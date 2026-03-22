@@ -1,0 +1,26 @@
+[package]
+name = "moqtap-client"
+description = "MoQT client library — QUIC transport, endpoint state machine, subscribe/fetch/namespace flows"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[features]
+default = []
+webtransport = ["wtransport"]
+
+[dependencies]
+moqtap-codec = { workspace = true }
+bytes = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+wtransport = { workspace = true, optional = true }

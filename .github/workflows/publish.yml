@@ -1,0 +1,46 @@
+name: Publish Crate
+
+on:
+  push:
+    tags:
+      - "codec-v*"
+      - "trace-v*"
+      - "client-v*"
+      - "cli-v*"
+      - "proxy-v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Parse tag
+        id: parse
+        run: |
+          # Tag format: codec-v0.1.0
+          TAG="${GITHUB_REF_NAME}"
+          SHORT="${TAG%-v*}"
+          VERSION="${TAG#*-v}"
+          CRATE="moqtap-${SHORT}"
+          echo "crate=${CRATE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${CRATE} v${VERSION}"
+
+      - name: Verify Cargo.toml version matches tag
+        run: |
+          CRATE="${{ steps.parse.outputs.crate }}"
+          VERSION="${{ steps.parse.outputs.version }}"
+          CARGO_VERSION=$(grep '^version' "crates/${CRATE}/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag version ($VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+
+      - name: Publish ${{ steps.parse.outputs.crate }}
+        run: cargo publish -p ${{ steps.parse.outputs.crate }} --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

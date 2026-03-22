@@ -1,0 +1,26 @@
+[package]
+name = "moqtap-cli"
+description = "moqtap CLI — MoQT debugging and tracing tool"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[[bin]]
+name = "moqtap"
+path = "src/main.rs"
+
+[dependencies]
+moqtap-client = { workspace = true }
+moqtap-codec = { workspace = true }
+moqtap-trace = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

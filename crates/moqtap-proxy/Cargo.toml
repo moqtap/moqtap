@@ -1,0 +1,30 @@
+[package]
+name = "moqtap-proxy"
+description = "MoQT intercepting proxy — transparent forwarding with inline frame parsing"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+cert-gen = ["rcgen"]
+webtransport = ["wtransport", "moqtap-client/webtransport"]
+
+[dependencies]
+moqtap-codec = { workspace = true }
+moqtap-client = { workspace = true }
+bytes = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { version = "0.7", features = ["rt"] }
+rcgen = { version = "0.14", optional = true }
+ring = "0.17"
+wtransport = { workspace = true, optional = true }
