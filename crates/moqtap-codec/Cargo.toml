@@ -1,0 +1,43 @@
+[package]
+name = "moqtap-codec"
+description = "MoQT (Media over QUIC Transport) wire codec — draft-07 through draft-17 message encoding/decoding"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["moqt", "codec", "quic", "media-streaming", "wire-format"]
+categories.workspace = true
+readme = "README.md"
+exclude = ["test-vectors/", "tests/"]
+
+[features]
+default = ["all-drafts"]
+draft07 = []
+draft08 = []
+draft09 = []
+draft10 = []
+draft11 = []
+draft12 = []
+draft13 = []
+draft14 = []
+draft15 = []
+draft16 = []
+draft17 = []
+all-drafts = ["draft07", "draft08", "draft09", "draft10", "draft11", "draft12", "draft13", "draft14", "draft15", "draft16", "draft17"]
+
+[dependencies]
+bytes = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "codec"
+harness = false
+required-features = ["draft17"]

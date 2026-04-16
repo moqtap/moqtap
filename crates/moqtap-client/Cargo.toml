@@ -1,0 +1,52 @@
+[package]
+name = "moqtap-client"
+description = "MoQT client library — QUIC transport, endpoint state machine, subscribe/fetch/namespace flows"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[features]
+default = ["draft14"]
+webtransport = ["wtransport"]
+
+draft07 = ["moqtap-codec/draft07"]
+draft08 = ["moqtap-codec/draft08"]
+draft09 = ["moqtap-codec/draft09"]
+draft10 = ["moqtap-codec/draft10"]
+draft11 = ["moqtap-codec/draft11"]
+draft12 = ["moqtap-codec/draft12"]
+draft13 = ["moqtap-codec/draft13"]
+draft14 = ["moqtap-codec/draft14"]
+draft15 = ["moqtap-codec/draft15"]
+draft16 = ["moqtap-codec/draft16"]
+draft17 = ["moqtap-codec/draft17"]
+all-drafts = [
+    "draft07",
+    "draft08",
+    "draft09",
+    "draft10",
+    "draft11",
+    "draft12",
+    "draft13",
+    "draft14",
+    "draft15",
+    "draft16",
+    "draft17",
+    "moqtap-codec/all-drafts",
+]
+
+[dependencies]
+moqtap-codec = { workspace = true, default-features = false }
+bytes = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+wtransport = { workspace = true, optional = true }

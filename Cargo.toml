@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/moqtap-codec",
+    "crates/moqtap-trace",
+    "crates/moqtap-client",
+    "crates/moqtap-proxy",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/moqtap/moqtap"
+homepage = "https://github.com/moqtap/moqtap"
+keywords = ["moqt", "quic", "streaming", "media", "protocol"]
+categories = ["network-programming"]
+
+[workspace.dependencies]
+moqtap-codec = { path = "crates/moqtap-codec", version = "0.1.0", default-features = false, features = ["draft07", "draft14"] }
+wtransport = { version = "0.7", features = ["dangerous-configuration"] }
+moqtap-trace = { path = "crates/moqtap-trace", version = "0.1.0" }
+moqtap-client = { path = "crates/moqtap-client", version = "0.1.0" }
+moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.1.0" }
+bytes = "1"
+thiserror = "2"
+quinn = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+webpki-roots = "0.26"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+ciborium = "0.2"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

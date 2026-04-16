@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['codec-v*']
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  features:
+    name: Feature flags
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p moqtap-codec --no-default-features --features draft07
+      - run: cargo check -p moqtap-codec --no-default-features --features draft14
+      - run: cargo check -p moqtap-codec --features draft07,draft14
+      - run: cargo test -p moqtap-codec --no-default-features --features draft07
+      - run: cargo test -p moqtap-codec --no-default-features --features draft14
+      - run: cargo test -p moqtap-codec --features draft07,draft14
+
+  doc:
+    name: Documentation
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps
+
+  msrv:
+    name: MSRV (1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@1.75
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace
+
+  deny:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  bench-smoke:
+    name: Codec bench (smoke)
+    runs-on: ubuntu-latest
+    # Only check that benches still build + run on PRs and main pushes.
+    # A longer run happens in `bench-full` on codec tags.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build benches
+        run: cargo bench -p moqtap-codec --bench codec --no-run
+      - name: Smoke run (short params)
+        run: |
+          cargo bench -p moqtap-codec --bench codec -- \
+            --warm-up-time 1 --measurement-time 2 --sample-size 10 \
+            --noplot
+
+  bench-full:
+    name: Codec bench (full)
+    runs-on: ubuntu-latest
+    # Full bench on codec release tags. Uploads criterion output so perf
+    # history can be compared across releases.
+    if: startsWith(github.ref, 'refs/tags/codec-v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run benches
+        run: cargo bench -p moqtap-codec --bench codec
+      - name: Upload criterion report
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-${{ github.ref_name }}
+          path: target/criterion
+          retention-days: 90
