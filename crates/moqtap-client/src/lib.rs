@@ -19,11 +19,11 @@
 //! - [`dispatch`] — Multi-draft entry-point types (`AnyConnection`,
 //!   `AnyClientEvent`, `AnyConnectionObserver`)
 //! - [`transport`] — Transport abstraction (QUIC, WebTransport)
-//! - [`draft07`] — Draft-07 client (enabled via `draft07` feature)
-//! - [`draft08`] — Draft-08 client (enabled via `draft08` feature)
-//! - [`draft09`] — Draft-09 client (enabled via `draft09` feature)
-//! - [`draft10`] — Draft-10 client (enabled via `draft10` feature)
-//! - [`draft13`] — Draft-13 client (enabled via `draft13` feature)
+//! - `draft07` — Draft-07 client (enabled via `draft07` feature)
+//! - `draft08` — Draft-08 client (enabled via `draft08` feature)
+//! - `draft09` — Draft-09 client (enabled via `draft09` feature)
+//! - `draft10` — Draft-10 client (enabled via `draft10` feature)
+//! - `draft13` — Draft-13 client (enabled via `draft13` feature)
 //! - [`draft14`] — Draft-14 client (enabled via `draft14` feature)
 
 #[cfg(feature = "draft07")]
@@ -62,7 +62,9 @@ pub mod draft17;
 /// Transport abstraction (QUIC, with WebTransport planned). Shared across drafts.
 pub mod transport;
 
-/// Multi-draft entry-point types (`AnyConnection`, `AnyClientEvent`,
-/// `AnyConnectionObserver`) for downstream consumers that need to hold
-/// a connection without compile-time coupling to one draft.
+/// Multi-draft entry-point types ([`AnyConnection`](dispatch::AnyConnection),
+/// [`AnyClientEvent`](dispatch::AnyClientEvent),
+/// [`AnyConnectionObserver`](dispatch::AnyConnectionObserver)) for downstream
+/// consumers that need to hold a connection without compile-time coupling to
+/// one draft.
 pub mod dispatch;

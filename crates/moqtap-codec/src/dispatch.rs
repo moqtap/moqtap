@@ -1,7 +1,8 @@
 //! Unified types and version-aware decode/encode for runtime draft dispatch.
 //!
 //! This module provides wrapper enums (`Any*`) that hold any enabled draft's
-//! types and dispatch encoding/decoding based on [`DraftVersion`].
+//! types and dispatch encoding/decoding based on
+//! [`DraftVersion`](crate::version::DraftVersion).
 //!
 //! Each enum variant is gated on its draft feature flag. Enable multiple draft
 //! features (e.g. `draft07` + `draft14`) for runtime dispatch between drafts.

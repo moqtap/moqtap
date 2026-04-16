@@ -3,13 +3,13 @@
 //!
 //! Major architectural differences from earlier drafts:
 //!
-//! * Unified [`Setup`] message (no separate CLIENT_SETUP / SERVER_SETUP).
+//! * Unified `Setup` message (no separate CLIENT_SETUP / SERVER_SETUP).
 //! * Response messages (`SubscribeOk`, `PublishOk`, `FetchOk`, `PublishDone`,
 //!   `RequestOk`, `RequestError`) do NOT carry a `request_id`. Each request
 //!   opens its own bidirectional stream and its response arrives as the
 //!   first message on that stream (spec §3.3, §9.7, §9.9). The transport
 //!   layer knows which `request_id` each bidi stream belongs to; callers
-//!   must supply that `request_id` via [`Endpoint::receive_response_on_stream`].
+//!   must supply that `request_id` via `Endpoint::receive_response_on_stream`.
 //! * No `Unsubscribe`, `FetchCancel`, `MaxRequestId`, `RequestsBlocked`,
 //!   `PublishNamespaceDone`, or `PublishNamespaceCancel` messages.
 //! * Request-producing messages (`Subscribe`, `Publish`, `Fetch`,

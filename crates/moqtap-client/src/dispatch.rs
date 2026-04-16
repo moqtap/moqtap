@@ -7,14 +7,14 @@
 //!
 //! Three types live here:
 //!
-//! - [`AnyConnection`] — wraps a draft-specific `Connection`.
-//! - [`AnyClientEvent`] — wraps a draft-specific `ClientEvent`.
-//! - [`AnyConnectionObserver`] — a trait that receives [`AnyClientEvent`]s.
-//!   Attached to an [`AnyConnection`] via [`AnyConnection::set_observer`],
+//! - `AnyConnection` — wraps a draft-specific `Connection`.
+//! - `AnyClientEvent` — wraps a draft-specific `ClientEvent`.
+//! - `AnyConnectionObserver` — a trait that receives `AnyClientEvent`s.
+//!   Attached to an `AnyConnection` via `AnyConnection::set_observer`,
 //!   which installs a per-draft adapter on the inner connection.
 //!
 //! Draft-specific protocol methods (e.g. `subscribe`, `fetch`) are not on
-//! [`AnyConnection`] because their signatures differ across drafts — match
+//! `AnyConnection` because their signatures differ across drafts — match
 //! on the variant to reach them.
 
 use std::sync::Arc;

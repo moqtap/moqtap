@@ -12,7 +12,7 @@ categories.workspace = true
 readme = "README.md"
 
 [features]
-default = ["draft14"]
+default = ["all-drafts"]
 webtransport = ["wtransport"]
 
 draft07 = ["moqtap-codec/draft07"]

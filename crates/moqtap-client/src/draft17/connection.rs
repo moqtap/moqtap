@@ -918,7 +918,7 @@ mod tests {
             ca_certs: Vec::new(),
             setup_parameters: Vec::new(),
         };
-        assert_eq!(config.alpn(), vec![b"moq-00".to_vec()]);
+        assert_eq!(config.alpn(), vec![b"moqt-17".to_vec()]);
     }
 
     #[test]

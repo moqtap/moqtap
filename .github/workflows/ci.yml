@@ -53,7 +53,37 @@ jobs:
       - run: cargo test --workspace
 
   features:
-    name: Feature flags
+    name: Feature flags (${{ matrix.draft }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        draft:
+          - draft07
+          - draft08
+          - draft09
+          - draft10
+          - draft11
+          - draft12
+          - draft13
+          - draft14
+          - draft15
+          - draft16
+          - draft17
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p moqtap-codec --no-default-features --features ${{ matrix.draft }}
+      - run: cargo clippy -p moqtap-codec --no-default-features --features ${{ matrix.draft }} --all-targets -- -D warnings
+      - run: cargo test -p moqtap-codec --no-default-features --features ${{ matrix.draft }}
+
+  features-combos:
+    name: Feature flags (combos)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,12 +91,13 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p moqtap-codec --no-default-features --features draft07
-      - run: cargo check -p moqtap-codec --no-default-features --features draft14
-      - run: cargo check -p moqtap-codec --features draft07,draft14
-      - run: cargo test -p moqtap-codec --no-default-features --features draft07
-      - run: cargo test -p moqtap-codec --no-default-features --features draft14
-      - run: cargo test -p moqtap-codec --features draft07,draft14
+      # Oldest + newest together — exercises the runtime dispatch path.
+      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft17
+      # Two adjacent drafts.
+      - run: cargo test -p moqtap-codec --no-default-features --features draft13,draft14
+      # Default (all-drafts) is already covered by the `test` job, but verify
+      # the crate still builds with no draft features enabled at all.
+      - run: cargo check -p moqtap-codec --no-default-features
 
   doc:
     name: Documentation
@@ -82,13 +113,13 @@ jobs:
       - run: cargo doc --workspace --no-deps
 
   msrv:
-    name: MSRV (1.75)
+    name: MSRV
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@1.75
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace
 

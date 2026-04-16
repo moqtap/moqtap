@@ -1,7 +1,8 @@
 //! Tests for runtime draft dispatch (version.rs + dispatch.rs).
-#![cfg(feature = "draft07")]
 
+#[allow(unused_imports)]
 use moqtap_codec::dispatch::*;
+#[allow(unused_imports)]
 use moqtap_codec::varint::VarInt;
 use moqtap_codec::version::DraftVersion;
 
@@ -45,6 +46,7 @@ fn draft_version_copy_eq_hash() {
 // AnyControlMessage — Draft-14
 // ============================================================
 
+#[cfg(feature = "draft14")]
 #[test]
 fn any_control_message_draft14_round_trip() {
     use moqtap_codec::draft14::message::{ControlMessage, GoAway};
@@ -60,6 +62,7 @@ fn any_control_message_draft14_round_trip() {
     let mut cursor = &buf[..];
     let decoded = AnyControlMessage::decode(DraftVersion::Draft14, &mut cursor).unwrap();
 
+    #[allow(unreachable_patterns)]
     match decoded {
         AnyControlMessage::Draft14(ControlMessage::GoAway(ga)) => {
             assert_eq!(ga.new_session_uri, b"https://new.example");
@@ -68,6 +71,7 @@ fn any_control_message_draft14_round_trip() {
     }
 }
 
+#[cfg(feature = "draft14")]
 #[test]
 fn any_control_message_draft14_max_request_id() {
     use moqtap_codec::draft14::message::{ControlMessage, MaxRequestId};
@@ -82,6 +86,7 @@ fn any_control_message_draft14_max_request_id() {
     let mut cursor = &buf[..];
     let decoded = AnyControlMessage::decode(DraftVersion::Draft14, &mut cursor).unwrap();
 
+    #[allow(unreachable_patterns)]
     match decoded {
         AnyControlMessage::Draft14(ControlMessage::MaxRequestId(m)) => {
             assert_eq!(m.request_id.into_inner(), 42);
@@ -94,6 +99,7 @@ fn any_control_message_draft14_max_request_id() {
 // AnyControlMessage — Draft-07
 // ============================================================
 
+#[cfg(feature = "draft07")]
 #[test]
 fn any_control_message_draft07_round_trip() {
     use moqtap_codec::draft07::message::{ControlMessage, GoAway};
@@ -109,6 +115,7 @@ fn any_control_message_draft07_round_trip() {
     let mut cursor = &buf[..];
     let decoded = AnyControlMessage::decode(DraftVersion::Draft07, &mut cursor).unwrap();
 
+    #[allow(unreachable_patterns)]
     match decoded {
         AnyControlMessage::Draft07(ControlMessage::GoAway(ga)) => {
             assert_eq!(ga.new_session_uri, b"https://old.example");
@@ -121,6 +128,7 @@ fn any_control_message_draft07_round_trip() {
 // AnySubgroupHeader
 // ============================================================
 
+#[cfg(feature = "draft14")]
 #[test]
 fn any_subgroup_header_draft14_round_trip() {
     use moqtap_codec::draft14::data_stream::{SubgroupHeader, SubgroupStreamType};
@@ -142,6 +150,7 @@ fn any_subgroup_header_draft14_round_trip() {
     let mut cursor = &buf[..];
     let decoded = AnySubgroupHeader::decode(DraftVersion::Draft14, &mut cursor).unwrap();
 
+    #[allow(unreachable_patterns)]
     match decoded {
         AnySubgroupHeader::Draft14(h) => {
             assert_eq!(h.track_alias.into_inner(), 1);
@@ -152,6 +161,7 @@ fn any_subgroup_header_draft14_round_trip() {
     }
 }
 
+#[cfg(feature = "draft07")]
 #[test]
 fn any_subgroup_header_draft07_round_trip() {
     use moqtap_codec::draft07::data_stream::SubgroupHeader;
@@ -170,6 +180,7 @@ fn any_subgroup_header_draft07_round_trip() {
     let mut cursor = &buf[..];
     let decoded = AnySubgroupHeader::decode(DraftVersion::Draft07, &mut cursor).unwrap();
 
+    #[allow(unreachable_patterns)]
     match decoded {
         AnySubgroupHeader::Draft07(h) => {
             assert_eq!(h.track_alias.into_inner(), 5);
@@ -183,6 +194,7 @@ fn any_subgroup_header_draft07_round_trip() {
 // AnyDatagramHeader
 // ============================================================
 
+#[cfg(feature = "draft14")]
 #[test]
 fn any_datagram_header_draft14_round_trip() {
     use moqtap_codec::draft14::data_stream::{DatagramObject, DatagramType};
@@ -207,6 +219,7 @@ fn any_datagram_header_draft14_round_trip() {
     let mut cursor = &buf[..];
     let decoded = AnyDatagramHeader::decode(DraftVersion::Draft14, &mut cursor).unwrap();
 
+    #[allow(unreachable_patterns)]
     match decoded {
         AnyDatagramHeader::Draft14(h) => {
             assert_eq!(h.track_alias.into_inner(), 3);
@@ -221,6 +234,7 @@ fn any_datagram_header_draft14_round_trip() {
 // AnyFetchHeader
 // ============================================================
 
+#[cfg(feature = "draft14")]
 #[test]
 fn any_fetch_header_draft14_round_trip() {
     use moqtap_codec::draft14::data_stream::FetchHeader;
@@ -234,6 +248,7 @@ fn any_fetch_header_draft14_round_trip() {
     let mut cursor = &buf[..];
     let decoded = AnyFetchHeader::decode(DraftVersion::Draft14, &mut cursor).unwrap();
 
+    #[allow(unreachable_patterns)]
     match decoded {
         AnyFetchHeader::Draft14(h) => {
             assert_eq!(h.request_id.into_inner(), 7);
@@ -242,6 +257,7 @@ fn any_fetch_header_draft14_round_trip() {
     }
 }
 
+#[cfg(feature = "draft07")]
 #[test]
 fn any_fetch_header_draft07_round_trip() {
     use moqtap_codec::draft07::data_stream::FetchHeader;
@@ -255,6 +271,7 @@ fn any_fetch_header_draft07_round_trip() {
     let mut cursor = &buf[..];
     let decoded = AnyFetchHeader::decode(DraftVersion::Draft07, &mut cursor).unwrap();
 
+    #[allow(unreachable_patterns)]
     match decoded {
         AnyFetchHeader::Draft07(h) => {
             assert_eq!(h.subscribe_id.into_inner(), 99);
@@ -267,6 +284,7 @@ fn any_fetch_header_draft07_round_trip() {
 // Draft mismatch detection
 // ============================================================
 
+#[cfg(all(feature = "draft07", feature = "draft14"))]
 #[test]
 fn draft14_bytes_decoded_with_draft07_produces_error_or_wrong_message() {
     use moqtap_codec::draft14::message::{ControlMessage, GoAway};

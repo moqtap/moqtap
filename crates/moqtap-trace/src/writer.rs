@@ -18,8 +18,9 @@ pub const MOQTRACE_VERSION: u32 = 1;
 /// accepts events one at a time via [`write_event`](Self::write_event).
 ///
 /// The inner writer is wrapped in a [`BufWriter`] so events can be appended
-/// at line rate without incurring one syscall per event. Call [`flush`] or
-/// [`into_inner`] to drain the buffer.
+/// at line rate without incurring one syscall per event. Call
+/// [`flush`](Self::flush) or [`into_inner`](Self::into_inner) to drain the
+/// buffer.
 #[derive(Debug)]
 pub struct MoqTraceWriter<W: Write> {
     inner: BufWriter<W>,

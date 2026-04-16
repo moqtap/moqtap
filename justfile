@@ -1,11 +1,24 @@
 # moqtap development tasks
 
 # Run all checks (what CI runs)
-check: fmt-check clippy test doc-check
+check: fmt-check clippy test test-features doc-check
 
 # Run tests
 test:
     cargo test --workspace
+
+# Run the codec test suite against each individual draft feature (matches CI).
+test-features:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17; do
+        echo "=== $d ==="
+        cargo test -p moqtap-codec --no-default-features --features "$d"
+    done
+    echo "=== no drafts ==="
+    cargo check -p moqtap-codec --no-default-features
+    echo "=== draft07 + draft17 ==="
+    cargo test -p moqtap-codec --no-default-features --features draft07,draft17
 
 # Run clippy lints
 clippy:
@@ -37,7 +50,7 @@ clean:
 
 # Check MSRV compatibility
 msrv:
-    cargo +1.75 check --workspace
+    cargo +1.83 check --workspace
 
 # Publish a single crate (dry run)
 publish-dry crate:

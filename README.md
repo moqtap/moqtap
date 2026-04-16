@@ -91,7 +91,7 @@ decodes against a `DraftVersion` selected at runtime from the enabled features.
 
 ## Development
 
-Requires Rust 1.75+ and [just](https://github.com/casey/just) (optional).
+Requires Rust 1.83+ and [just](https://github.com/casey/just) (optional).
 
 ```sh
 # Run all checks (what CI runs)

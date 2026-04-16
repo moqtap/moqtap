@@ -130,7 +130,7 @@ impl SubgroupHeader {
 
     /// Decode a subgroup header (assumes explicit subgroup_id format).
     ///
-    /// For stream-type-aware decoding, use [`decode_with_type`].
+    /// For stream-type-aware decoding, use [`Self::decode_with_type`].
     pub fn decode(buf: &mut impl Buf) -> Result<Self, CodecError> {
         Self::decode_with_type(StreamType::SubgroupExplicit, buf)
     }
@@ -181,7 +181,7 @@ pub struct ObjectHeader {
 impl ObjectHeader {
     /// Encode the object header (no extensions).
     ///
-    /// For extension-aware encoding, use [`encode_with_extensions`].
+    /// For extension-aware encoding, use [`Self::encode_with_extensions`].
     pub fn encode(&self, buf: &mut impl BufMut) {
         self.encode_with_extensions(false, buf);
     }
@@ -201,7 +201,7 @@ impl ObjectHeader {
 
     /// Decode an object header (no extensions).
     ///
-    /// For extension-aware decoding, use [`decode_with_extensions`].
+    /// For extension-aware decoding, use [`Self::decode_with_extensions`].
     pub fn decode(buf: &mut impl Buf) -> Result<Self, CodecError> {
         Self::decode_with_extensions(false, buf)
     }
