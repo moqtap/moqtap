@@ -16,7 +16,7 @@ The proxy does **not** participate in MoQT state management. It observes and opt
 ```
 Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
                        │
-                       ├─ parses frames inline (draft-07 .. draft-17)
+                       ├─ parses frames inline (draft-07..17)
                        ├─ emits ProxyEvents
                        └─ applies ProxyHook mutations
 ```
@@ -41,12 +41,12 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────┐
 │  Caller (CLI / GUI)                                 │
 │  Provides ProxyObserver + ProxyHook implementations │
-└──────────────────────┬─────────────────────────────┘
+└──────────────────────┬──────────────────────────────┘
                        │ drives
-┌──────────────────────▼─────────────────────────────┐
+┌──────────────────────▼──────────────────────────────┐
 │  moqtap-proxy                                       │
 │                                                     │
 │  TransparentProxy                                   │
@@ -58,13 +58,13 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 │                                                     │
 │  Parsers: ControlStreamParser, DataStreamParser     │
 │  Events: ProxyEvent (11 types), ProxySide, SessionId│
-└─────────────────────┬──────────────────────────────┘
+└──────────────────────┬──────────────────────────────┘
         uses           │
-┌──────────┐  ┌────────▼────────┐
-│ moqtap-  │  │ moqtap-client   │
+┌──────────┐  ┌────────▼─────────┐
+│ moqtap-  │  │ moqtap-client    │
 │ codec    │  │ (transport only) │
 │ (decode) │  │ Transport, QUIC  │
-└──────────┘  └─────────────────┘
+└──────────┘  └──────────────────┘
 ```
 
 ## Responsibility boundaries
