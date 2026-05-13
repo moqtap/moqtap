@@ -20,8 +20,8 @@ categories = ["network-programming"]
 moqtap-codec = { path = "crates/moqtap-codec", version = "0.2.0", default-features = false }
 wtransport = { version = "0.7", features = ["dangerous-configuration", "quinn"] }
 moqtap-trace = { path = "crates/moqtap-trace", version = "0.2.0" }
-moqtap-client = { path = "crates/moqtap-client", version = "0.2.0" }
-moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.2.0" }
+moqtap-client = { path = "crates/moqtap-client", version = "0.2.1" }
+moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.2.1" }
 bytes = "1"
 thiserror = "2"
 quinn = "0.11"

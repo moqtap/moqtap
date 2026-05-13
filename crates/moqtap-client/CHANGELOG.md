@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-13
+
+Bug-fix release. Fixes an incorrect `negotiated_version` value emitted by
+the draft-16 and draft-17 `Connection::connect` flows.
+
+### Fixed
+
+- `draft16::Connection::connect` now emits `ClientEvent::SetupComplete`
+  with `negotiated_version = 0xff000010` (draft-16).
+- `draft17::Connection::connect` now emits `ClientEvent::SetupComplete`
+  with `negotiated_version = 0xff000011` (draft-17).
+
 ## [0.2.0] - 2026-05-13
 
 Adds MoQT draft-18 support and broadens the `dispatch` facade with

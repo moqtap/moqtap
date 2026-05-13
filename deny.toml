@@ -14,6 +14,9 @@ allow = [
     "Unicode-DFS-2016",
     "OpenSSL",
     "Zlib",
+    # CDLA-Permissive-2.0 covers `webpki-roots` and `webpki-root-certs`
+    # — the trust-anchor bundles used by rustls.
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]

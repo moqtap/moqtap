@@ -88,7 +88,11 @@ fn data_stream_header_kind_fetch() {
 #[test]
 fn proxy_event_session_started() {
     let addr: SocketAddr = "127.0.0.1:1234".parse().unwrap();
-    let event = ProxyEvent::SessionStarted { session_id: SessionId(1), client_addr: addr, client_transport: "QUIC".into() };
+    let event = ProxyEvent::SessionStarted {
+        session_id: SessionId(1),
+        client_addr: addr,
+        client_transport: "QUIC".into(),
+    };
     let debug = format!("{event:?}");
     assert!(debug.contains("SessionStarted"));
 }
@@ -195,7 +199,11 @@ fn proxy_event_clone() {
 fn noop_observer_does_not_panic() {
     let obs = NoOpProxyObserver;
     let addr: SocketAddr = "127.0.0.1:1234".parse().unwrap();
-    obs.on_event(&ProxyEvent::SessionStarted { session_id: SessionId(1), client_addr: addr, client_transport: "QUIC".into() });
+    obs.on_event(&ProxyEvent::SessionStarted {
+        session_id: SessionId(1),
+        client_addr: addr,
+        client_transport: "QUIC".into(),
+    });
     obs.on_event(&ProxyEvent::SessionEnded {
         session_id: SessionId(1),
         reason: "done".to_string(),
@@ -236,7 +244,11 @@ fn collecting_observer_receives_events() {
     let obs = CollectingObserver { events: events.clone() };
     let addr: SocketAddr = "127.0.0.1:1234".parse().unwrap();
 
-    obs.on_event(&ProxyEvent::SessionStarted { session_id: SessionId(1), client_addr: addr, client_transport: "QUIC".into() });
+    obs.on_event(&ProxyEvent::SessionStarted {
+        session_id: SessionId(1),
+        client_addr: addr,
+        client_transport: "QUIC".into(),
+    });
     obs.on_event(&ProxyEvent::SessionEnded {
         session_id: SessionId(1),
         reason: "done".to_string(),
@@ -254,6 +266,10 @@ fn observer_is_object_safe() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let obs: Box<dyn ProxyObserver> = Box::new(CollectingObserver { events: events.clone() });
     let addr: SocketAddr = "127.0.0.1:5678".parse().unwrap();
-    obs.on_event(&ProxyEvent::SessionStarted { session_id: SessionId(99), client_addr: addr, client_transport: "QUIC".into() });
+    obs.on_event(&ProxyEvent::SessionStarted {
+        session_id: SessionId(99),
+        client_addr: addr,
+        client_transport: "QUIC".into(),
+    });
     assert_eq!(events.lock().unwrap().len(), 1);
 }

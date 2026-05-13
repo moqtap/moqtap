@@ -427,18 +427,19 @@ impl Connection {
             }
         }
 
-        let mut pending_events = Vec::with_capacity(3);
-        pending_events.push(ClientEvent::ControlMessage {
-            direction: Direction::Send,
-            message: any_setup,
-            raw: Some(raw_setup),
-        });
-        pending_events.push(ClientEvent::ControlMessage {
-            direction: Direction::Receive,
-            message: server_setup,
-            raw: raw_server_setup,
-        });
-        pending_events.push(ClientEvent::SetupComplete { negotiated_version: 0xff000000 + 18 });
+        let pending_events = vec![
+            ClientEvent::ControlMessage {
+                direction: Direction::Send,
+                message: any_setup,
+                raw: Some(raw_setup),
+            },
+            ClientEvent::ControlMessage {
+                direction: Direction::Receive,
+                message: server_setup,
+                raw: raw_server_setup,
+            },
+            ClientEvent::SetupComplete { negotiated_version: 0xff000000 + 18 },
+        ];
 
         Ok(Self {
             transport,

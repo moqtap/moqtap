@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-13
+
+Bumps `moqtap-client` to `0.2.1` to pick up the draft-16 / draft-17
+`SetupComplete` `negotiated_version` fix. No proxy-side code changes.
+
+### Changed
+
+- `moqtap-client` dependency bumped from `0.2.0` to `0.2.1`.
+
 ## [0.2.0] - 2026-05-13
 
 Adds MoQT draft-18 to the advertised ALPN set and unifies the client-facing

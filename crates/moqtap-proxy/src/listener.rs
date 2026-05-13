@@ -117,7 +117,7 @@ impl Listener {
     /// Raw-QUIC connections are returned immediately with the negotiated
     /// ALPN so the caller can pick the MoQT draft. For `h3` clients the
     /// listener drives the HTTP/3 + extended-CONNECT handshake to
-    /// completion before returning a ready [`wtransport::Connection`].
+    /// completion before returning a ready `wtransport::Connection`.
     pub async fn accept(&self) -> Result<AcceptedConn, ProxyError> {
         let incoming = self
             .endpoint
@@ -125,8 +125,7 @@ impl Listener {
             .await
             .ok_or_else(|| ProxyError::Listener("endpoint closed".to_string()))?;
 
-        let mut connecting =
-            incoming.accept().map_err(|e| ProxyError::Listener(e.to_string()))?;
+        let mut connecting = incoming.accept().map_err(|e| ProxyError::Listener(e.to_string()))?;
 
         // Peeking at handshake_data resolves as soon as the server has
         // processed the ClientHello, so the ALPN is known before the
@@ -159,7 +158,7 @@ impl Listener {
             }
             #[cfg(not(feature = "webtransport"))]
             {
-                let _ = connecting;
+                drop(connecting);
                 Err(ProxyError::Listener(
                     "client negotiated h3 but webtransport feature is not enabled".to_string(),
                 ))

@@ -70,6 +70,7 @@ jobs:
           - draft15
           - draft16
           - draft17
+          - draft18
     steps:
       - uses: actions/checkout@v4
         with:
