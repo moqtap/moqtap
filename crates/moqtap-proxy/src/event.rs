@@ -41,6 +41,10 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// The client's remote address.
         client_addr: SocketAddr,
+        /// The transport the client chose via ALPN — e.g. `"QUIC"` or
+        /// `"WebTransport"`. Observers use this to label per-client
+        /// sessions; the proxy itself accepts either simultaneously.
+        client_transport: String,
     },
 
     /// A setup message (CLIENT_SETUP or SERVER_SETUP) was observed.

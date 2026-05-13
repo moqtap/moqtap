@@ -130,9 +130,9 @@ impl ProxySession {
 
     /// The initial draft hint for this session. Drafts 15+ resolve
     /// unambiguously from the client ALPN (`moqt-15` / `moqt-16` /
-    /// `moqt-17`); otherwise we fall back to `config.draft`, which the
-    /// control-stream parser may refine once it peeks at CLIENT_SETUP /
-    /// SERVER_SETUP for the moq-00 cohort (drafts 07–14).
+    /// `moqt-17` / `moqt-18`); otherwise we fall back to `config.draft`,
+    /// which the control-stream parser may refine once it peeks at
+    /// CLIENT_SETUP / SERVER_SETUP for the moq-00 cohort (drafts 07–14).
     fn initial_draft(&self) -> DraftVersion {
         DraftVersion::from_alpn(&self.client_alpn).unwrap_or(self.config.draft)
     }

@@ -752,11 +752,12 @@ dependencies = [
 
 [[package]]
 name = "moqtap-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "moqtap-codec",
  "quinn",
+ "rcgen",
  "rustls",
  "thiserror 2.0.18",
  "tokio",
@@ -766,7 +767,7 @@ dependencies = [
 
 [[package]]
 name = "moqtap-codec"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "criterion",
@@ -778,7 +779,7 @@ dependencies = [
 
 [[package]]
 name = "moqtap-proxy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "moqtap-client",
@@ -796,8 +797,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "moqtap-trace"
+name = "moqtap-relay"
 version = "0.1.0"
+dependencies = [
+ "bytes",
+ "ciborium",
+ "moqtap-trace",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "moqtap-trace"
+version = "0.2.0"
 dependencies = [
  "ciborium",
  "serde",

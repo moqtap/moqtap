@@ -2,11 +2,11 @@
 
 Transparent MoQT intercepting proxy — sits between a client and relay, forwarding all bytes bidirectionally while parsing MoQT frames inline to produce structured events.
 
-The proxy does **not** participate in MoQT state management. It observes and optionally mutates, but never acts as an endpoint. Supports every MoQT wire format from **draft-07 through draft-17** at runtime via `moqtap-codec`'s dispatch layer — the draft is selected from the observed setup exchange.
+The proxy does **not** participate in MoQT state management. It observes and optionally mutates, but never acts as an endpoint. Supports every MoQT wire format from **draft-07 through draft-18** at runtime via `moqtap-codec`'s dispatch layer — the draft is selected from the observed setup exchange.
 
 ## What it does
 
-1. **Listen** for inbound connections from MoQT clients (QUIC or WebTransport)
+1. **Listen** on a single UDP port that accepts raw-QUIC MoQT and WebTransport clients simultaneously. The client-facing transport is chosen by ALPN: every supported MoQT draft (`moq-00`, `moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`) plus `h3` for WebTransport is advertised.
 2. **Connect** upstream to a MoQT relay (QUIC or WebTransport)
 3. **Forward** all streams (bidirectional, unidirectional) and datagrams between the two
 4. **Parse** MoQT frames inline — control messages, data stream headers, object headers, datagrams
@@ -16,7 +16,7 @@ The proxy does **not** participate in MoQT state management. It observes and opt
 ```
 Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
                        │
-                       ├─ parses frames inline (draft-07..17)
+                       ├─ parses frames inline (draft-07..18)
                        ├─ emits ProxyEvents
                        └─ applies ProxyHook mutations
 ```
@@ -27,10 +27,9 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 |------|-------------|
 | `TransparentProxy` | Accept loop orchestrator — binds listener, spawns per-connection sessions |
 | `ProxySession` | Per-connection forwarder — pipes streams + datagrams between client and relay |
-| `ProxyConfig` | Top-level configuration (listener, session, listener mode) |
-| `ListenerMode` | Client-facing transport: `Quic` or `WebTransport` |
-| `Listener` | QUIC server endpoint that accepts inbound connections |
-| `WtListener` | WebTransport server endpoint (behind `webtransport` feature) |
+| `ProxyConfig` | Top-level configuration (listener, session) |
+| `Listener` | Unified server endpoint — accepts both raw-QUIC MoQT and WebTransport on the same UDP port, dispatched by ALPN |
+| `AcceptedConn` | Enum returned by `Listener::accept`: `Quic { conn, alpn }` or `WebTransport(conn)` |
 | `UpstreamTransportType` | Upstream relay transport: `Quic` or `WebTransport { url }` |
 | `ProxyObserver` | Trait for receiving structured events (implement for logging, tracing, GUI) |
 | `ProxyHook` | Trait for optional frame mutation (return `Some(bytes)` to replace, `None` to pass through) |
@@ -50,7 +49,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 │  moqtap-proxy                                       │
 │                                                     │
 │  TransparentProxy                                   │
-│    └─ Listener (QUIC) or WtListener (WebTransport)  │
+│    └─ Listener (QUIC + WebTransport, ALPN dispatch) │
 │    └─ ProxySession (per-connection)                 │
 │         ├─ forward_control_stream (with parser)     │
 │         ├─ forward_uni_streams (with parser)        │
@@ -70,11 +69,12 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 ## Responsibility boundaries
 
 **moqtap-proxy IS responsible for:**
-- Accepting inbound connections (QUIC or WebTransport, server-side TLS)
+- Accepting inbound connections on a single UDP port (raw QUIC and WebTransport simultaneously, dispatched by negotiated ALPN)
+- Advertising ALPNs for every supported MoQT draft plus `h3` when `webtransport` is enabled
 - Self-signed certificate generation (behind `cert-gen` feature)
 - Connecting to upstream relays (QUIC or WebTransport)
 - Stream-level forwarding (bidirectional, unidirectional, datagrams)
-- Inline MoQT frame parsing for observation (drafts 07 through 17, via
+- Inline MoQT frame parsing for observation (drafts 07 through 18, via
   `moqtap-codec`'s dispatch enums)
 - Automatic stream type detection (subgroup vs fetch) on unidirectional streams
 - Setup message detection (CLIENT_SETUP / SERVER_SETUP emitted as distinct events)
@@ -93,7 +93,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `cert-gen` | no | Self-signed certificate generation via `rcgen` |
-| `webtransport` | no | WebTransport listener and upstream support via `wtransport` |
+| `webtransport` | no | Enables the `h3` ALPN on the unified listener plus WebTransport upstream support via `wtransport` |
 
 ## License
 

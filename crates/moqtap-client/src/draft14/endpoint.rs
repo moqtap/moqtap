@@ -342,6 +342,35 @@ impl Endpoint {
         Ok(())
     }
 
+    /// Send a SUBSCRIBE_UPDATE for an active subscription. Allocates a fresh
+    /// request ID for the update message and returns it alongside the message.
+    pub fn subscribe_update(
+        &mut self,
+        subscription_request_id: VarInt,
+        start_location: Location,
+        end_group: VarInt,
+        subscriber_priority: u8,
+        forward: Forward,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        self.require_active_or_err()?;
+        let sub_id = subscription_request_id.into_inner();
+        let sm =
+            self.subscriptions.get_mut(&sub_id).ok_or(EndpointError::UnknownRequest(sub_id))?;
+        sm.on_subscribe_update()?;
+        let req_id = self.request_ids.allocate()?;
+        let msg = ControlMessage::SubscribeUpdate(SubscribeUpdate {
+            request_id: req_id,
+            subscription_request_id,
+            start_location,
+            end_group,
+            subscriber_priority,
+            forward,
+            parameters,
+        });
+        Ok((req_id, msg))
+    }
+
     /// Process an incoming PUBLISH_DONE (subscriber side — publisher finished).
     pub fn receive_publish_done(&mut self, msg: &PublishDone) -> Result<(), EndpointError> {
         let id = msg.request_id.into_inner();

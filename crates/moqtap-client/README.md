@@ -14,8 +14,8 @@ Connect to a MoQT relay over QUIC or WebTransport and perform subscriber-side
 or publisher-side operations. The caller decides what to subscribe, fetch,
 or publish; moqtap-client handles the protocol.
 
-Supports every MoQT draft from **draft-07 through draft-17**. Each draft
-lives in its own top-level module (`draft07`..`draft17`) with its own
+Supports every MoQT draft from **draft-07 through draft-18**. Each draft
+lives in its own top-level module (`draft07`..`draft18`) with its own
 connection, endpoint state machine, event types, observer trait, and
 per-flow state machines. The `transport` module (QUIC / WebTransport) is
 shared across drafts.
@@ -80,7 +80,7 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 │  └────────────────────┬───────────────────────┘  │
 │                       │ wraps                    │
 │  ┌────────────────────▼───────────────────────┐  │
-│  │ draft07 | draft08 | ... | draft17          │  │
+│  │ draft07 | draft08 | ... | draft18          │  │
 │  │   connection · endpoint · session          │  │
 │  │   subscribe · fetch · publish · namespace  │  │
 │  │   subgroup streams · datagrams             │  │
@@ -108,7 +108,7 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 - Request ID allocation with parity enforcement and MAX_REQUEST_ID
 - Framed message I/O (control messages with varint- or fixed-length framing)
 - Data stream I/O (subgroup streams, fetch streams, datagrams)
-- Per-draft wire formats for drafts 07 through 17
+- Per-draft wire formats for drafts 07 through 18
 - TLS configuration (system roots, custom CAs, skip verification)
 - Event emission via the per-draft `ConnectionObserver` trait and the
   draft-agnostic `AnyConnectionObserver`
@@ -125,7 +125,7 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `draft07`..`draft17` | `draft14` on by default | Enable the matching draft's module; forwards the feature to `moqtap-codec` |
+| `draft07`..`draft18` | `draft14` on by default | Enable the matching draft's module; forwards the feature to `moqtap-codec` |
 | `all-drafts` | no | Enables every draft |
 | `webtransport` | no | WebTransport client support via `wtransport` |
 

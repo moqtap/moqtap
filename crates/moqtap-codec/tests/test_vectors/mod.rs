@@ -31,6 +31,9 @@ pub mod draft16_json;
 #[cfg(feature = "draft17")]
 #[allow(dead_code)]
 pub mod draft17_json;
+#[cfg(feature = "draft18")]
+#[allow(dead_code)]
+pub mod draft18_json;
 #[allow(dead_code)]
 pub mod params;
 

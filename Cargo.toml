@@ -17,11 +17,11 @@ keywords = ["moqt", "quic", "streaming", "media", "protocol"]
 categories = ["network-programming"]
 
 [workspace.dependencies]
-moqtap-codec = { path = "crates/moqtap-codec", version = "0.1.0", default-features = false, features = ["draft07", "draft14"] }
-wtransport = { version = "0.7", features = ["dangerous-configuration"] }
-moqtap-trace = { path = "crates/moqtap-trace", version = "0.1.0" }
-moqtap-client = { path = "crates/moqtap-client", version = "0.1.0" }
-moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.1.0" }
+moqtap-codec = { path = "crates/moqtap-codec", version = "0.2.0", default-features = false }
+wtransport = { version = "0.7", features = ["dangerous-configuration", "quinn"] }
+moqtap-trace = { path = "crates/moqtap-trace", version = "0.2.0" }
+moqtap-client = { path = "crates/moqtap-client", version = "0.2.0" }
+moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.2.0" }
 bytes = "1"
 thiserror = "2"
 quinn = "0.11"

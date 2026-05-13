@@ -1,7 +1,7 @@
 [package]
 name = "moqtap-codec"
-description = "MoQT (Media over QUIC Transport) wire codec — draft-07 through draft-17 message encoding/decoding"
-version = "0.1.0"
+description = "MoQT (Media over QUIC Transport) wire codec — draft-07 through draft-18 message encoding/decoding"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -25,7 +25,8 @@ draft14 = []
 draft15 = []
 draft16 = []
 draft17 = []
-all-drafts = ["draft07", "draft08", "draft09", "draft10", "draft11", "draft12", "draft13", "draft14", "draft15", "draft16", "draft17"]
+draft18 = []
+all-drafts = ["draft07", "draft08", "draft09", "draft10", "draft11", "draft12", "draft13", "draft14", "draft15", "draft16", "draft17", "draft18"]
 
 [dependencies]
 bytes = { workspace = true }

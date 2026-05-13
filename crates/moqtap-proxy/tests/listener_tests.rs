@@ -9,7 +9,6 @@ fn test_listener_config() -> ListenerConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         cert_chain: vec![pair.current.cert_der],
         key_der: pair.current.key_der,
-        alpn: vec![b"moq-00".to_vec()],
     }
 }
 
@@ -38,7 +37,6 @@ fn listener_bind_invalid_cert_fails() {
         key_der: rustls::pki_types::PrivateKeyDer::Pkcs8(
             rustls::pki_types::PrivatePkcs8KeyDer::from(vec![0u8; 10]),
         ),
-        alpn: vec![b"moq-00".to_vec()],
     };
     let result = Listener::bind(config);
     assert!(result.is_err());

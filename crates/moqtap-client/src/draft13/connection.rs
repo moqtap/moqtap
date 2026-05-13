@@ -371,6 +371,10 @@ pub struct Connection {
     control_send: Option<FramedSendStream>,
     control_recv: Option<FramedRecvStream>,
     observer: Option<Box<dyn ConnectionObserver>>,
+    /// Setup events buffered during `connect()` and replayed when an
+    /// observer attaches via `set_observer` — without this, an observer
+    /// attached after `connect` returns would never see the handshake.
+    pending_events: Vec<ClientEvent>,
 }
 
 impl Connection {
@@ -395,9 +399,9 @@ impl Connection {
         let setup_msg = endpoint
             .send_client_setup(config.supported_versions(), config.setup_parameters.clone())?;
         let any_setup = AnyControlMessage::Draft13(setup_msg);
-        let _raw_setup = control_send.write_control(&any_setup).await?;
+        let raw_setup = control_send.write_control(&any_setup).await?;
 
-        let (server_setup, _raw_server_setup) = control_recv.read_control(false).await?;
+        let (server_setup, raw_server_setup) = control_recv.read_control(true).await?;
         match &server_setup {
             AnyControlMessage::Draft13(ControlMessage::ServerSetup(ref ss)) => {
                 endpoint.receive_server_setup(ss)?;
@@ -407,19 +411,29 @@ impl Connection {
             }
         }
 
-        let conn = Self {
+        let mut pending_events = Vec::with_capacity(3);
+        pending_events.push(ClientEvent::ControlMessage {
+            direction: Direction::Send,
+            message: any_setup,
+            raw: Some(raw_setup),
+        });
+        pending_events.push(ClientEvent::ControlMessage {
+            direction: Direction::Receive,
+            message: server_setup,
+            raw: raw_server_setup,
+        });
+        if let Some(v) = endpoint.negotiated_version() {
+            pending_events.push(ClientEvent::SetupComplete { negotiated_version: v.into_inner() });
+        }
+
+        Ok(Self {
             transport,
             endpoint,
             control_send: Some(control_send),
             control_recv: Some(control_recv),
             observer: None,
-        };
-
-        if let Some(v) = conn.endpoint.negotiated_version() {
-            conn.emit(ClientEvent::SetupComplete { negotiated_version: v.into_inner() });
-        }
-
-        Ok(conn)
+            pending_events,
+        })
     }
 
     /// Establish a raw QUIC connection.
@@ -506,9 +520,15 @@ impl Connection {
 
     // ── Observer ───────────────────────────────────────────────
 
-    /// Attach an observer to receive connection events.
+    /// Attach an observer. Buffered handshake events from `connect()` are
+    /// flushed in arrival order before this returns.
     pub fn set_observer(&mut self, observer: Box<dyn ConnectionObserver>) {
         self.observer = Some(observer);
+        for event in self.pending_events.drain(..) {
+            if let Some(ref obs) = self.observer {
+                obs.on_event_owned(event);
+            }
+        }
     }
 
     /// Remove the observer.

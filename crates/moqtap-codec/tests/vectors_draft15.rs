@@ -171,13 +171,7 @@ fn run_subgroup_vectors(relative_path: &str) {
 
                 let resolved_id = match prev_object_id {
                     None => delta.into_inner(),
-                    Some(prev) => {
-                        if has_extensions {
-                            prev + delta.into_inner()
-                        } else {
-                            prev + delta.into_inner() + 1
-                        }
-                    }
+                    Some(prev) => prev + delta.into_inner() + 1,
                 };
                 prev_object_id = Some(resolved_id);
 

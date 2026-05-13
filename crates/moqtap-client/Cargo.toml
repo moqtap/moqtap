@@ -1,7 +1,7 @@
 [package]
 name = "moqtap-client"
 description = "MoQT client library — QUIC transport, endpoint state machine, subscribe/fetch/namespace flows"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -26,6 +26,7 @@ draft14 = ["moqtap-codec/draft14"]
 draft15 = ["moqtap-codec/draft15"]
 draft16 = ["moqtap-codec/draft16"]
 draft17 = ["moqtap-codec/draft17"]
+draft18 = ["moqtap-codec/draft18"]
 all-drafts = [
     "draft07",
     "draft08",
@@ -38,6 +39,7 @@ all-drafts = [
     "draft15",
     "draft16",
     "draft17",
+    "draft18",
     "moqtap-codec/all-drafts",
 ]
 
@@ -50,3 +52,6 @@ webpki-roots = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 wtransport = { workspace = true, optional = true }
+
+[dev-dependencies]
+rcgen = "0.14"
