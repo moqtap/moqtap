@@ -11,7 +11,7 @@
 //!
 //! # Feature flags
 //!
-//! Enable a draft with `--features draft14` (or any of `draft07`..`draft18`).
+//! Enable a draft with `--features draft14` (or any of `draft07`..`draft19`).
 //! Use `all-drafts` to enable every implemented draft. Default is `draft14`.
 //!
 //! # Modules
@@ -19,7 +19,7 @@
 //! - [`dispatch`] — Multi-draft entry-point types (`AnyConnection`,
 //!   `AnyClientEvent`, `AnyConnectionObserver`)
 //! - [`transport`] — Transport abstraction (QUIC, WebTransport)
-//! - `draft07`..`draft18` — One module per supported MoQT draft, each
+//! - `draft07`..`draft19` — One module per supported MoQT draft, each
 //!   enabled via the matching `draftNN` feature flag.
 
 #[cfg(feature = "draft07")]
@@ -57,6 +57,9 @@ pub mod draft17;
 
 #[cfg(feature = "draft18")]
 pub mod draft18;
+
+#[cfg(feature = "draft19")]
+pub mod draft19;
 
 /// Transport abstraction (QUIC, with WebTransport planned). Shared across drafts.
 pub mod transport;

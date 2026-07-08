@@ -186,6 +186,8 @@ dispatch_all! {
     Draft17 => draft17,
     #[cfg(feature = "draft18")]
     Draft18 => draft18,
+    #[cfg(feature = "draft19")]
+    Draft19 => draft19,
 }
 
 /// Draft-agnostic transport choice for [`AnyConnection::connect`].
@@ -464,6 +466,25 @@ impl AnyConnection {
                     .map_err(|e| AnyConnectionError(e.to_string()))?;
                 Ok(AnyConnection::Draft18(c))
             }
+            #[cfg(feature = "draft19")]
+            DraftVersion::Draft19 => {
+                use crate::draft19::connection::{ClientConfig, Connection, TransportType};
+                let transport = match config.transport {
+                    AnyTransportType::Quic => TransportType::Quic,
+                    AnyTransportType::WebTransport { url } => TransportType::WebTransport { url },
+                };
+                let inner = ClientConfig {
+                    draft: config.draft,
+                    transport,
+                    skip_cert_verification: config.skip_cert_verification,
+                    ca_certs: config.ca_certs,
+                    setup_parameters: config.setup_parameters,
+                };
+                let c = Connection::connect(addr, inner)
+                    .await
+                    .map_err(|e| AnyConnectionError(e.to_string()))?;
+                Ok(AnyConnection::Draft19(c))
+            }
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError(format!("draft {other:?} not enabled in this build",))),
         }
@@ -542,6 +563,12 @@ impl AnyConnection {
                 .map_err(|e| AnyConnectionError(e.to_string())),
             #[cfg(feature = "draft18")]
             Self::Draft18(c) => c
+                .recv_and_dispatch()
+                .await
+                .map(|_| ())
+                .map_err(|e| AnyConnectionError(e.to_string())),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => c
                 .recv_and_dispatch()
                 .await
                 .map(|_| ())
@@ -673,6 +700,11 @@ impl AnyConnection {
                 .subscribe(namespace, track_name, Vec::new())
                 .await
                 .map_err(|e| AnyConnectionError(e.to_string())),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => c
+                .subscribe(namespace, track_name, Vec::new())
+                .await
+                .map_err(|e| AnyConnectionError(e.to_string())),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError(format!(
                 "subscribe: not yet wired up for draft {:?} via AnyConnection",
@@ -720,6 +752,11 @@ impl AnyConnection {
                 .fetch(namespace, track_name, start_group, start_object, end_group, end_object)
                 .await
                 .map_err(|e| AnyConnectionError(e.to_string())),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => c
+                .fetch(namespace, track_name, start_group, start_object, end_group, end_object)
+                .await
+                .map_err(|e| AnyConnectionError(e.to_string())),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError(format!(
                 "fetch: not yet wired up for draft {:?} via AnyConnection",
@@ -759,6 +796,11 @@ impl AnyConnection {
                 .map_err(|e| AnyConnectionError(e.to_string())),
             #[cfg(feature = "draft18")]
             Self::Draft18(c) => c
+                .track_status(namespace, track_name, Vec::new())
+                .await
+                .map_err(|e| AnyConnectionError(e.to_string())),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => c
                 .track_status(namespace, track_name, Vec::new())
                 .await
                 .map_err(|e| AnyConnectionError(e.to_string())),
@@ -821,6 +863,11 @@ impl AnyConnection {
             }
             #[cfg(feature = "draft18")]
             Self::Draft18(c) => c
+                .subscribe_namespace(namespace_prefix, Vec::new())
+                .await
+                .map_err(|e| AnyConnectionError(e.to_string())),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => c
                 .subscribe_namespace(namespace_prefix, Vec::new())
                 .await
                 .map_err(|e| AnyConnectionError(e.to_string())),

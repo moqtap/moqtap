@@ -67,6 +67,7 @@ fn advertised_alpns() -> Vec<Vec<u8>> {
         DraftVersion::Draft16,
         DraftVersion::Draft17,
         DraftVersion::Draft18,
+        DraftVersion::Draft19,
     ] {
         let alpn = d.quic_alpn().to_vec();
         if !out.iter().any(|existing| existing == &alpn) {

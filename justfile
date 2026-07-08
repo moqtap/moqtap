@@ -11,7 +11,7 @@ test:
 test-features:
     #!/usr/bin/env bash
     set -euo pipefail
-    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17; do
+    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19; do
         echo "=== $d ==="
         cargo test -p moqtap-codec --no-default-features --features "$d"
     done
