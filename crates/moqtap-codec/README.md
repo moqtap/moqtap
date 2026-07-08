@@ -1,7 +1,7 @@
 # moqtap-codec
 
 Zero-dependency MoQT wire codec — draft-conforming parser and writer for every
-MoQT draft from draft-07 through draft-18.
+MoQT draft from draft-07 through draft-19.
 
 This crate handles pure encoding and decoding of MoQT protocol messages with
 no I/O, no async runtime, and no network dependencies. It is the foundational
@@ -32,7 +32,7 @@ wire-level code is shared across drafts. Shared primitives (`varint`, `kvp`,
 moqtap_codec::
     varint, kvp, types, version, error   (shared)
     dispatch                             (runtime Any* enums)
-    draft07, draft08, ..., draft18       (per-draft wire format)
+    draft07, draft08, ..., draft19       (per-draft wire format)
 ```
 
 ## Draft selection

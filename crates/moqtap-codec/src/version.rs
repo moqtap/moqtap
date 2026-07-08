@@ -29,6 +29,8 @@ pub enum DraftVersion {
     Draft17,
     /// draft-ietf-moq-transport-18.
     Draft18,
+    /// draft-ietf-moq-transport-19.
+    Draft19,
 }
 
 impl DraftVersion {
@@ -50,6 +52,7 @@ impl DraftVersion {
             DraftVersion::Draft16 => 16,
             DraftVersion::Draft17 => 17,
             DraftVersion::Draft18 => 18,
+            DraftVersion::Draft19 => 19,
         };
         VarInt::from_usize(0xff000000 + n as usize)
     }
@@ -73,14 +76,15 @@ impl DraftVersion {
             DraftVersion::Draft16 => b"moqt-16",
             DraftVersion::Draft17 => b"moqt-17",
             DraftVersion::Draft18 => b"moqt-18",
+            DraftVersion::Draft19 => b"moqt-19",
         }
     }
 
     /// Resolve an ALPN identifier to a specific draft version.
     ///
     /// Returns `Some` for ALPNs that unambiguously identify a draft
-    /// (`moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`). Returns `None` for
-    /// `moq-00` — which covers drafts 07–14 and requires inspecting
+    /// (`moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`, `moqt-19`). Returns `None`
+    /// for `moq-00` — which covers drafts 07–14 and requires inspecting
     /// CLIENT_SETUP's supported-versions list — and for any unrecognized
     /// ALPN.
     pub fn from_alpn(alpn: &[u8]) -> Option<DraftVersion> {
@@ -89,6 +93,7 @@ impl DraftVersion {
             b"moqt-16" => Some(DraftVersion::Draft16),
             b"moqt-17" => Some(DraftVersion::Draft17),
             b"moqt-18" => Some(DraftVersion::Draft18),
+            b"moqt-19" => Some(DraftVersion::Draft19),
             _ => None,
         }
     }
@@ -110,6 +115,7 @@ impl DraftVersion {
             16 => Some(DraftVersion::Draft16),
             17 => Some(DraftVersion::Draft17),
             18 => Some(DraftVersion::Draft18),
+            19 => Some(DraftVersion::Draft19),
             _ => None,
         }
     }
@@ -137,6 +143,7 @@ impl DraftVersion {
             DraftVersion::Draft16 => 16,
             DraftVersion::Draft17 => 17,
             DraftVersion::Draft18 => 18,
+            DraftVersion::Draft19 => 19,
         }
     }
 }
@@ -157,6 +164,7 @@ mod tests {
         assert_eq!(DraftVersion::from_alpn(b"moqt-16"), Some(DraftVersion::Draft16));
         assert_eq!(DraftVersion::from_alpn(b"moqt-17"), Some(DraftVersion::Draft17));
         assert_eq!(DraftVersion::from_alpn(b"moqt-18"), Some(DraftVersion::Draft18));
+        assert_eq!(DraftVersion::from_alpn(b"moqt-19"), Some(DraftVersion::Draft19));
     }
 
     #[test]
@@ -174,6 +182,7 @@ mod tests {
             DraftVersion::Draft16,
             DraftVersion::Draft17,
             DraftVersion::Draft18,
+            DraftVersion::Draft19,
         ] {
             assert_eq!(DraftVersion::from_alpn(d.quic_alpn()), Some(d));
         }
@@ -181,7 +190,7 @@ mod tests {
 
     #[test]
     fn from_number_resolves_supported_range() {
-        for n in 7..=18u8 {
+        for n in 7..=19u8 {
             assert!(DraftVersion::from_number(n).is_some(), "draft {n} should resolve");
         }
     }
@@ -190,7 +199,7 @@ mod tests {
     fn from_number_none_outside_range() {
         assert_eq!(DraftVersion::from_number(0), None);
         assert_eq!(DraftVersion::from_number(6), None);
-        assert_eq!(DraftVersion::from_number(19), None);
+        assert_eq!(DraftVersion::from_number(20), None);
         assert_eq!(DraftVersion::from_number(255), None);
     }
 }

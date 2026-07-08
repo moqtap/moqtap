@@ -2,7 +2,7 @@
 
 //! MoQT wire codec for
 //! [draft-07](https://www.ietf.org/archive/id/draft-ietf-moq-transport-07.html) through
-//! [draft-18](https://www.ietf.org/archive/id/draft-ietf-moq-transport-18.html).
+//! [draft-19](https://www.ietf.org/archive/id/draft-ietf-moq-transport-19.html).
 //!
 //! Enable draft support via feature flags: `draft14` (default), `draft07`, `draft08`, etc.
 //! Use `all-drafts` to enable every draft.
@@ -59,9 +59,12 @@ pub mod draft16;
 /// MoQT wire codec for draft-17.
 #[cfg(feature = "draft17")]
 pub mod draft17;
-/// MoQT wire codec for draft-18 (latest).
+/// MoQT wire codec for draft-18.
 #[cfg(feature = "draft18")]
 pub mod draft18;
+/// MoQT wire codec for draft-19 (latest).
+#[cfg(feature = "draft19")]
+pub mod draft19;
 
 /// Codec error types and size limits.
 pub mod error;

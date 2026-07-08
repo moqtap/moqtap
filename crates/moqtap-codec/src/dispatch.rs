@@ -117,6 +117,8 @@ dispatch_enum! {
         Draft17 => crate::draft17::message::ControlMessage,
         #[cfg(feature = "draft18")]
         Draft18 => crate::draft18::message::ControlMessage,
+        #[cfg(feature = "draft19")]
+        Draft19 => crate::draft19::message::ControlMessage,
     }
     decode(decode);
     encode(encode -> Result<(), CodecError>);
@@ -194,6 +196,10 @@ impl AnyControlMessage {
             AnyControlMessage::Draft18(m) => {
                 matches!(m, crate::draft18::message::ControlMessage::Setup(_))
             }
+            #[cfg(feature = "draft19")]
+            AnyControlMessage::Draft19(m) => {
+                matches!(m, crate::draft19::message::ControlMessage::Setup(_))
+            }
             #[allow(unreachable_patterns)]
             _ => false,
         }
@@ -230,6 +236,8 @@ dispatch_enum! {
         Draft17 => crate::draft17::data_stream::SubgroupHeader,
         #[cfg(feature = "draft18")]
         Draft18 => crate::draft18::data_stream::SubgroupHeader,
+        #[cfg(feature = "draft19")]
+        Draft19 => crate::draft19::data_stream::SubgroupHeader,
     }
     decode(decode);
     encode(encode -> ());
@@ -292,6 +300,8 @@ dispatch_enum! {
         Draft17 => crate::draft17::data_stream::DatagramHeader,
         #[cfg(feature = "draft18")]
         Draft18 => crate::draft18::data_stream::DatagramHeader,
+        #[cfg(feature = "draft19")]
+        Draft19 => crate::draft19::data_stream::DatagramHeader,
     }
     decode(decode);
     encode(encode -> ());
@@ -328,6 +338,8 @@ dispatch_enum! {
         Draft17 => crate::draft17::data_stream::FetchHeader,
         #[cfg(feature = "draft18")]
         Draft18 => crate::draft18::data_stream::FetchHeader,
+        #[cfg(feature = "draft19")]
+        Draft19 => crate::draft19::data_stream::FetchHeader,
     }
     decode(decode);
     encode(encode -> ());

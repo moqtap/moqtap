@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-08
+
+Adds MoQT draft-19 support. Test-vector submodule pinned to v0.10.0.
+
+### Added
+
+- New `draft19` module behind a `draft19` feature flag, with full control
+  message and data stream encode/decode coverage. `all-drafts` now enables it.
+- `DraftVersion::Draft19` variant, `moqt-19` ALPN, and dispatch enum
+  (`AnyControlMessage`, `AnySubgroupHeader`, `AnyDatagramHeader`,
+  `AnyFetchHeader`) variants for draft-19.
+- Range Filter parameters (length-prefixed): `SUBGROUP_FILTER` (`0x25`),
+  `OBJECTID_FILTER` (`0x26`), `PRIORITY_FILTER` (`0x27`),
+  `OBJECT_PROPERTY_FILTER` (`0x28`) and `TRACK_PROPERTY_FILTER` (`0x29`).
+- Setup Options `MAX_FILTER_RANGES` (`0x06`) and `MAX_REQUEST_UPDATES`
+  (`0x08`), both even KVP types carrying a varint value.
+- New `request_error_codes::CONFLICTING_FILTERS` (`0x35`) and
+  `INVALID_FILTER` (`0x36`).
+
+### Changed
+
+- `GoAway` no longer carries a `request_id`; the control-stream and
+  request-stream forms are now identical on the wire.
+- `PublishBlocked` renamed to `PublishSkipped` (message type `0x0F`
+  unchanged; wire layout identical).
+- `SUBSCRIPTION_FILTER` renamed to `LOCATION_FILTER` (parameter `0x21`
+  unchanged).
+- `GROUP_ORDER` (`0x22`) is now valid in `SubscribeTracks` rather than
+  `PUBLISH_OK`.
+
+### Removed
+
+- `request_error_codes::DUPLICATE_SUBSCRIPTION` (`0x19`); multiple
+  concurrent subscriptions per Track are now allowed.
+
 ## [0.2.0] - 2026-05-13
 
 Adds MoQT draft-18 support. Test-vector submodule pinned to v0.9.1.
