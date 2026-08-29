@@ -1,7 +1,12 @@
 [package]
 name = "moqtap-trace"
 description = "MoQT session tracing — .moqtrace file format, event capture, and session metrics"
-version = "0.1.0"
+# 0.2.0, not 0.1.1: `EventData` gained variants and became non-exhaustive, and
+# `TraceEvent` and `TraceHeader` gained public fields, which breaks any
+# exhaustive match or struct literal downstream. Under Cargo's 0.x rules the
+# minor position is the major position, so a patch bump would hand that break
+# to every current consumer of `^0.1.0`.
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
