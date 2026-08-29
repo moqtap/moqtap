@@ -1010,6 +1010,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quinn-netem"
+version = "0.1.0"
+dependencies = [
+ "quinn",
+ "serde",
+]
+
+[[package]]
 name = "quinn-proto"
 version = "0.11.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

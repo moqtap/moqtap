@@ -1,0 +1,5 @@
+# The decision-log fixture is compared against a rendered log byte for byte, so
+# nothing may rewrite a byte of it in either direction. `-text` disables the
+# clean and smudge filters outright, which does not depend on git's text/binary
+# heuristic agreeing with us.
+crates/quinn-netem/tests/fixtures/*.log -text

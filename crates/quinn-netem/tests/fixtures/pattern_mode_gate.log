@@ -1,0 +1,288 @@
+# quinn-netem decision-log v1 seq direction verdict cause wire_bytes now_ns release_ns dup_release_ns corrupt_offset corrupt_bit queue_backlog_bytes
+#
+# ==========================================================================
+#  THE GATE FIXTURE.  DERIVING THIS FILE BY RUNNING THE IMPLEMENTATION IS
+#  FORBIDDEN.  Every record below was written from the arithmetic in this
+#  header and from nothing else.
+# ==========================================================================
+#
+#  A fixture blessed from the code under test certifies whatever that code
+#  does, including nothing at all.  An engine whose decide function returned
+#  "pass" unconditionally would bless ten thousand records from itself and
+#  turn the whole reproducibility criterion green.  Comparing an
+#  implementation against its own output proves only that it equals itself.
+#
+#  So if a line here disagrees with the engine, the engine and this table
+#  disagree, and finding out which one is wrong is the work.  Re-derive the
+#  line from the rules below.  Do not paste what the engine printed.
+#
+#  Comment lines (first non-blank byte `#`) and blank lines are dropped from
+#  BOTH sides of the comparison, so this header costs the byte comparison
+#  nothing and travels in the same file as the records it explains.
+#
+#  --- the profile these records come from ---------------------------------
+#
+#  One direction, Downlink, so column 2 is 0 on every line.  seed 7.
+#  100 datagrams, seq 0..99, one per millisecond: now_ns = seq * 1000000.
+#
+#  Sizes are ON-WIRE bytes.  Every datagram is 1228 (a 1200-byte payload plus
+#  20 bytes of IPv4 header and 8 of UDP) except:
+#      seq 5, 23, 37, 88  ->  1500   (over the MTU limit)
+#      seq 40             ->  1400   (exactly the limit; the limit passes)
+#
+#  Armed on every phase:
+#      rate           bps 8000000, burst_bytes 1500, queue_bytes 2000
+#      mtu_blackhole  1400
+#
+#  A timeline swaps the rest of the profile twice:
+#
+#    phase A, ticks [0, 50ms)      seq 0..49
+#        loss       Pattern, indices [3, 7, 11, 22, 29, 44]
+#        blackouts  [ at_ns 20ms, for_ns 5ms ]
+#        delay, reorder, dup, corrupt: none
+#    phase B, at_ns 50ms           seq 50..79
+#        loss       EveryNth n = 5
+#        delay      Fixed 2ms
+#        reorder    gap 4, p = 1
+#        dup        p = 1
+#        corrupt: none.  blackouts: none.
+#    phase C, at_ns 80ms           seq 80..99
+#        phase B plus corrupt p = 1
+#
+#  Every probability in the profile is exactly 0 or exactly 1, so no verdict
+#  on any line depends on the value of a generator draw.  The reorder and
+#  duplication models still consume one draw each per datagram they judge —
+#  that is what keeps a later model's stream in the position it would be in
+#  anyway — but at p = 1 the answer is certain and the arithmetic below is
+#  complete without it.
+#
+#  --- the rules, in the order the engine applies them ---------------------
+#
+#  1. TIMELINE.  The phase is the last step whose at_ns is <= now.
+#  2. BLACKOUT (phase A only).  Half-open: 20ms <= now < 25ms, i.e. seq
+#     20..24 inclusive and seq 25 NOT.  Drop, cause 2.  Consumes no draw and
+#     never touches the queue, so the queue's backlog and its drain clock are
+#     exactly where the last admitted datagram left them.
+#  3. MTU.  Strictly greater than 1400 drops, cause 3.  So 1500 drops and the
+#     1400 at seq 40 passes.  No draw, no queue.
+#  4. LOSS.  Phase A: the named index list.  Phases B and C: seq % 5 == 4,
+#     i.e. the 5th, 10th, ... datagram.  Drop, cause 1.  No draw either way —
+#     both of these loss models are deterministic in seq.
+#  5. RATE, and it is two separate pieces of arithmetic.
+#
+#     THE QUEUE, in bytes.  It drains at the configured rate, 8000000 bits/s
+#     = 1000000 bytes/s = exactly 1 byte per microsecond, so a 1ms gap drains
+#     1000 bytes.  Drain first, floored at zero, then admit:
+#
+#         backlog := max(0, backlog - microseconds_since_the_last_ADMISSION
+#                                     _ATTEMPT)
+#         if backlog + wire_bytes > 2000 -> drop, cause 4, backlog unchanged
+#         else                            -> backlog := backlog + wire_bytes
+#
+#     Column 11 is the backlog AFTER this decision, this datagram included.
+#     A datagram dropped at step 2, 3 or 4 never reaches the queue, so it
+#     neither drains it nor is counted in it, and its column 11 repeats the
+#     previous admitted line's.  A tail drop DOES drain first, so its column
+#     11 is the post-drain backlog and is never the pre-drain one.
+#
+#     THE BUCKET, also in bytes, and it is what column 7 is about.  Depth
+#     1500, refilling at the same 1 byte per microsecond, and it starts FULL.
+#     Only a granted datagram spends from it.  Writing t_g for the tick of
+#     the last granted datagram and s_g for that datagram's size:
+#
+#         held(now) = min(1500, 1500 - s_g + microseconds_since_t_g)
+#         held >= this datagram's size  -> release = now
+#         otherwise                     -> release = now + (size - held) us
+#
+#     With 1228-byte datagrams one millisecond apart that works out to two
+#     grants and then one deferral: the first two lines are granted, and the
+#     third is short by 184 bytes and is released 184000 ns late.  Every
+#     `+184000` in column 7 below is that number, and the single `+356000` at
+#     seq 40 is the same arithmetic for the 1400-byte datagram there.
+#
+#  6. DELAY (phases B and C).  Fixed 2ms, added to whatever tick step 5 named.
+#     A fixed delay consumes no draw.
+#  7. REORDER (phases B and C).  Every 4th datagram is a candidate:
+#     seq % 4 == 3.  A candidate that hits — and at p = 1 every candidate
+#     hits — is released at `now` instead, and its verdict is 2, not 0.  The
+#     distinction is the whole visible effect of the model: the datagram did
+#     not wait, where a 0 would say it was never asked to.
+#  8. DUPLICATION (phases B and C).  p = 1, so every datagram that gets this
+#     far gets a copy, released at the same tick.  Column 8 is therefore
+#     equal to column 7 on those lines, and 18446744073709551615 (u64::MAX,
+#     "no duplicate") everywhere else.
+#  9. CORRUPTION (phase C).  p = 1.  Columns 9 and 10 are the byte offset and
+#     the bit, and they are THE ONLY TWO COLUMNS IN THIS FILE THAT COME FROM
+#     THE GENERATOR RATHER THAN FROM ARITHMETIC.  4294967295 (u32::MAX) in
+#     column 9 means no corruption.
+#
+#     The corruption stream is PCG32 seeded (state 7, sequence 4 — the
+#     downlink corruption stream id), and it is consumed three words per
+#     corrupted datagram: one for the hit, one for the offset, one for the
+#     bit.  The offset is bounded by wire_bytes - 48, which is 1180 here, and
+#     the bit by 8.  The bounded draw rejects below (-bound) mod bound, which
+#     is 936 for bound 1180 and 0 for bound 8; every offset word listed below
+#     is >= 936, so no draw in this file was rejected and each offset is
+#     simply `word mod 1180` and each bit `word mod 8`.
+#
+#     The three words per datagram, so a reader can check columns 9 and 10
+#     against any independent PCG32 rather than against this crate's:
+#
+#        seq    hit word    offset word   bit word    -> offset  bit
+#         80   1919132652    1862406582   2363703883       782    3
+#         81   3850697976    3945852795   3695547696        55    0
+#         82   1257919033    1362110348    265285222       948    6
+#         83   4148610212     491602704   2560990673       544    1
+#         85   3956148511     624063629   2491204434       569    2
+#         86      1252320    2395427962    138443112       822    0
+#         87   2341817487    4197356266    366435041       686    1
+#         90   4016944071    3496535293     60916133       593    5
+#         91     27858644    3072413651    142539314       451    2
+#         92   3951733527    1708008331   3344568846       811    6
+#         93    808414341    1324557222   3999081807       142    7
+#         95   3370822031    1878265947   1560657650       947    2
+#         96    860925615     738478481   2859278908       261    4
+#         97   2516280836    2770122128   3088559434       148    2
+#         98   1395614435    2554923119    634634759        99    7
+#
+#     Those words were produced by a second transcription of the generator,
+#     written from the published algorithm, and it is trustworthy for one
+#     specific reason: it reproduces the generator's published demo vector
+#     (seeded(42, 54) -> a15c02b7 7b47f409 ba1d3330 83d2f293) and the pinned
+#     first word of the all-zero seed (e4c14788) before it is used for
+#     anything here.  A number an independent anchored implementation agrees
+#     on is evidence.  A number the code under test printed is not.
+#
+#  --- what happened to which datagram, so a reader can spot-check ----------
+#
+#     dropped, loss (cause 1)      3, 7, 11, 29, 44, and then 54, 59, 64, 69,
+#                                  74, 79, 84, 89, 94, 99
+#     dropped, blackout (cause 2)  20, 21, 22, 23, 24
+#     dropped, MTU (cause 3)       5, 37, 88
+#     dropped, queue full (4)      16, 34, 41, 49
+#     bucket named a later tick    2, 10, 14, 19, 27, 32, 40, 47, 52, 57, 62,
+#                                  67, 72, 77, 82, 87, 92, 97.  At 67 and 87
+#                                  the reorder model then took the release
+#                                  back to `now`, so those two lines do not
+#                                  show the lateness in column 7.
+#     reordered (verdict 2)        51, 55, 63, 67, 71, 75, 83, 87, 91, 95
+#     corrupted                    80..99 less 84, 88, 89, 94 and 99, which
+#                                  were dropped before step 9
+#
+#  TWO PRECEDENCE FACTS ARE PINNED HERE ON PURPOSE, because they are the ones
+#  an implementation gets wrong silently:
+#
+#     seq 22 is in the loss index list AND inside the blackout.  It is
+#     reported as cause 2, not cause 1, because the blackout is consulted
+#     first.  If it ever reads 1, the model order moved.
+#     seq 23 is over the MTU limit AND inside the blackout.  Same answer, for
+#     the same reason.
+#
+#  And one boundary each way: seq 19 is one millisecond before the blackout
+#  and survives; seq 25 is the first millisecond after it and survives, which
+#  is what makes the window half-open rather than five-and-a-bit long.
+#
+#  Counts, as a cheap whole-file check: 100 records; 26 with verdict 0, 37
+#  with verdict 1, 10 with verdict 2, 27 with verdict 3; and of the 27 drops,
+#  15 loss, 5 blackout, 3 MTU, 4 queue-full.
+#
+0 0 0 0 1228 0 0 18446744073709551615 4294967295 0 1228
+1 0 0 0 1228 1000000 1000000 18446744073709551615 4294967295 0 1456
+2 0 1 0 1228 2000000 2184000 18446744073709551615 4294967295 0 1684
+3 0 3 1 1228 3000000 3000000 18446744073709551615 4294967295 0 1684
+4 0 0 0 1228 4000000 4000000 18446744073709551615 4294967295 0 1228
+5 0 3 3 1500 5000000 5000000 18446744073709551615 4294967295 0 1228
+6 0 0 0 1228 6000000 6000000 18446744073709551615 4294967295 0 1228
+7 0 3 1 1228 7000000 7000000 18446744073709551615 4294967295 0 1228
+8 0 0 0 1228 8000000 8000000 18446744073709551615 4294967295 0 1228
+9 0 0 0 1228 9000000 9000000 18446744073709551615 4294967295 0 1456
+10 0 1 0 1228 10000000 10184000 18446744073709551615 4294967295 0 1684
+11 0 3 1 1228 11000000 11000000 18446744073709551615 4294967295 0 1684
+12 0 0 0 1228 12000000 12000000 18446744073709551615 4294967295 0 1228
+13 0 0 0 1228 13000000 13000000 18446744073709551615 4294967295 0 1456
+14 0 1 0 1228 14000000 14184000 18446744073709551615 4294967295 0 1684
+15 0 0 0 1228 15000000 15000000 18446744073709551615 4294967295 0 1912
+16 0 3 4 1228 16000000 16000000 18446744073709551615 4294967295 0 912
+17 0 0 0 1228 17000000 17000000 18446744073709551615 4294967295 0 1228
+18 0 0 0 1228 18000000 18000000 18446744073709551615 4294967295 0 1456
+19 0 1 0 1228 19000000 19184000 18446744073709551615 4294967295 0 1684
+20 0 3 2 1228 20000000 20000000 18446744073709551615 4294967295 0 1684
+21 0 3 2 1228 21000000 21000000 18446744073709551615 4294967295 0 1684
+22 0 3 2 1228 22000000 22000000 18446744073709551615 4294967295 0 1684
+23 0 3 2 1500 23000000 23000000 18446744073709551615 4294967295 0 1684
+24 0 3 2 1228 24000000 24000000 18446744073709551615 4294967295 0 1684
+25 0 0 0 1228 25000000 25000000 18446744073709551615 4294967295 0 1228
+26 0 0 0 1228 26000000 26000000 18446744073709551615 4294967295 0 1456
+27 0 1 0 1228 27000000 27184000 18446744073709551615 4294967295 0 1684
+28 0 0 0 1228 28000000 28000000 18446744073709551615 4294967295 0 1912
+29 0 3 1 1228 29000000 29000000 18446744073709551615 4294967295 0 1912
+30 0 0 0 1228 30000000 30000000 18446744073709551615 4294967295 0 1228
+31 0 0 0 1228 31000000 31000000 18446744073709551615 4294967295 0 1456
+32 0 1 0 1228 32000000 32184000 18446744073709551615 4294967295 0 1684
+33 0 0 0 1228 33000000 33000000 18446744073709551615 4294967295 0 1912
+34 0 3 4 1228 34000000 34000000 18446744073709551615 4294967295 0 912
+35 0 0 0 1228 35000000 35000000 18446744073709551615 4294967295 0 1228
+36 0 0 0 1228 36000000 36000000 18446744073709551615 4294967295 0 1456
+37 0 3 3 1500 37000000 37000000 18446744073709551615 4294967295 0 1456
+38 0 0 0 1228 38000000 38000000 18446744073709551615 4294967295 0 1228
+39 0 0 0 1228 39000000 39000000 18446744073709551615 4294967295 0 1456
+40 0 1 0 1400 40000000 40356000 18446744073709551615 4294967295 0 1856
+41 0 3 4 1228 41000000 41000000 18446744073709551615 4294967295 0 856
+42 0 0 0 1228 42000000 42000000 18446744073709551615 4294967295 0 1228
+43 0 0 0 1228 43000000 43000000 18446744073709551615 4294967295 0 1456
+44 0 3 1 1228 44000000 44000000 18446744073709551615 4294967295 0 1456
+45 0 0 0 1228 45000000 45000000 18446744073709551615 4294967295 0 1228
+46 0 0 0 1228 46000000 46000000 18446744073709551615 4294967295 0 1456
+47 0 1 0 1228 47000000 47184000 18446744073709551615 4294967295 0 1684
+48 0 0 0 1228 48000000 48000000 18446744073709551615 4294967295 0 1912
+49 0 3 4 1228 49000000 49000000 18446744073709551615 4294967295 0 912
+50 0 1 0 1228 50000000 52000000 52000000 4294967295 0 1228
+51 0 2 0 1228 51000000 51000000 51000000 4294967295 0 1456
+52 0 1 0 1228 52000000 54184000 54184000 4294967295 0 1684
+53 0 1 0 1228 53000000 55000000 55000000 4294967295 0 1912
+54 0 3 1 1228 54000000 54000000 18446744073709551615 4294967295 0 1912
+55 0 2 0 1228 55000000 55000000 55000000 4294967295 0 1228
+56 0 1 0 1228 56000000 58000000 58000000 4294967295 0 1456
+57 0 1 0 1228 57000000 59184000 59184000 4294967295 0 1684
+58 0 1 0 1228 58000000 60000000 60000000 4294967295 0 1912
+59 0 3 1 1228 59000000 59000000 18446744073709551615 4294967295 0 1912
+60 0 1 0 1228 60000000 62000000 62000000 4294967295 0 1228
+61 0 1 0 1228 61000000 63000000 63000000 4294967295 0 1456
+62 0 1 0 1228 62000000 64184000 64184000 4294967295 0 1684
+63 0 2 0 1228 63000000 63000000 63000000 4294967295 0 1912
+64 0 3 1 1228 64000000 64000000 18446744073709551615 4294967295 0 1912
+65 0 1 0 1228 65000000 67000000 67000000 4294967295 0 1228
+66 0 1 0 1228 66000000 68000000 68000000 4294967295 0 1456
+67 0 2 0 1228 67000000 67000000 67000000 4294967295 0 1684
+68 0 1 0 1228 68000000 70000000 70000000 4294967295 0 1912
+69 0 3 1 1228 69000000 69000000 18446744073709551615 4294967295 0 1912
+70 0 1 0 1228 70000000 72000000 72000000 4294967295 0 1228
+71 0 2 0 1228 71000000 71000000 71000000 4294967295 0 1456
+72 0 1 0 1228 72000000 74184000 74184000 4294967295 0 1684
+73 0 1 0 1228 73000000 75000000 75000000 4294967295 0 1912
+74 0 3 1 1228 74000000 74000000 18446744073709551615 4294967295 0 1912
+75 0 2 0 1228 75000000 75000000 75000000 4294967295 0 1228
+76 0 1 0 1228 76000000 78000000 78000000 4294967295 0 1456
+77 0 1 0 1228 77000000 79184000 79184000 4294967295 0 1684
+78 0 1 0 1228 78000000 80000000 80000000 4294967295 0 1912
+79 0 3 1 1228 79000000 79000000 18446744073709551615 4294967295 0 1912
+80 0 1 0 1228 80000000 82000000 82000000 782 3 1228
+81 0 1 0 1228 81000000 83000000 83000000 55 0 1456
+82 0 1 0 1228 82000000 84184000 84184000 948 6 1684
+83 0 2 0 1228 83000000 83000000 83000000 544 1 1912
+84 0 3 1 1228 84000000 84000000 18446744073709551615 4294967295 0 1912
+85 0 1 0 1228 85000000 87000000 87000000 569 2 1228
+86 0 1 0 1228 86000000 88000000 88000000 822 0 1456
+87 0 2 0 1228 87000000 87000000 87000000 686 1 1684
+88 0 3 3 1500 88000000 88000000 18446744073709551615 4294967295 0 1684
+89 0 3 1 1228 89000000 89000000 18446744073709551615 4294967295 0 1684
+90 0 1 0 1228 90000000 92000000 92000000 593 5 1228
+91 0 2 0 1228 91000000 91000000 91000000 451 2 1456
+92 0 1 0 1228 92000000 94184000 94184000 811 6 1684
+93 0 1 0 1228 93000000 95000000 95000000 142 7 1912
+94 0 3 1 1228 94000000 94000000 18446744073709551615 4294967295 0 1912
+95 0 2 0 1228 95000000 95000000 95000000 947 2 1228
+96 0 1 0 1228 96000000 98000000 98000000 261 4 1456
+97 0 1 0 1228 97000000 99184000 99184000 148 2 1684
+98 0 1 0 1228 98000000 100000000 100000000 99 7 1912
+99 0 3 1 1228 99000000 99000000 18446744073709551615 4294967295 0 1912

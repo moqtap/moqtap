@@ -1,0 +1,41 @@
+[package]
+name = "quinn-netem"
+description = "Deterministic UDP datagram impairment — loss, delay, reorder, duplication, corruption and rate shaping for QUIC"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Not inherited: the workspace list describes crates that speak Media over QUIC,
+# and this one speaks UDP datagrams.
+keywords = ["quic", "quinn", "netem", "testing", "network"]
+categories = ["network-programming", "development-tools::testing"]
+readme = "README.md"
+
+[features]
+# No `default` key on purpose: the decision engine compiles with zero
+# dependencies, which is what keeps the determinism gate a plain `#[test]` with
+# no tokio, no QUIC and no network. Each feature below adds exactly one
+# dependency.
+
+# The QUIC socket adapter. The decision engine itself never sees it.
+quinn-socket = ["dep:quinn"]
+
+# `Serialize` and `Deserialize` for every type reachable from `ImpairProfile`
+# and `Preset`, so a scenario can be written in a config file instead of in
+# Rust. The orphan rule permits the derive nowhere but here; the alternative is
+# a set of mirror types in the consumer that compile green on the day a field is
+# added here and silently stop carrying it.
+serde = ["dep:serde"]
+
+[dependencies]
+quinn = { workspace = true, optional = true }
+# Not `workspace = true`: `default-features = false` on a workspace-inherited
+# dependency is ignored unless the workspace table carries it too, and the only
+# diagnostic is a manifest warning no build fails on. `std` is needed because
+# `PeerFilter` holds `SocketAddr`s and `Vec`s.
+#
+# `1.0.192` rather than `1` for `rename_all_fields`, which gives enum
+# struct-variants the same kebab-case keys as every struct in the profile types.
+serde = { version = "1.0.192", default-features = false, features = ["derive", "std"], optional = true }

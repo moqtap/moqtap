@@ -1,5 +1,14 @@
 name: Publish Crate
 
+# One entry per publishable crate, and a tag prefix that is missing here does
+# not publish — the push appears to work, produces no job at all, and is
+# indistinguishable from a publish that succeeded. Add the prefix in the same
+# change that adds the crate.
+#
+# `cli-v*` has been listed since the first release and its crate lives
+# elsewhere, unpushed. It is kept: a prefix with no crate fails loudly at
+# `cargo publish -p`, which is the safe direction, while a crate with no prefix
+# fails silently.
 on:
   push:
     tags:
@@ -8,6 +17,7 @@ on:
       - "client-v*"
       - "cli-v*"
       - "proxy-v*"
+      - "netem-v*"
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,11 +33,30 @@ jobs:
       - name: Parse tag
         id: parse
         run: |
-          # Tag format: codec-v0.1.0
+          set -euo pipefail
+          # Tag format: <short>-v<version>, e.g. codec-v0.1.0.
+          #
+          # An explicit table, not `moqtap-${SHORT}`. That concatenation was
+          # right only while every crate carried the project's prefix, and it
+          # silently stopped being right the moment one did not: `netem-v0.1.0`
+          # would have resolved to a `moqtap-netem` that does not exist. A
+          # table also makes the unmapped case reachable, which string
+          # concatenation never is — every prefix produces *a* name, just not
+          # necessarily one in this workspace.
           TAG="${GITHUB_REF_NAME}"
           SHORT="${TAG%-v*}"
           VERSION="${TAG#*-v}"
-          CRATE="moqtap-${SHORT}"
+          case "$SHORT" in
+            codec)  CRATE="moqtap-codec"  ;;
+            trace)  CRATE="moqtap-trace"  ;;
+            client) CRATE="moqtap-client" ;;
+            proxy)  CRATE="moqtap-proxy"  ;;
+            cli)    CRATE="moqtap-cli"    ;;
+            netem)  CRATE="quinn-netem"   ;;
+            *)
+              echo "::error::tag prefix '${SHORT}' maps to no crate. Add it to the case in publish.yml and to the tag list above — both, or the tag fires nothing."
+              exit 1 ;;
+          esac
           echo "crate=${CRATE}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Publishing ${CRATE} v${VERSION}"

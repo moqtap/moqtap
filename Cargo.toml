@@ -5,11 +5,12 @@ members = [
     "crates/moqtap-trace",
     "crates/moqtap-client",
     "crates/moqtap-proxy",
+    "crates/quinn-netem",
 ]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.83"
+rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/moqtap/moqtap"
 homepage = "https://github.com/moqtap/moqtap"
