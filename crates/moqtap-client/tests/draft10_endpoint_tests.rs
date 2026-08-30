@@ -15,13 +15,25 @@ fn ns(parts: &[&[u8]]) -> TrackNamespace {
     TrackNamespace(parts.iter().map(|p| p.to_vec()).collect())
 }
 
+/// A setup parameter value in the shape this draft's wire format produces.
+///
+/// Drafts 07 through 10 frame every setup parameter as {Type, Length, Value},
+/// so a value that came off the wire is always bytes. Building a
+/// `KvpValue::Varint` here would be building a shape no peer can send, and a
+/// test that does that is asserting on something it wrote itself.
+fn setup_value(v: u64) -> KvpValue {
+    let mut bytes = Vec::new();
+    varint(v).encode(&mut bytes);
+    KvpValue::Bytes(bytes)
+}
+
 // ============================================================
 // Construction and initial state
 // ============================================================
 
 #[test]
 fn endpoint_starts_in_connecting() {
-    let ep = Endpoint::new();
+    let ep = Endpoint::new(Role::Client);
     assert_eq!(ep.session_state(), SessionState::Connecting);
     assert_eq!(ep.active_subscription_count(), 0);
     assert_eq!(ep.active_fetch_count(), 0);
@@ -35,13 +47,13 @@ fn endpoint_starts_in_connecting() {
 // ============================================================
 
 fn make_active_client() -> Endpoint {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
-    let versions = vec![varint(0xff000007)];
+    let versions = vec![varint(0xff00000a)];
     let _ = ep.send_client_setup(versions, vec![]).unwrap();
     let server_setup = ServerSetup {
-        selected_version: varint(0xff000007),
-        parameters: vec![KeyValuePair { key: varint(0x02), value: KvpValue::Varint(varint(100)) }],
+        selected_version: varint(0xff00000a),
+        parameters: vec![KeyValuePair { key: varint(0x02), value: setup_value(100) }],
     };
     ep.receive_server_setup(&server_setup).unwrap();
     ep
@@ -49,34 +61,58 @@ fn make_active_client() -> Endpoint {
 
 #[test]
 fn endpoint_connect_transitions_to_setup_exchange() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     assert_eq!(ep.session_state(), SessionState::SetupExchange);
 }
 
+/// A SERVER_SETUP activates the session, and the version it settled is
+/// observed through what the endpoint will accept afterwards rather than by
+/// reading it back: this module encodes one draft, and a SERVER_SETUP naming
+/// another draft's version is refused whether or not the client offered it.
+///
+/// Dropping the version binding fails with:
+///
+/// ```text
+/// this module speaks one draft, and 0xff000003 is not it
+/// ```
 #[test]
 fn endpoint_receive_server_setup_activates_session() {
     let ep = make_active_client();
     assert_eq!(ep.session_state(), SessionState::Active);
-    assert_eq!(ep.negotiated_version(), Some(varint(0xff000007)));
     assert!(!ep.is_blocked());
+
+    let mut other = Endpoint::new(Role::Client);
+    other.connect().unwrap();
+    let offered = vec![varint(0xff00000a), varint(0xff000003)];
+    let _ = other.send_client_setup(offered, vec![]).unwrap();
+    let wrong_draft = ServerSetup { selected_version: varint(0xff000003), parameters: vec![] };
+    assert!(
+        other.receive_server_setup(&wrong_draft).is_err(),
+        "this module speaks one draft, and 0xff000003 is not it",
+    );
+    assert_eq!(
+        other.session_state(),
+        SessionState::SetupExchange,
+        "a refused SERVER_SETUP must not activate the session",
+    );
 }
 
 #[test]
 fn endpoint_blocked_without_max_subscribe_id() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
-    let _ = ep.send_client_setup(vec![varint(0xff000007)], vec![]).unwrap();
-    let server_setup = ServerSetup { selected_version: varint(0xff000007), parameters: vec![] };
+    let _ = ep.send_client_setup(vec![varint(0xff00000a)], vec![]).unwrap();
+    let server_setup = ServerSetup { selected_version: varint(0xff00000a), parameters: vec![] };
     ep.receive_server_setup(&server_setup).unwrap();
     assert!(ep.is_blocked());
 }
 
 #[test]
 fn endpoint_server_setup_wrong_version_fails() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
-    let _ = ep.send_client_setup(vec![varint(0xff000007)], vec![]).unwrap();
+    let _ = ep.send_client_setup(vec![varint(0xff00000a)], vec![]).unwrap();
     let server_setup = ServerSetup { selected_version: varint(0xff000099), parameters: vec![] };
     assert!(ep.receive_server_setup(&server_setup).is_err());
 }
@@ -386,13 +422,26 @@ fn endpoint_unknown_track_status_rejected() {
 // GoAway
 // ============================================================
 
+/// A GOAWAY drains the session. What that costs the peer is asserted rather
+/// than the URI being read back: "The endpoint MUST terminate the session with
+/// a Protocol Violation ... if it receives multiple GOAWAY messages", and a
+/// second one has nowhere to go from Draining.
+///
+/// Letting a second GOAWAY through fails with:
+///
+/// ```text
+/// a session can only be told to go away once
+/// ```
 #[test]
 fn endpoint_goaway_transitions_to_draining() {
     let mut ep = make_active_client();
     let msg = GoAway { new_session_uri: b"https://new".to_vec() };
     ep.receive_goaway(&msg).unwrap();
     assert_eq!(ep.session_state(), SessionState::Draining);
-    assert_eq!(ep.goaway_uri(), Some(b"https://new".as_slice()));
+    assert!(
+        ep.receive_goaway(&GoAway { new_session_uri: Vec::new() }).is_err(),
+        "a session can only be told to go away once",
+    );
 }
 
 #[test]
@@ -433,13 +482,31 @@ fn endpoint_receive_max_subscribe_id_raises_limit() {
 // SUBSCRIBES_BLOCKED (draft-08 new message)
 // ============================================================
 
+/// SUBSCRIBES_BLOCKED is the peer's account of where it stopped, not a grant.
+///
+/// The number in it is not read back. What is asserted is that it did not
+/// become this endpoint's own advertised ceiling: if the handler had folded it
+/// in, 100 would already be spent and advertising it would be refused for not
+/// being an increase.
+///
+/// Folding it in fails with:
+///
+/// ```text
+/// the peer's report is not a ceiling this endpoint has already advertised:
+/// SubscribeId(Decreased(100, 100))
+/// ```
 #[test]
-fn endpoint_receive_subscribes_blocked_records_peer_max() {
+fn endpoint_receive_subscribes_blocked_is_not_a_grant() {
     let mut ep = make_active_client();
+    let _ = ep.send_max_subscribe_id(varint(50)).unwrap();
+
     let msg =
         ControlMessage::SubscribesBlocked(SubscribesBlocked { maximum_subscribe_id: varint(100) });
     ep.receive_message(msg).unwrap();
-    assert_eq!(ep.peer_reported_max_subscribe_id(), Some(varint(100)));
+
+    let _ = ep
+        .send_max_subscribe_id(varint(100))
+        .expect("the peer's report is not a ceiling this endpoint has already advertised");
 }
 
 // ============================================================

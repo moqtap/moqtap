@@ -99,16 +99,29 @@ impl SubscribeNamespaceStateMachine {
         }
     }
 
-    /// Active -> Done.
-    pub fn on_unsubscribe_namespace(&mut self) -> Result<(), NamespaceError> {
-        if self.state == SubscribeNamespaceState::Active {
-            self.state = SubscribeNamespaceState::Done;
-            Ok(())
-        } else {
-            Err(NamespaceError::InvalidTransition {
+    /// Pending | Active -> Done, Done -> Done (this request's stream was
+    /// cancelled).
+    ///
+    /// This draft has no UNSUBSCRIBE_NAMESPACE message. Section 3.3.2: "Once a request
+    /// stream has been opened, the request MAY be cancelled by either endpoint."
+    ///
+    /// `Idle` is refused, on the other half of the same sentence: nothing has
+    /// been written, so there is no stream to terminate. `Done` stays `Done` —
+    /// nothing finishes a request stream's send half on the ordinary path, so a
+    /// caller that walks away from a request that has already ended still
+    /// resets the stream, and that reset is an ordinary end rather than a
+    /// fault.
+    pub fn on_request_cancelled(&mut self) -> Result<(), NamespaceError> {
+        match self.state {
+            SubscribeNamespaceState::Pending | SubscribeNamespaceState::Active => {
+                self.state = SubscribeNamespaceState::Done;
+                Ok(())
+            }
+            SubscribeNamespaceState::Done => Ok(()),
+            SubscribeNamespaceState::Idle => Err(NamespaceError::InvalidTransition {
                 from: format!("{:?}", self.state),
-                event: "on_unsubscribe_namespace".to_string(),
-            })
+                event: "on_request_cancelled".to_string(),
+            }),
         }
     }
 }
@@ -175,29 +188,32 @@ impl PublishNamespaceStateMachine {
         }
     }
 
-    /// Active -> Done (publisher withdrawing).
-    pub fn on_publish_namespace_done(&mut self) -> Result<(), NamespaceError> {
-        if self.state == PublishNamespaceState::Active {
-            self.state = PublishNamespaceState::Done;
-            Ok(())
-        } else {
-            Err(NamespaceError::InvalidTransition {
+    /// Pending | Active -> Done, Done -> Done (this request's stream was
+    /// cancelled).
+    ///
+    /// This draft has neither PUBLISH_NAMESPACE_DONE nor
+    /// PUBLISH_NAMESPACE_CANCEL: a publisher withdraws its advertisement, and a
+    /// receiver refuses one, by terminating the stream the PUBLISH_NAMESPACE
+    /// opened. Section 3.3.2: "Once a request
+    /// stream has been opened, the request MAY be cancelled by either endpoint."
+    ///
+    /// `Idle` is refused, on the other half of the same sentence: nothing has
+    /// been written, so there is no stream to terminate. `Done` stays `Done` —
+    /// nothing finishes a request stream's send half on the ordinary path, so a
+    /// caller that walks away from a request that has already ended still
+    /// resets the stream, and that reset is an ordinary end rather than a
+    /// fault.
+    pub fn on_request_cancelled(&mut self) -> Result<(), NamespaceError> {
+        match self.state {
+            PublishNamespaceState::Pending | PublishNamespaceState::Active => {
+                self.state = PublishNamespaceState::Done;
+                Ok(())
+            }
+            PublishNamespaceState::Done => Ok(()),
+            PublishNamespaceState::Idle => Err(NamespaceError::InvalidTransition {
                 from: format!("{:?}", self.state),
-                event: "on_publish_namespace_done".to_string(),
-            })
-        }
-    }
-
-    /// Active -> Done (subscriber cancelling).
-    pub fn on_publish_namespace_cancel(&mut self) -> Result<(), NamespaceError> {
-        if self.state == PublishNamespaceState::Active {
-            self.state = PublishNamespaceState::Done;
-            Ok(())
-        } else {
-            Err(NamespaceError::InvalidTransition {
-                from: format!("{:?}", self.state),
-                event: "on_publish_namespace_cancel".to_string(),
-            })
+                event: "on_request_cancelled".to_string(),
+            }),
         }
     }
 }

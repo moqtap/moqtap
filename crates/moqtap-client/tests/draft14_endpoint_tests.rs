@@ -52,6 +52,10 @@ fn make_active_client() -> Endpoint {
         parameters: vec![KeyValuePair { key: varint(0x02), value: KvpValue::Varint(varint(100)) }],
     };
     ep.receive_server_setup(&server_setup).unwrap();
+    // A peer may not open a request until this endpoint has granted it a
+    // budget: a peer's Request ID is measured against the maximum this
+    // endpoint advertised, and that starts at 0.
+    let _ = ep.send_max_request_id(varint(100)).unwrap();
     ep
 }
 
@@ -110,8 +114,15 @@ fn endpoint_server_setup_wrong_version_fails() {
 // ============================================================
 
 fn default_subscribe(ep: &mut Endpoint, track: &[u8]) -> (VarInt, ControlMessage) {
-    ep.subscribe(ns(&[b"ns"]), track.to_vec(), 0, GroupOrder::Publisher, FilterType::LargestObject)
-        .unwrap()
+    ep.subscribe(
+        ns(&[b"ns"]),
+        track.to_vec(),
+        0,
+        GroupOrder::Publisher,
+        FilterType::LargestObject,
+        Vec::new(),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -165,14 +176,33 @@ fn endpoint_subscribe_error_via_dispatch() {
     ep.receive_message(err).unwrap();
 }
 
+/// Section 9.10 sends a SUBSCRIBE_UPDATE from the subscriber to the publisher,
+/// so one that arrives names a subscription the peer opened. The peer opens
+/// one here first; this test used to feed an update naming a subscription
+/// this endpoint had opened itself, which is the message no peer following
+/// the draft sends.
 #[test]
 fn endpoint_subscribe_update_via_dispatch() {
     let mut ep = make_active_client();
-    let (id, _) = default_subscribe(&mut ep, b"trk");
-    ep.receive_message(subscribe_ok_for(id, varint(1))).unwrap();
+    let peers = varint(1);
+    ep.receive_message(ControlMessage::Subscribe(message::Subscribe {
+        request_id: peers,
+        track_namespace: ns(&[b"ns"]),
+        track_name: b"trk".to_vec(),
+        subscriber_priority: 128,
+        group_order: GroupOrder::Ascending,
+        forward: Forward::Forward,
+        filter_type: FilterType::LargestObject,
+        start_location: None,
+        end_group: None,
+        parameters: vec![],
+    }))
+    .unwrap();
     let upd = ControlMessage::SubscribeUpdate(SubscribeUpdate {
-        request_id: varint(999),
-        subscription_request_id: id,
+        // The update spends a Request ID of its own, so this is the peer's
+        // second, not a free-standing number.
+        request_id: varint(3),
+        subscription_request_id: peers,
         start_location: Location { group: varint(0), object: varint(0) },
         end_group: varint(10),
         subscriber_priority: 5,
@@ -221,7 +251,18 @@ fn endpoint_client_even_request_ids() {
 // ============================================================
 
 fn default_fetch(ep: &mut Endpoint) -> (VarInt, ControlMessage) {
-    ep.fetch(ns(&[b"ns"]), b"trk".to_vec(), varint(0), varint(0)).unwrap()
+    ep.fetch(
+        ns(&[b"ns"]),
+        b"trk".to_vec(),
+        128,
+        GroupOrder::Ascending,
+        varint(0),
+        varint(0),
+        varint(0),
+        varint(0),
+        Vec::new(),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -260,7 +301,7 @@ fn endpoint_fetch_ok_via_dispatch() {
     let ok = ControlMessage::FetchOk(FetchOk {
         request_id: id,
         group_order: GroupOrder::Ascending,
-        end_of_track: varint(0),
+        end_of_track: 0,
         end_location: Location { group: varint(0), object: varint(0) },
         parameters: vec![],
     });
@@ -294,7 +335,7 @@ fn endpoint_fetch_stream_fin() {
     let ok = ControlMessage::FetchOk(FetchOk {
         request_id: id,
         group_order: GroupOrder::Ascending,
-        end_of_track: varint(0),
+        end_of_track: 0,
         end_location: Location { group: varint(0), object: varint(0) },
         parameters: vec![],
     });
@@ -309,12 +350,94 @@ fn endpoint_fetch_stream_reset() {
     let ok = ControlMessage::FetchOk(FetchOk {
         request_id: id,
         group_order: GroupOrder::Ascending,
-        end_of_track: varint(0),
+        end_of_track: 0,
         end_location: Location { group: varint(0), object: varint(0) },
         parameters: vec![],
     });
     ep.receive_message(ok).unwrap();
     ep.on_fetch_stream_reset(id).unwrap();
+}
+
+// ============================================================
+// Joining fetch
+// ============================================================
+
+/// A subscription for a joining fetch to attach itself to.
+fn joined_subscription(ep: &mut Endpoint) -> VarInt {
+    let (parent_id, _) = default_subscribe(ep, b"trk");
+    ep.receive_message(subscribe_ok_for(parent_id, varint(1))).unwrap();
+    parent_id
+}
+
+/// A Relative Joining Fetch names the subscription it joins and how far back
+/// from its live edge to start, and nothing else: Section 9.16.2 has the
+/// publisher take the track from the subscription.
+#[test]
+fn endpoint_joining_fetch_allocates_and_tracks() {
+    let mut ep = make_active_client();
+    let parent_id = joined_subscription(&mut ep);
+
+    let (fetch_id, msg) =
+        ep.joining_fetch(0, GroupOrder::Publisher, parent_id, varint(2), Vec::new()).unwrap();
+    assert_ne!(fetch_id.into_inner(), parent_id.into_inner());
+    assert_eq!(ep.active_fetch_count(), 1);
+    match msg {
+        ControlMessage::Fetch(ref f) => {
+            assert_eq!(f.fetch_type as u64, FetchType::RelativeJoining as u64);
+            assert_eq!(f.subscriber_priority, 0);
+            assert_eq!(f.group_order, GroupOrder::Publisher);
+            match &f.fetch_payload {
+                message::FetchPayload::Joining { joining_request_id, joining_start } => {
+                    assert_eq!(*joining_request_id, parent_id);
+                    assert_eq!(*joining_start, varint(2));
+                }
+                _ => panic!("expected Joining payload"),
+            }
+        }
+        _ => panic!("expected Fetch control message"),
+    }
+}
+
+/// The absolute form is a different Fetch Type and the same payload, because
+/// Section 9.16.2.1 reads the one field two ways: "For a Relative Joining
+/// Fetch, the publisher sets the Start Location to {Subscribe Largest
+/// Location.Group - Joining Start, 0}", where "For an Absolute Joining Fetch,
+/// the publisher sets the Start Location to Joining Start."
+#[test]
+fn endpoint_absolute_joining_fetch_names_the_group_it_starts_at() {
+    let mut ep = make_active_client();
+    let parent_id = joined_subscription(&mut ep);
+
+    let (_, msg) = ep
+        .absolute_joining_fetch(128, GroupOrder::Ascending, parent_id, varint(9), Vec::new())
+        .unwrap();
+    match msg {
+        ControlMessage::Fetch(ref f) => {
+            assert_eq!(f.fetch_type as u64, FetchType::AbsoluteJoining as u64);
+            match &f.fetch_payload {
+                message::FetchPayload::Joining { joining_start, .. } => {
+                    assert_eq!(*joining_start, varint(9));
+                }
+                _ => panic!("expected Joining payload"),
+            }
+        }
+        _ => panic!("expected Fetch control message"),
+    }
+}
+
+/// A joining fetch under a Request ID this session has no subscription for is
+/// still built, because Section 9.16.2 puts that refusal at the other end:
+/// "If a publisher receives a Joining Fetch with a Request ID that does not
+/// correspond to an existing Subscribe in the same session, it MUST respond
+/// with a Fetch Error with code Invalid Joining Request ID."
+#[test]
+fn endpoint_joining_fetch_does_not_judge_the_request_it_joins() {
+    let mut ep = make_active_client();
+    let (fetch_id, _) =
+        ep.joining_fetch(0, GroupOrder::Publisher, varint(40), varint(1), Vec::new()).unwrap();
+    assert_eq!(ep.active_fetch_count(), 1);
+    // And the fetch is a fetch like any other: it can be cancelled.
+    ep.fetch_cancel(fetch_id).unwrap();
 }
 
 // ============================================================
@@ -324,7 +447,17 @@ fn endpoint_fetch_stream_reset() {
 #[test]
 fn endpoint_publish_allocates_and_tracks() {
     let mut ep = make_active_client();
-    let (id, msg) = ep.publish(ns(&[b"pub", b"alice"]), b"trk".to_vec(), Forward::Forward).unwrap();
+    let (id, msg) = ep
+        .publish(
+            ns(&[b"pub", b"alice"]),
+            b"trk".to_vec(),
+            varint(7),
+            GroupOrder::Ascending,
+            None,
+            Forward::Forward,
+            Vec::new(),
+        )
+        .unwrap();
     assert_eq!(id.into_inner(), 0);
     assert_eq!(ep.active_publish_count(), 1);
     match &msg {
@@ -332,6 +465,7 @@ fn endpoint_publish_allocates_and_tracks() {
             assert_eq!(p.request_id, id);
             assert_eq!(p.track_namespace.0, vec![b"pub".to_vec(), b"alice".to_vec()]);
             assert_eq!(p.track_name, b"trk");
+            assert_eq!(p.track_alias, varint(7));
             assert_eq!(p.forward, Forward::Forward);
         }
         _ => panic!("expected Publish"),
@@ -341,7 +475,17 @@ fn endpoint_publish_allocates_and_tracks() {
 #[test]
 fn endpoint_publish_ok_activates_publish() {
     let mut ep = make_active_client();
-    let (id, _) = ep.publish(ns(&[b"pub"]), b"trk".to_vec(), Forward::Forward).unwrap();
+    let (id, _) = ep
+        .publish(
+            ns(&[b"pub"]),
+            b"trk".to_vec(),
+            varint(7),
+            GroupOrder::Ascending,
+            None,
+            Forward::Forward,
+            Vec::new(),
+        )
+        .unwrap();
     let ok = PublishOk {
         request_id: id,
         forward: Forward::Forward,
@@ -358,7 +502,17 @@ fn endpoint_publish_ok_activates_publish() {
 #[test]
 fn endpoint_publish_done_lifecycle() {
     let mut ep = make_active_client();
-    let (id, _) = ep.publish(ns(&[b"pub"]), b"trk".to_vec(), Forward::Forward).unwrap();
+    let (id, _) = ep
+        .publish(
+            ns(&[b"pub"]),
+            b"trk".to_vec(),
+            varint(7),
+            GroupOrder::Ascending,
+            None,
+            Forward::Forward,
+            Vec::new(),
+        )
+        .unwrap();
     let ok = PublishOk {
         request_id: id,
         forward: Forward::Forward,
@@ -374,9 +528,24 @@ fn endpoint_publish_done_lifecycle() {
     assert!(matches!(done, ControlMessage::PublishDone(_)));
 }
 
+/// draft-14 Section 5.1: "The subscriber either accepts or rejects the
+/// subscription using PUBLISH_OK or PUBLISH_ERROR." The offer has to exist
+/// before it can be rejected, and rejecting it is what ends it.
 #[test]
 fn endpoint_send_publish_error() {
-    let ep = make_active_client();
+    let mut ep = make_active_client();
+    ep.receive_publish(&Publish {
+        request_id: varint(7),
+        track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+        track_name: b"track".to_vec(),
+        track_alias: varint(1),
+        group_order: GroupOrder::Ascending,
+        content_exists: ContentExists::NoLargestLocation,
+        largest_location: None,
+        forward: Forward::Forward,
+        parameters: vec![],
+    })
+    .expect("the peer's PUBLISH");
     let resp = ep.send_publish_error(varint(7), varint(3), b"denied".to_vec()).unwrap();
     match &resp {
         ControlMessage::PublishError(e) => {
@@ -385,12 +554,26 @@ fn endpoint_send_publish_error() {
         }
         _ => panic!("expected PublishError"),
     }
+    assert!(
+        ep.send_publish_error(varint(7), varint(3), b"again".to_vec()).is_err(),
+        "Section 5.1 allows exactly one answer to a PUBLISH"
+    );
 }
 
 #[test]
 fn endpoint_receive_publish_error_on_publish() {
     let mut ep = make_active_client();
-    let (id, _) = ep.publish(ns(&[b"pub"]), b"trk".to_vec(), Forward::Forward).unwrap();
+    let (id, _) = ep
+        .publish(
+            ns(&[b"pub"]),
+            b"trk".to_vec(),
+            varint(7),
+            GroupOrder::Ascending,
+            None,
+            Forward::Forward,
+            Vec::new(),
+        )
+        .unwrap();
     let err = message::PublishError {
         request_id: id,
         error_code: varint(1),
@@ -406,21 +589,18 @@ fn endpoint_receive_publish_error_on_publish() {
 #[test]
 fn endpoint_publish_namespace_roundtrip() {
     let mut ep = make_active_client();
-    let (req_id, msg) = ep.publish_namespace(ns(&[b"pub", b"alice"])).unwrap();
+    let (req_id, msg) = ep.publish_namespace(ns(&[b"pub", b"alice"]), vec![]).unwrap();
     assert_eq!(ep.active_publish_namespace_count(), 1);
     assert!(matches!(msg, ControlMessage::PublishNamespace(_)));
 
-    let ok = ControlMessage::PublishNamespaceOk(PublishNamespaceOk {
-        request_id: req_id,
-        parameters: vec![],
-    });
+    let ok = ControlMessage::PublishNamespaceOk(PublishNamespaceOk { request_id: req_id });
     ep.receive_message(ok).unwrap();
 }
 
 #[test]
 fn endpoint_publish_namespace_error() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.publish_namespace(ns(&[b"pub"])).unwrap();
+    let (req_id, _) = ep.publish_namespace(ns(&[b"pub"]), Vec::new()).unwrap();
     let err = ControlMessage::PublishNamespaceError(PublishNamespaceError {
         request_id: req_id,
         error_code: varint(1),
@@ -429,42 +609,48 @@ fn endpoint_publish_namespace_error() {
     ep.receive_message(err).unwrap();
 }
 
+/// Section 9.26: "The publisher sends the PUBLISH_NAMESPACE_DONE control
+/// message to indicate its intent to stop serving new subscriptions for tracks
+/// within the provided Track Namespace." The publisher here is the peer, so
+/// what arrives ends the announcement the peer made and not one of this
+/// endpoint's own.
 #[test]
 fn endpoint_publish_namespace_done() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.publish_namespace(ns(&[b"pub"])).unwrap();
-    let ok = ControlMessage::PublishNamespaceOk(PublishNamespaceOk {
-        request_id: req_id,
+    ep.receive_publish_namespace(&PublishNamespace {
+        request_id: varint(1),
+        track_namespace: ns(&[b"pub"]),
         parameters: vec![],
-    });
-    ep.receive_message(ok).unwrap();
+    })
+    .unwrap();
+    ep.send_publish_namespace_ok(varint(1)).unwrap();
     let done = ControlMessage::PublishNamespaceDone(PublishNamespaceDone {
         track_namespace: ns(&[b"pub"]),
     });
-    let _ = req_id;
     ep.receive_message(done).unwrap();
 }
 
+/// Section 8.4 names what a cancellation revokes: a namespace "it previously
+/// responded PUBLISH_NAMESPACE_OK to". This endpoint responded, so the
+/// announcement it revokes is the peer's.
 #[test]
 fn endpoint_publish_namespace_cancel() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.publish_namespace(ns(&[b"pub"])).unwrap();
-    let ok = ControlMessage::PublishNamespaceOk(PublishNamespaceOk {
-        request_id: req_id,
+    ep.receive_publish_namespace(&PublishNamespace {
+        request_id: varint(1),
+        track_namespace: ns(&[b"pub"]),
         parameters: vec![],
-    });
-    ep.receive_message(ok).unwrap();
-    let msg = ep.publish_namespace_cancel(req_id, b"done".to_vec()).unwrap();
+    })
+    .unwrap();
+    ep.send_publish_namespace_ok(varint(1)).unwrap();
+    let msg = ep.publish_namespace_cancel(ns(&[b"pub"]), varint(0), b"done".to_vec()).unwrap();
     assert!(matches!(msg, ControlMessage::PublishNamespaceCancel(_)));
 }
 
 #[test]
 fn endpoint_unknown_publish_namespace_ok_rejected() {
     let mut ep = make_active_client();
-    let ok = ControlMessage::PublishNamespaceOk(PublishNamespaceOk {
-        request_id: varint(999),
-        parameters: vec![],
-    });
+    let ok = ControlMessage::PublishNamespaceOk(PublishNamespaceOk { request_id: varint(999) });
     assert!(ep.receive_message(ok).is_err());
 }
 
@@ -475,14 +661,11 @@ fn endpoint_unknown_publish_namespace_ok_rejected() {
 #[test]
 fn endpoint_subscribe_namespace_roundtrip() {
     let mut ep = make_active_client();
-    let (req_id, msg) = ep.subscribe_namespace(ns(&[b"prefix"])).unwrap();
+    let (req_id, msg) = ep.subscribe_namespace(ns(&[b"prefix"]), vec![]).unwrap();
     assert_eq!(ep.active_subscribe_namespace_count(), 1);
     assert!(matches!(msg, ControlMessage::SubscribeNamespace(_)));
 
-    let ok = ControlMessage::SubscribeNamespaceOk(SubscribeNamespaceOk {
-        request_id: req_id,
-        parameters: vec![],
-    });
+    let ok = ControlMessage::SubscribeNamespaceOk(SubscribeNamespaceOk { request_id: req_id });
     ep.receive_message(ok).unwrap();
 
     let unsub = ep.unsubscribe_namespace(req_id, ns(&[b"prefix"])).unwrap();
@@ -492,7 +675,7 @@ fn endpoint_subscribe_namespace_roundtrip() {
 #[test]
 fn endpoint_subscribe_namespace_error() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.subscribe_namespace(ns(&[b"prefix"])).unwrap();
+    let (req_id, _) = ep.subscribe_namespace(ns(&[b"prefix"]), vec![]).unwrap();
     let err = ControlMessage::SubscribeNamespaceError(SubscribeNamespaceError {
         request_id: req_id,
         error_code: varint(1),
@@ -508,7 +691,17 @@ fn endpoint_subscribe_namespace_error() {
 #[test]
 fn endpoint_track_status_request_and_ok() {
     let mut ep = make_active_client();
-    let (req_id, msg) = ep.track_status(ns(&[b"ns"]), b"trk".to_vec()).unwrap();
+    let (req_id, msg) = ep
+        .track_status(
+            ns(&[b"ns"]),
+            b"trk".to_vec(),
+            128,
+            GroupOrder::Ascending,
+            Forward::Forward,
+            FilterType::LargestObject,
+            Vec::new(),
+        )
+        .unwrap();
     assert_eq!(ep.active_track_status_count(), 1);
     assert!(matches!(msg, ControlMessage::TrackStatus(_)));
 
@@ -527,7 +720,17 @@ fn endpoint_track_status_request_and_ok() {
 #[test]
 fn endpoint_track_status_error_reply() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.track_status(ns(&[b"ns"]), b"trk".to_vec()).unwrap();
+    let (req_id, _) = ep
+        .track_status(
+            ns(&[b"ns"]),
+            b"trk".to_vec(),
+            128,
+            GroupOrder::Ascending,
+            Forward::Forward,
+            FilterType::LargestObject,
+            Vec::new(),
+        )
+        .unwrap();
     let reply = ControlMessage::TrackStatusError(message::TrackStatusError {
         request_id: req_id,
         error_code: varint(1),
@@ -574,6 +777,7 @@ fn endpoint_draining_rejects_new_subscribe() {
         0,
         GroupOrder::Publisher,
         FilterType::LargestObject,
+        Vec::new(),
     );
     assert!(matches!(result, Err(EndpointError::Draining)));
 }
@@ -582,7 +786,15 @@ fn endpoint_draining_rejects_new_subscribe() {
 fn endpoint_draining_rejects_new_publish() {
     let mut ep = make_active_client();
     ep.receive_goaway(&GoAway { new_session_uri: vec![] }).unwrap();
-    let result = ep.publish(ns(&[b"pub"]), b"trk".to_vec(), Forward::Forward);
+    let result = ep.publish(
+        ns(&[b"pub"]),
+        b"trk".to_vec(),
+        varint(7),
+        GroupOrder::Ascending,
+        None,
+        Forward::Forward,
+        Vec::new(),
+    );
     assert!(matches!(result, Err(EndpointError::Draining)));
 }
 
@@ -590,7 +802,17 @@ fn endpoint_draining_rejects_new_publish() {
 fn endpoint_draining_rejects_new_fetch() {
     let mut ep = make_active_client();
     ep.receive_goaway(&GoAway { new_session_uri: vec![] }).unwrap();
-    let result = ep.fetch(ns(&[b"ns"]), b"trk".to_vec(), varint(0), varint(0));
+    let result = ep.fetch(
+        ns(&[b"ns"]),
+        b"trk".to_vec(),
+        128,
+        GroupOrder::Ascending,
+        varint(0),
+        varint(0),
+        varint(0),
+        varint(0),
+        Vec::new(),
+    );
     assert!(matches!(result, Err(EndpointError::Draining)));
 }
 
@@ -659,9 +881,29 @@ fn endpoint_mixed_flows_allocate_distinct_even_ids() {
     let mut ep = make_active_client();
     let (sub_id, _) = default_subscribe(&mut ep, b"trk");
     let (fetch_id, _) = default_fetch(&mut ep);
-    let (pub_id, _) = ep.publish(ns(&[b"pub"]), b"trk".to_vec(), Forward::Forward).unwrap();
-    let (ns_id, _) = ep.publish_namespace(ns(&[b"pub"])).unwrap();
-    let (ts_id, _) = ep.track_status(ns(&[b"ns"]), b"trk".to_vec()).unwrap();
+    let (pub_id, _) = ep
+        .publish(
+            ns(&[b"pub"]),
+            b"trk".to_vec(),
+            varint(7),
+            GroupOrder::Ascending,
+            None,
+            Forward::Forward,
+            Vec::new(),
+        )
+        .unwrap();
+    let (ns_id, _) = ep.publish_namespace(ns(&[b"pub"]), Vec::new()).unwrap();
+    let (ts_id, _) = ep
+        .track_status(
+            ns(&[b"ns"]),
+            b"trk".to_vec(),
+            128,
+            GroupOrder::Ascending,
+            Forward::Forward,
+            FilterType::LargestObject,
+            Vec::new(),
+        )
+        .unwrap();
 
     // Client uses even IDs: 0, 2, 4, 6, 8
     assert_eq!(sub_id.into_inner(), 0);
@@ -669,4 +911,60 @@ fn endpoint_mixed_flows_allocate_distinct_even_ids() {
     assert_eq!(pub_id.into_inner(), 4);
     assert_eq!(ns_id.into_inner(), 6);
     assert_eq!(ts_id.into_inner(), 8);
+}
+/// A helper cannot hand back a SUBSCRIBE the encoder will not write.
+///
+/// `subscribe` carries no start location, so the two filters that name one are
+/// refused there and served by `subscribe_range`, which derives the filter from
+/// the range it was given. The gate drives the message all the way to bytes,
+/// because the claim is not that the helper returned `Ok`, it is that a peer
+/// can read what it returned.
+///
+/// # What breaking the fix does, observed by making the change and running
+///
+/// Dropping the guard from `Endpoint::subscribe`:
+///
+/// ```text
+/// AbsoluteStart names a start location this call cannot carry: Ok((VarInt(0), Subscribe(Subscribe { request_id: VarInt(0), track_namespace: TrackNamespace([[110, 115]]), track_name: [116], subscriber_priority: 0, group_order: Publisher, forward: Forward, filter_type: AbsoluteStart, start_location: None, end_group: None, parameters: [] })))
+/// ```
+#[test]
+fn endpoint_subscribe_refuses_a_filter_it_cannot_carry() {
+    for filter in [FilterType::AbsoluteStart, FilterType::AbsoluteRange] {
+        let mut ep = make_active_client();
+        let got =
+            ep.subscribe(ns(&[b"ns"]), b"t".to_vec(), 0, GroupOrder::Publisher, filter, Vec::new());
+        assert!(
+            matches!(got, Err(EndpointError::FilterNeedsRange)),
+            "{filter:?} names a start location this call cannot carry: {got:?}"
+        );
+    }
+}
+
+/// And the range form builds one that encodes.
+#[test]
+fn endpoint_subscribe_range_builds_a_message_that_encodes() {
+    for (end_group, expected) in
+        [(None, FilterType::AbsoluteStart), (Some(varint(9)), FilterType::AbsoluteRange)]
+    {
+        let mut ep = make_active_client();
+        let (_, msg) = ep
+            .subscribe_range(
+                ns(&[b"ns"]),
+                b"t".to_vec(),
+                0,
+                GroupOrder::Publisher,
+                Location { group: varint(3), object: varint(4) },
+                end_group,
+                Vec::new(),
+            )
+            .expect("the range form must build a message");
+        match &msg {
+            ControlMessage::Subscribe(s) => {
+                assert_eq!(s.filter_type, expected, "the filter must follow the range");
+            }
+            other => panic!("expected SUBSCRIBE, got {other:?}"),
+        }
+        let mut out = Vec::new();
+        msg.encode(&mut out).expect("and it must be one a peer can read");
+    }
 }

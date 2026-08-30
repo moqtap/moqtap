@@ -1,3 +1,5 @@
+#![cfg(feature = "draft14")]
+
 //! Loopback data-plane test — subgroup stream and datagram exchange
 //! over a real quinn endpoint, with observer-event assertions on the
 //! client side.
@@ -121,6 +123,8 @@ async fn subgroup_stream_round_trip_emits_observer_events() {
             assert_eq!(h.group_id.into_inner(), 7);
             assert_eq!(h.publisher_priority, 128);
         }
+        // A build enabling one draft leaves this catch-all nothing to match.
+        #[allow(unreachable_patterns)]
         other => panic!("unexpected draft variant: {other:?}"),
     }
     assert_eq!(got_object.payload, b"hello-subgroup");

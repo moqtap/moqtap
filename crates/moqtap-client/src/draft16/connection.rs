@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use bytes::{Buf, Bytes, BytesMut};
 
@@ -6,21 +7,36 @@ use crate::draft16::endpoint::{Endpoint, EndpointError};
 use crate::draft16::event::{ClientEvent, Direction, StreamKind};
 use crate::draft16::observer::ConnectionObserver;
 use crate::draft16::session::request_id::Role;
+use crate::draft16::session::setup;
+use crate::malformed_tracks::MalformedTrackCondition;
+use crate::track_locations::{ObjectLocation, ObjectRole, TrackObjects};
 use crate::transport::quic::QuicTransport;
 use crate::transport::{RecvStream, SendStream, Transport, TransportError};
 use moqtap_codec::dispatch::{
     AnyControlMessage, AnyDatagramHeader, AnyFetchHeader, AnySubgroupHeader,
 };
-use moqtap_codec::draft16::data_stream::{FetchHeader, SubgroupObject, SubgroupObjectReader};
-use moqtap_codec::draft16::message::ControlMessage;
+use moqtap_codec::draft16::data_stream::{
+    FetchHeader, FetchObjectHeader, SubgroupObject, SubgroupObjectReader,
+};
+use moqtap_codec::draft16::error_codes::DataStreamResetErrorCode;
+use moqtap_codec::draft16::message::{ControlMessage, MessageType, RequestError, RequestOk};
 use moqtap_codec::error::CodecError;
 use moqtap_codec::kvp::KeyValuePair;
 use moqtap_codec::types::*;
 use moqtap_codec::varint::VarInt;
 use moqtap_codec::version::DraftVersion;
 
-/// MoQT ALPN identifier (used by raw QUIC transport).
-pub const MOQT_ALPN: &[u8] = b"moq-00";
+/// The ALPN identifier draft-16 uses on raw QUIC, `moqt-16`.
+///
+/// Drafts 07 to 14 share one ALPN, `moq-00`, and a peer that offers it has
+/// said nothing about which of the eight it speaks. Draft-15 ended that:
+/// from there each draft has an ALPN of its own, so the version is settled
+/// by the TLS handshake before a byte of MoQT is written.
+///
+/// This is [`DraftVersion::Draft16`]'s own
+/// [`quic_alpn`](DraftVersion::quic_alpn), which is what
+/// [`ClientConfig::alpn`] offers; the test below holds the two together.
+pub const MOQT_ALPN: &[u8] = b"moqt-16";
 
 /// Errors from the connection layer.
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +71,62 @@ pub enum ConnectionError {
     /// Data stream used out of order (e.g. object before header).
     #[error("data stream state error: {0}")]
     DataStreamState(&'static str),
+    /// A bidirectional stream the peer opened began with a message type other
+    /// than SUBSCRIBE_NAMESPACE.
+    ///
+    /// Draft-16 Section 3.3: "This specification only specifies two uses of
+    /// bidirectional streams, the control stream, which begins with
+    /// CLIENT_SETUP, and SUBSCRIBE_NAMESPACE. Bidirectional streams MUST NOT
+    /// begin with any other message type unless negotiated. If they do, the
+    /// peer MUST close the Session with a Protocol Violation." The session has
+    /// already been closed on the wire by the time this is returned, and the
+    /// offending stream reset.
+    #[error(
+        "a bidirectional stream the peer opened began with {0:?}, which does not begin a namespace subscription; the session was closed"
+    )]
+    NonSubscribeNamespaceOnBidiStream(MessageType),
+    /// A `respond_*` helper was called on a namespace subscription this
+    /// endpoint opened.
+    ///
+    /// The answer to a SUBSCRIBE_NAMESPACE is owed by whoever received it, so
+    /// only a stream that arrived through
+    /// [`Connection::accept_namespace_stream`] can be answered here. Nothing
+    /// was written and no state moved.
+    #[error("request {0} was made by this endpoint, so there is nothing here to answer")]
+    NotOursToAnswer(u64),
+    /// An Object arrived carrying extension headers on a status that is not
+    /// Normal.
+    /// Draft-16 Section 10.2.1.2: "Any Object with status Normal can have
+    /// extension headers", with a reference to Section 2.5 inside the sentence,
+    /// and "If an endpoint receives extension headers on Objects with status
+    /// that is not Normal, it MUST close the session with a
+    /// PROTOCOL_VIOLATION."
+    ///
+    /// The codec decodes such an Object rather than refusing it — the frame is
+    /// well formed, and a tool that reports non-conforming traffic has to be
+    /// able to read it. Being an endpoint rather than an observer is what turns
+    /// it into an error, so it is raised here, on the receive path, and not in
+    /// the decoder.
+    ///
+    /// [`Connection::close_for_data_stream`] performs the close the sentence
+    /// above requires. It is a separate call because the reader that raises
+    /// this holds no connection, and because a deliberately permissive caller
+    /// should be able to read a violating stream and report it without tearing
+    /// the session down.
+    #[error(
+        "object {object_id} carries {extensions_len} bytes of extension headers on status {status:?}, which is not Normal"
+    )]
+    ExtensionsOnNonNormalStatus {
+        /// The Object ID the extension headers arrived on.
+        object_id: u64,
+        /// Length in bytes of the extension-header block.
+        extensions_len: usize,
+        /// The Object's status, resolved through the encoding's elision rule.
+        ///
+        /// Spelled out in full because the glob import of `moqtap_codec::types`
+        /// brings a different `ObjectStatus` into this module.
+        status: moqtap_codec::draft16::types::ObjectStatus,
+    },
 }
 
 /// Transport type for the connection.
@@ -129,15 +201,41 @@ impl FramedSendStream {
     /// Write a subgroup stream header. Also initializes the internal
     /// delta-encoding state used by
     /// [`FramedSendStream::write_subgroup_object`].
+    ///
+    /// The header is refused, and nothing is written, if its fields disagree
+    /// with its own stream type. That check has to happen here rather than at
+    /// the first object: the type is what every object after it is framed
+    /// against, so a header that went out saying the wrong thing cannot be
+    /// taken back.
     pub async fn write_subgroup_header(
         &mut self,
         header: &AnySubgroupHeader,
     ) -> Result<(), ConnectionError> {
         let mut buf = Vec::new();
-        header.encode(&mut buf);
+        header.encode_stream_checked(&mut buf)?;
         self.inner.write_all(&buf).await?;
-        if let AnySubgroupHeader::Draft16(ref d16) = header {
-            self.subgroup_io = Some(SubgroupObjectReader::new(d16));
+        match header {
+            AnySubgroupHeader::Draft16(ref d16) => {
+                self.subgroup_io = Some(SubgroupObjectReader::new(d16));
+            }
+            // Only this draft's header seeds the object reader. With draft 16
+            // as the only enabled draft `AnySubgroupHeader` has a single
+            // variant, the arm above is exhaustive and this one unreachable.
+            #[cfg(any(
+                feature = "draft07",
+                feature = "draft08",
+                feature = "draft09",
+                feature = "draft10",
+                feature = "draft11",
+                feature = "draft12",
+                feature = "draft13",
+                feature = "draft14",
+                feature = "draft15",
+                feature = "draft17",
+                feature = "draft18",
+                feature = "draft19"
+            ))]
+            _ => {}
         }
         Ok(())
     }
@@ -148,7 +246,7 @@ impl FramedSendStream {
         header: &AnyFetchHeader,
     ) -> Result<(), ConnectionError> {
         let mut buf = Vec::new();
-        header.encode(&mut buf);
+        header.encode_stream(&mut buf);
         self.inner.write_all(&buf).await?;
         Ok(())
     }
@@ -170,15 +268,72 @@ impl FramedSendStream {
         Ok(())
     }
 
+    /// Append a fetch object to the stream.
+    ///
+    /// The fetch stream had a header writer and no object writer, so a caller
+    /// could open one and put nothing on it through this type. The subgroup
+    /// stream has had both since the writer was introduced.
+    ///
+    /// The declared length comes from the payload rather than from the caller's
+    /// field: a header that disagrees with the bytes beside it desynchronises
+    /// every object after it on the stream, and nothing downstream can recover.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::Codec`] if the header's fields disagree with the
+    /// Serialization Flags that announce them, which the encoder refuses rather
+    /// than writing a frame its own reader cannot take apart.
+    pub async fn write_fetch_object(
+        &mut self,
+        header: &FetchObjectHeader,
+        payload: &[u8],
+    ) -> Result<(), ConnectionError> {
+        let mut header = header.clone();
+        header.payload_length = VarInt::from_usize(payload.len());
+        let mut buf = Vec::new();
+        header.encode(&mut buf)?;
+        buf.extend_from_slice(payload);
+        self.inner.write_all(&buf).await?;
+        Ok(())
+    }
+
     /// Finish the stream (send FIN).
     pub async fn finish(&mut self) -> Result<(), ConnectionError> {
         self.inner.finish()?;
         Ok(())
     }
 
+    /// Abandon the stream, handing the peer `code` as the `RESET_STREAM`
+    /// application error code.
+    ///
+    /// Dropping a send stream sends a FIN, which claims the stream ended
+    /// cleanly; this is the only way to say the opposite. See
+    /// [`SendStream::reset`].
+    pub fn reset(&mut self, code: u64) -> Result<(), ConnectionError> {
+        self.inner.reset(code)?;
+        Ok(())
+    }
+
     /// Returns the draft version this stream is framed for.
     pub fn draft(&self) -> DraftVersion {
         self.draft
+    }
+}
+
+/// What an Object Status makes of an object here.
+///
+/// Two answers where drafts 08 through 13 have three, and the missing one is
+/// the point: the end-of-track status settles where the track ended and is
+/// judged against nothing, because the rule about where one may be placed is
+/// not in this draft. `a_track_may_end_where_it_has_already_been.rs` asserts
+/// that acceptance.
+///
+/// Every other status is a statement about objects rather than one of them.
+fn object_role(status: Option<u64>) -> ObjectRole {
+    match status {
+        None | Some(0x0) => ObjectRole::Produced,
+        Some(0x4) => ObjectRole::EndsTrack(None),
+        _ => ObjectRole::Neither,
     }
 }
 
@@ -189,17 +344,58 @@ pub struct FramedRecvStream {
     draft: DraftVersion,
     /// Stateful subgroup object reader.
     subgroup_io: Option<SubgroupObjectReader>,
+    /// The record this stream's objects are measured against, and the Group ID
+    /// its header named.
+    ///
+    /// One group for the whole stream: a subgroup header names it once and no
+    /// object header repeats it. `None` on a stream that was never given one -
+    /// a stream for an alias no live binding names, and every stream built
+    /// outside [`Connection::accept_subgroup_stream`] - and such a stream reads
+    /// exactly as it did before this existed.
+    tracking: Option<(TrackObjects, u64)>,
 }
 
 impl FramedRecvStream {
     /// Create a new framed receive stream for the given draft version.
     pub fn new(inner: RecvStream, draft: DraftVersion) -> Self {
-        Self { inner, buf: BytesMut::with_capacity(4096), draft, subgroup_io: None }
+        Self { inner, buf: BytesMut::with_capacity(4096), draft, subgroup_io: None, tracking: None }
     }
 
     /// Get the transport-level stream ID.
     pub fn stream_id(&self) -> u64 {
         self.inner.stream_id()
+    }
+
+    /// Measure this stream's objects against `objects`, all of them in `group`.
+    ///
+    /// Called by [`Connection::accept_subgroup_stream`] once the header has
+    /// been read, which is the only point at which both the track and the group
+    /// are known.
+    fn measure_objects_against(&mut self, objects: TrackObjects, group: u64) {
+        self.tracking = Some((objects, group));
+    }
+
+    /// Judge one object this stream carried against where its track ended.
+    ///
+    /// The object's Group ID is the stream's and its Object ID is its own,
+    /// already resolved from the delta the wire carries; what they are measured
+    /// against is the end an end-of-track object settled on any stream.
+    fn note_subgroup_object(
+        &self,
+        object: u64,
+        status: Option<u64>,
+    ) -> Result<(), ConnectionError> {
+        let Some((objects, group)) = &self.tracking else { return Ok(()) };
+        let at = ObjectLocation { group: *group, object };
+        objects.note_past_final(at, object_role(status)).map_err(|end| {
+            ConnectionError::Endpoint(EndpointError::ObjectPastFinalObject {
+                alias: objects.alias(),
+                group: at.group,
+                object: at.object,
+                final_group: end.group,
+                final_object: end.object,
+            })
+        })
     }
 
     /// Read more data from the stream into the internal buffer.
@@ -223,6 +419,46 @@ impl FramedRecvStream {
             }
         }
         Ok(())
+    }
+
+    /// Stop reading, telling the peer to stop transmitting with `code` as the
+    /// `STOP_SENDING` application error code, discarding anything unread.
+    ///
+    /// Dropping a receive stream also stops it, but with a hard-coded 0. See
+    /// [`RecvStream::stop`].
+    pub fn stop(&mut self, code: u64) -> Result<(), ConnectionError> {
+        self.inner.stop(code)?;
+        Ok(())
+    }
+
+    /// Wait for the peer to reset this stream, consuming nothing.
+    ///
+    /// See [`RecvStream::received_reset`] for what `Ok(None)` means and why a
+    /// caller must not re-poll after it.
+    pub async fn received_reset(&mut self) -> Result<Option<u64>, ConnectionError> {
+        Ok(self.inner.received_reset().await?)
+    }
+
+    /// Read the next control message, or report that the peer finished the
+    /// stream at a message boundary.
+    ///
+    /// `Ok(None)` is a clean end and not an error: on a namespace
+    /// subscription's stream it is one of the two ways Section 6.1 withdraws
+    /// the subscription — "closing the stream with either a FIN or
+    /// RESET_STREAM" — and the other is a reset, which surfaces as
+    /// [`TransportError::StreamReset`] out of the read below.
+    ///
+    /// A stream that ends *inside* a message is a different thing and stays
+    /// [`ConnectionError::UnexpectedEnd`]: the buffer is empty only at a
+    /// boundary.
+    pub async fn read_control_or_end(
+        &mut self,
+        capture_raw: bool,
+    ) -> Result<Option<(AnyControlMessage, Option<Vec<u8>>)>, ConnectionError> {
+        if self.buf.is_empty() && !self.fill().await? {
+            return Ok(None);
+        }
+        self.read_control(capture_raw).await.map(Some)
     }
 
     /// Read a control message from the stream.
@@ -282,8 +518,28 @@ impl FramedRecvStream {
                 Ok(header) => {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
-                    if let AnySubgroupHeader::Draft16(ref d16) = header {
-                        self.subgroup_io = Some(SubgroupObjectReader::new(d16));
+                    match header {
+                        AnySubgroupHeader::Draft16(ref d16) => {
+                            self.subgroup_io = Some(SubgroupObjectReader::new(d16));
+                        }
+                        // Only this draft's header seeds the object reader. With draft 16
+                        // as the only enabled draft `AnySubgroupHeader` has a single
+                        // variant, the arm above is exhaustive and this one unreachable.
+                        #[cfg(any(
+                            feature = "draft07",
+                            feature = "draft08",
+                            feature = "draft09",
+                            feature = "draft10",
+                            feature = "draft11",
+                            feature = "draft12",
+                            feature = "draft13",
+                            feature = "draft14",
+                            feature = "draft15",
+                            feature = "draft17",
+                            feature = "draft18",
+                            feature = "draft19"
+                        ))]
+                        _ => {}
                     }
                     return Ok(header);
                 }
@@ -321,6 +577,13 @@ impl FramedRecvStream {
     /// Read the next draft-16 subgroup object from this stream using
     /// the stateful reader seeded by
     /// [`FramedRecvStream::read_subgroup_header`].
+    ///
+    /// Errors with [`ConnectionError::ExtensionsOnNonNormalStatus`] on an
+    /// Object that carries extension headers on a status other than Normal,
+    /// which draft-16 Section 10.2.1.2 answers with a session close. The Object
+    /// is consumed from the stream before the check, so the reader stays in
+    /// step with the wire and a caller that reports the violation and reads on
+    /// sees the following Object rather than a re-parse of this one.
     pub async fn read_subgroup_object(&mut self) -> Result<SubgroupObject, ConnectionError> {
         if self.subgroup_io.is_none() {
             return Err(ConnectionError::DataStreamState("subgroup header not read yet"));
@@ -334,6 +597,17 @@ impl FramedRecvStream {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
                     *reader = probe;
+                    if !obj.extensions_permitted() {
+                        return Err(ConnectionError::ExtensionsOnNonNormalStatus {
+                            object_id: obj.object_id.into_inner(),
+                            extensions_len: obj.extension_headers.len(),
+                            status: obj.status(),
+                        });
+                    }
+                    self.note_subgroup_object(
+                        obj.object_id.into_inner(),
+                        obj.object_status.map(|s| s as u64),
+                    )?;
                     return Ok(obj);
                 }
                 Err(CodecError::UnexpectedEnd) => {
@@ -366,9 +640,339 @@ impl FramedRecvStream {
         }
     }
 
+    /// Read the next draft-16 fetch object's header and payload.
+    ///
+    /// The mirror of [`FramedSendStream::write_fetch_object`], and the payload
+    /// comes back with the header for the reason the codec leaves it on the
+    /// wire: `payload_length` says how many bytes follow, and a reader that
+    /// takes the wrong number of them desynchronises every later object on the
+    /// stream. Doing it here is the only place that count and the buffer are
+    /// both in hand.
+    ///
+    /// Stateless, because draft-16's decoder is: the header comes back with its
+    /// elided fields still absent — `group_id_delta`, `object_id_delta` and the
+    /// Subgroup ID mode say what each Object inherited rather than what it is.
+    /// Resolving them against the Object before needs state this draft's codec
+    /// does not offer, which drafts 15, 16 and 18 each do in their own way.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::UnexpectedEnd`] when the stream ends inside the header
+    /// or inside the payload it declared, and [`ConnectionError::Codec`] on a
+    /// Serialization Flags value the draft does not define.
+    pub async fn read_fetch_object(
+        &mut self,
+    ) -> Result<(FetchObjectHeader, Vec<u8>), ConnectionError> {
+        let header = loop {
+            let mut cursor = &self.buf[..];
+            match FetchObjectHeader::decode(&mut cursor) {
+                Ok(header) => {
+                    let consumed = self.buf.len() - cursor.remaining();
+                    self.buf.advance(consumed);
+                    break header;
+                }
+                Err(CodecError::UnexpectedEnd) => {
+                    if !self.fill().await? {
+                        return Err(ConnectionError::UnexpectedEnd);
+                    }
+                }
+                Err(e) => return Err(ConnectionError::Codec(e)),
+            }
+        };
+        let payload = self.read_object_payload(&header.payload_length).await?;
+        Ok((header, payload))
+    }
+
+    /// Take the `length` payload bytes that follow a fetch object's header.
+    ///
+    /// Separate from the header read because the header is decoded from a probe
+    /// cursor that may have to be retried after a fill, and the payload is a
+    /// flat byte count that never is.
+    async fn read_object_payload(&mut self, length: &VarInt) -> Result<Vec<u8>, ConnectionError> {
+        let length = length.into_inner() as usize;
+        self.ensure(length).await?;
+        let payload = self.buf[..length].to_vec();
+        self.buf.advance(length);
+        Ok(payload)
+    }
+
     /// Returns the draft version this stream is framed for.
     pub fn draft(&self) -> DraftVersion {
         self.draft
+    }
+}
+
+/// Which side opened the bidirectional stream a namespace subscription
+/// travels on.
+///
+/// Section 6.1 does not say who may subscribe to a namespace, and a relay
+/// subscribing to what a client publishes is the ordinary case, so the stream
+/// arrives in both directions. The two are not symmetric — one side owes an
+/// answer and the other is waiting for it — so a [`NamespaceStream`] carries
+/// this to say which side of that it is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestOrigin {
+    /// This endpoint opened the stream and wrote the SUBSCRIBE_NAMESPACE on
+    /// it. What comes back is the answer and the namespaces that follow it.
+    Local,
+    /// The peer opened the stream; this endpoint owes it an answer and writes
+    /// the namespaces on it afterwards.
+    Peer,
+}
+
+/// The application error code a namespace subscription's stream is abandoned
+/// with when this endpoint never served it: `INTERNAL_ERROR`, 0x0.
+///
+/// Draft-16 assigns no code for this. Its only registry of stream error codes
+/// is Section 13.4.4, "Data Stream Reset Error Codes", and every entry there is
+/// specified by Section 10.4.3, which is about closing subgroup streams — a
+/// namespace subscription's stream is not a data stream. Section 6.1 offers a
+/// FIN as the alternative and names no number for the other form.
+///
+/// So this is a choice rather than a citation, and it is the one that claims
+/// least: `INTERNAL_ERROR` is "an implementation specific error", which is
+/// exactly what a stream abandoned mid-accept is. It is taken from the codec's
+/// own registry rather than written as a literal so a renumbering in a later
+/// draft cannot be missed here.
+///
+/// Only the paths that give up on a stream before it carries a subscription
+/// use it — a request that could not be built, a first message that could not
+/// be read, a Request ID the peer may not use. A caller cancelling a live
+/// subscription picks its own code, or uses the FIN form and picks none.
+const STREAM_ABANDONED: u64 = DataStreamResetErrorCode::InternalError as u64;
+
+/// The largest value a QUIC application error code can carry, `2^62 - 1`.
+///
+/// Checked by [`NamespaceStream::cancel`] before either half of the stream is
+/// touched, so an unrepresentable code cannot half-cancel a subscription.
+const MAX_QUIC_VARINT: u64 = (1u64 << 62) - 1;
+
+/// One SUBSCRIBE_NAMESPACE and everything answering it, on a bidirectional
+/// stream of their own.
+///
+/// Draft-16 Section 3.3: "This specification only specifies two uses of
+/// bidirectional streams, the control stream, which begins with CLIENT_SETUP,
+/// and SUBSCRIBE_NAMESPACE." This is the second use, and the only request on
+/// this draft that has a stream at all — every other one is still written on
+/// the control stream and identified by its Request ID.
+///
+/// The stream matters because two of the four messages that travel on it carry
+/// no Request ID. Section 9.21 puts NAMESPACE "on the response stream of a
+/// SUBSCRIBE_NAMESPACE request" and Section 9.23 says the same of
+/// NAMESPACE_DONE; both carry a Track Namespace **Suffix**, relative to a
+/// prefix only this subscription knows. Without the stream they name nothing.
+///
+/// # Reading and writing go through the connection
+///
+/// This handle owns both halves of the stream but not the session, so the
+/// endpoint state machine and the observer stay where they were. Read with
+/// [`Connection::recv_on_namespace_stream`], answer the peer with
+/// [`Connection::respond_ok_on_namespace_stream`] or
+/// [`Connection::respond_error_on_namespace_stream`], report namespaces with
+/// [`Connection::send_on_namespace_stream`], and withdraw with
+/// [`Connection::cancel_namespace_stream`] or
+/// [`Connection::finish_namespace_stream`].
+///
+/// [`cancel`](Self::cancel), [`finish`](Self::finish) and
+/// [`peer_cancelled`](Self::peer_cancelled) are on the handle because a caller
+/// may hold one without the connection. None of them moves the endpoint's
+/// record of the subscription, which is why the connection carries a wrapper
+/// for each.
+///
+/// # Dropping this cancels the subscription, and correctly
+///
+/// Section 6.1: "A SUBSCRIBE_NAMESPACE can be cancelled by closing the stream
+/// with either a FIN or RESET_STREAM." Dropping a send stream sends a FIN and
+/// dropping a receive stream sends `STOP_SENDING`, so a handle that falls out
+/// of scope performs the first of those two forms exactly. That is why there
+/// is no [`Drop`] impl here: on this draft the default *is* the cancellation,
+/// and drafts 17 to 19 need one only because they made a FIN mean something
+/// else.
+///
+/// What a drop cannot do is say so at the endpoint. It holds the stream and
+/// not the session, so the subscription stays where it was in the endpoint's
+/// record while the stream it travelled on is gone. Call
+/// [`Connection::finish_namespace_stream`] wherever that record matters.
+///
+/// All fields are private so the shape can grow without breaking callers.
+#[must_use = "dropping a namespace stream cancels the subscription; hold it while it is live"]
+pub struct NamespaceStream {
+    send: FramedSendStream,
+    recv: FramedRecvStream,
+    request_id: VarInt,
+    draft: DraftVersion,
+    stream_id: u64,
+    origin: RequestOrigin,
+    /// Whether this handle has already closed the stream, by either form.
+    closed: bool,
+    /// Whether a `respond_*` helper has written the answer on this stream.
+    /// Only ever true on a [`RequestOrigin::Peer`] stream.
+    responded: bool,
+}
+
+impl NamespaceStream {
+    /// The Request ID the SUBSCRIBE_NAMESPACE on this stream carries.
+    pub fn request_id(&self) -> VarInt {
+        self.request_id
+    }
+
+    /// The transport-level stream identifier, the same one
+    /// [`ClientEvent::StreamOpened`] reports.
+    pub fn stream_id(&self) -> u64 {
+        self.stream_id
+    }
+
+    /// The draft version this stream is framed for.
+    pub fn draft(&self) -> DraftVersion {
+        self.draft
+    }
+
+    /// Which side opened this stream.
+    ///
+    /// [`RequestOrigin::Peer`] means this endpoint owes the answer and the
+    /// `respond_*` helpers apply; [`RequestOrigin::Local`] means it is waiting
+    /// for one.
+    pub fn origin(&self) -> RequestOrigin {
+        self.origin
+    }
+
+    /// Whether the answer has been written on this stream by one of the
+    /// `respond_*` helpers.
+    ///
+    /// Always false on a [`RequestOrigin::Local`] stream, which is answered by
+    /// the peer rather than here.
+    pub fn responded(&self) -> bool {
+        self.responded
+    }
+
+    /// Whether [`cancel`](Self::cancel) or [`finish`](Self::finish) has
+    /// already run on this handle.
+    ///
+    /// Says nothing about the peer: a peer's cancel is learned from
+    /// [`peer_cancelled`](Self::peer_cancelled) or from the next read.
+    pub fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    /// Cancel the subscription by resetting the stream, handing the peer
+    /// `code`.
+    ///
+    /// The second of the two forms Section 6.1 allows. Both halves are shut —
+    /// a QUIC bidirectional stream has two independent halves, so resetting
+    /// only the send half would leave the peer free to keep writing namespaces
+    /// nobody will read. The send half is reset with `code` and the receive
+    /// half is stopped with the same value.
+    ///
+    /// `code` is a plain `u64` and has no default here, because draft-16
+    /// assigns none: its only registry of stream error codes is titled "Data
+    /// Stream Reset Error Codes" and every entry in it is specified by Section
+    /// 10.4.3, which is about closing subgroup streams. A namespace
+    /// subscription's stream is not a data stream, so a caller that wants to
+    /// end one without choosing a number should use [`finish`](Self::finish),
+    /// the form that carries none.
+    ///
+    /// **This is the stream and nothing else.** The endpoint's record of the
+    /// subscription does not move, so a namespace already in flight is still
+    /// accepted after this returns. [`Connection::cancel_namespace_stream`]
+    /// does both and is what a caller holding a connection should reach for.
+    ///
+    /// Idempotent, and errors from a stream that was already reset or finished
+    /// are swallowed: the subscription is cancelled either way.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::Transport`] carrying [`TransportError::Write`] if
+    /// `code` is outside the QUIC varint range (`0..2^62`). Nothing is sent in
+    /// that case and the handle is *not* marked closed, so a caller can retry
+    /// with a representable code.
+    pub fn cancel(&mut self, code: u64) -> Result<(), ConnectionError> {
+        if self.closed {
+            return Ok(());
+        }
+        // Rejected before either half is touched, so a failed call leaves the
+        // stream exactly as it was.
+        if code > MAX_QUIC_VARINT {
+            return Err(ConnectionError::Transport(TransportError::Write(format!(
+                "error code {code} exceeds the varint range"
+            ))));
+        }
+        self.closed = true;
+        // Already-finished or already-reset halves report StreamClosed; the
+        // subscription ends regardless, so neither is worth raising.
+        let _ = self.send.reset(code);
+        let _ = self.recv.stop(code);
+        Ok(())
+    }
+
+    /// Cancel the subscription by finishing the send half cleanly.
+    ///
+    /// The first of the two forms Section 6.1 allows, and the one that needs
+    /// no error code. The receive half is left open on purpose: a publisher
+    /// that has already written namespaces has them in flight, and stopping
+    /// the half they arrive on would discard what was sent before the FIN.
+    ///
+    /// Like [`cancel`](Self::cancel), this is the stream and nothing else.
+    /// [`Connection::finish_namespace_stream`] is the same act with the
+    /// endpoint's record attached.
+    ///
+    /// Idempotent.
+    pub async fn finish(&mut self) -> Result<(), ConnectionError> {
+        if self.closed {
+            return Ok(());
+        }
+        self.closed = true;
+        self.send.finish().await
+    }
+
+    /// Wait for the peer to reset this stream, consuming nothing.
+    ///
+    /// This sees one of Section 6.1's two forms and not the other: a reset
+    /// arrives here, a FIN arrives as `Ok(None)` from
+    /// [`Connection::recv_on_namespace_stream`]. A caller that wants to
+    /// observe both has to read.
+    ///
+    /// Returns `Ok(Some(code))` with the peer's application error code, or
+    /// `Ok(None)` meaning **no reset is observable, now or ever — stop
+    /// asking**. A caller that re-polls after `Ok(None)` spins.
+    ///
+    /// Records nothing at the endpoint;
+    /// [`Connection::peer_cancelled_on_namespace_stream`] is the same wait
+    /// with the record attached. Cancel-safe, and it grants no flow-control
+    /// credit.
+    ///
+    /// On WebTransport this always answers `Ok(None)`: `wtransport` exposes no
+    /// reset-only observable, so a WebTransport caller learns of a peer reset
+    /// on its next read and not before.
+    pub async fn peer_cancelled(&mut self) -> Result<Option<u64>, ConnectionError> {
+        self.recv.received_reset().await
+    }
+}
+
+/// Holds a peer-opened stream pair while its first message is being read, and
+/// puts it back on the connection's queue if that read is abandoned.
+///
+/// [`Connection::accept_namespace_stream`] awaits a whole control message, and
+/// a caller may drop that future — a `select!` against a shutdown signal is
+/// the ordinary reason. Without this the stream, and every byte already read
+/// off it into the reader's buffer, would go with the future: the peer would
+/// see its subscription reset for no reason it could act on.
+///
+/// [`Drop`] is the only place this can run, because a cancelled future is
+/// never polled again. Every path that finishes — success or error — takes the
+/// pair out first, so a pair still present when this drops was cancelled.
+struct PendingInbound<'a> {
+    pair: Option<(FramedSendStream, FramedRecvStream)>,
+    queue: &'a Mutex<VecDeque<(FramedSendStream, FramedRecvStream)>>,
+}
+
+impl Drop for PendingInbound<'_> {
+    fn drop(&mut self) {
+        if let Some(pair) = self.pair.take() {
+            // Front, not back: this stream arrived before anything still
+            // queued behind it, and a partially read message must not be
+            // handed out after a stream that arrived later.
+            self.queue.lock().unwrap_or_else(|p| p.into_inner()).push_front(pair);
+        }
     }
 }
 
@@ -378,13 +982,31 @@ pub struct Connection {
     transport: Transport,
     endpoint: Endpoint,
     draft: DraftVersion,
-    control_send: Option<FramedSendStream>,
+    /// The control stream's write half, behind an async lock.
+    ///
+    /// A lock rather than `&mut self` because Section 2.4.2's answer to a
+    /// Malformed Track is a control message, and the condition is detected
+    /// where objects arrive - on a datagram read that takes `&self`, and on a
+    /// stream the caller holds, whose reader has no connection at all.
+    control_send: Option<tokio::sync::Mutex<FramedSendStream>>,
     control_recv: Option<FramedRecvStream>,
     observer: Option<Box<dyn ConnectionObserver>>,
     /// Setup events buffered during `connect()` and replayed when an
     /// observer attaches via `set_observer` — without this, an observer
     /// attached after `connect` returns would never see the handshake.
     pending_events: Vec<ClientEvent>,
+    /// Bidirectional streams the peer opened that
+    /// [`accept_namespace_stream`](Connection::accept_namespace_stream) took
+    /// off the transport but did not finish reading a first message from,
+    /// because its future was dropped. In arrival order.
+    ///
+    /// Without this a caller could not put `accept_namespace_stream` in a
+    /// `select!` at all: losing the race would lose a stream the peer had
+    /// already opened and, with it, whatever of the request had arrived.
+    ///
+    /// Behind a mutex because the lock is only ever held for a push or a pop,
+    /// never across an await.
+    pending_inbound: Mutex<VecDeque<(FramedSendStream, FramedRecvStream)>>,
 }
 
 impl Connection {
@@ -396,6 +1018,15 @@ impl Connection {
     /// a ready-to-use connection.
     pub async fn connect(addr: &str, config: ClientConfig) -> Result<Self, ConnectionError> {
         let draft = config.draft;
+        // PATH is for native QUIC only, and the transport is known here and
+        // nowhere further in. Refusing before dialling means a session that
+        // the server would close on sight is never opened.
+        setup::validate_client_path_transport(
+            &config.setup_parameters,
+            matches!(config.transport, TransportType::WebTransport { .. }),
+        )
+        .map_err(EndpointError::from)?;
+
         let transport = match &config.transport {
             TransportType::Quic => Self::connect_quic(addr, &config).await?,
             TransportType::WebTransport { url } => {
@@ -431,11 +1062,13 @@ impl Connection {
             ClientEvent::ControlMessage {
                 direction: Direction::Send,
                 message: any_setup,
+                stream_id: None,
                 raw: Some(raw_setup),
             },
             ClientEvent::ControlMessage {
                 direction: Direction::Receive,
                 message: server_setup,
+                stream_id: None,
                 raw: raw_server_setup,
             },
             ClientEvent::SetupComplete { negotiated_version: 0xff000000 + 16 },
@@ -445,10 +1078,11 @@ impl Connection {
             transport,
             endpoint,
             draft,
-            control_send: Some(control_send),
+            control_send: Some(tokio::sync::Mutex::new(control_send)),
             control_recv: Some(control_recv),
             observer: None,
             pending_events,
+            pending_inbound: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -566,13 +1200,16 @@ impl Connection {
     ///
     /// Wraps the draft-16 message in `AnyControlMessage::Draft16` for
     /// framing.
-    pub async fn send_control(&mut self, msg: &ControlMessage) -> Result<(), ConnectionError> {
+    pub async fn send_control(&self, msg: &ControlMessage) -> Result<(), ConnectionError> {
         let any = AnyControlMessage::Draft16(msg.clone());
-        let send = self.control_send.as_mut().ok_or(ConnectionError::NoControlStream)?;
+        let mut send =
+            self.control_send.as_ref().ok_or(ConnectionError::NoControlStream)?.lock().await;
         let raw = send.write_control(&any).await?;
+        drop(send);
         self.emit(ClientEvent::ControlMessage {
             direction: Direction::Send,
             message: any,
+            stream_id: None,
             raw: Some(raw),
         });
         Ok(())
@@ -585,17 +1222,39 @@ impl Connection {
     pub async fn recv_control(&mut self) -> Result<ControlMessage, ConnectionError> {
         let recv = self.control_recv.as_mut().ok_or(ConnectionError::NoControlStream)?;
         let capture_raw = self.observer.is_some();
-        let (any, raw) = recv.read_control(capture_raw).await?;
+        let (any, raw) = match recv.read_control(capture_raw).await {
+            Ok(v) => v,
+            Err(e) => return Err(self.close_for_codec(e)),
+        };
         if capture_raw {
             self.emit(ClientEvent::ControlMessage {
                 direction: Direction::Receive,
                 message: any.clone(),
+                stream_id: None,
                 raw,
             });
         }
         // Unwrap to draft-16 for the endpoint
         match any {
             AnyControlMessage::Draft16(msg) => Ok(msg),
+            // `AnyControlMessage` carries one variant per enabled draft feature.
+            // When draft 16 is the only one enabled the arm above is exhaustive
+            // and this rejection arm is unreachable, so it is compiled only for
+            // builds in which another draft's variant can actually turn up.
+            #[cfg(any(
+                feature = "draft07",
+                feature = "draft08",
+                feature = "draft09",
+                feature = "draft10",
+                feature = "draft11",
+                feature = "draft12",
+                feature = "draft13",
+                feature = "draft14",
+                feature = "draft15",
+                feature = "draft17",
+                feature = "draft18",
+                feature = "draft19"
+            ))]
             _ => Err(ConnectionError::Codec(CodecError::UnknownMessageType(0))),
         }
     }
@@ -604,7 +1263,7 @@ impl Connection {
     /// endpoint state machine. Returns the decoded message for inspection.
     pub async fn recv_and_dispatch(&mut self) -> Result<ControlMessage, ConnectionError> {
         let msg = self.recv_control().await?;
-        self.endpoint.receive_message(msg.clone())?;
+        self.endpoint.receive_message(msg.clone()).map_err(|e| self.close_if_session_fatal(e))?;
 
         // Emit draining event if this was a GoAway
         if let ControlMessage::GoAway(ref ga) = msg {
@@ -634,9 +1293,101 @@ impl Connection {
         self.send_control(&msg).await
     }
 
+    /// Accept a subscription the peer opened, sending SUBSCRIBE_OK and giving
+    /// its track a Track Alias.
+    ///
+    /// The endpoint refuses an alias a live track of its own already holds and
+    /// refuses a second answer to one SUBSCRIBE, so nothing is written on the
+    /// wire when it does either.
+    pub async fn subscribe_ok(
+        &mut self,
+        request_id: VarInt,
+        track_alias: VarInt,
+        track_extensions: Vec<KeyValuePair>,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_subscribe_ok(
+            request_id,
+            track_alias,
+            track_extensions,
+            parameters,
+        )?;
+        self.send_control(&msg).await
+    }
+
+    /// Refuse a request the peer opened, sending REQUEST_ERROR.
+    ///
+    /// One message refuses a SUBSCRIBE or a FETCH, and the endpoint finds
+    /// which by the identifier. It refuses a second answer to either, and
+    /// refuses a Joining Fetch's refusal under any code but the one the draft
+    /// names for it, so nothing is written on the wire when it does.
+    pub async fn request_error(
+        &mut self,
+        request_id: VarInt,
+        error_code: VarInt,
+        retry_interval: VarInt,
+        reason_phrase: Vec<u8>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_request_error(
+            request_id,
+            error_code,
+            retry_interval,
+            reason_phrase,
+        )?;
+        self.send_control(&msg).await
+    }
+
+    /// Narrow a subscription this endpoint opened, sending REQUEST_UPDATE, and
+    /// return the Request ID the update itself spent.
+    pub async fn request_update(
+        &mut self,
+        existing_request_id: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<VarInt, ConnectionError> {
+        let (request_id, msg) = self.endpoint.request_update(existing_request_id, parameters)?;
+        self.send_control(&msg).await?;
+        Ok(request_id)
+    }
+
+    /// Accept a PUBLISH the peer sent, which establishes the subscription it
+    /// opened.
+    ///
+    /// The endpoint refuses a second answer to one PUBLISH, so nothing is
+    /// written on the wire when it does.
+    pub async fn publish_ok(
+        &mut self,
+        request_id: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_publish_ok(request_id, parameters)?;
+        self.send_control(&msg).await
+    }
+
+    /// Reject a PUBLISH the peer sent, which ends the subscription it opened
+    /// before it was established.
+    ///
+    /// The endpoint refuses a second answer to one PUBLISH, so nothing is
+    /// written on the wire when it does.
+    pub async fn publish_error(
+        &mut self,
+        request_id: VarInt,
+        error_code: VarInt,
+        retry_interval: VarInt,
+        reason_phrase: Vec<u8>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_publish_error(
+            request_id,
+            error_code,
+            retry_interval,
+            reason_phrase,
+        )?;
+        self.send_control(&msg).await
+    }
+
     // -- Fetch flow -------------------------------------------------
 
     /// Send a standalone FETCH and return the allocated request ID.
+    #[allow(clippy::too_many_arguments)]
     pub async fn fetch(
         &mut self,
         track_namespace: TrackNamespace,
@@ -645,6 +1396,7 @@ impl Connection {
         start_object: VarInt,
         end_group: VarInt,
         end_object: VarInt,
+        parameters: Vec<KeyValuePair>,
     ) -> Result<VarInt, ConnectionError> {
         let (req_id, msg) = self.endpoint.fetch(
             track_namespace,
@@ -653,18 +1405,43 @@ impl Connection {
             start_object,
             end_group,
             end_object,
+            parameters,
         )?;
         self.send_control(&msg).await?;
         Ok(req_id)
     }
 
-    /// Send a joining FETCH and return the allocated request ID.
+    /// Send a Relative Joining Fetch and return the allocated request ID.
+    ///
+    /// `joining_start` counts groups back from the subscription's largest
+    /// group. To name the starting group outright, use
+    /// [`absolute_joining_fetch`](Self::absolute_joining_fetch).
     pub async fn joining_fetch(
         &mut self,
         joining_request_id: VarInt,
         joining_start: VarInt,
+        parameters: Vec<KeyValuePair>,
     ) -> Result<VarInt, ConnectionError> {
-        let (req_id, msg) = self.endpoint.joining_fetch(joining_request_id, joining_start)?;
+        let (req_id, msg) =
+            self.endpoint.joining_fetch(joining_request_id, joining_start, parameters)?;
+        self.send_control(&msg).await?;
+        Ok(req_id)
+    }
+
+    /// Send an Absolute Joining Fetch and return the allocated request ID.
+    ///
+    /// Here `joining_start` is the group to begin at rather than an offset,
+    /// which is what an application that knows the group it wants has: draft-16
+    /// Section 9.16.2.1 has the publisher set the Start Location to
+    /// {Joining Start, 0}.
+    pub async fn absolute_joining_fetch(
+        &mut self,
+        joining_request_id: VarInt,
+        joining_start: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<VarInt, ConnectionError> {
+        let (req_id, msg) =
+            self.endpoint.absolute_joining_fetch(joining_request_id, joining_start, parameters)?;
         self.send_control(&msg).await?;
         Ok(req_id)
     }
@@ -675,19 +1452,603 @@ impl Connection {
         self.send_control(&msg).await
     }
 
+    /// Accept a fetch the peer opened, sending FETCH_OK.
+    ///
+    /// The endpoint refuses a Joining Fetch naming a subscription this session
+    /// cannot join and refuses a second answer to one FETCH, so nothing is
+    /// written on the wire when it does either.
+    pub async fn fetch_ok(
+        &mut self,
+        request_id: VarInt,
+        end_of_track: u8,
+        end_group: VarInt,
+        end_object: VarInt,
+        parameters: Vec<KeyValuePair>,
+        track_extensions: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_fetch_ok(
+            request_id,
+            end_of_track,
+            end_group,
+            end_object,
+            parameters,
+            track_extensions,
+        )?;
+        self.send_control(&msg).await
+    }
+
     // -- Namespace flows --------------------------------------------
 
-    /// Send a SUBSCRIBE_NAMESPACE and return the request ID.
+    /// Send a SUBSCRIBE_NAMESPACE on a bidirectional stream of its own.
+    ///
+    /// Section 6.1: "The subscriber sends SUBSCRIBE_NAMESPACE on a new
+    /// bidirectional stream and the publisher MUST send a single REQUEST_OK or
+    /// REQUEST_ERROR as the first message on the bidirectional stream in
+    /// response to a SUBSCRIBE_NAMESPACE." Every other draft-16 request is
+    /// still written on the control stream; this is the one that is not.
+    ///
+    /// The returned [`NamespaceStream`] **must be held while the subscription
+    /// is live**. Section 6.1 makes closing the stream the cancellation, so
+    /// letting the handle fall out of scope withdraws the subscription — see
+    /// the type's own note.
+    ///
+    /// `subscribe_options` selects what the publisher reports back: PUBLISH
+    /// (0x00), NAMESPACE (0x01) or both (0x02), per Section 9.25.
+    ///
+    /// # Ordering
+    ///
+    /// The stream is opened before the Request ID is allocated, because a
+    /// failed open would otherwise burn an id the endpoint cannot retract. If
+    /// the endpoint refuses the request the stream is reset rather than
+    /// dropped: dropping would FIN it, which on this draft says a
+    /// subscription that was never made has been withdrawn.
     pub async fn subscribe_namespace(
         &mut self,
         namespace_prefix: TrackNamespace,
         subscribe_options: VarInt,
         parameters: Vec<KeyValuePair>,
-    ) -> Result<VarInt, ConnectionError> {
-        let (req_id, msg) =
-            self.endpoint.subscribe_namespace(namespace_prefix, subscribe_options, parameters)?;
-        self.send_control(&msg).await?;
-        Ok(req_id)
+    ) -> Result<NamespaceStream, ConnectionError> {
+        let (send, recv) = self.transport.open_bi().await?;
+        let mut send = FramedSendStream::new(send, self.draft);
+        let mut recv = FramedRecvStream::new(recv, self.draft);
+
+        let (req_id, msg) = match self.endpoint.subscribe_namespace(
+            namespace_prefix,
+            subscribe_options,
+            parameters,
+        ) {
+            Ok(built) => built,
+            Err(e) => {
+                let _ = send.reset(STREAM_ABANDONED);
+                let _ = recv.stop(STREAM_ABANDONED);
+                return Err(ConnectionError::Endpoint(e));
+            }
+        };
+
+        let stream_id = send.stream_id();
+        self.emit(ClientEvent::StreamOpened {
+            direction: Direction::Send,
+            stream_kind: StreamKind::NamespaceSubscription,
+            stream_id,
+        });
+        let any = AnyControlMessage::Draft16(msg);
+        let raw = match send.write_control(&any).await {
+            Ok(raw) => raw,
+            Err(e) => {
+                let _ = send.reset(STREAM_ABANDONED);
+                let _ = recv.stop(STREAM_ABANDONED);
+                return Err(e);
+            }
+        };
+        self.emit(ClientEvent::ControlMessage {
+            direction: Direction::Send,
+            message: any,
+            stream_id: Some(stream_id),
+            raw: Some(raw),
+        });
+        Ok(NamespaceStream {
+            send,
+            recv,
+            request_id: req_id,
+            draft: self.draft,
+            stream_id,
+            origin: RequestOrigin::Local,
+            closed: false,
+            responded: false,
+        })
+    }
+
+    /// Accept the next bidirectional stream the peer opened, read the
+    /// SUBSCRIBE_NAMESPACE it begins with, and hand back that request and a
+    /// handle to answer it on.
+    ///
+    /// The mirror of [`subscribe_namespace`](Self::subscribe_namespace).
+    /// Section 3.3 does not say who may open the second kind of bidirectional
+    /// stream, and a relay subscribing to what a client publishes is the
+    /// ordinary case, so a client that never calls this can never be asked for
+    /// its namespaces.
+    ///
+    /// The returned [`NamespaceStream`] carries [`RequestOrigin::Peer`].
+    /// Answer it with
+    /// [`respond_ok_on_namespace_stream`](Self::respond_ok_on_namespace_stream)
+    /// or
+    /// [`respond_error_on_namespace_stream`](Self::respond_error_on_namespace_stream),
+    /// and **hold it for as long as the subscription lasts** — every NAMESPACE
+    /// and NAMESPACE_DONE is written on it, and dropping it ends the
+    /// subscription.
+    ///
+    /// # Two refusals, two codes
+    ///
+    /// Section 3.3, on a stream that begins with the wrong type:
+    /// "Bidirectional streams MUST NOT begin with any other message type
+    /// unless negotiated. If they do, the peer MUST close the Session with a
+    /// Protocol Violation." Section 9.1, on the Request ID: "If an endpoint
+    /// receives a Request ID that is not valid for the peer, or a new request
+    /// with a Request ID that is not the next in sequence or exceeds the
+    /// received MAX_REQUEST_ID, it MUST close the session with
+    /// INVALID_REQUEST_ID." Both are closes of the session on the
+    /// wire, with different codes, and both happen before this returns — the
+    /// error handed back reports a session that is already gone, not one the
+    /// caller must remember to close.
+    ///
+    /// The refusal cannot be built without the acceptance. An endpoint that
+    /// took a bidirectional stream only to refuse everything on it would close
+    /// sessions over the SUBSCRIBE_NAMESPACE the same sentence permits.
+    ///
+    /// # Cancelling this future loses nothing
+    ///
+    /// A stream taken off the transport but not yet read is put back on an
+    /// internal queue, and the next call takes it before accepting anything
+    /// new — including whatever bytes of the request had already arrived,
+    /// which live in the stream's own reader. So this is safe to `select!`
+    /// against a shutdown signal or a timer. See
+    /// [`pending_inbound_count`](Self::pending_inbound_count).
+    ///
+    /// What it is **not** safe to do is run concurrently with another method
+    /// on the same connection: this takes `&mut self` because registering the
+    /// peer's request moves endpoint state.
+    ///
+    /// # Ordering
+    ///
+    /// The endpoint is told about the request last, after every step that can
+    /// fail or be cancelled, and building the handle afterwards cannot fail.
+    /// Registering earlier would let a cancelled accept leave a state machine
+    /// keyed to a stream nobody holds, and the peer's next Request ID would
+    /// then look out of sequence — a session close, over an id the peer used
+    /// exactly once.
+    ///
+    /// # Errors
+    ///
+    /// - [`ConnectionError::NonSubscribeNamespaceOnBidiStream`] — the session
+    ///   has been closed with PROTOCOL_VIOLATION and the stream reset.
+    /// - [`ConnectionError::Endpoint`] carrying `RequestId` — the session has
+    ///   been closed with INVALID_REQUEST_ID and the stream reset.
+    /// - [`ConnectionError::Endpoint`] carrying `NotActive` or `Draining` —
+    ///   the stream is reset, the session is left alone.
+    /// - [`ConnectionError::Transport`] or [`ConnectionError::Codec`] — the
+    ///   stream is reset, the session is left alone.
+    pub async fn accept_namespace_stream(
+        &mut self,
+    ) -> Result<(ControlMessage, NamespaceStream), ConnectionError> {
+        let pair = match self.take_pending_inbound() {
+            Some(pair) => pair,
+            None => {
+                let (send, recv) = self.transport.accept_bi().await?;
+                (FramedSendStream::new(send, self.draft), FramedRecvStream::new(recv, self.draft))
+            }
+        };
+        let capture_raw = self.observer.is_some();
+
+        let (any, raw, mut send, mut recv) = {
+            let mut pending = PendingInbound { pair: Some(pair), queue: &self.pending_inbound };
+            let read = {
+                let (_, recv) = pending.pair.as_mut().expect("set on construction");
+                recv.read_control(capture_raw).await
+            };
+            // Taken out before anything can return, so the guard's Drop puts
+            // the pair back for exactly one reason: this future was cancelled.
+            let (mut send, mut recv) = pending.pair.take().expect("set on construction");
+            match read {
+                Ok((any, raw)) => (any, raw, send, recv),
+                Err(e) => {
+                    // A stream whose first message could not be read is not
+                    // worth queueing: the next accept would fail on it the
+                    // same way. Reset rather than FIN — nothing was served.
+                    let _ = send.reset(STREAM_ABANDONED);
+                    let _ = recv.stop(STREAM_ABANDONED);
+                    return Err(e);
+                }
+            }
+        };
+
+        // Reported once the request has actually arrived rather than when the
+        // stream came off the transport, so a cancelled accept that is retried
+        // does not report the same stream twice.
+        let stream_id = send.stream_id();
+        self.emit(ClientEvent::StreamOpened {
+            direction: Direction::Receive,
+            stream_kind: StreamKind::NamespaceSubscription,
+            stream_id,
+        });
+        if capture_raw {
+            self.emit(ClientEvent::ControlMessage {
+                direction: Direction::Receive,
+                message: any.clone(),
+                stream_id: Some(stream_id),
+                raw,
+            });
+        }
+
+        // One arm per enabled draft, and with this draft the only one enabled
+        // the rejection arm below is compiled out — leaving a match clippy
+        // would rather see written as a `let`. It cannot be: every other
+        // feature set needs the arm, and the arm has to shut both halves of
+        // the stream before it returns.
+        #[allow(clippy::infallible_destructuring_match)]
+        let msg = match any {
+            AnyControlMessage::Draft16(msg) => msg,
+            // `AnyControlMessage` carries one variant per enabled draft
+            // feature. When draft 16 is the only one enabled the arm above is
+            // exhaustive and this rejection arm is unreachable.
+            #[cfg(any(
+                feature = "draft07",
+                feature = "draft08",
+                feature = "draft09",
+                feature = "draft10",
+                feature = "draft11",
+                feature = "draft12",
+                feature = "draft13",
+                feature = "draft14",
+                feature = "draft15",
+                feature = "draft17",
+                feature = "draft18",
+                feature = "draft19"
+            ))]
+            _ => {
+                let _ = send.reset(STREAM_ABANDONED);
+                let _ = recv.stop(STREAM_ABANDONED);
+                return Err(ConnectionError::Codec(CodecError::UnknownMessageType(0)));
+            }
+        };
+
+        let ty = msg.message_type();
+        if ty != MessageType::SubscribeNamespace {
+            let err = self.endpoint.refuse_non_subscribe_namespace(ty);
+            self.close_for(&err);
+            let _ = send.reset(STREAM_ABANDONED);
+            let _ = recv.stop(STREAM_ABANDONED);
+            return Err(ConnectionError::NonSubscribeNamespaceOnBidiStream(ty));
+        }
+
+        let request_id = match self.endpoint.receive_subscribe_namespace_on_stream(&msg) {
+            Ok(request_id) => request_id,
+            Err(e) => {
+                let _ = send.reset(STREAM_ABANDONED);
+                let _ = recv.stop(STREAM_ABANDONED);
+                return Err(self.close_if_session_fatal(e));
+            }
+        };
+
+        Ok((
+            msg,
+            NamespaceStream {
+                send,
+                recv,
+                request_id,
+                draft: self.draft,
+                stream_id,
+                origin: RequestOrigin::Peer,
+                closed: false,
+                responded: false,
+            },
+        ))
+    }
+
+    /// Take the oldest stream pair a cancelled
+    /// [`accept_namespace_stream`](Self::accept_namespace_stream) put back, if
+    /// any.
+    ///
+    /// Synchronous on purpose: the guard is dropped before the caller awaits,
+    /// so the lock is never held across a suspension point.
+    fn take_pending_inbound(&self) -> Option<(FramedSendStream, FramedRecvStream)> {
+        self.pending_inbound.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).pop_front()
+    }
+
+    /// How many peer-opened namespace streams a cancelled
+    /// [`accept_namespace_stream`](Self::accept_namespace_stream) put back and
+    /// a later call has not yet taken.
+    ///
+    /// Zero unless an accept future was dropped mid-read.
+    pub fn pending_inbound_count(&self) -> usize {
+        self.pending_inbound.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).len()
+    }
+
+    /// Read the next message off a namespace subscription's stream and
+    /// dispatch it through the endpoint.
+    ///
+    /// Three things can come back, and each is one of the shapes Section 6.1
+    /// and Section 9.25 describe:
+    ///
+    /// - `Ok(Some(msg))` — a REQUEST_OK or REQUEST_ERROR answering the
+    ///   subscription, or a NAMESPACE or NAMESPACE_DONE reporting on it.
+    /// - `Ok(None)` — the peer finished its half with a FIN. Section 6.1 makes
+    ///   that a cancellation, and it is recorded here.
+    /// - `Err` carrying [`TransportError::StreamReset`] — the peer reset the
+    ///   stream, the other form of the same cancellation, also recorded.
+    ///
+    /// This blocks until a whole message has arrived. Backpressure is per
+    /// subscription: a stream nobody reads stays unread, and the peer stays
+    /// flow controlled on it alone.
+    ///
+    /// # A stream the peer opened reports but does not dispatch
+    ///
+    /// Draft-16 places nothing after the SUBSCRIBE_NAMESPACE on the
+    /// subscriber's half, so on a [`RequestOrigin::Peer`] stream there is no
+    /// state for a second message to move and none is attempted; what a
+    /// responder reads for is the peer's FIN. A message that arrives anyway is
+    /// handed back rather than refused, because no sentence in this draft
+    /// forbids it.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::Endpoint`] if the message does not fit the
+    /// subscription's state, or names a different request than this stream
+    /// carries. The message has already been emitted to the observer by
+    /// then — what arrived is reported whether or not the endpoint accepts it.
+    pub async fn recv_on_namespace_stream(
+        &mut self,
+        stream: &mut NamespaceStream,
+    ) -> Result<Option<ControlMessage>, ConnectionError> {
+        let capture_raw = self.observer.is_some();
+        let read = match stream.recv.read_control_or_end(capture_raw).await {
+            Ok(read) => read,
+            Err(e) => {
+                // A peer that reset this stream cancelled the subscription on
+                // it, and this is where a caller reading normally learns of
+                // it. The record is made and its verdict dropped: the read's
+                // own error is what the caller has to act on, and returning a
+                // state error in its place would hide a reset behind it.
+                if matches!(e, ConnectionError::Transport(TransportError::StreamReset(_))) {
+                    let _ = self.endpoint.cancel_namespace_subscription(stream.request_id);
+                }
+                return Err(e);
+            }
+        };
+        let Some((any, raw)) = read else {
+            // The other half of Section 6.1's sentence. Recorded the same way
+            // and for the same reason as the reset above.
+            let _ = self.endpoint.cancel_namespace_subscription(stream.request_id);
+            return Ok(None);
+        };
+        if capture_raw {
+            self.emit(ClientEvent::ControlMessage {
+                direction: Direction::Receive,
+                message: any.clone(),
+                stream_id: Some(stream.stream_id),
+                raw,
+            });
+        }
+        let msg = match any {
+            AnyControlMessage::Draft16(msg) => Ok::<_, ConnectionError>(msg),
+            // `AnyControlMessage` carries one variant per enabled draft
+            // feature. When draft 16 is the only one enabled the arm above is
+            // exhaustive and this rejection arm is unreachable.
+            #[cfg(any(
+                feature = "draft07",
+                feature = "draft08",
+                feature = "draft09",
+                feature = "draft10",
+                feature = "draft11",
+                feature = "draft12",
+                feature = "draft13",
+                feature = "draft14",
+                feature = "draft15",
+                feature = "draft17",
+                feature = "draft18",
+                feature = "draft19"
+            ))]
+            _ => Err(ConnectionError::Codec(CodecError::UnknownMessageType(0))),
+        }?;
+        if stream.origin == RequestOrigin::Local {
+            self.endpoint
+                .receive_on_namespace_stream(stream.request_id, &msg)
+                .map_err(|e| self.close_if_session_fatal(e))?;
+        }
+        Ok(Some(msg))
+    }
+
+    /// Write a message on an open namespace subscription stream.
+    ///
+    /// This is for what follows the answer: Section 9.25 says the publisher
+    /// "will send matching NAMESPACE messages on the response stream if they
+    /// are requested", and NAMESPACE_DONE withdraws one of them on the same
+    /// stream. The answer itself has its own helpers, which drive the endpoint
+    /// as well as the wire.
+    ///
+    /// It does not refuse any message type: which messages may follow the
+    /// answer is not something this implementation can settle, so the choice
+    /// is left to the caller rather than guessed at.
+    pub async fn send_on_namespace_stream(
+        &mut self,
+        stream: &mut NamespaceStream,
+        msg: &ControlMessage,
+    ) -> Result<(), ConnectionError> {
+        let any = AnyControlMessage::Draft16(msg.clone());
+        let raw = stream.send.write_control(&any).await?;
+        self.emit(ClientEvent::ControlMessage {
+            direction: Direction::Send,
+            message: any,
+            stream_id: Some(stream.stream_id),
+            raw: Some(raw),
+        });
+        Ok(())
+    }
+
+    /// Accept the peer's SUBSCRIBE_NAMESPACE with a REQUEST_OK on its own
+    /// stream.
+    ///
+    /// Section 6.1: "the publisher MUST send a single REQUEST_OK or
+    /// REQUEST_ERROR as the first message on the bidirectional stream in
+    /// response to a SUBSCRIBE_NAMESPACE." The Request ID is taken from the
+    /// stream rather than from the caller, which is what makes the correlation
+    /// unforgeable.
+    ///
+    /// The endpoint goes first and the message is written only if it agrees.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotOursToAnswer`] if `stream` was opened by this
+    /// endpoint, and [`ConnectionError::Endpoint`] if the subscription has
+    /// already been answered or has ended.
+    pub async fn respond_ok_on_namespace_stream(
+        &mut self,
+        stream: &mut NamespaceStream,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        self.respond_on_namespace_stream(
+            stream,
+            ControlMessage::RequestOk(RequestOk { request_id: stream.request_id, parameters }),
+        )
+        .await
+    }
+
+    /// Refuse the peer's SUBSCRIBE_NAMESPACE with a REQUEST_ERROR on its own
+    /// stream, and finish the stream.
+    ///
+    /// Section 9.25 says what follows the refusal: "If it is an error, the
+    /// stream will be immediately closed via FIN." So this writes and then
+    /// finishes, and the handle is closed when it returns.
+    ///
+    /// # Errors
+    ///
+    /// As [`respond_ok_on_namespace_stream`](Self::respond_ok_on_namespace_stream).
+    pub async fn respond_error_on_namespace_stream(
+        &mut self,
+        stream: &mut NamespaceStream,
+        error_code: VarInt,
+        retry_interval: VarInt,
+        reason_phrase: Vec<u8>,
+    ) -> Result<(), ConnectionError> {
+        self.respond_on_namespace_stream(
+            stream,
+            ControlMessage::RequestError(RequestError {
+                request_id: stream.request_id,
+                error_code,
+                retry_interval,
+                reason_phrase,
+            }),
+        )
+        .await?;
+        stream.finish().await
+    }
+
+    /// Drive the endpoint, then write the answer.
+    ///
+    /// The order is the one every request path here uses: a caller acts on a
+    /// stream after the endpoint has accepted the step, never before.
+    async fn respond_on_namespace_stream(
+        &mut self,
+        stream: &mut NamespaceStream,
+        msg: ControlMessage,
+    ) -> Result<(), ConnectionError> {
+        if stream.origin != RequestOrigin::Peer {
+            return Err(ConnectionError::NotOursToAnswer(stream.request_id.into_inner()));
+        }
+        // Which of the two answers this is, and the code it carries, are both
+        // in the message, so nothing else has to be told them.
+        let refusal_code = match &msg {
+            ControlMessage::RequestError(e) => Some(e.error_code),
+            _ => None,
+        };
+        let driven = self.endpoint.respond_on_namespace_stream(stream.request_id, refusal_code);
+        driven.map_err(|e| self.close_if_session_fatal(e))?;
+        let any = AnyControlMessage::Draft16(msg);
+        let raw = stream.send.write_control(&any).await?;
+        stream.responded = true;
+        self.emit(ClientEvent::ControlMessage {
+            direction: Direction::Send,
+            message: any,
+            stream_id: Some(stream.stream_id),
+            raw: Some(raw),
+        });
+        Ok(())
+    }
+
+    /// Withdraw a namespace subscription by resetting its stream: record it at
+    /// the endpoint, then reset.
+    ///
+    /// Section 6.1 puts the withdrawal at the stream — "A SUBSCRIBE_NAMESPACE
+    /// can be cancelled by closing the stream with either a FIN or
+    /// RESET_STREAM" — while the subscription's own state lives in the
+    /// endpoint, so the two have to move together. This and
+    /// [`finish_namespace_stream`](Self::finish_namespace_stream) are the only
+    /// places that move both.
+    ///
+    /// The endpoint goes first and the stream is reset only if it agrees. A
+    /// refused withdrawal therefore leaves the stream exactly as it was, and
+    /// [`NamespaceStream::cancel`] is still there for a caller that wants the
+    /// stream reset regardless.
+    ///
+    /// Idempotent from both ends: a subscription that has already ended
+    /// accepts it and stays where it is, and a handle that is already closed
+    /// resets nothing a second time.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::Endpoint`] if no namespace subscription carries this
+    /// stream's id or nothing was ever written on it, and
+    /// [`ConnectionError::Transport`] if `code` is outside the QUIC varint
+    /// range — see [`NamespaceStream::cancel`], which is what sends it.
+    pub fn cancel_namespace_stream(
+        &mut self,
+        stream: &mut NamespaceStream,
+        code: u64,
+    ) -> Result<(), ConnectionError> {
+        let recorded = self.endpoint.cancel_namespace_subscription(stream.request_id);
+        recorded.map_err(|e| self.close_if_session_fatal(e))?;
+        stream.cancel(code)
+    }
+
+    /// Withdraw a namespace subscription by finishing its stream: record it at
+    /// the endpoint, then FIN.
+    ///
+    /// The other form Section 6.1 allows, and the one that needs no error
+    /// code. See [`cancel_namespace_stream`](Self::cancel_namespace_stream)
+    /// for the ordering and the idempotence, which are the same.
+    pub async fn finish_namespace_stream(
+        &mut self,
+        stream: &mut NamespaceStream,
+    ) -> Result<(), ConnectionError> {
+        let recorded = self.endpoint.cancel_namespace_subscription(stream.request_id);
+        recorded.map_err(|e| self.close_if_session_fatal(e))?;
+        stream.finish().await
+    }
+
+    /// Wait for the peer to reset this subscription's stream, and record it if
+    /// it does.
+    ///
+    /// [`NamespaceStream::peer_cancelled`] with the endpoint's record
+    /// attached. A caller applying backpressure is deliberately not calling
+    /// [`recv_on_namespace_stream`](Self::recv_on_namespace_stream), which is
+    /// the other place a peer reset surfaces, so without this the subscription
+    /// would end on the wire and stay open in the endpoint's record for as
+    /// long as the backpressure lasts.
+    ///
+    /// It sees a reset and not a FIN — see
+    /// [`NamespaceStream::peer_cancelled`]. Cancel-safe, and it grants no
+    /// flow-control credit.
+    pub async fn peer_cancelled_on_namespace_stream(
+        &mut self,
+        stream: &mut NamespaceStream,
+    ) -> Result<Option<u64>, ConnectionError> {
+        let code = stream.peer_cancelled().await?;
+        if code.is_some() {
+            // Discarded for the reason the read path discards it: the peer has
+            // ended the subscription whatever the record said, and a state
+            // error here would replace the answer the caller asked for.
+            let _ = self.endpoint.cancel_namespace_subscription(stream.request_id);
+        }
+        Ok(code)
     }
 
     /// Send a PUBLISH_NAMESPACE and return the request ID.
@@ -701,6 +2062,49 @@ impl Connection {
         Ok(req_id)
     }
 
+    /// Accept a request the peer opened, sending REQUEST_OK.
+    ///
+    /// The endpoint refuses a second answer to one request, so nothing is
+    /// written on the wire when it does. On this draft an announcement and a
+    /// track status are the requests REQUEST_OK accepts; a subscription, a
+    /// publication and a fetch each have an acceptance of their own that
+    /// carries more than this one can.
+    pub async fn request_ok(
+        &mut self,
+        request_id: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_request_ok(request_id, parameters)?;
+        self.send_control(&msg).await
+    }
+
+    /// Revoke an acceptance, sending PUBLISH_NAMESPACE_CANCEL.
+    ///
+    /// The endpoint refuses one for an announcement it never accepted, so
+    /// nothing is written on the wire when it does.
+    pub async fn publish_namespace_cancel(
+        &mut self,
+        request_id: VarInt,
+        error_code: VarInt,
+        reason_phrase: Vec<u8>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.publish_namespace_cancel(request_id, error_code, reason_phrase)?;
+        self.send_control(&msg).await
+    }
+
+    /// Withdraw an announcement this endpoint made, sending
+    /// PUBLISH_NAMESPACE_DONE.
+    ///
+    /// The mirror of [`Self::publish_namespace`], and the counterpart of
+    /// [`Self::publish_namespace_cancel`]: this one ends an announcement of
+    /// this endpoint's, that one revokes the acceptance of one the peer made.
+    pub async fn publish_namespace_done(
+        &mut self,
+        request_id: VarInt,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.publish_namespace_done(request_id)?;
+        self.send_control(&msg).await
+    }
     // -- Track Status flow ------------------------------------------
 
     /// Send a TRACK_STATUS and return the allocated request ID.
@@ -778,6 +2182,34 @@ impl Connection {
         Ok(framed)
     }
 
+    /// Open a new unidirectional stream for sending a FETCH's objects.
+    ///
+    /// The objects answering a FETCH do not go on the request's own stream:
+    /// they go on a unidirectional stream of their own, which opens with a
+    /// FETCH_HEADER naming the request they belong to. This writes that header
+    /// and hands back the stream, the same way
+    /// [`open_subgroup_stream`](Self::open_subgroup_stream) does for a
+    /// subgroup.
+    ///
+    /// The caller owns the stream that comes back. Nothing here remembers
+    /// which request it belongs to, so an endpoint serving several fetches at
+    /// once keeps its own map from Request ID to stream.
+    pub async fn open_fetch_stream(
+        &self,
+        header: &AnyFetchHeader,
+    ) -> Result<FramedSendStream, ConnectionError> {
+        let send = self.transport.open_uni().await?;
+        let mut framed = FramedSendStream::new(send, self.draft);
+        let sid = framed.stream_id();
+        framed.write_fetch_header(header).await?;
+        self.emit(ClientEvent::StreamOpened {
+            direction: Direction::Send,
+            stream_kind: StreamKind::Fetch,
+            stream_id: sid,
+        });
+        Ok(framed)
+    }
+
     /// Accept an incoming unidirectional data stream and read its subgroup
     /// header.
     pub async fn accept_subgroup_stream(
@@ -797,17 +2229,29 @@ impl Connection {
             direction: Direction::Receive,
             header: header.clone(),
         });
+        // The track is resolved here and not inside the stream: it takes the
+        // endpoint's alias table, which a stream handle has no way back to.
+        // Handed over rather than offered, so measuring is not something a
+        // caller has to remember to ask for.
+        if let Some(objects) = self.endpoint.track_objects(header.track_alias()) {
+            framed.measure_objects_against(objects, header.group_id());
+        }
         Ok((header, framed))
     }
 
     /// Send an object via datagram.
+    ///
+    /// The header goes through `AnyDatagramHeader::encode`, which refuses a
+    /// header whose Object Status the framing it names cannot carry. Such a
+    /// header errors here and nothing is sent, rather than going out as an
+    /// ordinary payload datagram with the status quietly dropped.
     pub fn send_datagram(
         &self,
         header: &AnyDatagramHeader,
         payload: &[u8],
     ) -> Result<(), ConnectionError> {
         let mut buf = Vec::new();
-        header.encode(&mut buf);
+        header.encode(&mut buf)?;
         buf.extend_from_slice(payload);
         self.emit(ClientEvent::DatagramReceived {
             direction: Direction::Send,
@@ -830,7 +2274,149 @@ impl Connection {
             header: header.clone(),
             payload_len: payload.len(),
         });
+        // A datagram is a whole object, so the connection can measure it
+        // without help from the caller - and answer the condition itself,
+        // because an UNSUBSCRIBE takes the connection an object on a stream
+        // cannot reach.
+        let meta = header.meta();
+        if let Err(err) = self.endpoint.note_received_object(
+            meta.track_alias,
+            ObjectLocation { group: meta.group_id, object: meta.object_id },
+            object_role(meta.status),
+        ) {
+            self.withdraw_malformed_track(
+                meta.track_alias,
+                MalformedTrackCondition::ObjectPastFinalObject,
+            )
+            .await;
+            return Err(err.into());
+        }
         Ok((header, payload))
+    }
+
+    /// Close the session on the wire when the endpoint says a violation is
+    /// fatal to it, and hand the error back unchanged.
+    ///
+    /// [`EndpointError::session_error_code`] answers `Some` for exactly the
+    /// errors this draft ends the session over, and the endpoint has already
+    /// moved its own state machine to Closed by the time this runs. Without
+    /// this step that move is purely internal: the local endpoint refuses to
+    /// start anything new while the peer, which is the one that broke the
+    /// rule, sees a session that is still open and goes on sending. A rule
+    /// that names a session termination code is a statement about the wire,
+    /// so it takes a CONNECTION_CLOSE to satisfy it.
+    ///
+    /// The reason phrase is the error's own `Display` text, which names the
+    /// rule rather than repeating the numeric code the close already carries.
+    ///
+    /// Errors that answer `None` are recoverable and nothing is sent.
+    fn close_for(&self, err: &EndpointError) {
+        if let Some(code) = err.session_error_code() {
+            // QUIC application error codes are 62-bit; every code in this
+            // registry is far below `u32::MAX`, and saturating rather than
+            // truncating means a future code that is not could never be
+            // reported as a different, assigned one.
+            let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+            self.close(wire_code, err.to_string().as_bytes());
+        }
+    }
+
+    /// [`close_for`](Self::close_for), then the error unchanged, for the
+    /// common case where the endpoint's error is also what the caller returns.
+    fn close_if_session_fatal(&self, err: EndpointError) -> ConnectionError {
+        self.close_for(&err);
+        ConnectionError::Endpoint(err)
+    }
+
+    /// Send the messages Section 2.4.2 asks for when a track is found
+    /// Send the messages Section 2.4.2 asks for when a track is found
+    /// malformed, and stop at the first one the control stream refuses.
+    ///
+    /// "When a subscriber detects a Malformed Track, it MUST UNSUBSCRIBE any
+    /// subscription and FETCH_CANCEL any fetch for that Track from that
+    /// publisher" - one message per request, in Request ID order, and the
+    /// endpoint decides which message each request takes.
+    ///
+    /// A write that fails is not reported. The caller is on its way to
+    /// returning an error that says what went wrong with the track, and a
+    /// control stream that will not take an UNSUBSCRIBE is a session on its way
+    /// out for a reason of its own; replacing the condition's report with a
+    /// transport error would lose the only account of why the track was
+    /// withdrawn. The rest of the withdrawal is abandoned, because a stream
+    /// that refused one message will refuse the next.
+    async fn withdraw_malformed_track(&self, alias: u64, condition: MalformedTrackCondition) {
+        for msg in self.endpoint.withdraw_malformed_track(alias, condition) {
+            if self.send_control(&msg).await.is_err() {
+                break;
+            }
+        }
+    }
+
+    /// Withdraw from a track a data stream found malformed, reporting whether
+    /// it did.
+    ///
+    /// The Malformed Track twin of [`Connection::close_for_data_stream`], and
+    /// separate from it for the same reason and one more. The same one: a
+    /// [`FramedRecvStream`] holds no connection, so the reader that finds the
+    /// fault is not the object that can send an UNSUBSCRIBE. The one more: the
+    /// two answers are opposites - that call ends the session, this one gives
+    /// up a track and leaves it running - and a single entry point would have
+    /// to decide between them from the error alone, which is exactly the
+    /// decision a caller reproducing a capture wants to make itself.
+    ///
+    /// The datagram path needs none of this. It is read through the connection,
+    /// so [`Connection::recv_datagram`] answers the condition where it finds
+    /// it, and this is only for the objects that arrive on a stream the caller
+    /// holds.
+    pub async fn withdraw_for_data_stream(&self, err: &ConnectionError) -> bool {
+        let ConnectionError::Endpoint(EndpointError::ObjectPastFinalObject { alias, .. }) = err
+        else {
+            return false;
+        };
+        self.withdraw_malformed_track(*alias, MalformedTrackCondition::ObjectPastFinalObject).await;
+        true
+    }
+
+    /// Close the session when a failure raised while reading a *data* stream is
+    /// one draft-16 answers with a close. Reports whether it closed.
+    ///
+    /// [`accept_subgroup_stream`](Self::accept_subgroup_stream) hands the caller
+    /// a [`FramedRecvStream`], which holds no connection and so cannot close
+    /// one, and the read that raises this failure happens there. The caller is
+    /// the only party holding both halves, which is what this is for.
+    ///
+    /// Splitting it this way rather than closing inside the reader keeps a
+    /// caller that is deliberately permissive — a tool reproducing a capture,
+    /// say — able to read a violating stream and report it without tearing the
+    /// session down. The rule is stated at endpoints, and this is where an
+    /// endpoint decides it is one.
+    ///
+    /// Answers the extension-header rule of Section 10.2.1.2, and any decode
+    /// failure `codec_session_error_code` recognises, so a rule is answered
+    /// with one code whichever stream carried it.
+    pub fn close_for_data_stream(&self, err: &ConnectionError) -> bool {
+        // Saturate rather than truncate, so a future code above `u32::MAX` is
+        // never reported as a different assigned one.
+        let protocol_violation = u32::try_from(
+            moqtap_codec::draft16::error_codes::SessionErrorCode::ProtocolViolation.as_u64(),
+        )
+        .unwrap_or(u32::MAX);
+        match err {
+            ConnectionError::Codec(inner) => {
+                let Some(code) = Self::codec_session_error_code(inner) else { return false };
+                let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+                self.close(wire_code, inner.to_string().as_bytes());
+                true
+            }
+            // Not a `Codec` failure: the codec decodes such an Object without
+            // complaint, because the frame is well formed. It is being an
+            // endpoint that makes it a violation.
+            ConnectionError::ExtensionsOnNonNormalStatus { .. } => {
+                self.close(protocol_violation, err.to_string().as_bytes());
+                true
+            }
+            _ => false,
+        }
     }
 
     // -- Accessors --------------------------------------------------
@@ -848,6 +2434,248 @@ impl Connection {
     /// Returns the draft version this connection is using.
     pub fn draft(&self) -> DraftVersion {
         self.draft
+    }
+
+    /// The code to close the session with when a control message could not be
+    /// decoded because the peer broke a rule draft-16 answers with a close.
+    ///
+    /// Every variant listed here comes from a sentence in this draft that names
+    /// the consequence, and the list is deliberately shorter than draft-17's:
+    /// the bounds are per draft, and answering one this draft does not state
+    /// would close a session over traffic a conforming peer may send.
+    ///
+    ///   - Reason Phrase, maximum 1024 bytes: "If an endpoint receives a length
+    ///     exceeding the maximum, it MUST close the session with a
+    ///     PROTOCOL_VIOLATION."
+    ///   - KVP value, maximum 2^16-1 bytes, with the same sentence.
+    ///   - Track Namespace field count: "If an endpoint receives a Track
+    ///     Namespace consisting of 0 or greater than 32 Track Namespace Fields,
+    ///     it MUST close the session with a PROTOCOL_VIOLATION." Note the lower
+    ///     bound — an empty tuple is refused here, where drafts 17 and later
+    ///     permit it.
+    ///   - Full Track Name, maximum 4,096 bytes. This draft widened the rule from
+    ///     draft-15's: "If an endpoint receives a Track Namespace or a Full
+    ///     Track Name exceeding 4,096 bytes".
+    ///   - Duplicate parameters, a SHOULD rather than a MUST: "Receivers SHOULD
+    ///     check that there are no unexpected duplicate parameters and close the
+    ///     session as a PROTOCOL_VIOLATION"
+    ///   - A Track Namespace Field of length zero, which draft-15 does not
+    ///     state: "Each Track Namespace Field Value MUST contain at least one
+    ///     byte."
+    ///   - The delta-encoded parameter type overflow, which arrives with this
+    ///     draft along with delta encoding itself.
+    ///
+    ///   - GOAWAY New Session URI, maximum 8,192 bytes: "If an endpoint
+    ///     receives a length exceeding the maximum, it MUST close the session
+    ///     with a PROTOCOL_VIOLATION." Every draft from 11 to 19 states it; 07
+    ///     through 10 state no maximum for the field at all.
+    ///   - Unknown control message type: "An endpoint that receives an unknown
+    ///     message type MUST close the session." All thirteen drafts state it,
+    ///     in the same words, and the sentence names no code, so Protocol
+    ///     Violation is what carries it.
+    ///
+    /// `None` for everything else, including [`CodecError::InvalidField`]. That
+    /// variant is shared by a dozen unrelated malformations, only some of which
+    /// the draft answers with a close, so treating it as fatal would close
+    /// sessions the draft does not ask to be closed. Splitting it is the way to
+    /// bring the rest of those rules under this function; widening the match is
+    /// not.
+    fn codec_session_error_code(
+        err: &CodecError,
+    ) -> Option<moqtap_codec::draft16::error_codes::SessionErrorCode> {
+        use moqtap_codec::draft16::error_codes::SessionErrorCode;
+        use moqtap_codec::kvp::KvpError;
+        match err {
+            // The declared Length disagreeing with the fields, which every
+            // draft answers with a close. Drafts 07 through 10 name no code for
+            // it, so it takes the one their other unnamed rules take.
+            // A Filter Type outside the four this draft assigns, Section 5.1.2:
+            // "An endpoint that receives a filter type other than the above MUST
+            // close the session with PROTOCOL_VIOLATION."
+            //
+            // Drafts 07 through 14 carried the Filter Type as a field of
+            // SUBSCRIBE. From draft-15 it is the first field inside the
+            // length-prefixed filter parameter, where a codec that carries the
+            // value as opaque bytes never reads it — the rule did not change and
+            // the place it has to be enforced did.
+            CodecError::InvalidFilterType(_) => Some(SessionErrorCode::ProtocolViolation),
+            // A filter parameter whose value is not a filter, Section 9.2.2.5:
+            // "It is a length-prefixed Subscription Filter... If the length of
+            // the Subscription Filter does not match the parameter length, the
+            // publisher MUST close the session with PROTOCOL_VIOLATION."
+            //
+            // The one key-value malformation this draft answers with something
+            // other than KEY_VALUE_FORMATTING_ERROR. The general rule covers the
+            // same bytes and names that code; the sentence above is the specific
+            // one, so it governs. Drafts 17 and later drop it and leave only the
+            // general rule, which is why the same malformation ends a session
+            // there under a different code.
+            CodecError::SubscriptionFilterMalformed { .. } => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            // A Fetch Type outside the three this draft assigns: "An endpoint
+            // that receives a Fetch Type other than 0x1, 0x2 or 0x3 MUST close
+            // the session with a PROTOCOL_VIOLATION." The value decides which
+            // fields follow it — a Standalone fetch carries a track name and a
+            // range where a joining fetch carries a Request ID and an offset —
+            // so a reader that cannot name the type cannot find the end of the
+            // message.
+            CodecError::InvalidFetchType(_) => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::ControlMessageLengthMismatch { .. } => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            CodecError::KeyDeltaOverflow(..)
+            | CodecError::DuplicateParameter(_)
+            | CodecError::TrackNameTooLong
+            | CodecError::InvalidNamespaceTupleSize(_)
+            | CodecError::ReasonPhraseTooLong
+            | CodecError::GoAwayUriTooLong
+            | CodecError::UnknownMessageType(_)
+            | CodecError::Kvp(KvpError::ValueTooLong(_))
+            | CodecError::EmptyNamespaceField => Some(SessionErrorCode::ProtocolViolation),
+            // An unknown data-plane type, Section 10: "An endpoint that
+            // receives an unknown stream or datagram type MUST close the
+            // session." One sentence covering two tables, which is why both
+            // variants sit here.
+            // A Message Parameter whose value is outside the range its type
+            // allows: DELIVERY_TIMEOUT in Section 9.2.2.2, FORWARD in Section
+            // 9.2.2.8, GROUP_ORDER in Section 9.2.2.4 and SUBSCRIBER_PRIORITY in
+            // Section 9.2.2.3.
+            // Each states that a receiver "MUST close the session with
+            // PROTOCOL_VIOLATION".
+            CodecError::ParameterValueOutOfRange { .. } => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            // A Track Extension or Track Property whose value is outside the
+            // range its type allows: DELIVERY_TIMEOUT in Section 11.1,
+            // DEFAULT_PUBLISHER_GROUP_ORDER in Section 11.1.1.2 and DYNAMIC_GROUPS in
+            // Section 11.1.1.3.
+            // Each states that a receiver "MUST close the session with
+            // PROTOCOL_VIOLATION".
+            //
+            // A separate arm from the parameter rule above because the two
+            // registries are separate: 0x22 is GROUP_ORDER as a parameter and
+            // DEFAULT_PUBLISHER_GROUP_ORDER as a Track Extension, and a log that
+            // named only the number would not say which.
+            CodecError::TrackPropertyValueOutOfRange { .. } => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            CodecError::UnknownStreamType(_) | CodecError::UnknownDatagramType(_) => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            // A Type inside a form this draft defines but on a list it names as
+            // invalid: Section 10.4.2 for a subgroup header whose SUBGROUP_ID_MODE
+            // is the reserved 0b11, Section 10.3.1 for a datagram asking to be both
+            // an object status and an end-of-group marker. Unlike the rule above,
+            // these two name their code outright.
+            CodecError::InvalidTypeValue { .. } => Some(SessionErrorCode::ProtocolViolation),
+            // A key-value pair whose value is not the serialization its own
+            // Type defines, Section 1.4.2: "If a receiver understands a Type,
+            // and the following Value or Length/Value does not match the
+            // serialization defined by that Type, the receiver MUST close the
+            // session with error code KEY_VALUE_FORMATTING_ERROR."
+            //
+            // Section 9.2.2.1 states the same answer for the one structure this
+            // draft spells out: "If the Token structure cannot be decoded, the
+            // receiver MUST close the Session with KEY_VALUE_FORMATTING_ERROR."
+            //
+            // The one rule in this table that names a code other than Protocol
+            // Violation.
+            CodecError::KeyValueFormatting { .. } => {
+                Some(SessionErrorCode::KeyValueFormattingError)
+            }
+            // A Message Parameter whose type this draft does not define, Section
+            // 9.2: "All Message Parameters MUST be defined in the negotiated
+            // version of MOQT or negotiated via Setup Parameters. An endpoint that
+            // receives an unknown Message Parameter MUST close the session with
+            // PROTOCOL_VIOLATION."
+            //
+            // One namespace only. This draft also says a receiver ignores an
+            // unrecognised Setup Parameter, so an unknown type in a SETUP is carried and
+            // the codec never raises this for one.
+            CodecError::UnknownMessageParameter(_) => Some(SessionErrorCode::ProtocolViolation),
+            // Everything this draft does not answer, named rather than swept up
+            // by a wildcard. The arm is exhaustive deliberately: a new
+            // `CodecError` variant will not compile until it has been placed on
+            // one side or the other, on this draft, which is the decision a `_`
+            // arm makes silently and invisibly on all thirteen at once.
+            //
+            // Adding one variant to `CodecError` was tried, and produces
+            // thirteen `E0004`s, one per draft, each naming the variant that has
+            // nowhere to go. That is the whole mechanism.
+            //
+            // The nesting stops at `VarInt`, whose variants report how the bytes
+            // ran out rather than a rule an endpoint states, so there is nothing
+            // in it for a draft to answer. `Kvp` is spelled out because it does
+            // carry one.
+            // Neither field exists from draft-15 on. Forwarding became the
+            // FORWARD parameter, which carries the same rule in a different
+            // shape and is answered above under its own variant; Content Exists
+            // became the presence or absence of a LARGEST_OBJECT parameter.
+            CodecError::InvalidForward(_)
+            | CodecError::InvalidContentExists(_)
+            | CodecError::UnexpectedEnd
+            | CodecError::MessageTooLong(_)
+            | CodecError::VarInt(_)
+            | CodecError::InvalidField
+            | CodecError::InvalidRange(..)
+            | CodecError::ParameterLengthMismatch(_)
+            | CodecError::EndOfTrackObjectId(_)
+            | CodecError::ParametersOutOfOrder(..)
+            | CodecError::ObjectIdOverflow(..)
+            | CodecError::ExtensionsOnNonExistentObject(_)
+            | CodecError::InvalidRequiredRequestIdDelta(..)
+            // Not `ParameterOutOfScope`, even though this draft is the one that
+            // starts closing over an unknown Message Parameter above. The scope
+            // rule is a separate sentence and it keeps the older answer. Section
+            // 9.2.2: "Each message parameter definition indicates the message types
+            // in which it can appear. If it appears in some other type of message,
+            // it MUST be ignored." The two halves part company at draft-17, which
+            // is where the second sentence becomes a close, so this draft carries an
+            // out-of-scope parameter and the codec never raises the variant here.
+            | CodecError::ParameterOutOfScope { .. }
+            // The End Group is written out in full on this draft, so there is
+            // nothing to add and nothing to overflow. Drafts 17 and later
+            // replaced it with a delta measured from the Start Location's Group,
+            // and 18 and 19 close the session when the sum leaves the range.
+            | CodecError::FilterEndGroupOverflow { .. }
+            // The object payload rule, Section 10.2.1.1: "Any object with a status
+            // code other than zero MUST have an empty payload." A MUST on the
+            // sender with no receiver action named anywhere — the "SHOULD be
+            // treated as a protocol error" in the same paragraph belongs to the
+            // sentence before it, which is about a status value this draft does
+            // not assign — so an object carrying a payload it may not is refused
+            // and the session stays open.
+            //
+            // That was already the answer. The bytes used to arrive as
+            // `InvalidField`, which is on this side too; naming the rule changes
+            // nothing a peer can observe and makes the decision legible.
+            | CodecError::PayloadNotPermitted { .. }
+            | CodecError::UnsupportedDraft(_)
+            | CodecError::Kvp(
+                KvpError::MissingLength | KvpError::UnexpectedEnd | KvpError::VarInt(_),
+            ) => None,
+        }
+    }
+
+    /// Close the session on the wire when a decode failure is one draft-16
+    /// answers with a close, and hand the error back unchanged.
+    /// Without it every bound the decoder enforces would stop at *this endpoint
+    /// refused the frame* while the peer, which is the one that broke the rule,
+    /// saw a session that was still open and went on sending. "MUST close the
+    /// session with a PROTOCOL_VIOLATION" is a statement about the wire.
+    fn close_for_codec(&self, err: ConnectionError) -> ConnectionError {
+        if let ConnectionError::Codec(inner) = &err {
+            if let Some(code) = Self::codec_session_error_code(inner) {
+                // QUIC application error codes are 62-bit; every code in this
+                // registry is far below `u32::MAX`, and saturating rather than
+                // truncating means a future code that is not could never be
+                // reported as a different, assigned one.
+                let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+                self.close(wire_code, inner.to_string().as_bytes());
+            }
+        }
+        err
     }
 
     /// Close the connection.
@@ -960,9 +2788,40 @@ mod tests {
         assert_eq!(config.alpn(), vec![b"h3".to_vec()]);
     }
 
+    /// `MOQT_ALPN` is the ALPN a client configured for this draft offers.
+    ///
+    /// Putting `moq-00` back — the value this constant held on all five of
+    /// drafts 15-19 — fails with:
+    ///
+    /// ```text
+    /// assertion `left == right` failed: MOQT_ALPN is "moq-00"; a draft-19 client offers ["moqt-19"]
+    /// ```
     #[test]
-    fn moqt_alpn_value() {
-        assert_eq!(MOQT_ALPN, b"moq-00");
+    fn moqt_alpn_is_the_one_a_client_offers() {
+        // A literal on its own is what let this constant keep `moq-00` for
+        // five drafts after draft-15 stopped using it, so the value is
+        // checked against what a client configured for this draft actually
+        // puts on the wire, and only then against the literal.
+        let config = ClientConfig {
+            draft: DraftVersion::Draft16,
+            transport: TransportType::Quic,
+            skip_cert_verification: false,
+            ca_certs: Vec::new(),
+            setup_parameters: Vec::new(),
+        };
+        assert_eq!(
+            config.alpn(),
+            vec![MOQT_ALPN.to_vec()],
+            "MOQT_ALPN is {:?}; a draft-{} client offers {:?}",
+            String::from_utf8_lossy(MOQT_ALPN),
+            16,
+            config
+                .alpn()
+                .iter()
+                .map(|a| String::from_utf8_lossy(a).into_owned())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(MOQT_ALPN, b"moqt-16");
     }
 
     #[test]

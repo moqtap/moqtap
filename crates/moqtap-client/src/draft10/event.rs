@@ -27,7 +27,7 @@ pub enum StreamKind {
 
 /// A decoded subgroup object: the object header followed by its payload.
 ///
-/// Draft-07 subgroup objects are stateless (no delta encoding, no extension
+/// Draft-10 subgroup objects are stateless (no delta encoding, no extension
 /// headers), so each object can be decoded independently.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubgroupObject {

@@ -23,6 +23,16 @@ pub enum StreamKind {
     Fetch,
     /// Datagram.
     Datagram,
+    /// Namespace subscription stream: the bidirectional stream a
+    /// SUBSCRIBE_NAMESPACE and everything answering it travel on.
+    ///
+    /// Draft-16 Section 3.3 names the only two things a bidirectional stream
+    /// may be — "the control stream, which begins with CLIENT_SETUP, and
+    /// SUBSCRIBE_NAMESPACE" — and this is the second of them. It is the only
+    /// kind here that is not a data stream, and it is named because an
+    /// observer that could not name it would see a SUBSCRIBE_NAMESPACE with no
+    /// stream to attach it to.
+    NamespaceSubscription,
 }
 
 /// Events emitted by a MoQT connection.
@@ -44,6 +54,17 @@ pub enum ClientEvent {
         direction: Direction,
         /// The decoded control message.
         message: AnyControlMessage,
+        /// The stream it travelled on, when that is not the control stream.
+        ///
+        /// `Some` for the SUBSCRIBE_NAMESPACE that opens a namespace
+        /// subscription's own bidirectional stream and for everything
+        /// answering it there. `None` for the control stream, which every
+        /// other message uses.
+        ///
+        /// NAMESPACE and NAMESPACE_DONE carry no Request ID, so without this
+        /// an observer would see a namespace reported and have nothing to
+        /// attribute it to.
+        stream_id: Option<u64>,
         /// The raw wire bytes of the framed message (type + length + payload).
         /// `None` if raw capture is not available.
         raw: Option<Vec<u8>>,

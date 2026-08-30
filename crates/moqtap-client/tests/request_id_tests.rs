@@ -6,7 +6,7 @@ use moqtap_client::draft14::session::request_id::*;
 // Allocation
 // ============================================================
 
-/// draft-14 section 6.3: Client request IDs are even (0, 2, 4, ...).
+/// Draft-14 Section 9.1: a client's request IDs are even - 0, 2, 4, ...
 #[test]
 fn client_allocates_even_ids() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -21,7 +21,7 @@ fn client_allocates_even_ids() {
     assert_eq!(id4.into_inner(), 4);
 }
 
-/// draft-14 section 6.3: Server request IDs are odd (1, 3, 5, ...).
+/// Draft-14 Section 9.1: a server's request IDs are odd - 1, 3, 5, ...
 #[test]
 fn server_allocates_odd_ids() {
     let mut alloc = RequestIdAllocator::new(Role::Server);
@@ -36,24 +36,25 @@ fn server_allocates_odd_ids() {
     assert_eq!(id5.into_inner(), 5);
 }
 
-/// draft-14 section 6.3: Request ID exceeding MAX_REQUEST_ID results in
-/// TOO_MANY_REQUESTS (session error 0x7).
+/// Draft-14 Section 9.5 describes the MAX_REQUEST_ID field as "The new Maximum
+/// Request ID for the session plus 1" and closes the session with
+/// TOO_MANY_REQUESTS on a request ID "equal to or larger than this". So a
+/// ceiling of 4 leaves a client the two IDs 0 and 2, and 4 is the first it may
+/// not send.
 #[test]
 fn allocate_respects_max_request_id() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
     alloc.update_max(4).unwrap();
 
-    // Client IDs: 0, 2, 4
     alloc.allocate().expect("allocate 0");
     alloc.allocate().expect("allocate 2");
-    alloc.allocate().expect("allocate 4");
 
-    // Next would be 6, which exceeds max of 4.
     let result = alloc.allocate();
-    assert!(result.is_err(), "allocation beyond max should be blocked");
+    assert!(result.is_err(), "4 is the ceiling itself and may not be allocated");
 }
 
-/// draft-14 section 6.3: Default MAX_REQUEST_ID is 0 (no requests allowed until increased).
+/// Draft-14 Section 9.3.2.3: the ceiling defaults to 0, and "if not specified,
+/// the peer MUST NOT send requests".
 #[test]
 fn allocate_blocked_when_default_max_is_zero() {
     let alloc = &mut RequestIdAllocator::new(Role::Client);
@@ -62,7 +63,7 @@ fn allocate_blocked_when_default_max_is_zero() {
     assert!(result.is_err(), "allocation should be blocked when max is 0 (default)");
 }
 
-/// draft-14 section 6.3: Allocation unblocked after MAX_REQUEST_ID increase.
+/// Draft-14 Section 9.5: allocation resumes once the ceiling rises.
 #[test]
 fn allocate_unblocked_after_max_increase() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -80,7 +81,7 @@ fn allocate_unblocked_after_max_increase() {
 // Max updates
 // ============================================================
 
-/// draft-14 section 6.3: MAX_REQUEST_ID can increase.
+/// Draft-14 Section 9.5: the ceiling may rise.
 #[test]
 fn max_request_id_can_increase() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -89,7 +90,8 @@ fn max_request_id_can_increase() {
     assert_eq!(alloc.max_id(), 10);
 }
 
-/// draft-14 section 6.3: MAX_REQUEST_ID can only increase; smaller value = PROTOCOL_VIOLATION.
+/// Draft-14 Section 9.5: "The Maximum Request ID MUST only increase within a
+/// session", and a smaller value is a PROTOCOL_VIOLATION.
 #[test]
 fn max_request_id_cannot_decrease() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -106,7 +108,8 @@ fn max_request_id_cannot_decrease() {
     }
 }
 
-/// draft-14 section 6.3: MAX_REQUEST_ID can only increase; equal value = PROTOCOL_VIOLATION.
+/// Draft-14 Section 9.5: an equal value is a PROTOCOL_VIOLATION too - the rule
+/// is a strict increase.
 #[test]
 fn max_request_id_cannot_stay_same() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -123,7 +126,7 @@ fn max_request_id_cannot_stay_same() {
     }
 }
 
-/// draft-14 section 6.3: Default MAX_REQUEST_ID is 0.
+/// Draft-14 Section 9.3.2.3: the ceiling starts at 0.
 #[test]
 fn max_request_id_default_is_zero() {
     let alloc = RequestIdAllocator::new(Role::Server);
@@ -134,7 +137,7 @@ fn max_request_id_default_is_zero() {
 // Parity validation
 // ============================================================
 
-/// draft-14 section 6.3: Client validates that peer (server) sends odd IDs.
+/// Draft-14 Section 9.1: a client accepts only the odd IDs a server allocates.
 #[test]
 fn client_validates_peer_sends_odd() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -144,8 +147,8 @@ fn client_validates_peer_sends_odd() {
     assert!(result.is_ok(), "client should accept odd peer id: {result:?}");
 }
 
-/// draft-14 section 6.3: Receiving request ID with wrong parity = INVALID_REQUEST_ID
-/// (session error 0x4). Client rejects even peer IDs.
+/// Draft-14 Section 9.1: a request ID "not valid for the peer" is an
+/// INVALID_REQUEST_ID session close. A client refuses even peer IDs.
 #[test]
 fn client_rejects_peer_even_id() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -161,8 +164,7 @@ fn client_rejects_peer_even_id() {
     }
 }
 
-/// draft-14 section 6.3: Receiving request ID with wrong parity = INVALID_REQUEST_ID
-/// (session error 0x4). Server rejects odd peer IDs.
+/// Draft-14 Section 9.1: the mirror - a server refuses odd peer IDs.
 #[test]
 fn server_rejects_peer_odd_id() {
     let mut alloc = RequestIdAllocator::new(Role::Server);
@@ -178,25 +180,23 @@ fn server_rejects_peer_odd_id() {
     }
 }
 
-/// draft-14 section 6.3: Request ID exceeding MAX = TOO_MANY_REQUESTS (session error 0x7).
-/// Use an odd ID (correct parity for server peer) that exceeds max.
+/// The allocator's own ceiling is the budget the *peer* granted *us*, and it
+/// says nothing about what the peer may send. The ceiling that binds a peer's
+/// request ID is the MAX_REQUEST_ID this endpoint advertised, a different
+/// number, so this check is deliberately parity-only and the endpoint owns the
+/// other half.
 #[test]
-fn validate_peer_id_exceeds_max() {
+fn the_allocators_own_ceiling_does_not_bind_the_peer() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
     alloc.update_max(10).unwrap();
-    // Peer id 101 is odd (correct parity for server peer) but exceeds max of 10.
-    let result = alloc.validate_peer_id(101);
-    assert!(result.is_err(), "peer id exceeding max should fail");
-    match result.unwrap_err() {
-        RequestIdError::ExceedsMax(id, max) => {
-            assert_eq!(id, 101);
-            assert_eq!(max, 10);
-        }
-        other => panic!("expected ExceedsMax error, got: {other:?}"),
-    }
+    assert_eq!(
+        alloc.validate_peer_id(101),
+        Ok(()),
+        "101 is odd, so it is a server's to allocate, whatever budget we were given",
+    );
 }
 
-/// draft-14 section 6.3: Server validates that peer (client) sends even IDs.
+/// Draft-14 Section 9.1: a server accepts only the even IDs a client allocates.
 #[test]
 fn server_validates_peer_sends_even() {
     let mut alloc = RequestIdAllocator::new(Role::Server);
@@ -206,7 +206,8 @@ fn server_validates_peer_sends_even() {
     assert!(result.is_ok(), "server should accept even peer id: {result:?}");
 }
 
-/// draft-14 section 6.3: REQUESTS_BLOCKED sent when endpoint wants to send but is at max.
+/// Draft-14 Section 9.6: REQUESTS_BLOCKED is for when an endpoint wants an ID
+/// and the ceiling has none left.
 #[test]
 fn is_blocked_reflects_capacity() {
     let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -217,11 +218,11 @@ fn is_blocked_reflects_capacity() {
                               // Still blocked since max hasn't increased
     assert!(alloc.is_blocked(), "should still be blocked");
 
-    alloc.update_max(2).unwrap();
-    assert!(!alloc.is_blocked(), "should be unblocked after max increase to 2");
+    alloc.update_max(4).unwrap();
+    assert!(!alloc.is_blocked(), "should be unblocked after max increase to 4");
 
-    // Allocate 0 and 2, then should be blocked again
+    // A ceiling of 4 covers 0 and 2; 4 itself is out of reach.
     alloc.allocate().unwrap(); // 0
     alloc.allocate().unwrap(); // 2
-    assert!(alloc.is_blocked(), "should be blocked after exhausting IDs up to max");
+    assert!(alloc.is_blocked(), "should be blocked once the ceiling is reached");
 }

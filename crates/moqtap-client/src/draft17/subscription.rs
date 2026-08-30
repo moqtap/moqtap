@@ -7,7 +7,7 @@ pub enum SubscriptionState {
     Subscribing,
     /// Subscription is accepted and data may be flowing.
     Active,
-    /// Subscription has ended (error, unsubscribe, or publish done).
+    /// Subscription has ended (error, cancellation, or PUBLISH_DONE).
     Done,
 }
 
@@ -86,22 +86,51 @@ impl SubscriptionStateMachine {
         }
     }
 
-    /// Active -> Done (UNSUBSCRIBE sent).
-    pub fn on_unsubscribe(&mut self) -> Result<(), SubscriptionError> {
-        if self.state == SubscriptionState::Active {
-            self.state = SubscriptionState::Done;
-            Ok(())
-        } else {
-            Err(SubscriptionError::InvalidTransition {
+    /// Subscribing | Active -> Done, Done -> Done (this subscription's request
+    /// stream was cancelled).
+    ///
+    /// This draft has no UNSUBSCRIBE message. Section 3.3.1: "Once a request
+    /// stream has been opened, the request MAY be cancelled by either endpoint."
+    ///
+    /// `Subscribing` is accepted because the precondition is the stream being
+    /// open, and it is open from the SUBSCRIBE that opened it: a subscription
+    /// can be withdrawn before it is ever answered.
+    ///
+    /// `Idle` is refused, on the other half of the same sentence: nothing has
+    /// been written, so there is no stream to terminate. `Done` stays `Done` —
+    /// nothing finishes a request stream's send half on the ordinary path, so a
+    /// caller that walks away from a request that has already ended still
+    /// resets the stream, and that reset is an ordinary end rather than a
+    /// fault.
+    pub fn on_request_cancelled(&mut self) -> Result<(), SubscriptionError> {
+        match self.state {
+            SubscriptionState::Subscribing | SubscriptionState::Active => {
+                self.state = SubscriptionState::Done;
+                Ok(())
+            }
+            SubscriptionState::Done => Ok(()),
+            SubscriptionState::Idle => Err(SubscriptionError::InvalidTransition {
                 from: self.state,
-                event: "on_unsubscribe".to_string(),
-            })
+                event: "on_request_cancelled".to_string(),
+            }),
         }
     }
 
-    /// Active -> Active (SUBSCRIBE_UPDATE received -- self-transition).
+    /// REQUEST_UPDATE received -- a self-transition, from Subscribing as well as
+    /// from Active.
+    ///
+    /// Section 9.10 orders an update against the request rather than against
+    /// the request's answer: the sender of a SUBSCRIBE "can later send a
+    /// REQUEST_UPDATE on the same bidi stream as the request to modify it",
+    /// where later is later than the SUBSCRIBE. The stream is open from the
+    /// moment the SUBSCRIBE opens it.
+    ///
+    /// So a peer that sends SUBSCRIBE and REQUEST_UPDATE back to back breaks no
+    /// rule this draft states, and an update arriving before the answer leaves
+    /// the subscription where it found it. `Idle` and `Done` are still refused:
+    /// in neither does the subscription an update names exist.
     pub fn on_subscribe_update(&mut self) -> Result<(), SubscriptionError> {
-        if self.state == SubscriptionState::Active {
+        if matches!(self.state, SubscriptionState::Subscribing | SubscriptionState::Active) {
             Ok(())
         } else {
             Err(SubscriptionError::InvalidTransition {

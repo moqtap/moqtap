@@ -1,3 +1,5 @@
+#![cfg(feature = "draft14")]
+
 //! Error-injection tests. A minimal server built on raw quinn +
 //! moqtap-codec plays the role of a misbehaving peer to drive the
 //! client's handshake failure paths.

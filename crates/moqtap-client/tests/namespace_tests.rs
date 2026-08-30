@@ -6,14 +6,19 @@ use moqtap_client::draft14::namespace::*;
 // SubscribeNamespace happy path
 // ============================================================
 
-/// draft-14 section 6.6: SubscribeNamespace starts in Idle state.
+/// draft-14 Section 6.1: "If the subscriber is aware of a namespace of
+/// interest, it can send SUBSCRIBE_NAMESPACE to publishers/relays it has
+/// established a session with." Until it does, there is no interest registered.
 #[test]
 fn sub_ns_initial_state_is_idle() {
     let sm = SubscribeNamespaceStateMachine::new();
     assert_eq!(sm.state(), SubscribeNamespaceState::Idle);
 }
 
-/// draft-14 section 6.6: Idle -> Pending on SUBSCRIBE_NAMESPACE sent.
+/// draft-14 Section 9.28: "The subscriber sends the SUBSCRIBE_NAMESPACE control
+/// message to a publisher to request the current set of matching published
+/// namespaces and established subscriptions, as well as future updates to the
+/// set."
 #[test]
 fn sub_ns_idle_to_pending() {
     let mut sm = SubscribeNamespaceStateMachine::new();
@@ -21,7 +26,9 @@ fn sub_ns_idle_to_pending() {
     assert_eq!(sm.state(), SubscribeNamespaceState::Pending);
 }
 
-/// draft-14 section 6.6: Pending -> Active on SUBSCRIBE_NAMESPACE_OK received.
+/// draft-14 Section 6.1: "A publisher MUST send exactly one
+/// SUBSCRIBE_NAMESPACE_OK or SUBSCRIBE_NAMESPACE_ERROR in response to a
+/// SUBSCRIBE_NAMESPACE."
 #[test]
 fn sub_ns_pending_to_active() {
     let mut sm = SubscribeNamespaceStateMachine::new();
@@ -30,7 +37,8 @@ fn sub_ns_pending_to_active() {
     assert_eq!(sm.state(), SubscribeNamespaceState::Active);
 }
 
-/// draft-14 section 6.6: Active -> Done on UNSUBSCRIBE_NAMESPACE sent.
+/// draft-14 Section 6.1: "An UNSUBSCRIBE_NAMESPACE withdraws a previous
+/// SUBSCRIBE_NAMESPACE."
 #[test]
 fn sub_ns_active_to_done_via_unsubscribe() {
     let mut sm = SubscribeNamespaceStateMachine::new();
@@ -40,7 +48,8 @@ fn sub_ns_active_to_done_via_unsubscribe() {
     assert_eq!(sm.state(), SubscribeNamespaceState::Done);
 }
 
-/// draft-14 section 6.6: Pending -> Done on SUBSCRIBE_NAMESPACE_ERROR received.
+/// draft-14 Section 9.30: "A publisher sends a SUBSCRIBE_NAMESPACE_ERROR
+/// control message in response to a failed SUBSCRIBE_NAMESPACE."
 #[test]
 fn sub_ns_pending_to_done_via_error() {
     let mut sm = SubscribeNamespaceStateMachine::new();
@@ -50,7 +59,8 @@ fn sub_ns_pending_to_done_via_error() {
     assert_eq!(sm.state(), SubscribeNamespaceState::Done);
 }
 
-/// draft-14 section 6.6: Full lifecycle Idle -> Pending -> Active -> Done.
+/// draft-14 Section 6.1: the whole of a namespace subscription, from the request
+/// through its single answer to the withdrawal.
 #[test]
 fn sub_ns_full_lifecycle() {
     let mut sm = SubscribeNamespaceStateMachine::new();
@@ -70,7 +80,8 @@ fn sub_ns_full_lifecycle() {
 // SubscribeNamespace invalid transitions
 // ============================================================
 
-/// draft-14 section 6.6: Cannot receive SUBSCRIBE_NAMESPACE_OK from Idle.
+/// draft-14 Section 9.29: the answer carries "the Request ID of the
+/// SUBSCRIBE_NAMESPACE this message is replying to", and none has been sent.
 #[test]
 fn sub_ns_cannot_ok_from_idle() {
     let mut sm = SubscribeNamespaceStateMachine::new();
@@ -78,7 +89,8 @@ fn sub_ns_cannot_ok_from_idle() {
     assert!(result.is_err(), "on_subscribe_namespace_ok from Idle should fail");
 }
 
-/// draft-14 section 6.6: Cannot transition from Done to any other state.
+/// draft-14 Section 9.1: a Request ID is spent once, so a withdrawn namespace
+/// subscription is not resumed under the identifier it ended with.
 #[test]
 fn sub_ns_cannot_reuse_after_done() {
     let mut sm = SubscribeNamespaceStateMachine::new();
@@ -91,7 +103,8 @@ fn sub_ns_cannot_reuse_after_done() {
     assert!(result.is_err(), "on_subscribe_namespace_sent from Done should fail");
 }
 
-/// draft-14 section 6.6: Cannot UNSUBSCRIBE_NAMESPACE from Idle.
+/// draft-14 Section 6.1: "An UNSUBSCRIBE_NAMESPACE withdraws a previous
+/// SUBSCRIBE_NAMESPACE" — here there is no previous one to withdraw.
 #[test]
 fn sub_ns_cannot_unsubscribe_from_idle() {
     let mut sm = SubscribeNamespaceStateMachine::new();
@@ -103,14 +116,16 @@ fn sub_ns_cannot_unsubscribe_from_idle() {
 // PublishNamespace happy path
 // ============================================================
 
-/// draft-14 section 6.7: PublishNamespace starts in Idle state.
+/// draft-14 Section 6.2: "A publisher MAY send PUBLISH_NAMESPACE messages to any
+/// subscriber." Until it does, it has advertised nothing.
 #[test]
 fn pub_ns_initial_state_is_idle() {
     let sm = PublishNamespaceStateMachine::new();
     assert_eq!(sm.state(), PublishNamespaceState::Idle);
 }
 
-/// draft-14 section 6.7: Idle -> Pending on PUBLISH_NAMESPACE sent.
+/// draft-14 Section 9.23: "The publisher sends the PUBLISH_NAMESPACE control
+/// message to advertise that it has tracks available within a Track Namespace."
 #[test]
 fn pub_ns_idle_to_pending() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -118,7 +133,9 @@ fn pub_ns_idle_to_pending() {
     assert_eq!(sm.state(), PublishNamespaceState::Pending);
 }
 
-/// draft-14 section 6.7: Pending -> Active on PUBLISH_NAMESPACE_OK received.
+/// draft-14 Section 9.24: "The subscriber sends a PUBLISH_NAMESPACE_OK control
+/// message to acknowledge the successful authorization and acceptance of a
+/// PUBLISH_NAMESPACE message."
 #[test]
 fn pub_ns_pending_to_active() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -127,7 +144,9 @@ fn pub_ns_pending_to_active() {
     assert_eq!(sm.state(), PublishNamespaceState::Active);
 }
 
-/// draft-14 section 6.7: Active -> Done on PUBLISH_NAMESPACE_DONE sent (publisher withdrawing).
+/// draft-14 Section 9.26: "The publisher sends the PUBLISH_NAMESPACE_DONE
+/// control message to indicate its intent to stop serving new subscriptions for
+/// tracks within the provided Track Namespace."
 #[test]
 fn pub_ns_active_to_done_via_done() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -137,7 +156,10 @@ fn pub_ns_active_to_done_via_done() {
     assert_eq!(sm.state(), PublishNamespaceState::Done);
 }
 
-/// draft-14 section 6.7: Active -> Done on PUBLISH_NAMESPACE_CANCEL received (subscriber cancelling).
+/// draft-14 Section 6.2: "A subscriber can send PUBLISH_NAMESPACE_CANCEL to
+/// revoke acceptance of an PUBLISH_NAMESPACE ... After receiving an
+/// PUBLISH_NAMESPACE_CANCEL, the publisher does not send
+/// PUBLISH_NAMESPACE_DONE." The advertisement is over either way.
 #[test]
 fn pub_ns_active_to_done_via_cancel() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -148,7 +170,8 @@ fn pub_ns_active_to_done_via_cancel() {
     assert_eq!(sm.state(), PublishNamespaceState::Done);
 }
 
-/// draft-14 section 6.7: Pending -> Done on PUBLISH_NAMESPACE_ERROR received.
+/// draft-14 Section 9.25: "The subscriber sends a PUBLISH_NAMESPACE_ERROR
+/// control message for tracks that failed authorization."
 #[test]
 fn pub_ns_pending_to_done_via_error() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -158,7 +181,11 @@ fn pub_ns_pending_to_done_via_error() {
     assert_eq!(sm.state(), PublishNamespaceState::Done);
 }
 
-/// draft-14 section 6.7: Full lifecycle with PUBLISH_NAMESPACE_DONE.
+/// draft-14 Section 6.2: "A PUBLISH_NAMESPACE_DONE message withdraws a previous
+/// PUBLISH_NAMESPACE, although it is not a protocol error for the subscriber to
+/// send a SUBSCRIBE or FETCH message for a track in a namespace after receiving
+/// an PUBLISH_NAMESPACE_DONE." The publisher ends its own advertisement; the
+/// subscriber is not obliged to stop asking.
 #[test]
 fn pub_ns_full_lifecycle_with_done() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -174,7 +201,8 @@ fn pub_ns_full_lifecycle_with_done() {
     assert_eq!(sm.state(), PublishNamespaceState::Done);
 }
 
-/// draft-14 section 6.7: Full lifecycle with PUBLISH_NAMESPACE_CANCEL.
+/// draft-14 Section 6.2: the same advertisement ended by the subscriber instead,
+/// revoking the acceptance it gave.
 #[test]
 fn pub_ns_full_lifecycle_with_cancel() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -194,7 +222,8 @@ fn pub_ns_full_lifecycle_with_cancel() {
 // PublishNamespace invalid transitions
 // ============================================================
 
-/// draft-14 section 6.7: Cannot receive PUBLISH_NAMESPACE_OK from Idle.
+/// draft-14 Section 9.24: the answer carries "the Request ID of the
+/// PUBLISH_NAMESPACE this message is replying to", and none has been sent.
 #[test]
 fn pub_ns_cannot_ok_from_idle() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -202,7 +231,8 @@ fn pub_ns_cannot_ok_from_idle() {
     assert!(result.is_err(), "on_publish_namespace_ok from Idle should fail");
 }
 
-/// draft-14 section 6.7: Cannot send PUBLISH_NAMESPACE_DONE from Idle.
+/// draft-14 Section 6.2: "A PUBLISH_NAMESPACE_DONE message withdraws a previous
+/// PUBLISH_NAMESPACE" — here there is no previous one to withdraw.
 #[test]
 fn pub_ns_cannot_done_from_idle() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -210,7 +240,8 @@ fn pub_ns_cannot_done_from_idle() {
     assert!(result.is_err(), "on_publish_namespace_done from Idle should fail");
 }
 
-/// draft-14 section 6.7: Cannot transition from Done to any other state (terminal).
+/// draft-14 Section 9.1: a Request ID is spent once, so a withdrawn namespace is
+/// advertised again as a new request rather than as this one.
 #[test]
 fn pub_ns_cannot_reuse_after_done() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -223,7 +254,8 @@ fn pub_ns_cannot_reuse_after_done() {
     assert!(result.is_err(), "on_publish_namespace_sent from Done should fail");
 }
 
-/// draft-14 section 6.7: Cannot receive PUBLISH_NAMESPACE_CANCEL from Idle.
+/// draft-14 Section 6.2: a PUBLISH_NAMESPACE_CANCEL revokes "acceptance of an
+/// PUBLISH_NAMESPACE", and nothing has been advertised to accept.
 #[test]
 fn pub_ns_cannot_cancel_from_idle() {
     let mut sm = PublishNamespaceStateMachine::new();
@@ -231,7 +263,9 @@ fn pub_ns_cannot_cancel_from_idle() {
     assert!(result.is_err(), "on_publish_namespace_cancel from Idle should fail");
 }
 
-/// draft-14 section 6.7: Cannot receive PUBLISH_NAMESPACE_CANCEL from Pending.
+/// draft-14 Section 6.2: a PUBLISH_NAMESPACE_CANCEL revokes "acceptance of an
+/// PUBLISH_NAMESPACE", so it follows a PUBLISH_NAMESPACE_OK. While the answer is
+/// still owed there is no acceptance to revoke.
 #[test]
 fn pub_ns_cannot_cancel_from_pending() {
     let mut sm = PublishNamespaceStateMachine::new();

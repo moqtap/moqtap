@@ -1,4 +1,4 @@
-//! MoQT client implementation for draft-18.
+//! MoQT client implementation for draft-19.
 //!
 //! Each draft lives in its own top-level module with a complete, independent
 //! implementation: connection, endpoint state machine, event types, observer

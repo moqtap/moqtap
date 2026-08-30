@@ -1,6 +1,7 @@
 #![cfg(feature = "draft11")]
 
 use moqtap_client::draft11::endpoint::*;
+use moqtap_client::draft11::session::request_id::Role;
 use moqtap_client::draft11::session::state::SessionState;
 use moqtap_codec::draft11::message::{self, *};
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
@@ -15,9 +16,9 @@ fn ns(parts: &[&[u8]]) -> TrackNamespace {
     TrackNamespace(parts.iter().map(|p| p.to_vec()).collect())
 }
 
-/// group_order = Original (0) as a VarInt.
-fn group_order_original() -> VarInt {
-    varint(0)
+/// The Group Order a request sends when it has no preference.
+fn group_order_original() -> GroupOrder {
+    GroupOrder::Publisher
 }
 
 /// filter_type = LargestObject (2) as a VarInt.
@@ -31,7 +32,7 @@ fn filter_largest_object() -> VarInt {
 
 #[test]
 fn endpoint_starts_in_connecting() {
-    let ep = Endpoint::new();
+    let ep = Endpoint::new(Role::Client);
     assert_eq!(ep.session_state(), SessionState::Connecting);
     assert_eq!(ep.active_subscription_count(), 0);
     assert_eq!(ep.active_fetch_count(), 0);
@@ -45,7 +46,7 @@ fn endpoint_starts_in_connecting() {
 // ============================================================
 
 fn make_active_client() -> Endpoint {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     let versions = vec![varint(0xff00000b)];
     let _ = ep.send_client_setup(versions, vec![]).unwrap();
@@ -59,7 +60,7 @@ fn make_active_client() -> Endpoint {
 
 #[test]
 fn endpoint_connect_transitions_to_setup_exchange() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     assert_eq!(ep.session_state(), SessionState::SetupExchange);
 }
@@ -74,7 +75,7 @@ fn endpoint_receive_server_setup_activates_session() {
 
 #[test]
 fn endpoint_blocked_without_max_request_id() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     let _ = ep.send_client_setup(vec![varint(0xff00000b)], vec![]).unwrap();
     let server_setup = ServerSetup { selected_version: varint(0xff00000b), parameters: vec![] };
@@ -84,7 +85,7 @@ fn endpoint_blocked_without_max_request_id() {
 
 #[test]
 fn endpoint_server_setup_wrong_version_fails() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     let _ = ep.send_client_setup(vec![varint(0xff00000b)], vec![]).unwrap();
     let server_setup = ServerSetup { selected_version: varint(0xff000099), parameters: vec![] };
@@ -96,8 +97,12 @@ fn endpoint_server_setup_wrong_version_fails() {
 // ============================================================
 
 fn default_subscribe(ep: &mut Endpoint, track: &[u8]) -> (VarInt, ControlMessage) {
+    subscribe_with_alias(ep, track, 1)
+}
+
+fn subscribe_with_alias(ep: &mut Endpoint, track: &[u8], alias: u64) -> (VarInt, ControlMessage) {
     ep.subscribe(
-        varint(1),
+        varint(alias),
         ns(&[b"ns"]),
         track.to_vec(),
         0,
@@ -121,7 +126,7 @@ fn subscribe_ok_for(id: VarInt) -> ControlMessage {
         request_id: id,
         expires: varint(0),
         group_order: group_order_original(),
-        content_exists: varint(0),
+        content_exists: ContentExists::NoLargestLocation,
         largest_location: None,
         parameters: vec![],
     })
@@ -158,15 +163,18 @@ fn endpoint_unsubscribe_produces_message() {
     assert!(matches!(msg, ControlMessage::Unsubscribe(_)));
 }
 
+/// Section 8.1: a client's request IDs are the even ones and step by two,
+/// so consecutive subscribes are 0, 2, 4 rather than 0, 1, 2.
 #[test]
 fn endpoint_monotonic_request_ids() {
     let mut ep = make_active_client();
-    let (id0, _) = default_subscribe(&mut ep, b"a");
-    let (id1, _) = default_subscribe(&mut ep, b"b");
-    let (id2, _) = default_subscribe(&mut ep, b"c");
+    // Three tracks need three aliases: one alias may not name two tracks.
+    let (id0, _) = subscribe_with_alias(&mut ep, b"a", 1);
+    let (id1, _) = subscribe_with_alias(&mut ep, b"b", 2);
+    let (id2, _) = subscribe_with_alias(&mut ep, b"c", 3);
     assert_eq!(id0.into_inner(), 0);
-    assert_eq!(id1.into_inner(), 1);
-    assert_eq!(id2.into_inner(), 2);
+    assert_eq!(id1.into_inner(), 2);
+    assert_eq!(id2.into_inner(), 4);
 }
 
 // ============================================================
@@ -215,7 +223,7 @@ fn endpoint_fetch_ok_via_dispatch() {
     let ok = ControlMessage::FetchOk(message::FetchOk {
         request_id: id,
         group_order: group_order_original(),
-        end_of_track: varint(0),
+        end_of_track: 0,
         end_location: Location { group: varint(10), object: varint(0) },
         parameters: vec![],
     });
@@ -383,9 +391,8 @@ fn endpoint_joining_fetch_allocates_and_tracks() {
     ep.receive_message(subscribe_ok_for(parent_id)).unwrap();
 
     // Issue a joining fetch against it
-    let (fetch_id, msg) = ep
-        .joining_fetch(0, group_order_original(), FetchType::RelativeJoining, parent_id, varint(2))
-        .unwrap();
+    let (fetch_id, msg) =
+        ep.joining_fetch(0, group_order_original(), parent_id, varint(2)).unwrap();
     assert_ne!(fetch_id.into_inner(), parent_id.into_inner());
     assert_eq!(ep.active_fetch_count(), 1);
     match msg {
@@ -395,6 +402,43 @@ fn endpoint_joining_fetch_allocates_and_tracks() {
                 FetchPayload::Joining { joining_subscribe_id, joining_start } => {
                     assert_eq!(*joining_subscribe_id, parent_id);
                     assert_eq!(*joining_start, varint(2));
+                }
+                _ => panic!("expected Joining payload"),
+            }
+        }
+        _ => panic!("expected Fetch control message"),
+    }
+}
+
+/// The absolute form is a different Fetch Type and the same payload, because
+/// Section 8.13 reads the one field two ways: for a Relative Joining Fetch
+/// "this value represents the group offset for the Fetch prior and relative to
+/// the Current Group of the corresponding Subscribe", and "For an Absolute
+/// Joining Fetch (0x3), this value represents the Starting Group ID."
+///
+/// Which of the two a call writes is settled by which call it is. There is no
+/// Fetch Type to hand the endpoint, so this gate is what says the two calls
+/// have not become one.
+///
+/// Cut and measured: this builder left reaching the relative type gives
+/// `left: 2` against `right: 3` here, and reddens
+/// `every_request_helper_asks_for_what_it_was_told` on this draft as well,
+/// because the connection helper above it has nothing left of its own to get
+/// right.
+#[test]
+fn endpoint_absolute_joining_fetch_names_the_group_it_starts_at() {
+    let mut ep = make_active_client();
+    let (parent_id, _) = default_subscribe(&mut ep, b"trk");
+    ep.receive_message(subscribe_ok_for(parent_id)).unwrap();
+
+    let (_, msg) =
+        ep.absolute_joining_fetch(128, GroupOrder::Ascending, parent_id, varint(9)).unwrap();
+    match msg {
+        ControlMessage::Fetch(ref f) => {
+            assert_eq!(f.fetch_type as u64, FetchType::AbsoluteJoining as u64);
+            match &f.fetch_payload {
+                FetchPayload::Joining { joining_start, .. } => {
+                    assert_eq!(*joining_start, varint(9));
                 }
                 _ => panic!("expected Joining payload"),
             }

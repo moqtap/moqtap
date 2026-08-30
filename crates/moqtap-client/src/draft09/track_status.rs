@@ -1,6 +1,6 @@
 /// TrackStatus lifecycle states (draft-09).
 ///
-/// Draft-07 TRACK_STATUS is a single request/response pair:
+/// Draft-09 TRACK_STATUS is a single request/response pair:
 /// the requester sends TRACK_STATUS_REQUEST, and the publisher
 /// replies with TRACK_STATUS. There are no OK / ERROR variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,5 +73,35 @@ impl TrackStatusStateMachine {
                 event: "on_track_status".to_string(),
             })
         }
+    }
+}
+
+/// The same transitions, named for the end the request arrives at.
+///
+/// A track status the peer asks for passes through the states in the same
+/// order as one this endpoint asks for, with both messages going the other
+/// way: the request arrives instead of leaving, and the answer leaves instead
+/// of arriving. Sharing the transitions and not the names is what lets a
+/// refusal say which event was refused rather than the mirror image of it.
+///
+/// Section 7.12 leaves the answering end no discretion about whether to
+/// answer: "A TRACK_STATUS message MUST be sent in response to each
+/// TRACK_STATUS_REQUEST." What it bounds is how many, and that is what `Done`
+/// is for: a second answer finds a request that has already left `Pending`.
+impl TrackStatusStateMachine {
+    /// Idle → Pending (TRACK_STATUS_REQUEST received).
+    pub fn on_track_status_request_received(&mut self) -> Result<(), TrackStatusError> {
+        self.on_track_status_request_sent().map_err(|_| TrackStatusError::InvalidTransition {
+            from: self.state(),
+            event: "on_track_status_request_received".to_string(),
+        })
+    }
+
+    /// Pending → Done (TRACK_STATUS sent).
+    pub fn on_track_status_sent(&mut self) -> Result<(), TrackStatusError> {
+        self.on_track_status().map_err(|_| TrackStatusError::InvalidTransition {
+            from: self.state(),
+            event: "on_track_status_sent".to_string(),
+        })
     }
 }

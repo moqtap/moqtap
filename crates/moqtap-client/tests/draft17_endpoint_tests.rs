@@ -11,6 +11,9 @@
 //!   * No UNSUBSCRIBE, FETCH_CANCEL, MAX_REQUEST_ID, REQUESTS_BLOCKED,
 //!     PUBLISH_NAMESPACE_DONE, or PUBLISH_NAMESPACE_CANCEL.
 //!   * Request-producing messages carry `required_request_id_delta`.
+//!   * `Namespace`, `NamespaceDone` and `PublishBlocked` arrive on the
+//!     SUBSCRIBE_NAMESPACE request stream they report on, not on the
+//!     control stream.
 
 use moqtap_client::draft17::endpoint::{Endpoint, EndpointError};
 use moqtap_client::draft17::session::request_id::Role;
@@ -163,17 +166,53 @@ fn endpoint_request_error_routes_to_subscribe() {
     ep.receive_response_on_stream(id, req_err()).unwrap();
 }
 
+/// A REQUEST_UPDATE names its target by the stream it arrives on, not by the
+/// Request ID in its own body.
+///
+/// Draft-17 Section 9.1 has REQUEST_UPDATE consume a Request ID of its own, and
+/// Section 9.10 puts it "on the same bidi stream as the request to modify it".
+/// The update below therefore carries an id (`update_id`) that names no request
+/// at all, and still has to land on the subscription whose stream it came in on.
 #[test]
-fn endpoint_request_update_references_by_request_id() {
+fn endpoint_request_update_is_correlated_by_the_stream_not_by_its_own_id() {
     let mut ep = make_active_client();
     let (id, _) = ep.subscribe(ns(&[b"a"]), b"trk".to_vec(), vec![]).unwrap();
     ep.receive_response_on_stream(id, sub_ok()).unwrap();
+
+    let update_id = varint(id.into_inner() + 100);
+    let upd = ControlMessage::RequestUpdate(RequestUpdate {
+        request_id: update_id,
+        required_request_id_delta: varint(0),
+        parameters: vec![],
+    });
+    ep.receive_response_on_stream(id, upd).unwrap();
+}
+
+/// The control stream is not where a REQUEST_UPDATE belongs, and receiving one
+/// there ends the session.
+///
+/// Section 9.10 gives the stream the job of naming the request being modified,
+/// so an update with no request stream around it identifies nothing. The gate is
+/// the consequence rather than the return value: the session must be Closed
+/// afterwards and the close code must be the one Section 3.5 assigns.
+#[test]
+fn endpoint_request_update_on_the_control_stream_closes_the_session() {
+    use moqtap_client::draft17::endpoint::EndpointError;
+    use moqtap_codec::draft17::error_codes::SessionErrorCode;
+
+    let mut ep = make_active_client();
+    let (id, _) = ep.subscribe(ns(&[b"a"]), b"trk".to_vec(), vec![]).unwrap();
+    ep.receive_response_on_stream(id, sub_ok()).unwrap();
+
     let upd = ControlMessage::RequestUpdate(RequestUpdate {
         request_id: id,
         required_request_id_delta: varint(0),
         parameters: vec![],
     });
-    ep.receive_message(upd).unwrap();
+    let err = ep.receive_message(upd).unwrap_err();
+    assert!(matches!(err, EndpointError::RequestUpdateOnControlStream), "got {err:?}");
+    assert_eq!(err.session_error_code(), Some(SessionErrorCode::ProtocolViolation));
+    assert_eq!(ep.session_state(), moqtap_client::draft17::session::state::SessionState::Closed);
 }
 
 #[test]
@@ -196,8 +235,9 @@ fn endpoint_publish_done_ends_subscription() {
 #[test]
 fn endpoint_fetch_allocates_and_tracks() {
     let mut ep = make_active_client();
-    let (_id, msg) =
-        ep.fetch(ns(&[b"a"]), b"t".to_vec(), varint(0), varint(0), varint(10), varint(5)).unwrap();
+    let (_id, msg) = ep
+        .fetch(ns(&[b"a"]), b"t".to_vec(), varint(0), varint(0), varint(10), varint(5), Vec::new())
+        .unwrap();
     assert!(matches!(msg, ControlMessage::Fetch(_)));
     assert_eq!(ep.active_fetch_count(), 1);
 }
@@ -205,8 +245,9 @@ fn endpoint_fetch_allocates_and_tracks() {
 #[test]
 fn endpoint_fetch_ok_routes_by_request_id() {
     let mut ep = make_active_client();
-    let (id, _) =
-        ep.fetch(ns(&[b"a"]), b"t".to_vec(), varint(0), varint(0), varint(10), varint(5)).unwrap();
+    let (id, _) = ep
+        .fetch(ns(&[b"a"]), b"t".to_vec(), varint(0), varint(0), varint(10), varint(5), Vec::new())
+        .unwrap();
     let ok = ControlMessage::FetchOk(FetchOk {
         end_of_track: 0,
         end_group: varint(10),
@@ -220,7 +261,7 @@ fn endpoint_fetch_ok_routes_by_request_id() {
 #[test]
 fn endpoint_joining_fetch_allocates() {
     let mut ep = make_active_client();
-    let (_id, msg) = ep.joining_fetch(varint(0), varint(0)).unwrap();
+    let (_id, msg) = ep.joining_fetch(varint(0), varint(0), Vec::new()).unwrap();
     assert!(matches!(msg, ControlMessage::Fetch(_)));
 }
 
@@ -232,8 +273,9 @@ fn endpoint_joining_fetch_allocates() {
 fn endpoint_out_of_order_responses_route_correctly() {
     let mut ep = make_active_client();
     let (sub_id, _) = ep.subscribe(ns(&[b"a"]), b"t".to_vec(), vec![]).unwrap();
-    let (fetch_id, _) =
-        ep.fetch(ns(&[b"a"]), b"t".to_vec(), varint(0), varint(0), varint(1), varint(1)).unwrap();
+    let (fetch_id, _) = ep
+        .fetch(ns(&[b"a"]), b"t".to_vec(), varint(0), varint(0), varint(1), varint(1), Vec::new())
+        .unwrap();
 
     // Fetch response first, then subscribe response — fine because each is
     // addressed by its own request_id.
@@ -312,25 +354,183 @@ fn endpoint_request_ok_routes_to_correct_flow() {
     ep.receive_response_on_stream(pn_id, req_ok()).unwrap();
 }
 
+/// A NAMESPACE and a NAMESPACE_DONE report namespaces on the
+/// SUBSCRIBE_NAMESPACE stream that asked for them, and they only report: the
+/// request the stream carries is left where it was.
+///
+/// Draft-17 Section 9.18 says NAMESPACE "is sent on the response stream of a
+/// SUBSCRIBE_NAMESPACE request", and Section 9.19 that "All NAMESPACE_DONE
+/// messages are in response to a SUBSCRIBE_NAMESPACE". Section 9.20 fixes what
+/// they follow: "If the subscriber receives any frame other than a REQUEST_OK
+/// or a REQUEST_ERROR as the first frame on the response half of the stream,
+/// then it MUST close the session with a PROTOCOL_VIOLATION", so the
+/// announcements come after the REQUEST_OK, which is how this drives them.
+///
+/// That REQUEST_OK is also what makes the flow's state readable: it leaves the
+/// flow Active, and a second REQUEST_OK is then refused *from wherever the flow
+/// now is*, naming that state in the error. So the last assertion reads back
+/// the state the announcements left behind, which is the whole claim.
+///
+/// # What this catches, observed by making each change and running it
+///
+/// Dropping the NAMESPACE arm from `Endpoint::receive_response_on_stream`, so
+/// the announcement falls through to the catch-all as it did before:
+///
+/// ```text
+/// NAMESPACE belongs on the SUBSCRIBE_NAMESPACE stream: ResponseOnControlStream
+/// ```
+///
+/// Giving that arm a state edge — ending the namespace subscription instead of
+/// reporting on it — so the message is still accepted but no longer
+/// informational:
+///
+/// ```text
+/// the announcements moved the SUBSCRIBE_NAMESPACE flow: namespace error: invalid transition from Done on event on_subscribe_namespace_ok
+/// ```
 #[test]
 fn endpoint_namespace_announcement_is_informational() {
+    use moqtap_client::draft17::namespace::NamespaceError;
+
     let mut ep = make_active_client();
-    ep.receive_message(ControlMessage::Namespace(Namespace { namespace_suffix: ns(&[b"x"]) }))
-        .unwrap();
-    ep.receive_message(ControlMessage::NamespaceDone(NamespaceDone {
-        namespace_suffix: ns(&[b"x"]),
-    }))
-    .unwrap();
+    let (id, _) = ep.subscribe_namespace(ns(&[b"x"]), varint(2), vec![]).unwrap();
+    ep.receive_response_on_stream(id, req_ok()).unwrap();
+
+    ep.receive_response_on_stream(
+        id,
+        ControlMessage::Namespace(Namespace { namespace_suffix: ns(&[b"y"]) }),
+    )
+    .expect("NAMESPACE belongs on the SUBSCRIBE_NAMESPACE stream");
+    ep.receive_response_on_stream(
+        id,
+        ControlMessage::NamespaceDone(NamespaceDone { namespace_suffix: ns(&[b"y"]) }),
+    )
+    .expect("NAMESPACE_DONE belongs on the SUBSCRIBE_NAMESPACE stream");
+
+    assert_eq!(ep.session_state(), SessionState::Active);
+    assert_eq!(ep.active_subscribe_namespace_count(), 1);
+
+    let err = ep.receive_response_on_stream(id, req_ok()).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            EndpointError::Namespace(NamespaceError::InvalidTransition { from, .. })
+                if from == "Active"
+        ),
+        "the announcements moved the SUBSCRIBE_NAMESPACE flow: {err}"
+    );
 }
 
+/// A PUBLISH_BLOCKED names a track on the same stream, and is informational in
+/// the same sense.
+///
+/// Draft-17 Section 9.21: "All PUBLISH_BLOCKED messages are in response to a
+/// SUBSCRIBE_NAMESPACE" — this draft has no SUBSCRIBE_TRACKS, the request
+/// draft-18 moved it onto, so on draft-17 it shares the one stream with the two
+/// announcements above. The state is read back the same way.
+///
+/// # What this catches, observed by making each change and running it
+///
+/// Dropping the PUBLISH_BLOCKED arm from
+/// `Endpoint::receive_response_on_stream`:
+///
+/// ```text
+/// PUBLISH_BLOCKED belongs on the SUBSCRIBE_NAMESPACE stream: ResponseOnControlStream
+/// ```
+///
+/// Giving that arm a state edge, ending the namespace subscription the blocked
+/// track was reported under:
+///
+/// ```text
+/// PUBLISH_BLOCKED moved the SUBSCRIBE_NAMESPACE flow: namespace error: invalid transition from Done on event on_subscribe_namespace_ok
+/// ```
 #[test]
 fn endpoint_publish_blocked_is_informational() {
+    use moqtap_client::draft17::namespace::NamespaceError;
+
     let mut ep = make_active_client();
-    ep.receive_message(ControlMessage::PublishBlocked(PublishBlocked {
-        namespace_suffix: ns(&[b"x"]),
-        track_name: b"t".to_vec(),
-    }))
-    .unwrap();
+    let (id, _) = ep.subscribe_namespace(ns(&[b"x"]), varint(2), vec![]).unwrap();
+    ep.receive_response_on_stream(id, req_ok()).unwrap();
+
+    ep.receive_response_on_stream(
+        id,
+        ControlMessage::PublishBlocked(PublishBlocked {
+            namespace_suffix: ns(&[b"y"]),
+            track_name: b"t".to_vec(),
+        }),
+    )
+    .expect("PUBLISH_BLOCKED belongs on the SUBSCRIBE_NAMESPACE stream");
+
+    assert_eq!(ep.session_state(), SessionState::Active);
+    assert_eq!(ep.active_subscribe_namespace_count(), 1);
+
+    let err = ep.receive_response_on_stream(id, req_ok()).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            EndpointError::Namespace(NamespaceError::InvalidTransition { from, .. })
+                if from == "Active"
+        ),
+        "PUBLISH_BLOCKED moved the SUBSCRIBE_NAMESPACE flow: {err}"
+    );
+}
+
+/// None of the three belongs on the control stream, and one arriving there ends
+/// the session.
+///
+/// The sections above give each of them one place, and it is a request stream;
+/// a copy on the control stream names no request, so there is nothing it could
+/// be reporting on. The live SUBSCRIBE_NAMESPACE is what rules out the weaker
+/// reading of the refusal — it is not "no such request", because the request
+/// exists and its stream is open.
+///
+/// A fresh endpoint per message because the first refusal closes the session.
+///
+/// # What this catches, observed by making the change and running it
+///
+/// Restoring the control-stream arm that used to accept a NAMESPACE there
+/// (`ControlMessage::Namespace(ref m) => self.receive_namespace(m)`), which is
+/// the behaviour this file previously asserted:
+///
+/// ```text
+/// NAMESPACE must be refused on the control stream
+/// ```
+#[test]
+fn endpoint_namespace_announcements_on_the_control_stream_close_the_session() {
+    use moqtap_codec::draft17::error_codes::SessionErrorCode;
+
+    // The name is the one the endpoint reports the refusal under, so each pair
+    // also gates the message against the wrong name.
+    let cases = [
+        ("NAMESPACE", ControlMessage::Namespace(Namespace { namespace_suffix: ns(&[b"y"]) })),
+        (
+            "NAMESPACE_DONE",
+            ControlMessage::NamespaceDone(NamespaceDone { namespace_suffix: ns(&[b"y"]) }),
+        ),
+        (
+            "PUBLISH_BLOCKED",
+            ControlMessage::PublishBlocked(PublishBlocked {
+                namespace_suffix: ns(&[b"y"]),
+                track_name: b"t".to_vec(),
+            }),
+        ),
+    ];
+
+    for (name, msg) in cases {
+        let mut ep = make_active_client();
+        let (id, _) = ep.subscribe_namespace(ns(&[b"x"]), varint(2), vec![]).unwrap();
+        ep.receive_response_on_stream(id, req_ok()).unwrap();
+
+        let err = match ep.receive_message(msg) {
+            Err(e) => e,
+            Ok(()) => panic!("{name} must be refused on the control stream"),
+        };
+        assert!(
+            matches!(err, EndpointError::RequestMessageOnControlStream(m) if m == name),
+            "{name} on the control stream gave {err}"
+        );
+        assert_eq!(err.session_error_code(), Some(SessionErrorCode::ProtocolViolation));
+        assert_eq!(ep.session_state(), SessionState::Closed);
+    }
 }
 
 // ============================================================

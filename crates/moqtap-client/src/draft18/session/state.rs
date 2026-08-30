@@ -82,9 +82,21 @@ impl SessionStateMachine {
         }
     }
 
-    /// Transition: Active|Draining -> Closed.
+    /// Transition: SetupExchange|Active|Draining -> Closed.
+    ///
+    /// draft-18 Section 3.5: "The Transport Session can be terminated at any point."
+    /// The same section lists VERSION_NEGOTIATION_FAILED (0x15), "The client didn't
+    /// offer a version supported by the server" — a failure reachable only from
+    /// SetupExchange, before any session is Active. A session that cannot close there
+    /// cannot record the one outcome that code exists for.
+    ///
+    /// Connecting is still refused: no transport session has been established, so there
+    /// is nothing to terminate.
     pub fn on_close(&mut self) -> Result<(), SessionError> {
-        if self.state == SessionState::Active || self.state == SessionState::Draining {
+        if matches!(
+            self.state,
+            SessionState::SetupExchange | SessionState::Active | SessionState::Draining
+        ) {
             self.state = SessionState::Closed;
             Ok(())
         } else {

@@ -57,11 +57,8 @@ const NORMAL_BYTES: u32 = 1_200;
 const OVERSIZED_BYTES: u32 = 1_500;
 
 /// The on-wire size of datagram `seq`.
-///
-/// `%` rather than `is_multiple_of`, which is stable only from 1.87 and would
-/// raise this crate's floor by two releases for one line of a test.
 fn wire_bytes_of(seq: u64) -> u32 {
-    if seq % 89 == 0 {
+    if seq.is_multiple_of(89) {
         OVERSIZED_BYTES
     } else {
         NORMAL_BYTES

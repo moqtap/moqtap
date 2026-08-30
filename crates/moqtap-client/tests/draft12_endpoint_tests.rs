@@ -1,6 +1,7 @@
 #![cfg(feature = "draft12")]
 
 use moqtap_client::draft12::endpoint::*;
+use moqtap_client::draft12::session::request_id::Role;
 use moqtap_client::draft12::session::state::SessionState;
 use moqtap_codec::draft12::message::{self, *};
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
@@ -15,9 +16,16 @@ fn ns(parts: &[&[u8]]) -> TrackNamespace {
     TrackNamespace(parts.iter().map(|p| p.to_vec()).collect())
 }
 
-/// group_order = Original (0) as a VarInt.
-fn group_order_original() -> VarInt {
-    varint(0)
+/// The Group Order a request sends when it has no preference.
+fn group_order_original() -> GroupOrder {
+    GroupOrder::Publisher
+}
+
+/// The Group Order a PUBLISH_OK sends. Draft-12 calls 0x0 a protocol error on
+/// that message and on no other, so a PUBLISH_OK fixture cannot use
+/// [`group_order_original`] while a SUBSCRIBE_OK fixture still can.
+fn group_order_replied() -> GroupOrder {
+    GroupOrder::Ascending
 }
 
 /// filter_type = LargestObject (2) as a VarInt.
@@ -31,7 +39,7 @@ fn filter_largest_object() -> VarInt {
 
 #[test]
 fn endpoint_starts_in_connecting() {
-    let ep = Endpoint::new();
+    let ep = Endpoint::new(Role::Client);
     assert_eq!(ep.session_state(), SessionState::Connecting);
     assert_eq!(ep.active_subscription_count(), 0);
     assert_eq!(ep.active_fetch_count(), 0);
@@ -46,7 +54,7 @@ fn endpoint_starts_in_connecting() {
 // ============================================================
 
 fn make_active_client() -> Endpoint {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     let versions = vec![varint(0xff00000c)];
     let _ = ep.send_client_setup(versions, vec![]).unwrap();
@@ -55,12 +63,16 @@ fn make_active_client() -> Endpoint {
         parameters: vec![KeyValuePair { key: varint(0x02), value: KvpValue::Varint(varint(100)) }],
     };
     ep.receive_server_setup(&server_setup).unwrap();
+    // A peer may not open a request until this endpoint has granted it a
+    // budget: a peer's Request ID is measured against the maximum this
+    // endpoint advertised, and that starts at 0.
+    let _ = ep.send_max_request_id(varint(100)).unwrap();
     ep
 }
 
 #[test]
 fn endpoint_connect_transitions_to_setup_exchange() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     assert_eq!(ep.session_state(), SessionState::SetupExchange);
 }
@@ -75,7 +87,7 @@ fn endpoint_receive_server_setup_activates_session() {
 
 #[test]
 fn endpoint_blocked_without_max_request_id() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     let _ = ep.send_client_setup(vec![varint(0xff00000c)], vec![]).unwrap();
     let server_setup = ServerSetup { selected_version: varint(0xff00000c), parameters: vec![] };
@@ -85,7 +97,7 @@ fn endpoint_blocked_without_max_request_id() {
 
 #[test]
 fn endpoint_server_setup_wrong_version_fails() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     let _ = ep.send_client_setup(vec![varint(0xff00000c)], vec![]).unwrap();
     let server_setup = ServerSetup { selected_version: varint(0xff000099), parameters: vec![] };
@@ -97,8 +109,15 @@ fn endpoint_server_setup_wrong_version_fails() {
 // ============================================================
 
 fn default_subscribe(ep: &mut Endpoint, track: &[u8]) -> (VarInt, ControlMessage) {
-    ep.subscribe(ns(&[b"ns"]), track.to_vec(), 0, group_order_original(), filter_largest_object())
-        .unwrap()
+    ep.subscribe(
+        ns(&[b"ns"]),
+        track.to_vec(),
+        0,
+        group_order_original(),
+        filter_largest_object(),
+        Vec::new(),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -116,7 +135,7 @@ fn subscribe_ok_for(id: VarInt, alias: VarInt) -> ControlMessage {
         track_alias: alias,
         expires: varint(0),
         group_order: group_order_original(),
-        content_exists: varint(0),
+        content_exists: ContentExists::NoLargestLocation,
         largest_location: None,
         parameters: vec![],
     })
@@ -166,6 +185,8 @@ fn endpoint_unsubscribe_produces_message() {
     assert!(matches!(msg, ControlMessage::Unsubscribe(_)));
 }
 
+/// Section 8.1: a client's request IDs are the even ones and step by two,
+/// so consecutive subscribes are 0, 2, 4 rather than 0, 1, 2.
 #[test]
 fn endpoint_monotonic_request_ids() {
     let mut ep = make_active_client();
@@ -173,8 +194,8 @@ fn endpoint_monotonic_request_ids() {
     let (id1, _) = default_subscribe(&mut ep, b"b");
     let (id2, _) = default_subscribe(&mut ep, b"c");
     assert_eq!(id0.into_inner(), 0);
-    assert_eq!(id1.into_inner(), 1);
-    assert_eq!(id2.into_inner(), 2);
+    assert_eq!(id1.into_inner(), 2);
+    assert_eq!(id2.into_inner(), 4);
 }
 
 // ============================================================
@@ -191,6 +212,7 @@ fn default_fetch(ep: &mut Endpoint) -> (VarInt, ControlMessage) {
         varint(0),
         varint(10),
         varint(0),
+        Vec::new(),
     )
     .unwrap()
 }
@@ -223,7 +245,7 @@ fn endpoint_fetch_ok_via_dispatch() {
     let ok = ControlMessage::FetchOk(message::FetchOk {
         request_id: id,
         group_order: group_order_original(),
-        end_of_track: varint(0),
+        end_of_track: 0,
         end_location: Location { group: varint(10), object: varint(0) },
         parameters: vec![],
     });
@@ -245,7 +267,7 @@ fn endpoint_fetch_cancel_produces_message() {
 #[test]
 fn endpoint_announce_tracks_namespace() {
     let mut ep = make_active_client();
-    let (_id, msg) = ep.announce(ns(&[b"pub", b"alice"])).unwrap();
+    let (_id, msg) = ep.announce(ns(&[b"pub", b"alice"]), vec![]).unwrap();
     assert_eq!(ep.active_announce_count(), 1);
     assert!(matches!(msg, ControlMessage::Announce(_)));
 }
@@ -253,7 +275,7 @@ fn endpoint_announce_tracks_namespace() {
 #[test]
 fn endpoint_announce_ok_via_dispatch() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.announce(ns(&[b"pub", b"alice"])).unwrap();
+    let (req_id, _) = ep.announce(ns(&[b"pub", b"alice"]), vec![]).unwrap();
     let ok = ControlMessage::AnnounceOk(AnnounceOk { request_id: req_id });
     ep.receive_message(ok).unwrap();
 }
@@ -261,7 +283,7 @@ fn endpoint_announce_ok_via_dispatch() {
 #[test]
 fn endpoint_unannounce_after_ok() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.announce(ns(&[b"pub", b"alice"])).unwrap();
+    let (req_id, _) = ep.announce(ns(&[b"pub", b"alice"]), vec![]).unwrap();
     let ok = ControlMessage::AnnounceOk(AnnounceOk { request_id: req_id });
     ep.receive_message(ok).unwrap();
     let msg = ep.unannounce(ns(&[b"pub", b"alice"])).unwrap();
@@ -282,7 +304,7 @@ fn endpoint_unknown_announce_request_id_rejected() {
 #[test]
 fn endpoint_subscribe_announces_roundtrip() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.subscribe_announces(ns(&[b"prefix"])).unwrap();
+    let (req_id, _) = ep.subscribe_announces(ns(&[b"prefix"]), vec![]).unwrap();
     assert_eq!(ep.active_subscribe_announces_count(), 1);
     let ok = ControlMessage::SubscribeAnnouncesOk(SubscribeAnnouncesOk { request_id: req_id });
     ep.receive_message(ok).unwrap();
@@ -297,7 +319,7 @@ fn endpoint_subscribe_announces_roundtrip() {
 #[test]
 fn endpoint_track_status_request_and_reply() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.track_status_request(ns(&[b"ns"]), b"trk".to_vec()).unwrap();
+    let (req_id, _) = ep.track_status_request(ns(&[b"ns"]), b"trk".to_vec(), Vec::new()).unwrap();
     assert_eq!(ep.active_track_status_count(), 1);
     let reply = ControlMessage::TrackStatus(TrackStatus {
         request_id: req_id,
@@ -343,6 +365,7 @@ fn endpoint_draining_rejects_new_subscribe() {
         0,
         group_order_original(),
         filter_largest_object(),
+        Vec::new(),
     );
     assert!(matches!(result, Err(EndpointError::Draining)));
 }
@@ -390,18 +413,49 @@ fn endpoint_joining_fetch_allocates_and_tracks() {
     ep.receive_message(subscribe_ok_for(parent_id, varint(1))).unwrap();
 
     // Issue a joining fetch against it
-    let (fetch_id, msg) = ep
-        .joining_fetch(0, group_order_original(), FetchType::RelativeJoining, parent_id, varint(2))
-        .unwrap();
+    let (fetch_id, msg) =
+        ep.joining_fetch(0, group_order_original(), parent_id, varint(2), Vec::new()).unwrap();
     assert_ne!(fetch_id.into_inner(), parent_id.into_inner());
     assert_eq!(ep.active_fetch_count(), 1);
     match msg {
         ControlMessage::Fetch(ref f) => {
             assert_eq!(f.fetch_type as u64, FetchType::RelativeJoining as u64);
             match &f.fetch_payload {
-                FetchPayload::Joining { joining_subscribe_id, joining_start } => {
-                    assert_eq!(*joining_subscribe_id, parent_id);
+                FetchPayload::Joining { joining_request_id, joining_start } => {
+                    assert_eq!(*joining_request_id, parent_id);
                     assert_eq!(*joining_start, varint(2));
+                }
+                _ => panic!("expected Joining payload"),
+            }
+        }
+        _ => panic!("expected Fetch control message"),
+    }
+}
+
+/// The absolute form is a different Fetch Type and the same payload, because
+/// Section 8.16 reads the one field two ways: for a Relative Joining Fetch
+/// "this value represents the group offset for the Fetch prior and relative to
+/// the Current Group of the corresponding Subscribe", and "For an Absolute
+/// Joining Fetch (0x3), this value represents the Starting Group ID."
+///
+/// Which of the two a call writes is settled by which call it is. There is no
+/// Fetch Type to hand the endpoint, so this gate is what says the two calls
+/// have not become one.
+#[test]
+fn endpoint_absolute_joining_fetch_names_the_group_it_starts_at() {
+    let mut ep = make_active_client();
+    let (parent_id, _) = default_subscribe(&mut ep, b"trk");
+    ep.receive_message(subscribe_ok_for(parent_id, varint(1))).unwrap();
+
+    let (_, msg) = ep
+        .absolute_joining_fetch(128, GroupOrder::Ascending, parent_id, varint(9), Vec::new())
+        .unwrap();
+    match msg {
+        ControlMessage::Fetch(ref f) => {
+            assert_eq!(f.fetch_type as u64, FetchType::AbsoluteJoining as u64);
+            match &f.fetch_payload {
+                FetchPayload::Joining { joining_start, .. } => {
+                    assert_eq!(*joining_start, varint(9));
                 }
                 _ => panic!("expected Joining payload"),
             }
@@ -421,9 +475,9 @@ fn make_publish(request_id: VarInt, alias: VarInt) -> Publish {
         track_name: b"trk".to_vec(),
         track_alias: alias,
         group_order: group_order_original(),
-        content_exists: varint(0),
+        content_exists: ContentExists::NoLargestLocation,
         largest_location: None,
-        forward: varint(1),
+        forward: Forward::Forward,
         parameters: vec![],
     }
 }
@@ -431,10 +485,10 @@ fn make_publish(request_id: VarInt, alias: VarInt) -> Publish {
 #[test]
 fn endpoint_receive_publish_records_pending() {
     let mut ep = make_active_client();
-    let pub_msg = make_publish(varint(7), varint(42));
+    let pub_msg = make_publish(varint(1), varint(42));
     ep.receive_message(ControlMessage::Publish(pub_msg.clone())).unwrap();
     assert_eq!(ep.pending_publish_count(), 1);
-    let got = ep.pending_publish(varint(7)).expect("pending publish");
+    let got = ep.pending_publish(varint(1)).expect("pending publish");
     assert_eq!(got.track_alias, varint(42));
     assert_eq!(got.track_name, b"trk");
 }
@@ -442,15 +496,15 @@ fn endpoint_receive_publish_records_pending() {
 #[test]
 fn endpoint_send_publish_ok_consumes_pending() {
     let mut ep = make_active_client();
-    let pub_msg = make_publish(varint(7), varint(42));
+    let pub_msg = make_publish(varint(1), varint(42));
     ep.receive_message(ControlMessage::Publish(pub_msg)).unwrap();
 
     let resp = ep
         .send_publish_ok(
-            varint(7),
             varint(1),
+            Forward::Forward,
             10,
-            group_order_original(),
+            group_order_replied(),
             filter_largest_object(),
             None,
             None,
@@ -464,10 +518,10 @@ fn endpoint_send_publish_ok_consumes_pending() {
 #[test]
 fn endpoint_send_publish_error_consumes_pending() {
     let mut ep = make_active_client();
-    let pub_msg = make_publish(varint(7), varint(42));
+    let pub_msg = make_publish(varint(1), varint(42));
     ep.receive_message(ControlMessage::Publish(pub_msg)).unwrap();
 
-    let resp = ep.send_publish_error(varint(7), varint(3), b"denied".to_vec()).unwrap();
+    let resp = ep.send_publish_error(varint(1), varint(3), b"denied".to_vec()).unwrap();
     match resp {
         ControlMessage::PublishError(ref e) => {
             assert_eq!(e.error_code, varint(3));
@@ -483,9 +537,9 @@ fn endpoint_publish_ok_for_unknown_request_fails() {
     let mut ep = make_active_client();
     let resp = ep.send_publish_ok(
         varint(99),
-        varint(1),
+        Forward::Forward,
         0,
-        group_order_original(),
+        group_order_replied(),
         filter_largest_object(),
         None,
         None,

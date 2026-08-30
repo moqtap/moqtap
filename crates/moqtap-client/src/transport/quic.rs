@@ -69,14 +69,35 @@ impl From<quinn::ConnectionError> for TransportError {
 }
 
 impl From<quinn::WriteError> for TransportError {
+    /// `Stopped` keeps the peer's application error code as a typed
+    /// [`TransportError::Stopped`] so a forwarder can mirror it; every
+    /// other cause collapses to a message.
     fn from(e: quinn::WriteError) -> Self {
-        TransportError::Write(e.to_string())
+        match e {
+            quinn::WriteError::Stopped(code) => TransportError::Stopped(code.into_inner()),
+            other => TransportError::Write(other.to_string()),
+        }
+    }
+}
+
+impl From<quinn::ReadError> for TransportError {
+    /// `Reset` keeps the peer's application error code as a typed
+    /// [`TransportError::StreamReset`] so a forwarder can mirror it;
+    /// every other cause collapses to a message.
+    fn from(e: quinn::ReadError) -> Self {
+        match e {
+            quinn::ReadError::Reset(code) => TransportError::StreamReset(code.into_inner()),
+            other => TransportError::Read(other.to_string()),
+        }
     }
 }
 
 impl From<quinn::ReadExactError> for TransportError {
     fn from(e: quinn::ReadExactError) -> Self {
-        TransportError::Read(e.to_string())
+        match e {
+            quinn::ReadExactError::ReadError(inner) => inner.into(),
+            other => TransportError::Read(other.to_string()),
+        }
     }
 }
 

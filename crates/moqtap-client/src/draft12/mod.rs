@@ -41,6 +41,8 @@ pub mod fetch;
 pub mod namespace;
 /// Connection observer trait for receiving client events.
 pub mod observer;
+/// Lifecycle of a subscription a peer opened with PUBLISH.
+pub mod publish;
 /// Session state, setup validation, and request ID allocation.
 pub mod session;
 /// Subscription lifecycle state machine.

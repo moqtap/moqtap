@@ -15,13 +15,32 @@ fn ns(parts: &[&[u8]]) -> TrackNamespace {
     TrackNamespace(parts.iter().map(|p| p.to_vec()).collect())
 }
 
+/// A setup parameter value in the shape this draft's wire format produces.
+///
+/// Drafts 07 through 10 frame every setup parameter as {Type, Length, Value},
+/// so a value that came off the wire is always bytes. Building a
+/// `KvpValue::Varint` here would be building a shape no peer can send, and a
+/// test that does that is asserting on something it wrote itself.
+fn setup_value(v: u64) -> KvpValue {
+    let mut bytes = Vec::new();
+    varint(v).encode(&mut bytes);
+    KvpValue::Bytes(bytes)
+}
+
+/// The ROLE parameter draft-07 requires of both endpoints. Section 6.2.2.1:
+/// "Both endpoints MUST send a ROLE parameter with one of the three values
+/// specified above."
+fn role() -> KeyValuePair {
+    KeyValuePair { key: varint(0x00), value: setup_value(3) }
+}
+
 // ============================================================
 // Construction and initial state
 // ============================================================
 
 #[test]
 fn endpoint_starts_in_connecting() {
-    let ep = Endpoint::new();
+    let ep = Endpoint::new(Role::Client);
     assert_eq!(ep.session_state(), SessionState::Connecting);
     assert_eq!(ep.active_subscription_count(), 0);
     assert_eq!(ep.active_fetch_count(), 0);
@@ -35,13 +54,13 @@ fn endpoint_starts_in_connecting() {
 // ============================================================
 
 fn make_active_client() -> Endpoint {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     let versions = vec![varint(0xff000007)];
-    let _ = ep.send_client_setup(versions, vec![]).unwrap();
+    let _ = ep.send_client_setup(versions, vec![role()]).unwrap();
     let server_setup = ServerSetup {
         selected_version: varint(0xff000007),
-        parameters: vec![KeyValuePair { key: varint(0x02), value: KvpValue::Varint(varint(100)) }],
+        parameters: vec![role(), KeyValuePair { key: varint(0x02), value: setup_value(100) }],
     };
     ep.receive_server_setup(&server_setup).unwrap();
     ep
@@ -49,35 +68,62 @@ fn make_active_client() -> Endpoint {
 
 #[test]
 fn endpoint_connect_transitions_to_setup_exchange() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
     assert_eq!(ep.session_state(), SessionState::SetupExchange);
 }
 
+/// A SERVER_SETUP activates the session, and the version it settled is
+/// observed through what the endpoint will accept afterwards rather than by
+/// reading it back: this module encodes one draft, and a SERVER_SETUP naming
+/// another draft's version is refused whether or not the client offered it.
+///
+/// Dropping the version binding fails with:
+///
+/// ```text
+/// this module speaks one draft, and 0xff000003 is not it
+/// ```
 #[test]
 fn endpoint_receive_server_setup_activates_session() {
     let ep = make_active_client();
     assert_eq!(ep.session_state(), SessionState::Active);
-    assert_eq!(ep.negotiated_version(), Some(varint(0xff000007)));
     assert!(!ep.is_blocked());
+
+    let mut other = Endpoint::new(Role::Client);
+    other.connect().unwrap();
+    let offered = vec![varint(0xff000007), varint(0xff000003)];
+    let _ = other.send_client_setup(offered, vec![role()]).unwrap();
+    let wrong_draft =
+        ServerSetup { selected_version: varint(0xff000003), parameters: vec![role()] };
+    assert!(
+        other.receive_server_setup(&wrong_draft).is_err(),
+        "this module speaks one draft, and 0xff000003 is not it",
+    );
+    assert_eq!(
+        other.session_state(),
+        SessionState::SetupExchange,
+        "a refused SERVER_SETUP must not activate the session",
+    );
 }
 
 #[test]
 fn endpoint_blocked_without_max_subscribe_id() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
-    let _ = ep.send_client_setup(vec![varint(0xff000007)], vec![]).unwrap();
-    let server_setup = ServerSetup { selected_version: varint(0xff000007), parameters: vec![] };
+    let _ = ep.send_client_setup(vec![varint(0xff000007)], vec![role()]).unwrap();
+    let server_setup =
+        ServerSetup { selected_version: varint(0xff000007), parameters: vec![role()] };
     ep.receive_server_setup(&server_setup).unwrap();
     assert!(ep.is_blocked());
 }
 
 #[test]
 fn endpoint_server_setup_wrong_version_fails() {
-    let mut ep = Endpoint::new();
+    let mut ep = Endpoint::new(Role::Client);
     ep.connect().unwrap();
-    let _ = ep.send_client_setup(vec![varint(0xff000007)], vec![]).unwrap();
-    let server_setup = ServerSetup { selected_version: varint(0xff000099), parameters: vec![] };
+    let _ = ep.send_client_setup(vec![varint(0xff000007)], vec![role()]).unwrap();
+    let server_setup =
+        ServerSetup { selected_version: varint(0xff000099), parameters: vec![role()] };
     assert!(ep.receive_server_setup(&server_setup).is_err());
 }
 
@@ -388,13 +434,26 @@ fn endpoint_unknown_track_status_rejected() {
 // GoAway
 // ============================================================
 
+/// A GOAWAY drains the session. What that costs the peer is asserted rather
+/// than the URI being read back: "The endpoint MUST terminate the session with
+/// a Protocol Violation ... if it receives multiple GOAWAY messages", and a
+/// second one has nowhere to go from Draining.
+///
+/// Letting a second GOAWAY through fails with:
+///
+/// ```text
+/// a session can only be told to go away once
+/// ```
 #[test]
 fn endpoint_goaway_transitions_to_draining() {
     let mut ep = make_active_client();
     let msg = GoAway { new_session_uri: b"https://new".to_vec() };
     ep.receive_goaway(&msg).unwrap();
     assert_eq!(ep.session_state(), SessionState::Draining);
-    assert_eq!(ep.goaway_uri(), Some(b"https://new".as_slice()));
+    assert!(
+        ep.receive_goaway(&GoAway { new_session_uri: Vec::new() }).is_err(),
+        "a session can only be told to go away once",
+    );
 }
 
 #[test]

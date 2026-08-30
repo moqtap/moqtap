@@ -51,6 +51,10 @@ fn make_active_client() -> Endpoint {
         parameters: vec![KeyValuePair { key: varint(0x02), value: KvpValue::Varint(varint(100)) }],
     };
     ep.receive_server_setup(&server_setup).unwrap();
+    // A peer may not open a request until this endpoint has granted it a
+    // budget: a peer's Request ID is measured against the maximum this
+    // endpoint advertised, and that starts at 0.
+    let _ = ep.send_max_request_id(varint(100)).unwrap();
     ep
 }
 
@@ -145,15 +149,25 @@ fn endpoint_subscribe_error_via_request_error() {
     ep.receive_message(err).unwrap();
 }
 
+/// Section 9.11 sends a REQUEST_UPDATE from the sender of the request, so one
+/// that arrives names a request the peer made. The peer makes one here first;
+/// this test used to feed an update naming a subscription this endpoint had
+/// opened itself, which is the message no peer following the draft sends.
 #[test]
 fn endpoint_subscribe_update_via_dispatch() {
     let mut ep = make_active_client();
-    let (id, _) = default_subscribe(&mut ep, b"trk");
-    ep.receive_message(subscribe_ok_for(id, varint(1))).unwrap();
+    let peers = varint(1);
+    ep.receive_message(ControlMessage::Subscribe(Subscribe {
+        request_id: peers,
+        track_namespace: ns(&[b"ns"]),
+        track_name: b"trk".to_vec(),
+        parameters: vec![],
+    }))
+    .unwrap();
     // RequestUpdate uses existing_request_id to reference the original
     let upd = ControlMessage::RequestUpdate(RequestUpdate {
-        request_id: varint(99), // new request ID for the update itself
-        existing_request_id: id,
+        request_id: varint(3), // the peer's second, which the update spends
+        existing_request_id: peers,
         parameters: vec![],
     });
     ep.receive_message(upd).unwrap();
@@ -198,7 +212,8 @@ fn endpoint_client_even_request_ids() {
 // ============================================================
 
 fn default_fetch(ep: &mut Endpoint) -> (VarInt, ControlMessage) {
-    ep.fetch(ns(&[b"ns"]), b"trk".to_vec(), varint(0), varint(0), varint(10), varint(0)).unwrap()
+    ep.fetch(ns(&[b"ns"]), b"trk".to_vec(), varint(0), varint(0), varint(10), varint(0), Vec::new())
+        .unwrap()
 }
 
 #[test]
@@ -229,7 +244,7 @@ fn endpoint_fetch_ok_via_dispatch() {
     let (id, _) = default_fetch(&mut ep);
     let ok = ControlMessage::FetchOk(FetchOk {
         request_id: id,
-        end_of_track: varint(0),
+        end_of_track: 0,
         end_group: varint(10),
         end_object: varint(0),
         parameters: vec![],
@@ -265,7 +280,7 @@ fn endpoint_fetch_stream_fin() {
     let (id, _) = default_fetch(&mut ep);
     let ok = ControlMessage::FetchOk(FetchOk {
         request_id: id,
-        end_of_track: varint(0),
+        end_of_track: 0,
         end_group: varint(10),
         end_object: varint(0),
         parameters: vec![],
@@ -286,7 +301,7 @@ fn endpoint_joining_fetch_allocates_and_tracks() {
     let (parent_id, _) = default_subscribe(&mut ep, b"trk");
     ep.receive_message(subscribe_ok_for(parent_id, varint(1))).unwrap();
 
-    let (fetch_id, msg) = ep.joining_fetch(parent_id, varint(2)).unwrap();
+    let (fetch_id, msg) = ep.joining_fetch(parent_id, varint(2), Vec::new()).unwrap();
     assert_ne!(fetch_id.into_inner(), parent_id.into_inner());
     assert_eq!(ep.active_fetch_count(), 1);
     match msg {
@@ -392,25 +407,39 @@ fn endpoint_publish_namespace_error_via_request_error() {
     ep.receive_message(err).unwrap();
 }
 
+/// Section 9.22: "The publisher sends the PUBLISH_NAMESPACE_DONE control
+/// message to indicate its intent to stop serving new subscriptions for tracks
+/// within the provided Track Namespace." The publisher here is the peer, and
+/// on this draft the message names the Request ID the announcement arrived
+/// under rather than the namespace.
 #[test]
 fn endpoint_publish_namespace_done_by_request_id() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.publish_namespace(ns(&[b"pub"]), vec![]).unwrap();
-    let ok = ControlMessage::RequestOk(RequestOk { request_id: req_id, parameters: vec![] });
-    ep.receive_message(ok).unwrap();
-    // Draft-16: PublishNamespaceDone uses request_id
-    let done = ControlMessage::PublishNamespaceDone(PublishNamespaceDone { request_id: req_id });
+    ep.receive_publish_namespace(&PublishNamespace {
+        request_id: varint(1),
+        track_namespace: ns(&[b"pub"]),
+        parameters: vec![],
+    })
+    .unwrap();
+    ep.send_request_ok(varint(1), vec![]).unwrap();
+    let done = ControlMessage::PublishNamespaceDone(PublishNamespaceDone { request_id: varint(1) });
     ep.receive_message(done).unwrap();
 }
 
+/// Section 8.5 names what a cancellation revokes: a namespace "it previously
+/// responded REQUEST_OK to". This endpoint responded, so the announcement it
+/// revokes is the peer's, named here by the Request ID it arrived under.
 #[test]
 fn endpoint_publish_namespace_cancel_by_request_id() {
     let mut ep = make_active_client();
-    let (req_id, _) = ep.publish_namespace(ns(&[b"pub"]), vec![]).unwrap();
-    let ok = ControlMessage::RequestOk(RequestOk { request_id: req_id, parameters: vec![] });
-    ep.receive_message(ok).unwrap();
-    // Draft-16: Cancel uses request_id
-    let msg = ep.publish_namespace_cancel(req_id, varint(0), b"done".to_vec()).unwrap();
+    ep.receive_publish_namespace(&PublishNamespace {
+        request_id: varint(1),
+        track_namespace: ns(&[b"pub"]),
+        parameters: vec![],
+    })
+    .unwrap();
+    ep.send_request_ok(varint(1), vec![]).unwrap();
+    let msg = ep.publish_namespace_cancel(varint(1), varint(0), b"done".to_vec()).unwrap();
     assert!(matches!(msg, ControlMessage::PublishNamespaceCancel(_)));
 }
 
@@ -425,6 +454,10 @@ fn endpoint_unknown_publish_namespace_ok_rejected() {
 // Subscribe Namespace flow
 // ============================================================
 
+/// Draft-16 Section 6.1 puts the answer on the request's own stream, so the
+/// answer is fed to the endpoint the same way. Feeding it through
+/// `receive_message` — the control stream — is what this test used to do, and
+/// the endpoint took it, which is the defect the stream work corrected.
 #[test]
 fn endpoint_subscribe_namespace_roundtrip() {
     let mut ep = make_active_client();
@@ -438,9 +471,8 @@ fn endpoint_subscribe_namespace_roundtrip() {
         _ => panic!("expected SubscribeNamespace"),
     }
 
-    // Ok via consolidated RequestOk
     let ok = ControlMessage::RequestOk(RequestOk { request_id: req_id, parameters: vec![] });
-    ep.receive_message(ok).unwrap();
+    ep.receive_on_namespace_stream(req_id, &ok).unwrap();
 }
 
 #[test]
@@ -453,7 +485,7 @@ fn endpoint_subscribe_namespace_error_via_request_error() {
         retry_interval: varint(0),
         reason_phrase: b"denied".to_vec(),
     });
-    ep.receive_message(err).unwrap();
+    ep.receive_on_namespace_stream(req_id, &err).unwrap();
 }
 
 // ============================================================
@@ -526,8 +558,15 @@ fn endpoint_draining_rejects_new_publish() {
 fn endpoint_draining_rejects_new_fetch() {
     let mut ep = make_active_client();
     ep.receive_goaway(&GoAway { new_session_uri: vec![] }).unwrap();
-    let result =
-        ep.fetch(ns(&[b"ns"]), b"trk".to_vec(), varint(0), varint(0), varint(10), varint(0));
+    let result = ep.fetch(
+        ns(&[b"ns"]),
+        b"trk".to_vec(),
+        varint(0),
+        varint(0),
+        varint(10),
+        varint(0),
+        Vec::new(),
+    );
     assert!(matches!(result, Err(EndpointError::Draining)));
 }
 

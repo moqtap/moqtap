@@ -1,3 +1,5 @@
+#![cfg(feature = "draft14")]
+
 //! Loopback handshake test — verifies `Connection::connect()` performs
 //! CLIENT_SETUP/SERVER_SETUP against a real quinn endpoint.
 //!

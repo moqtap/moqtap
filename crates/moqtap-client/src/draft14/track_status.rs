@@ -84,3 +84,43 @@ impl TrackStatusStateMachine {
         }
     }
 }
+
+/// The same transitions, named for the end the request arrives at.
+///
+/// A track status the peer asks for passes through the states in the same
+/// order as one this endpoint asks for, with every message going the other
+/// way: the request arrives instead of leaving and the answer leaves instead
+/// of arriving. Sharing the transitions and not the names is what lets a
+/// refusal say which event was refused rather than the mirror image of it.
+///
+/// Section 9.20 says what the arriving request is: the receiver "treats it
+/// identically as if it had received a SUBSCRIBE message, except it does not
+/// create downstream subscription state or send any Objects". Identical
+/// treatment and no subscription state is why the request gets a machine of
+/// this kind rather than a subscription's, and why what it opens is a record
+/// of its own rather than an entry among the subscriptions the peer holds.
+impl TrackStatusStateMachine {
+    /// Idle → Pending (TRACK_STATUS received).
+    pub fn on_track_status_received(&mut self) -> Result<(), TrackStatusError> {
+        self.on_track_status_sent().map_err(|_| TrackStatusError::InvalidTransition {
+            from: self.state(),
+            event: "on_track_status_received".to_string(),
+        })
+    }
+
+    /// Pending → Done (TRACK_STATUS_OK sent).
+    pub fn on_track_status_ok_sent(&mut self) -> Result<(), TrackStatusError> {
+        self.on_track_status_ok().map_err(|_| TrackStatusError::InvalidTransition {
+            from: self.state(),
+            event: "on_track_status_ok_sent".to_string(),
+        })
+    }
+
+    /// Pending → Done (TRACK_STATUS_ERROR sent).
+    pub fn on_track_status_error_sent(&mut self) -> Result<(), TrackStatusError> {
+        self.on_track_status_error().map_err(|_| TrackStatusError::InvalidTransition {
+            from: self.state(),
+            event: "on_track_status_error_sent".to_string(),
+        })
+    }
+}

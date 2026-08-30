@@ -21,8 +21,11 @@
 //! * Subgroup / datagram / fetch object headers carry `extension_count` +
 //!   opaque extension bytes.
 //! * New `DatagramStatus` stream type (0x02) for status-only datagrams.
-//! * `ObjectStatus` value 4 is now `EndOfTrackAndGroup`, and value 5 is a new
-//!   `EndOfTrack` (track ends but current group does not).
+//! * `ObjectStatus` value 5 changes meaning: draft-07 Section 7.1.1.1 assigns
+//!   it "end of Subgroup", and draft-08 Section 7.1.1.1 reassigns it "end of
+//!   Track" — Group ID one greater than the largest produced, Object ID zero.
+//!   Value 4 is "end of Track and Group" in both drafts; what draft-08 adds
+//!   there is the receiver's protocol-error check on the two ids.
 
 /// Outbound MoQT connection with MoQT framing over QUIC.
 pub mod connection;

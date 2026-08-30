@@ -82,9 +82,23 @@ impl SessionStateMachine {
         }
     }
 
-    /// Transition: Active|Draining → Closed.
+    /// Transition: SetupExchange|Active|Draining -> Closed.
+    ///
+    /// draft-08 Section 3.5: "The Transport Session can be terminated at any point."
+    /// Section 7.2.1 obliges an endpoint to do so during the Setup exchange itself:
+    /// "If the server does not support any of the versions offered by the client, or
+    /// the client receives a server version that it did not offer, the corresponding
+    /// peer MUST close the session." That failure is reachable only from
+    /// SetupExchange, so a session that cannot close there cannot record the one
+    /// outcome the draft requires of it.
+    ///
+    /// Connecting is still refused: no transport session has been established, so there
+    /// is nothing to terminate.
     pub fn on_close(&mut self) -> Result<(), SessionError> {
-        if self.state == SessionState::Active || self.state == SessionState::Draining {
+        if matches!(
+            self.state,
+            SessionState::SetupExchange | SessionState::Active | SessionState::Draining
+        ) {
             self.state = SessionState::Closed;
             Ok(())
         } else {

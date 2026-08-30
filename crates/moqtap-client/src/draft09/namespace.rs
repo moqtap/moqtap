@@ -111,6 +111,63 @@ impl SubscribeAnnouncesStateMachine {
             })
         }
     }
+
+    /// Idle → Pending (a SUBSCRIBE_ANNOUNCES arrived from the peer).
+    ///
+    /// The mirror of
+    /// [`on_subscribe_announces_sent`](Self::on_subscribe_announces_sent),
+    /// named for the direction it runs in rather than shared with it: the two
+    /// state edges coincide, so a message dispatched to the wrong one of them
+    /// would move the record silently instead of naming the event it was not.
+    pub fn on_subscribe_announces_received(&mut self) -> Result<(), NamespaceError> {
+        self.on_subscribe_announces_sent().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_subscribe_announces_received".to_string(),
+        })
+    }
+
+    /// Pending → Active (this endpoint accepted the peer's request with a
+    /// SUBSCRIBE_ANNOUNCES_OK).
+    ///
+    /// Section 4.1: "A publisher MUST send exactly one SUBSCRIBE_ANNOUNCES_OK
+    /// or SUBSCRIBE_ANNOUNCES_ERROR in response to a SUBSCRIBE_ANNOUNCES."
+    ///
+    /// One answer and no second one: the record leaves Pending on the first,
+    /// and a second call finds it somewhere else.
+    pub fn on_subscribe_announces_ok_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_subscribe_announces_ok().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_subscribe_announces_ok_sent".to_string(),
+        })
+    }
+
+    /// Pending → Done (this endpoint refused the peer's request with a
+    /// SUBSCRIBE_ANNOUNCES_ERROR).
+    ///
+    /// The other half of the same sentence: one message back, and this is the
+    /// other one it can be.
+    pub fn on_subscribe_announces_error_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_subscribe_announces_error().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_subscribe_announces_error_sent".to_string(),
+        })
+    }
+
+    /// Active → Done (the peer withdrew the namespace subscription with an
+    /// UNSUBSCRIBE_ANNOUNCES).
+    ///
+    /// Section 4.1: "An UNSUBSCRIBE_ANNOUNCES withdraws a previous
+    /// SUBSCRIBE_ANNOUNCES."
+    ///
+    /// Active is the acceptance, which is the state a namespace subscription
+    /// reaches by being answered SUBSCRIBE_ANNOUNCES_OK and no other way, so
+    /// a withdrawal of one never answered is refused here.
+    pub fn on_unsubscribe_announces_received(&mut self) -> Result<(), NamespaceError> {
+        self.on_unsubscribe_announces().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_unsubscribe_announces_received".to_string(),
+        })
+    }
 }
 
 /// State machine for the ANNOUNCE flow (draft-09).
@@ -199,5 +256,59 @@ impl AnnounceStateMachine {
                 event: "on_announce_cancel".to_string(),
             })
         }
+    }
+}
+
+/// The same transitions, named for the end the advertisement arrives at.
+///
+/// An announcement this endpoint accepts passes through the states in the same
+/// order as one it makes, with every message going the other way: the ANNOUNCE
+/// arrives instead of leaving, the answer leaves instead of arriving, the
+/// withdrawal arrives and the cancellation leaves. Sharing the transitions and
+/// not the names is what lets a refusal say which event was refused, rather
+/// than naming the mirror image of it.
+impl AnnounceStateMachine {
+    /// Idle -> Pending (ANNOUNCE received from the peer).
+    pub fn on_announce_received(&mut self) -> Result<(), NamespaceError> {
+        self.on_announce_sent().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_announce_received".to_string(),
+        })
+    }
+
+    /// Pending -> Active (ANNOUNCE_OK sent, accepting the announcement).
+    pub fn on_announce_ok_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_announce_ok().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_announce_ok_sent".to_string(),
+        })
+    }
+
+    /// Pending -> Done (ANNOUNCE_ERROR sent, refusing the announcement).
+    pub fn on_announce_error_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_announce_error().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_announce_error_sent".to_string(),
+        })
+    }
+
+    /// Active -> Done (UNANNOUNCE received, the peer withdrawing).
+    pub fn on_unannounce_received(&mut self) -> Result<(), NamespaceError> {
+        self.on_unannounce().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_unannounce_received".to_string(),
+        })
+    }
+
+    /// Active -> Done (ANNOUNCE_CANCEL sent, revoking an acceptance).
+    ///
+    /// Active is the acceptance: it is the state an announcement reaches by
+    /// being answered ANNOUNCE_OK and no other way, which is why a cancellation
+    /// of one never answered is refused here rather than sent.
+    pub fn on_announce_cancel_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_announce_cancel().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_announce_cancel_sent".to_string(),
+        })
     }
 }

@@ -6,12 +6,18 @@ use crate::draft15::endpoint::{Endpoint, EndpointError};
 use crate::draft15::event::{ClientEvent, Direction, StreamKind};
 use crate::draft15::observer::ConnectionObserver;
 use crate::draft15::session::request_id::Role;
+use crate::draft15::session::setup;
+use crate::forwarding_preference::ObjectForwardingPreference;
+use crate::malformed_tracks::MalformedTrackCondition;
+use crate::track_locations::{ObjectLocation, ObjectRole, TrackObjects};
 use crate::transport::quic::QuicTransport;
 use crate::transport::{RecvStream, SendStream, Transport, TransportError};
 use moqtap_codec::dispatch::{
     AnyControlMessage, AnyDatagramHeader, AnyFetchHeader, AnySubgroupHeader,
 };
-use moqtap_codec::draft15::data_stream::{FetchHeader, SubgroupObject, SubgroupObjectReader};
+use moqtap_codec::draft15::data_stream::{
+    FetchHeader, FetchObjectHeader, FetchObjectReader, SubgroupObject, SubgroupObjectReader,
+};
 use moqtap_codec::draft15::message::ControlMessage;
 use moqtap_codec::error::CodecError;
 use moqtap_codec::kvp::KeyValuePair;
@@ -19,8 +25,17 @@ use moqtap_codec::types::*;
 use moqtap_codec::varint::VarInt;
 use moqtap_codec::version::DraftVersion;
 
-/// MoQT ALPN identifier (used by raw QUIC transport).
-pub const MOQT_ALPN: &[u8] = b"moq-00";
+/// The ALPN identifier draft-15 uses on raw QUIC, `moqt-15`.
+///
+/// Drafts 07 to 14 share one ALPN, `moq-00`, and a peer that offers it has
+/// said nothing about which of the eight it speaks. Draft-15 ended that:
+/// from there each draft has an ALPN of its own, so the version is settled
+/// by the TLS handshake before a byte of MoQT is written.
+///
+/// This is [`DraftVersion::Draft15`]'s own
+/// [`quic_alpn`](DraftVersion::quic_alpn), which is what
+/// [`ClientConfig::alpn`] offers; the test below holds the two together.
+pub const MOQT_ALPN: &[u8] = b"moqt-15";
 
 /// Errors from the connection layer.
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +70,39 @@ pub enum ConnectionError {
     /// Data stream used out of order (e.g. object before header).
     #[error("data stream state error: {0}")]
     DataStreamState(&'static str),
+    /// An Object arrived carrying extension headers on a status that is not
+    /// Normal.
+    ///
+    /// Draft-15 Section 10.2.1.2: "Any Object with status Normal can have
+    /// extension headers. If an endpoint receives extension headers on Objects
+    /// with status that is not Normal, it MUST close the session with a
+    /// PROTOCOL_VIOLATION."
+    ///
+    /// The codec decodes such an Object rather than refusing it — the frame is
+    /// well formed, and a tool that reports non-conforming traffic has to be
+    /// able to read it. Being an endpoint rather than an observer is what turns
+    /// it into an error, so it is raised here, on the receive path, and not in
+    /// the decoder.
+    ///
+    /// [`Connection::close_for_data_stream`] performs the close the sentence
+    /// above requires. It is a separate call because the reader that raises
+    /// this holds no connection, and because a deliberately permissive caller
+    /// should be able to read a violating stream and report it without tearing
+    /// the session down.
+    #[error(
+        "object {object_id} carries {extensions_len} bytes of extension headers on status {status:?}, which is not Normal"
+    )]
+    ExtensionsOnNonNormalStatus {
+        /// The Object ID the extension headers arrived on.
+        object_id: u64,
+        /// Length in bytes of the extension-header block.
+        extensions_len: usize,
+        /// The Object's status, resolved through the encoding's elision rule.
+        ///
+        /// Spelled out in full because the glob import of `moqtap_codec::types`
+        /// brings a different `ObjectStatus` into this module.
+        status: moqtap_codec::draft15::types::ObjectStatus,
+    },
 }
 
 /// Transport type for the connection.
@@ -103,12 +151,17 @@ pub struct FramedSendStream {
     /// extension-presence flag, seeded from the stream's
     /// `SubgroupHeader`).
     subgroup_io: Option<SubgroupObjectReader>,
+    /// Stateful fetch object writer, seeded from the stream's `FetchHeader`.
+    /// A fetch object inherits fields from the object before it, so the writer
+    /// has to have seen that object; without this the first one has nothing to
+    /// inherit from and is refused.
+    fetch_io: Option<FetchObjectReader>,
 }
 
 impl FramedSendStream {
     /// Create a new framed send stream for the given draft version.
     pub fn new(inner: SendStream, draft: DraftVersion) -> Self {
-        Self { inner, draft, subgroup_io: None }
+        Self { inner, draft, subgroup_io: None, fetch_io: None }
     }
 
     /// Get the transport-level stream ID.
@@ -131,15 +184,41 @@ impl FramedSendStream {
     /// Write a subgroup stream header. Also initializes the internal
     /// delta-encoding state used by
     /// [`FramedSendStream::write_subgroup_object`].
+    ///
+    /// The header is refused, and nothing is written, if its fields disagree
+    /// with its own stream type. That check has to happen here rather than at
+    /// the first object: the type is what every object after it is framed
+    /// against, so a header that went out saying the wrong thing cannot be
+    /// taken back.
     pub async fn write_subgroup_header(
         &mut self,
         header: &AnySubgroupHeader,
     ) -> Result<(), ConnectionError> {
         let mut buf = Vec::new();
-        header.encode(&mut buf);
+        header.encode_stream_checked(&mut buf)?;
         self.inner.write_all(&buf).await?;
-        if let AnySubgroupHeader::Draft15(ref d15) = header {
-            self.subgroup_io = Some(SubgroupObjectReader::new(d15));
+        match header {
+            AnySubgroupHeader::Draft15(ref d15) => {
+                self.subgroup_io = Some(SubgroupObjectReader::new(d15));
+            }
+            // Only this draft's header seeds the object reader. With draft 15
+            // as the only enabled draft `AnySubgroupHeader` has a single
+            // variant, the arm above is exhaustive and this one unreachable.
+            #[cfg(any(
+                feature = "draft07",
+                feature = "draft08",
+                feature = "draft09",
+                feature = "draft10",
+                feature = "draft11",
+                feature = "draft12",
+                feature = "draft13",
+                feature = "draft14",
+                feature = "draft16",
+                feature = "draft17",
+                feature = "draft18",
+                feature = "draft19"
+            ))]
+            _ => {}
         }
         Ok(())
     }
@@ -150,8 +229,9 @@ impl FramedSendStream {
         header: &AnyFetchHeader,
     ) -> Result<(), ConnectionError> {
         let mut buf = Vec::new();
-        header.encode(&mut buf);
+        header.encode_stream(&mut buf);
         self.inner.write_all(&buf).await?;
+        self.fetch_io = Some(FetchObjectReader::new());
         Ok(())
     }
 
@@ -173,6 +253,44 @@ impl FramedSendStream {
         Ok(())
     }
 
+    /// Append a fetch object to the stream.
+    ///
+    /// The fetch stream had a header writer and no object writer, so a caller
+    /// could open one and put nothing on it through this type.
+    ///
+    /// Draft-15 delta-encodes a fetch object against the one before it, so this
+    /// needs the same stream state the subgroup path keeps, seeded by
+    /// [`write_fetch_header`](Self::write_fetch_header). An object that inherits
+    /// a field from a previous object that does not exist is refused there
+    /// rather than written as a zero.
+    ///
+    /// The declared length comes from the payload rather than from the caller's
+    /// field: a header that disagrees with the bytes beside it desynchronises
+    /// every object after it on the stream, and nothing downstream can recover.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::DataStreamState`] if no fetch header has been written
+    /// on this stream, and [`ConnectionError::Codec`] for a header the writer
+    /// refuses.
+    pub async fn write_fetch_object(
+        &mut self,
+        header: &FetchObjectHeader,
+        payload: &[u8],
+    ) -> Result<(), ConnectionError> {
+        let writer = self
+            .fetch_io
+            .as_mut()
+            .ok_or(ConnectionError::DataStreamState("fetch header not written yet"))?;
+        let mut header = header.clone();
+        header.payload_length = VarInt::from_usize(payload.len());
+        let mut buf = Vec::new();
+        writer.write_object_header(&header, &mut buf)?;
+        buf.extend_from_slice(payload);
+        self.inner.write_all(&buf).await?;
+        Ok(())
+    }
+
     /// Finish the stream (send FIN).
     pub async fn finish(&mut self) -> Result<(), ConnectionError> {
         self.inner.finish()?;
@@ -185,6 +303,23 @@ impl FramedSendStream {
     }
 }
 
+/// What an Object Status makes of an object here.
+///
+/// Two answers where drafts 08 through 13 have three, and the missing one is
+/// the point: the end-of-track status settles where the track ended and is
+/// judged against nothing, because the rule about where one may be placed is
+/// not in this draft. `a_track_may_end_where_it_has_already_been.rs` asserts
+/// that acceptance.
+///
+/// Every other status is a statement about objects rather than one of them.
+fn object_role(status: Option<u64>) -> ObjectRole {
+    match status {
+        None | Some(0x0) => ObjectRole::Produced,
+        Some(0x4) => ObjectRole::EndsTrack(None),
+        _ => ObjectRole::Neither,
+    }
+}
+
 /// A framed reader for a recv stream. Handles MoQT varint-length decoding.
 pub struct FramedRecvStream {
     inner: RecvStream,
@@ -193,17 +328,69 @@ pub struct FramedRecvStream {
     /// Stateful subgroup object reader (tracks delta-decode state and
     /// extension-presence flag).
     subgroup_io: Option<SubgroupObjectReader>,
+    /// Stateful fetch object reader, holding the Object each following Object
+    /// may inherit its Group ID, Subgroup ID, Object ID and Priority from.
+    /// Seeded by [`FramedRecvStream::read_fetch_header`].
+    fetch_io: Option<FetchObjectReader>,
+    /// The record this stream's objects are measured against, and the Group ID
+    /// its header named.
+    ///
+    /// One group for the whole stream: a subgroup header names it once and no
+    /// object header repeats it. `None` on a stream that was never given one -
+    /// a stream for an alias no live binding names, and every stream built
+    /// outside [`Connection::accept_subgroup_stream`] - and such a stream reads
+    /// exactly as it did before this existed.
+    tracking: Option<(TrackObjects, u64)>,
 }
 
 impl FramedRecvStream {
     /// Create a new framed receive stream for the given draft version.
     pub fn new(inner: RecvStream, draft: DraftVersion) -> Self {
-        Self { inner, buf: BytesMut::with_capacity(4096), draft, subgroup_io: None }
+        Self {
+            inner,
+            buf: BytesMut::with_capacity(4096),
+            draft,
+            subgroup_io: None,
+            fetch_io: None,
+            tracking: None,
+        }
     }
 
     /// Get the transport-level stream ID.
     pub fn stream_id(&self) -> u64 {
         self.inner.stream_id()
+    }
+
+    /// Measure this stream's objects against `objects`, all of them in `group`.
+    ///
+    /// Called by [`Connection::accept_subgroup_stream`] once the header has
+    /// been read, which is the only point at which both the track and the group
+    /// are known.
+    fn measure_objects_against(&mut self, objects: TrackObjects, group: u64) {
+        self.tracking = Some((objects, group));
+    }
+
+    /// Judge one object this stream carried against where its track ended.
+    ///
+    /// The object's Group ID is the stream's and its Object ID is its own,
+    /// already resolved from the delta the wire carries; what they are measured
+    /// against is the end an end-of-track object settled on any stream.
+    fn note_subgroup_object(
+        &self,
+        object: u64,
+        status: Option<u64>,
+    ) -> Result<(), ConnectionError> {
+        let Some((objects, group)) = &self.tracking else { return Ok(()) };
+        let at = ObjectLocation { group: *group, object };
+        objects.note_past_final(at, object_role(status)).map_err(|end| {
+            ConnectionError::Endpoint(EndpointError::ObjectPastFinalObject {
+                alias: objects.alias(),
+                group: at.group,
+                object: at.object,
+                final_group: end.group,
+                final_object: end.object,
+            })
+        })
     }
 
     /// Read more data from the stream into the internal buffer.
@@ -286,8 +473,28 @@ impl FramedRecvStream {
                 Ok(header) => {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
-                    if let AnySubgroupHeader::Draft15(ref d15) = header {
-                        self.subgroup_io = Some(SubgroupObjectReader::new(d15));
+                    match header {
+                        AnySubgroupHeader::Draft15(ref d15) => {
+                            self.subgroup_io = Some(SubgroupObjectReader::new(d15));
+                        }
+                        // Only this draft's header seeds the object reader. With draft 15
+                        // as the only enabled draft `AnySubgroupHeader` has a single
+                        // variant, the arm above is exhaustive and this one unreachable.
+                        #[cfg(any(
+                            feature = "draft07",
+                            feature = "draft08",
+                            feature = "draft09",
+                            feature = "draft10",
+                            feature = "draft11",
+                            feature = "draft12",
+                            feature = "draft13",
+                            feature = "draft14",
+                            feature = "draft16",
+                            feature = "draft17",
+                            feature = "draft18",
+                            feature = "draft19"
+                        ))]
+                        _ => {}
                     }
                     return Ok(header);
                 }
@@ -301,7 +508,12 @@ impl FramedRecvStream {
         }
     }
 
-    /// Read a fetch response header.
+    /// Read a fetch response header, and seed the object reader that follows it.
+    ///
+    /// The seeding is what makes [`FramedRecvStream::read_fetch_object`] usable:
+    /// a draft-15 fetch object may leave out fields and take the prior Object's,
+    /// so the objects of one stream have to be read through one reader and the
+    /// header is where that reader begins.
     pub async fn read_fetch_header(&mut self) -> Result<AnyFetchHeader, ConnectionError> {
         self.ensure(1).await?;
         loop {
@@ -310,6 +522,7 @@ impl FramedRecvStream {
                 Ok(header) => {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
+                    self.fetch_io = Some(FetchObjectReader::new());
                     return Ok(header);
                 }
                 Err(CodecError::UnexpectedEnd) => {
@@ -328,6 +541,13 @@ impl FramedRecvStream {
     /// delta-encoded object ID and (when the stream type says so) the
     /// extension block. Returns an error if called before a subgroup
     /// header was read.
+    ///
+    /// Errors with [`ConnectionError::ExtensionsOnNonNormalStatus`] on an
+    /// Object that carries extension headers on a status other than Normal,
+    /// which draft-15 Section 10.2.1.2 answers with a session close. The Object
+    /// is consumed from the stream before the check, so the reader stays in
+    /// step with the wire and a caller that reports the violation and reads on
+    /// sees the following Object rather than a re-parse of this one.
     pub async fn read_subgroup_object(&mut self) -> Result<SubgroupObject, ConnectionError> {
         if self.subgroup_io.is_none() {
             return Err(ConnectionError::DataStreamState("subgroup header not read yet"));
@@ -341,6 +561,17 @@ impl FramedRecvStream {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
                     *reader = probe;
+                    if !obj.extensions_permitted() {
+                        return Err(ConnectionError::ExtensionsOnNonNormalStatus {
+                            object_id: obj.object_id.into_inner(),
+                            extensions_len: obj.extension_headers.len(),
+                            status: obj.status(),
+                        });
+                    }
+                    self.note_subgroup_object(
+                        obj.object_id.into_inner(),
+                        obj.object_status.map(|s| s as u64),
+                    )?;
                     return Ok(obj);
                 }
                 Err(CodecError::UnexpectedEnd) => {
@@ -373,6 +604,75 @@ impl FramedRecvStream {
         }
     }
 
+    /// Read the next draft-15 fetch object's header and payload.
+    ///
+    /// The mirror of [`FramedSendStream::write_fetch_object`], and it needs the
+    /// same state that one needs: draft-15 lets an Object leave out its Group
+    /// ID, Subgroup ID, Object ID and Priority and take the prior Object's, so
+    /// the reader carries the prior Object and this method is refused before
+    /// [`FramedRecvStream::read_fetch_header`] has seeded it.
+    ///
+    /// The header that comes back is resolved — every field is a value rather
+    /// than an inheritance — which is what makes draft-15 and draft-18
+    /// different from the three drafts either side of them.
+    ///
+    /// The payload comes back with the header because `payload_length` says how
+    /// many bytes follow it, and a reader that takes the wrong number of them
+    /// desynchronises every later object on the stream.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::DataStreamState`] when no fetch header has been read,
+    /// [`ConnectionError::UnexpectedEnd`] when the stream ends inside the header
+    /// or inside the payload it declared, and [`ConnectionError::Codec`] on
+    /// every rule Section 10.4.4 states about the flags and about an Object that
+    /// inherits from one that does not exist.
+    pub async fn read_fetch_object(
+        &mut self,
+    ) -> Result<(FetchObjectHeader, Vec<u8>), ConnectionError> {
+        if self.fetch_io.is_none() {
+            return Err(ConnectionError::DataStreamState("fetch header not read yet"));
+        }
+        let header = loop {
+            let reader = self.fetch_io.as_mut().unwrap();
+            // The reader carries the prior Object, so it is advanced on a probe
+            // and committed only once the whole header was there to read. A
+            // reader advanced by a short read would resolve the next Object
+            // against a half-read one.
+            let mut probe = reader.clone();
+            let mut cursor = &self.buf[..];
+            match probe.read_object_header(&mut cursor) {
+                Ok(header) => {
+                    let consumed = self.buf.len() - cursor.remaining();
+                    self.buf.advance(consumed);
+                    *reader = probe;
+                    break header;
+                }
+                Err(CodecError::UnexpectedEnd) => {
+                    if !self.fill().await? {
+                        return Err(ConnectionError::UnexpectedEnd);
+                    }
+                }
+                Err(e) => return Err(ConnectionError::Codec(e)),
+            }
+        };
+        let payload = self.read_object_payload(&header.payload_length).await?;
+        Ok((header, payload))
+    }
+
+    /// Take the `length` payload bytes that follow a fetch object's header.
+    ///
+    /// Separate from the header read because the header is decoded from a probe
+    /// cursor that may have to be retried after a fill, and the payload is a
+    /// flat byte count that never is.
+    async fn read_object_payload(&mut self, length: &VarInt) -> Result<Vec<u8>, ConnectionError> {
+        let length = length.into_inner() as usize;
+        self.ensure(length).await?;
+        let payload = self.buf[..length].to_vec();
+        self.buf.advance(length);
+        Ok(payload)
+    }
+
     /// Returns the draft version this stream is framed for.
     pub fn draft(&self) -> DraftVersion {
         self.draft
@@ -385,7 +685,14 @@ pub struct Connection {
     transport: Transport,
     endpoint: Endpoint,
     draft: DraftVersion,
-    control_send: Option<FramedSendStream>,
+    /// Behind a lock because a control message is written from two kinds of
+    /// place. Most of them are the caller's own request, made through `&mut
+    /// self`. The messages that answer a Malformed Track are not: the
+    /// conditions that make a track malformed are detected on the data plane,
+    /// where this connection is reached through a shared reference. The lock
+    /// also makes one message the unit of writing, so two of them cannot
+    /// interleave on the stream.
+    control_send: Option<tokio::sync::Mutex<FramedSendStream>>,
     control_recv: Option<FramedRecvStream>,
     observer: Option<Box<dyn ConnectionObserver>>,
     /// Setup events buffered during `connect()` and replayed when an
@@ -403,6 +710,15 @@ impl Connection {
     /// a ready-to-use connection.
     pub async fn connect(addr: &str, config: ClientConfig) -> Result<Self, ConnectionError> {
         let draft = config.draft;
+        // PATH is for native QUIC only, and the transport is known here and
+        // nowhere further in. Refusing before dialling means a session that
+        // the server would close on sight is never opened.
+        setup::validate_client_path_transport(
+            &config.setup_parameters,
+            matches!(config.transport, TransportType::WebTransport { .. }),
+        )
+        .map_err(EndpointError::from)?;
+
         let transport = match &config.transport {
             TransportType::Quic => Self::connect_quic(addr, &config).await?,
             TransportType::WebTransport { url } => {
@@ -452,7 +768,7 @@ impl Connection {
             transport,
             endpoint,
             draft,
-            control_send: Some(control_send),
+            control_send: Some(tokio::sync::Mutex::new(control_send)),
             control_recv: Some(control_recv),
             observer: None,
             pending_events,
@@ -573,10 +889,12 @@ impl Connection {
     ///
     /// Wraps the draft-15 message in `AnyControlMessage::Draft15` for
     /// framing.
-    pub async fn send_control(&mut self, msg: &ControlMessage) -> Result<(), ConnectionError> {
+    pub async fn send_control(&self, msg: &ControlMessage) -> Result<(), ConnectionError> {
         let any = AnyControlMessage::Draft15(msg.clone());
-        let send = self.control_send.as_mut().ok_or(ConnectionError::NoControlStream)?;
+        let mut send =
+            self.control_send.as_ref().ok_or(ConnectionError::NoControlStream)?.lock().await;
         let raw = send.write_control(&any).await?;
+        drop(send);
         self.emit(ClientEvent::ControlMessage {
             direction: Direction::Send,
             message: any,
@@ -592,7 +910,10 @@ impl Connection {
     pub async fn recv_control(&mut self) -> Result<ControlMessage, ConnectionError> {
         let recv = self.control_recv.as_mut().ok_or(ConnectionError::NoControlStream)?;
         let capture_raw = self.observer.is_some();
-        let (any, raw) = recv.read_control(capture_raw).await?;
+        let (any, raw) = match recv.read_control(capture_raw).await {
+            Ok(v) => v,
+            Err(e) => return Err(self.close_for_codec(e)),
+        };
         if capture_raw {
             self.emit(ClientEvent::ControlMessage {
                 direction: Direction::Receive,
@@ -603,6 +924,24 @@ impl Connection {
         // Unwrap to draft-15 for the endpoint
         match any {
             AnyControlMessage::Draft15(msg) => Ok(msg),
+            // `AnyControlMessage` carries one variant per enabled draft feature.
+            // When draft 15 is the only one enabled the arm above is exhaustive
+            // and this rejection arm is unreachable, so it is compiled only for
+            // builds in which another draft's variant can actually turn up.
+            #[cfg(any(
+                feature = "draft07",
+                feature = "draft08",
+                feature = "draft09",
+                feature = "draft10",
+                feature = "draft11",
+                feature = "draft12",
+                feature = "draft13",
+                feature = "draft14",
+                feature = "draft16",
+                feature = "draft17",
+                feature = "draft18",
+                feature = "draft19"
+            ))]
             _ => Err(ConnectionError::Codec(CodecError::UnknownMessageType(0))),
         }
     }
@@ -611,7 +950,7 @@ impl Connection {
     /// endpoint state machine. Returns the decoded message for inspection.
     pub async fn recv_and_dispatch(&mut self) -> Result<ControlMessage, ConnectionError> {
         let msg = self.recv_control().await?;
-        self.endpoint.receive_message(msg.clone())?;
+        self.endpoint.receive_message(msg.clone()).map_err(|e| self.close_if_session_fatal(e))?;
 
         // Emit draining event if this was a GoAway
         if let ControlMessage::GoAway(ref ga) = msg {
@@ -641,9 +980,85 @@ impl Connection {
         self.send_control(&msg).await
     }
 
+    /// Accept a subscription the peer opened, sending SUBSCRIBE_OK and giving
+    /// its track a Track Alias.
+    ///
+    /// The endpoint refuses an alias a live track of its own already holds and
+    /// refuses a second answer to one SUBSCRIBE, so nothing is written on the
+    /// wire when it does either.
+    pub async fn subscribe_ok(
+        &mut self,
+        request_id: VarInt,
+        track_alias: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_subscribe_ok(request_id, track_alias, parameters)?;
+        self.send_control(&msg).await
+    }
+
+    /// Refuse a request the peer opened, sending REQUEST_ERROR.
+    ///
+    /// One message refuses a SUBSCRIBE, a FETCH, an announcement, a track
+    /// status or a namespace subscription, and the endpoint finds which by the
+    /// identifier. It refuses a second answer to any of them, and
+    /// refuses a Joining Fetch's refusal under any code but the one the draft
+    /// names for it, so nothing is written on the wire when it does.
+    pub async fn request_error(
+        &mut self,
+        request_id: VarInt,
+        error_code: VarInt,
+        reason_phrase: Vec<u8>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_request_error(request_id, error_code, reason_phrase)?;
+        self.send_control(&msg).await
+    }
+
+    /// Narrow a subscription this endpoint opened, sending SUBSCRIBE_UPDATE, and
+    /// return the Request ID the update itself spent.
+    pub async fn subscribe_update(
+        &mut self,
+        subscription_request_id: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<VarInt, ConnectionError> {
+        let (request_id, msg) =
+            self.endpoint.subscribe_update(subscription_request_id, parameters)?;
+        self.send_control(&msg).await?;
+        Ok(request_id)
+    }
+
+    /// Accept a PUBLISH the peer sent, which establishes the subscription it
+    /// opened.
+    ///
+    /// The endpoint refuses a second answer to one PUBLISH, so nothing is
+    /// written on the wire when it does.
+    pub async fn publish_ok(
+        &mut self,
+        request_id: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_publish_ok(request_id, parameters)?;
+        self.send_control(&msg).await
+    }
+
+    /// Reject a PUBLISH the peer sent, which ends the subscription it opened
+    /// before it was established.
+    ///
+    /// The endpoint refuses a second answer to one PUBLISH, so nothing is
+    /// written on the wire when it does.
+    pub async fn publish_error(
+        &mut self,
+        request_id: VarInt,
+        error_code: VarInt,
+        reason_phrase: Vec<u8>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_publish_error(request_id, error_code, reason_phrase)?;
+        self.send_control(&msg).await
+    }
+
     // -- Fetch flow -------------------------------------------------
 
     /// Send a standalone FETCH and return the allocated request ID.
+    #[allow(clippy::too_many_arguments)]
     pub async fn fetch(
         &mut self,
         track_namespace: TrackNamespace,
@@ -652,6 +1067,7 @@ impl Connection {
         start_object: VarInt,
         end_group: VarInt,
         end_object: VarInt,
+        parameters: Vec<KeyValuePair>,
     ) -> Result<VarInt, ConnectionError> {
         let (req_id, msg) = self.endpoint.fetch(
             track_namespace,
@@ -660,18 +1076,43 @@ impl Connection {
             start_object,
             end_group,
             end_object,
+            parameters,
         )?;
         self.send_control(&msg).await?;
         Ok(req_id)
     }
 
-    /// Send a joining FETCH and return the allocated request ID.
+    /// Send a Relative Joining Fetch and return the allocated request ID.
+    ///
+    /// `joining_start` counts groups back from the subscription's largest
+    /// group. To name the starting group outright, use
+    /// [`absolute_joining_fetch`](Self::absolute_joining_fetch).
     pub async fn joining_fetch(
         &mut self,
         joining_request_id: VarInt,
         joining_start: VarInt,
+        parameters: Vec<KeyValuePair>,
     ) -> Result<VarInt, ConnectionError> {
-        let (req_id, msg) = self.endpoint.joining_fetch(joining_request_id, joining_start)?;
+        let (req_id, msg) =
+            self.endpoint.joining_fetch(joining_request_id, joining_start, parameters)?;
+        self.send_control(&msg).await?;
+        Ok(req_id)
+    }
+
+    /// Send an Absolute Joining Fetch and return the allocated request ID.
+    ///
+    /// Here `joining_start` is the group to begin at rather than an offset,
+    /// which is what an application that knows the group it wants has: draft-15
+    /// Section 9.16.2.1 has the publisher set the Start Location to
+    /// {Joining Start, 0}.
+    pub async fn absolute_joining_fetch(
+        &mut self,
+        joining_request_id: VarInt,
+        joining_start: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<VarInt, ConnectionError> {
+        let (req_id, msg) =
+            self.endpoint.absolute_joining_fetch(joining_request_id, joining_start, parameters)?;
         self.send_control(&msg).await?;
         Ok(req_id)
     }
@@ -679,6 +1120,29 @@ impl Connection {
     /// Send a FETCH_CANCEL for the given request ID.
     pub async fn fetch_cancel(&mut self, request_id: VarInt) -> Result<(), ConnectionError> {
         let msg = self.endpoint.fetch_cancel(request_id)?;
+        self.send_control(&msg).await
+    }
+
+    /// Accept a fetch the peer opened, sending FETCH_OK.
+    ///
+    /// The endpoint refuses a Joining Fetch naming a subscription this session
+    /// cannot join and refuses a second answer to one FETCH, so nothing is
+    /// written on the wire when it does either.
+    pub async fn fetch_ok(
+        &mut self,
+        request_id: VarInt,
+        end_of_track: u8,
+        end_group: VarInt,
+        end_object: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_fetch_ok(
+            request_id,
+            end_of_track,
+            end_group,
+            end_object,
+            parameters,
+        )?;
         self.send_control(&msg).await
     }
 
@@ -706,6 +1170,50 @@ impl Connection {
         Ok(req_id)
     }
 
+    /// Accept a request the peer opened, sending REQUEST_OK.
+    ///
+    /// The endpoint refuses a second answer to one request, so nothing is
+    /// written on the wire when it does. On this draft an announcement, a track
+    /// status and a namespace subscription are the requests REQUEST_OK
+    /// accepts; a subscription, a publication and a fetch each have an
+    /// acceptance of their own that carries more than this one can.
+    pub async fn request_ok(
+        &mut self,
+        request_id: VarInt,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.send_request_ok(request_id, parameters)?;
+        self.send_control(&msg).await
+    }
+
+    /// Revoke an acceptance, sending PUBLISH_NAMESPACE_CANCEL.
+    ///
+    /// The endpoint refuses one for an announcement it never accepted, so
+    /// nothing is written on the wire when it does.
+    pub async fn publish_namespace_cancel(
+        &mut self,
+        track_namespace: TrackNamespace,
+        error_code: VarInt,
+        reason_phrase: Vec<u8>,
+    ) -> Result<(), ConnectionError> {
+        let msg =
+            self.endpoint.publish_namespace_cancel(track_namespace, error_code, reason_phrase)?;
+        self.send_control(&msg).await
+    }
+
+    /// Withdraw an announcement this endpoint made, sending
+    /// PUBLISH_NAMESPACE_DONE.
+    ///
+    /// The mirror of [`Self::publish_namespace`], and the counterpart of
+    /// [`Self::publish_namespace_cancel`]: this one ends an announcement of
+    /// this endpoint's, that one revokes the acceptance of one the peer made.
+    pub async fn publish_namespace_done(
+        &mut self,
+        track_namespace: TrackNamespace,
+    ) -> Result<(), ConnectionError> {
+        let msg = self.endpoint.publish_namespace_done(track_namespace)?;
+        self.send_control(&msg).await
+    }
     // -- Track Status flow ------------------------------------------
 
     /// Send a TRACK_STATUS and return the allocated request ID.
@@ -753,6 +1261,51 @@ impl Connection {
         self.send_control(&msg).await
     }
 
+    // -- Malformed Tracks -------------------------------------------
+
+    /// Send what Section 2.4.2 asks for when this endpoint finds a track
+    /// malformed.
+    ///
+    /// "it MUST UNSUBSCRIBE any subscription and FETCH_CANCEL any fetch for
+    /// that Track from that publisher" — one message per request, in Request
+    /// ID order, and the endpoint decides which message each request takes.
+    ///
+    /// A write that fails is not reported. The caller is on its way to
+    /// returning an error that says what went wrong with the track, and a
+    /// control stream that will not take an UNSUBSCRIBE is a session on its
+    /// way out for a reason of its own; replacing the condition's report with
+    /// a transport error would lose the only account of why the track was
+    /// withdrawn. The rest of the withdrawal is abandoned, because a stream
+    /// that refused one message will refuse the next.
+    async fn withdraw_malformed_track(&self, alias: u64, condition: MalformedTrackCondition) {
+        for msg in self.endpoint.withdraw_malformed_track(alias, condition) {
+            if self.send_control(&msg).await.is_err() {
+                break;
+            }
+        }
+    }
+
+    /// Record the framing an arriving object was sent with, and withdraw from
+    /// the track when it is the second framing that track has been sent.
+    ///
+    /// The receiving half of a pair. The two writing paths call the endpoint
+    /// directly and answer a mixed track by refusing to write it, because
+    /// Section 2.4.2's sentence is a subscriber's: an endpoint about to send an
+    /// object is that object's Original Publisher, and a publisher has no
+    /// subscription of its own to withdraw and no fetch of its own to cancel.
+    async fn note_received_framing(
+        &self,
+        alias: u64,
+        seen: ObjectForwardingPreference,
+    ) -> Result<(), ConnectionError> {
+        let Err(err) = self.endpoint.note_object_forwarding_preference(alias, seen) else {
+            return Ok(());
+        };
+        self.withdraw_malformed_track(alias, MalformedTrackCondition::MixedForwardingPreference)
+            .await;
+        Err(err.into())
+    }
+
     // -- Data streams -----------------------------------------------
 
     /// Open a new unidirectional stream for sending subgroup data.
@@ -760,6 +1313,13 @@ impl Connection {
         &self,
         header: &AnySubgroupHeader,
     ) -> Result<FramedSendStream, ConnectionError> {
+        // Before the stream is opened: the Original Publisher is who the rule
+        // binds, so a header that would mix this track's framing is refused
+        // here rather than written and answered by the peer.
+        self.endpoint.note_object_forwarding_preference(
+            header.track_alias(),
+            ObjectForwardingPreference::Subgroup,
+        )?;
         let send = self.transport.open_uni().await?;
         let mut framed = FramedSendStream::new(send, self.draft);
         let sid = framed.stream_id();
@@ -773,6 +1333,34 @@ impl Connection {
             stream_id: sid,
             direction: Direction::Send,
             header: header.clone(),
+        });
+        Ok(framed)
+    }
+
+    /// Open a new unidirectional stream for sending a FETCH's objects.
+    ///
+    /// The objects answering a FETCH do not go on the request's own stream:
+    /// they go on a unidirectional stream of their own, which opens with a
+    /// FETCH_HEADER naming the request they belong to. This writes that header
+    /// and hands back the stream, the same way
+    /// [`open_subgroup_stream`](Self::open_subgroup_stream) does for a
+    /// subgroup.
+    ///
+    /// The caller owns the stream that comes back. Nothing here remembers
+    /// which request it belongs to, so an endpoint serving several fetches at
+    /// once keeps its own map from Request ID to stream.
+    pub async fn open_fetch_stream(
+        &self,
+        header: &AnyFetchHeader,
+    ) -> Result<FramedSendStream, ConnectionError> {
+        let send = self.transport.open_uni().await?;
+        let mut framed = FramedSendStream::new(send, self.draft);
+        let sid = framed.stream_id();
+        framed.write_fetch_header(header).await?;
+        self.emit(ClientEvent::StreamOpened {
+            direction: Direction::Send,
+            stream_kind: StreamKind::Fetch,
+            stream_id: sid,
         });
         Ok(framed)
     }
@@ -796,17 +1384,38 @@ impl Connection {
             direction: Direction::Receive,
             header: header.clone(),
         });
+        // Every object on a subgroup stream has the Subgroup preference, so
+        // the header settles the track's framing before a single object is
+        // read.
+        self.note_received_framing(header.track_alias(), ObjectForwardingPreference::Subgroup)
+            .await?;
+        // The track is resolved here and not inside the stream: it takes the
+        // endpoint's alias table, which a stream handle has no way back to.
+        if let Some(objects) = self.endpoint.track_objects(header.track_alias()) {
+            framed.measure_objects_against(objects, header.group_id());
+        }
         Ok((header, framed))
     }
 
     /// Send an object via datagram.
+    ///
+    /// The header goes through `AnyDatagramHeader::encode`, which refuses a
+    /// header whose Object Status the framing it names cannot carry. Such a
+    /// header errors here and nothing is sent, rather than going out as an
+    /// ordinary payload datagram with the status quietly dropped.
     pub fn send_datagram(
         &self,
         header: &AnyDatagramHeader,
         payload: &[u8],
     ) -> Result<(), ConnectionError> {
+        // Before anything is encoded, for the reason `open_subgroup_stream`
+        // gives.
+        self.endpoint.note_object_forwarding_preference(
+            header.meta().track_alias,
+            ObjectForwardingPreference::Datagram,
+        )?;
         let mut buf = Vec::new();
-        header.encode(&mut buf);
+        header.encode(&mut buf)?;
         buf.extend_from_slice(payload);
         self.emit(ClientEvent::DatagramReceived {
             direction: Direction::Send,
@@ -829,7 +1438,144 @@ impl Connection {
             header: header.clone(),
             payload_len: payload.len(),
         });
+        // A datagram is the other framing, and it settles the track's just as a
+        // subgroup header does.
+        self.note_received_framing(header.meta().track_alias, ObjectForwardingPreference::Datagram)
+            .await?;
+        // A datagram is a whole object, so the connection can measure it
+        // without help from the caller - and answer the condition itself,
+        // because an UNSUBSCRIBE takes the connection an object on a stream
+        // cannot reach.
+        let meta = header.meta();
+        if let Err(err) = self.endpoint.note_received_object(
+            meta.track_alias,
+            ObjectLocation { group: meta.group_id, object: meta.object_id },
+            object_role(meta.status),
+        ) {
+            self.withdraw_malformed_track(
+                meta.track_alias,
+                MalformedTrackCondition::ObjectPastFinalObject,
+            )
+            .await;
+            return Err(err.into());
+        }
         Ok((header, payload))
+    }
+
+    /// Close the session on the wire when the endpoint says a violation is
+    /// fatal to it, and hand the error back unchanged.
+    ///
+    /// [`EndpointError::session_error_code`] answers `Some` for exactly the
+    /// errors this draft ends the session over, and the endpoint has already
+    /// moved its own state machine to Closed by the time this runs. Without
+    /// this step that move is purely internal: the local endpoint refuses to
+    /// start anything new while the peer, which is the one that broke the
+    /// rule, sees a session that is still open and goes on sending. A rule
+    /// that names a session termination code is a statement about the wire,
+    /// so it takes a CONNECTION_CLOSE to satisfy it.
+    ///
+    /// The reason phrase is the error's own `Display` text, which names the
+    /// rule rather than repeating the numeric code the close already carries.
+    ///
+    /// Errors that answer `None` are recoverable and nothing is sent.
+    fn close_for(&self, err: &EndpointError) {
+        if let Some(code) = err.session_error_code() {
+            // QUIC application error codes are 62-bit; every code in this
+            // registry is far below `u32::MAX`, and saturating rather than
+            // truncating means a future code that is not could never be
+            // reported as a different, assigned one.
+            let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+            self.close(wire_code, err.to_string().as_bytes());
+        }
+    }
+
+    /// [`close_for`](Self::close_for), then the error unchanged, for the
+    /// common case where the endpoint's error is also what the caller returns.
+    fn close_if_session_fatal(&self, err: EndpointError) -> ConnectionError {
+        self.close_for(&err);
+        ConnectionError::Endpoint(err)
+    }
+
+    /// Withdraw from a track a data stream found malformed, reporting whether
+    /// it did.
+    ///
+    /// The Malformed Track twin of [`Connection::close_for_data_stream`], and
+    /// separate from it for the same reason and one more. The same one: a
+    /// [`FramedRecvStream`] holds no connection, so the reader that finds the
+    /// fault is not the object that can send an UNSUBSCRIBE. The one more: the
+    /// two answers are opposites - that call ends the session, this one gives
+    /// up a track and leaves it running - and a single entry point would have
+    /// to decide between them from the error alone, which is exactly the
+    /// decision a caller reproducing a capture wants to make itself.
+    ///
+    /// The datagram path needs none of this. It is read through the connection,
+    /// so [`Connection::recv_datagram`] answers the condition where it finds
+    /// it, and this is only for the objects that arrive on a stream the caller
+    /// holds.
+    pub async fn withdraw_for_data_stream(&self, err: &ConnectionError) -> bool {
+        let ConnectionError::Endpoint(EndpointError::ObjectPastFinalObject { alias, .. }) = err
+        else {
+            return false;
+        };
+        self.withdraw_malformed_track(*alias, MalformedTrackCondition::ObjectPastFinalObject).await;
+        true
+    }
+
+    /// Close the session when a failure raised while reading a *data* stream is
+    /// one draft-15 answers with a close. Reports whether it closed.
+    ///
+    /// [`accept_subgroup_stream`](Self::accept_subgroup_stream) hands the caller
+    /// a [`FramedRecvStream`], which holds no connection and so cannot close
+    /// one, and the read that raises this failure happens there. The caller is
+    /// the only party holding both halves, which is what this is for.
+    ///
+    /// Splitting it this way rather than closing inside the reader keeps a
+    /// caller that is deliberately permissive — a tool reproducing a capture,
+    /// say — able to read a violating stream and report it without tearing the
+    /// session down. The rule is stated at endpoints, and this is where an
+    /// endpoint decides it is one.
+    ///
+    /// Answers the extension-header rule of Section 10.2.1.2, and any decode
+    /// failure `codec_session_error_code` recognises, so a rule is answered
+    /// with one code whichever stream carried it.
+    ///
+    /// Not every rule that reaches here is the decoder's. A track whose objects
+    /// mix forwarding preferences is the endpoint's to notice — it takes the
+    /// alias table to know which track an object belongs to — and it arrives on
+    /// exactly these streams. Both kinds are asked for a code the same way, and
+    /// a rule with no code is declined rather than guessed at.
+    pub fn close_for_data_stream(&self, err: &ConnectionError) -> bool {
+        // Saturate rather than truncate, so a future code above `u32::MAX` is
+        // never reported as a different assigned one.
+        let protocol_violation = u32::try_from(
+            moqtap_codec::draft15::error_codes::SessionErrorCode::ProtocolViolation.as_u64(),
+        )
+        .unwrap_or(u32::MAX);
+        match err {
+            ConnectionError::Codec(inner) => {
+                let Some(code) = Self::codec_session_error_code(inner) else { return false };
+                let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+                self.close(wire_code, inner.to_string().as_bytes());
+                true
+            }
+            // Not a `Codec` failure: the codec decodes such an Object without
+            // complaint, because the frame is well formed. It is being an
+            // endpoint that makes it a violation.
+            ConnectionError::ExtensionsOnNonNormalStatus { .. } => {
+                self.close(protocol_violation, err.to_string().as_bytes());
+                true
+            }
+            // A rule the endpoint raises rather than the decoder. The two
+            // reach their codes through different tables and mean the same
+            // thing here: `Some` is a rule this draft ends the session over.
+            ConnectionError::Endpoint(inner) => {
+                let Some(code) = inner.session_error_code() else { return false };
+                let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+                self.close(wire_code, inner.to_string().as_bytes());
+                true
+            }
+            _ => false,
+        }
     }
 
     // -- Accessors --------------------------------------------------
@@ -847,6 +1593,229 @@ impl Connection {
     /// Returns the draft version this connection is using.
     pub fn draft(&self) -> DraftVersion {
         self.draft
+    }
+
+    /// The code to close the session with when a control message could not be
+    /// decoded because the peer broke a rule draft-15 answers with a close.
+    ///
+    /// Every variant listed here comes from a sentence in this draft that names
+    /// the consequence, and the list is deliberately shorter than draft-17's:
+    /// the bounds are per draft, and answering one this draft does not state
+    /// would close a session over traffic a conforming peer may send.
+    ///
+    ///   - Reason Phrase, maximum 1024 bytes: "If an endpoint receives a length
+    ///     exceeding the maximum, it MUST close the session with a
+    ///     PROTOCOL_VIOLATION."
+    ///   - KVP value, maximum 2^16-1 bytes, with the same sentence.
+    ///   - Track Namespace field count: "If an endpoint receives a Track
+    ///     Namespace consisting of 0 or greater than 32 Track Namespace Fields,
+    ///     it MUST close the session with a PROTOCOL_VIOLATION." Note the lower
+    ///     bound — an empty tuple is refused here, where drafts 17 and later
+    ///     permit it.
+    ///   - Full Track Name, maximum 4,096 bytes. Draft-15 states this of the Full Track
+    ///     Name alone; draft-16 widened it to a Track Namespace on its own.
+    ///   - Duplicate parameters, a SHOULD rather than a MUST: "Receivers SHOULD
+    ///     check that there are no unauthorized duplicate parameters and close the
+    ///     session as a PROTOCOL_VIOLATION"
+    ///
+    ///   - GOAWAY New Session URI, maximum 8,192 bytes: "If an endpoint
+    ///     receives a length exceeding the maximum, it MUST close the session
+    ///     with a PROTOCOL_VIOLATION." Every draft from 11 to 19 states it; 07
+    ///     through 10 state no maximum for the field at all.
+    ///   - Unknown control message type: "An endpoint that receives an unknown
+    ///     message type MUST close the session." All thirteen drafts state it,
+    ///     in the same words, and the sentence names no code, so Protocol
+    ///     Violation is what carries it.
+    ///
+    /// **Not** the unknown Message Parameter rule. Drafts 16 through 19 require
+    /// a close for a Message Parameter whose type the negotiated version does
+    /// not define. This draft states the opposite and states it about the same
+    /// parameters: "Receivers MUST allow duplicates of unknown parameters",
+    /// which presumes an unknown parameter arrives and is carried. Refusing one
+    /// here would close a session over an extension this draft leaves room for.
+    ///
+    /// `None` for everything else, including [`CodecError::InvalidField`]. That
+    /// variant is shared by a dozen unrelated malformations, only some of which
+    /// the draft answers with a close, so treating it as fatal would close
+    /// sessions the draft does not ask to be closed. Splitting it is the way to
+    /// bring the rest of those rules under this function; widening the match is
+    /// not.
+    fn codec_session_error_code(
+        err: &CodecError,
+    ) -> Option<moqtap_codec::draft15::error_codes::SessionErrorCode> {
+        use moqtap_codec::draft15::error_codes::SessionErrorCode;
+        use moqtap_codec::kvp::KvpError;
+        match err {
+            // The declared Length disagreeing with the fields, which every
+            // draft answers with a close. Drafts 07 through 10 name no code for
+            // it, so it takes the one their other unnamed rules take.
+            // A Filter Type outside the four this draft assigns, Section 5.1.2:
+            // "An endpoint that receives a filter type other than the above MUST
+            // close the session with PROTOCOL_VIOLATION."
+            //
+            // Drafts 07 through 14 carried the Filter Type as a field of
+            // SUBSCRIBE. From draft-15 it is the first field inside the
+            // length-prefixed filter parameter, where a codec that carries the
+            // value as opaque bytes never reads it — the rule did not change and
+            // the place it has to be enforced did.
+            CodecError::InvalidFilterType(_) => Some(SessionErrorCode::ProtocolViolation),
+            // A filter parameter whose value is not a filter, Section 9.2.1.7:
+            // "It is a length-prefixed Subscription Filter... If the length of
+            // the Subscription Filter does not match the parameter length, the
+            // publisher MUST close the session with PROTOCOL_VIOLATION."
+            //
+            // The one key-value malformation this draft answers with something
+            // other than KEY_VALUE_FORMATTING_ERROR. The general rule covers the
+            // same bytes and names that code; the sentence above is the specific
+            // one, so it governs. Drafts 17 and later drop it and leave only the
+            // general rule, which is why the same malformation ends a session
+            // there under a different code.
+            CodecError::SubscriptionFilterMalformed { .. } => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            // A Fetch Type outside the three this draft assigns: "An endpoint
+            // that receives a Fetch Type other than 0x1, 0x2 or 0x3 MUST close
+            // the session with a PROTOCOL_VIOLATION." The value decides which
+            // fields follow it — a Standalone fetch carries a track name and a
+            // range where a joining fetch carries a Request ID and an offset —
+            // so a reader that cannot name the type cannot find the end of the
+            // message.
+            CodecError::InvalidFetchType(_) => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::ControlMessageLengthMismatch { .. } => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            CodecError::DuplicateParameter(_)
+            | CodecError::TrackNameTooLong
+            | CodecError::InvalidNamespaceTupleSize(_)
+            | CodecError::ReasonPhraseTooLong
+            | CodecError::GoAwayUriTooLong
+            | CodecError::UnknownMessageType(_)
+            | CodecError::Kvp(KvpError::ValueTooLong(_)) => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            // An unknown data-plane type, Section 10: "An endpoint that
+            // receives an unknown stream or datagram type MUST close the
+            // session." One sentence covering two tables, which is why both
+            // variants sit here.
+            // A Message Parameter whose value is outside the range its type
+            // allows: FORWARD in Section 9.2.1.10, GROUP_ORDER in Section 9.2.1.6,
+            // SUBSCRIBER_PRIORITY in Section 9.2.1.5 and DYNAMIC_GROUPS in
+            // Section 9.2.1.11.
+            // Each states that a receiver "MUST close the session with
+            // PROTOCOL_VIOLATION".
+            CodecError::ParameterValueOutOfRange { .. } => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            CodecError::UnknownStreamType(_) | CodecError::UnknownDatagramType(_) => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
+            // A key-value pair whose value is not the serialization its own
+            // Type defines, Section 1.4.2: "If a receiver understands a Type,
+            // and the following Value or Length/Value does not match the
+            // serialization defined by that Type, the receiver MUST terminate the
+            // session with error code KEY_VALUE_FORMATTING_ERROR."
+            //
+            // Section 9.2.1.1 states the same answer for the one structure this
+            // draft spells out: "If the Token structure cannot be decoded, the
+            // receiver MUST close the Session with KEY_VALUE_FORMATTING_ERROR."
+            //
+            // The one rule in this table that names a code other than Protocol
+            // Violation.
+            CodecError::KeyValueFormatting { .. } => {
+                Some(SessionErrorCode::KeyValueFormattingError)
+            }
+            // Everything this draft does not answer, named rather than swept up
+            // by a wildcard. The arm is exhaustive deliberately: a new
+            // `CodecError` variant will not compile until it has been placed on
+            // one side or the other, on this draft, which is the decision a `_`
+            // arm makes silently and invisibly on all thirteen at once.
+            //
+            // Adding one variant to `CodecError` was tried, and produces
+            // thirteen `E0004`s, one per draft, each naming the variant that has
+            // nowhere to go. That is the whole mechanism.
+            //
+            // The nesting stops at `VarInt`, whose variants report how the bytes
+            // ran out rather than a rule an endpoint states, so there is nothing
+            // in it for a draft to answer. `Kvp` is spelled out because it does
+            // carry one.
+            // Neither field exists from draft-15 on. Forwarding became the
+            // FORWARD parameter, which carries the same rule in a different
+            // shape and is answered above under its own variant; Content Exists
+            // became the presence or absence of a LARGEST_OBJECT parameter.
+            CodecError::InvalidForward(_)
+            | CodecError::InvalidContentExists(_)
+            | CodecError::UnexpectedEnd
+            | CodecError::MessageTooLong(_)
+            | CodecError::VarInt(_)
+            | CodecError::InvalidField
+            | CodecError::EmptyNamespaceField
+            | CodecError::InvalidRange(..)
+            | CodecError::ParameterLengthMismatch(_)
+            | CodecError::EndOfTrackObjectId(_)
+            | CodecError::KeyDeltaOverflow(..)
+            // Not `TrackPropertyValueOutOfRange`: draft-15 has no extension
+            // header or Track Property registry. DYNAMIC_GROUPS, which draft-16
+            // moves into one, is a Message Parameter here - Section 9.2.1.11,
+            // "Values larger than 1 are a Protocol Violation" - and arrives as
+            // `ParameterValueOutOfRange` above.
+            | CodecError::TrackPropertyValueOutOfRange { .. }
+            | CodecError::ParametersOutOfOrder(..)
+            | CodecError::ObjectIdOverflow(..)
+            | CodecError::ExtensionsOnNonExistentObject(_)
+            | CodecError::InvalidRequiredRequestIdDelta(..)
+            | CodecError::InvalidTypeValue { .. }
+            | CodecError::UnknownMessageParameter(_)
+            // Not `ParameterOutOfScope`: this draft states the scope rule and
+            // answers it the other way. Section 9.2.1 Version Specific Parameters: "Each
+            // version-specific parameter definition indicates the message types in which it can
+            // appear. If it appears in some other type of message, it MUST be
+            // ignored." The codec carries such a parameter on this draft and never
+            // raises the variant, so this arm records a rule this draft has and
+            // does not close over, not one it is missing. Draft-17 is where the
+            // second sentence becomes a close.
+            | CodecError::ParameterOutOfScope { .. }
+            // The End Group is written out in full on this draft, so there is
+            // nothing to add and nothing to overflow. Drafts 17 and later
+            // replaced it with a delta measured from the Start Location's Group,
+            // and 18 and 19 close the session when the sum leaves the range.
+            | CodecError::FilterEndGroupOverflow { .. }
+            // The object payload rule, Section 10.2.1.1: "Any object with a status
+            // code other than zero MUST have an empty payload." A MUST on the
+            // sender with no receiver action named anywhere — the "SHOULD be
+            // treated as a protocol error" in the same paragraph belongs to the
+            // sentence before it, which is about a status value this draft does
+            // not assign — so an object carrying a payload it may not is refused
+            // and the session stays open.
+            //
+            // That was already the answer. The bytes used to arrive as
+            // `InvalidField`, which is on this side too; naming the rule changes
+            // nothing a peer can observe and makes the decision legible.
+            | CodecError::PayloadNotPermitted { .. }
+            | CodecError::UnsupportedDraft(_)
+            | CodecError::Kvp(
+                KvpError::MissingLength | KvpError::UnexpectedEnd | KvpError::VarInt(_),
+            ) => None,
+        }
+    }
+
+    /// Close the session on the wire when a decode failure is one draft-15
+    /// answers with a close, and hand the error back unchanged.
+    /// Without it every bound the decoder enforces would stop at *this endpoint
+    /// refused the frame* while the peer, which is the one that broke the rule,
+    /// saw a session that was still open and went on sending. "MUST close the
+    /// session with a PROTOCOL_VIOLATION" is a statement about the wire.
+    fn close_for_codec(&self, err: ConnectionError) -> ConnectionError {
+        if let ConnectionError::Codec(inner) = &err {
+            if let Some(code) = Self::codec_session_error_code(inner) {
+                // QUIC application error codes are 62-bit; every code in this
+                // registry is far below `u32::MAX`, and saturating rather than
+                // truncating means a future code that is not could never be
+                // reported as a different, assigned one.
+                let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+                self.close(wire_code, inner.to_string().as_bytes());
+            }
+        }
+        err
     }
 
     /// Close the connection.
@@ -959,9 +1928,40 @@ mod tests {
         assert_eq!(config.alpn(), vec![b"h3".to_vec()]);
     }
 
+    /// `MOQT_ALPN` is the ALPN a client configured for this draft offers.
+    ///
+    /// Putting `moq-00` back — the value this constant held on all five of
+    /// drafts 15-19 — fails with:
+    ///
+    /// ```text
+    /// assertion `left == right` failed: MOQT_ALPN is "moq-00"; a draft-19 client offers ["moqt-19"]
+    /// ```
     #[test]
-    fn moqt_alpn_value() {
-        assert_eq!(MOQT_ALPN, b"moq-00");
+    fn moqt_alpn_is_the_one_a_client_offers() {
+        // A literal on its own is what let this constant keep `moq-00` for
+        // five drafts after draft-15 stopped using it, so the value is
+        // checked against what a client configured for this draft actually
+        // puts on the wire, and only then against the literal.
+        let config = ClientConfig {
+            draft: DraftVersion::Draft15,
+            transport: TransportType::Quic,
+            skip_cert_verification: false,
+            ca_certs: Vec::new(),
+            setup_parameters: Vec::new(),
+        };
+        assert_eq!(
+            config.alpn(),
+            vec![MOQT_ALPN.to_vec()],
+            "MOQT_ALPN is {:?}; a draft-{} client offers {:?}",
+            String::from_utf8_lossy(MOQT_ALPN),
+            15,
+            config
+                .alpn()
+                .iter()
+                .map(|a| String::from_utf8_lossy(a).into_owned())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(MOQT_ALPN, b"moqt-15");
     }
 
     #[test]

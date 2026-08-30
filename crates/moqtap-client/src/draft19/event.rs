@@ -14,7 +14,7 @@ pub enum Direction {
     Receive,
 }
 
-/// Data stream type.
+/// The kind of stream an event refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamKind {
     /// Subgroup data stream.
@@ -23,6 +23,15 @@ pub enum StreamKind {
     Fetch,
     /// Datagram.
     Datagram,
+    /// Request stream: the bidirectional stream one request and its response
+    /// travel on.
+    ///
+    /// Draft-19 Section 3.3 moved requests off the control plane and gave each
+    /// one a bidirectional stream that begins with the request message. This
+    /// is the only kind here that is not a data stream, and it is named
+    /// because an observer that could not name it would see a request message
+    /// with no stream to attach it to.
+    Request,
 }
 
 /// Events emitted by a MoQT connection.
@@ -34,7 +43,7 @@ pub enum StreamKind {
 pub enum ClientEvent {
     /// MoQT setup handshake completed.
     SetupComplete {
-        /// The negotiated MoQT version (from ALPN in draft-18).
+        /// The negotiated MoQT version (from ALPN in draft-19).
         negotiated_version: u64,
     },
 
@@ -44,6 +53,15 @@ pub enum ClientEvent {
         direction: Direction,
         /// The decoded control message.
         message: AnyControlMessage,
+        /// The transport-level identifier of the stream the message travelled
+        /// on when that stream is a request stream, and `None` when it is the
+        /// control stream.
+        ///
+        /// Draft-19 responses carry no request id: the stream is the
+        /// correlation. Without this an observer sees a SUBSCRIBE_OK with
+        /// nothing to say which SUBSCRIBE it answers, and cannot tell a
+        /// message on the control stream from one on a request stream.
+        stream_id: Option<u64>,
         /// The raw wire bytes of the framed message (type + length + payload).
         /// `None` if raw capture is not available.
         raw: Option<Vec<u8>>,

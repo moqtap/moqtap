@@ -99,9 +99,21 @@ impl SubscriptionStateMachine {
         }
     }
 
-    /// Active -> Active (SUBSCRIBE_UPDATE received -- self-transition).
+    /// REQUEST_UPDATE received -- a self-transition, from Subscribing as well as
+    /// from Active.
+    ///
+    /// Section 9.11 orders an update against the request rather than against
+    /// the request's answer: the sender of a SUBSCRIBE "can later send a
+    /// REQUEST_UPDATE to modify it", where later is later than the SUBSCRIBE.
+    /// The message names what it updates in its own Existing Request ID field,
+    /// which the SUBSCRIBE has already established.
+    ///
+    /// So a peer that sends SUBSCRIBE and REQUEST_UPDATE back to back breaks no
+    /// rule this draft states, and an update arriving before the answer leaves
+    /// the subscription where it found it. `Idle` and `Done` are still refused:
+    /// in neither does the subscription an update names exist.
     pub fn on_subscribe_update(&mut self) -> Result<(), SubscriptionError> {
-        if self.state == SubscriptionState::Active {
+        if matches!(self.state, SubscriptionState::Subscribing | SubscriptionState::Active) {
             Ok(())
         } else {
             Err(SubscriptionError::InvalidTransition {
@@ -122,5 +134,62 @@ impl SubscriptionStateMachine {
                 event: "on_publish_done".to_string(),
             })
         }
+    }
+}
+
+/// The same six transitions, named for the end that sees them.
+///
+/// A subscription this endpoint publishes runs through the states in the same
+/// order as one it subscribes to, with every message going the other way: the
+/// SUBSCRIBE arrives instead of leaving, the answer leaves instead of
+/// arriving. Sharing the transitions and not the names is what lets a refusal
+/// say which event was refused, rather than naming the mirror image of it.
+impl SubscriptionStateMachine {
+    /// Idle -> Subscribing (SUBSCRIBE received from a subscribing peer).
+    pub fn on_subscribe_received(&mut self) -> Result<(), SubscriptionError> {
+        self.on_subscribe_sent().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_subscribe_received".to_string(),
+        })
+    }
+
+    /// Subscribing -> Active (SUBSCRIBE_OK sent to the subscribing peer).
+    pub fn on_subscribe_ok_sent(&mut self) -> Result<(), SubscriptionError> {
+        self.on_subscribe_ok().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_subscribe_ok_sent".to_string(),
+        })
+    }
+
+    /// Subscribing -> Done (REQUEST_ERROR sent to the subscribing peer).
+    pub fn on_request_error_sent(&mut self) -> Result<(), SubscriptionError> {
+        self.on_subscribe_error().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_request_error_sent".to_string(),
+        })
+    }
+
+    /// Active -> Done (UNSUBSCRIBE received from the subscribing peer).
+    pub fn on_unsubscribe_received(&mut self) -> Result<(), SubscriptionError> {
+        self.on_unsubscribe().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_unsubscribe_received".to_string(),
+        })
+    }
+
+    /// Active -> Done (PUBLISH_DONE sent to the subscribing peer).
+    pub fn on_publish_done_sent(&mut self) -> Result<(), SubscriptionError> {
+        self.on_publish_done().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_publish_done_sent".to_string(),
+        })
+    }
+
+    /// Subscribing or Active, unchanged (REQUEST_UPDATE received from the subscribing peer).
+    pub fn on_request_update_received(&mut self) -> Result<(), SubscriptionError> {
+        self.on_subscribe_update().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_request_update_received".to_string(),
+        })
     }
 }

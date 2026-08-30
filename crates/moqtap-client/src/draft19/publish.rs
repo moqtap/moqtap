@@ -7,7 +7,7 @@ pub enum PublishState {
     Publishing,
     /// PUBLISH_OK received; the track is being published.
     Active,
-    /// Publish has ended (error or PUBLISH_DONE sent).
+    /// Publish has ended (error, cancellation, or PUBLISH_DONE sent).
     Done,
 }
 
@@ -96,6 +96,34 @@ impl PublishStateMachine {
                 from: self.state,
                 event: "on_publish_done_sent".to_string(),
             })
+        }
+    }
+
+    /// Publishing | Active -> Done, Done -> Done (this request's stream was
+    /// cancelled).
+    ///
+    /// PUBLISH_DONE ends a publication the receiver accepted. This is the
+    /// request itself being withdrawn, which this draft puts at the stream —
+    /// Section 3.3.3: "Once a request
+    /// stream has been opened, the request MAY be cancelled by either endpoint."
+    ///
+    /// `Idle` is refused, on the other half of the same sentence: nothing has
+    /// been written, so there is no stream to terminate. `Done` stays `Done` —
+    /// nothing finishes a request stream's send half on the ordinary path, so a
+    /// caller that walks away from a request that has already ended still
+    /// resets the stream, and that reset is an ordinary end rather than a
+    /// fault.
+    pub fn on_request_cancelled(&mut self) -> Result<(), PublishError> {
+        match self.state {
+            PublishState::Publishing | PublishState::Active => {
+                self.state = PublishState::Done;
+                Ok(())
+            }
+            PublishState::Done => Ok(()),
+            PublishState::Idle => Err(PublishError::InvalidTransition {
+                from: self.state,
+                event: "on_request_cancelled".to_string(),
+            }),
         }
     }
 }

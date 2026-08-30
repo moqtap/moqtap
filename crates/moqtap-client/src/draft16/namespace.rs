@@ -99,15 +99,79 @@ impl SubscribeNamespaceStateMachine {
         }
     }
 
-    /// Active -> Done.
-    pub fn on_unsubscribe_namespace(&mut self) -> Result<(), NamespaceError> {
-        if self.state == SubscribeNamespaceState::Active {
+    /// Pending | Active -> Done, Done -> Done (this subscription's stream was
+    /// closed).
+    ///
+    /// Draft-16 has no UNSUBSCRIBE_NAMESPACE. The subscription is withdrawn by
+    /// ending the stream it was made on — Section 6.1: "A SUBSCRIBE_NAMESPACE
+    /// can be cancelled by closing the stream with either a FIN or
+    /// RESET_STREAM." Either form is a withdrawal, so both arrive here.
+    ///
+    /// `Pending` is accepted because the stream is open from the
+    /// SUBSCRIBE_NAMESPACE that opened it, and the sentence asks for nothing
+    /// more: a namespace subscription can be withdrawn before it is ever
+    /// answered.
+    ///
+    /// `Idle` is refused, on the other half of the same sentence: nothing has
+    /// been written, so there is no stream to close. `Done` stays `Done` — a
+    /// subscription that has already ended is still carried on a stream, and
+    /// closing that stream afterwards is the ordinary end rather than a fault.
+    pub fn on_request_cancelled(&mut self) -> Result<(), NamespaceError> {
+        match self.state {
+            SubscribeNamespaceState::Pending | SubscribeNamespaceState::Active => {
+                self.state = SubscribeNamespaceState::Done;
+                Ok(())
+            }
+            SubscribeNamespaceState::Done => Ok(()),
+            SubscribeNamespaceState::Idle => Err(NamespaceError::InvalidTransition {
+                from: format!("{:?}", self.state),
+                event: "on_request_cancelled".to_string(),
+            }),
+        }
+    }
+
+    /// Idle -> Pending (the peer opened a stream with a SUBSCRIBE_NAMESPACE on
+    /// it).
+    ///
+    /// The mirror of [`on_subscribe_namespace_sent`](Self::on_subscribe_namespace_sent),
+    /// named for the direction it runs in rather than sharing that one: the
+    /// state edges coincide, so a mis-dispatch would succeed silently instead
+    /// of naming the wrong event in an `InvalidTransition`.
+    pub fn on_subscribe_namespace_received(&mut self) -> Result<(), NamespaceError> {
+        if self.state == SubscribeNamespaceState::Idle {
+            self.state = SubscribeNamespaceState::Pending;
+            Ok(())
+        } else {
+            Err(NamespaceError::InvalidTransition {
+                from: format!("{:?}", self.state),
+                event: "on_subscribe_namespace_received".to_string(),
+            })
+        }
+    }
+
+    /// Pending -> Active (this endpoint answered the peer's request with a
+    /// REQUEST_OK).
+    pub fn on_subscribe_namespace_ok_sent(&mut self) -> Result<(), NamespaceError> {
+        if self.state == SubscribeNamespaceState::Pending {
+            self.state = SubscribeNamespaceState::Active;
+            Ok(())
+        } else {
+            Err(NamespaceError::InvalidTransition {
+                from: format!("{:?}", self.state),
+                event: "on_subscribe_namespace_ok_sent".to_string(),
+            })
+        }
+    }
+
+    /// Pending -> Done (this endpoint refused the peer's request).
+    pub fn on_subscribe_namespace_error_sent(&mut self) -> Result<(), NamespaceError> {
+        if self.state == SubscribeNamespaceState::Pending {
             self.state = SubscribeNamespaceState::Done;
             Ok(())
         } else {
             Err(NamespaceError::InvalidTransition {
                 from: format!("{:?}", self.state),
-                event: "on_unsubscribe_namespace".to_string(),
+                event: "on_subscribe_namespace_error_sent".to_string(),
             })
         }
     }
@@ -199,5 +263,59 @@ impl PublishNamespaceStateMachine {
                 event: "on_publish_namespace_cancel".to_string(),
             })
         }
+    }
+}
+
+/// The same transitions, named for the end the advertisement arrives at.
+///
+/// An announcement this endpoint accepts passes through the states in the same
+/// order as one it makes, with every message going the other way: the PUBLISH_NAMESPACE
+/// arrives instead of leaving, the answer leaves instead of arriving, the
+/// withdrawal arrives and the cancellation leaves. Sharing the transitions and
+/// not the names is what lets a refusal say which event was refused, rather
+/// than naming the mirror image of it.
+impl PublishNamespaceStateMachine {
+    /// Idle -> Pending (PUBLISH_NAMESPACE received from the peer).
+    pub fn on_publish_namespace_received(&mut self) -> Result<(), NamespaceError> {
+        self.on_publish_namespace_sent().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_publish_namespace_received".to_string(),
+        })
+    }
+
+    /// Pending -> Active (REQUEST_OK sent, accepting the announcement).
+    pub fn on_publish_namespace_ok_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_publish_namespace_ok().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_publish_namespace_ok_sent".to_string(),
+        })
+    }
+
+    /// Pending -> Done (REQUEST_ERROR sent, refusing the announcement).
+    pub fn on_publish_namespace_error_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_publish_namespace_error().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_publish_namespace_error_sent".to_string(),
+        })
+    }
+
+    /// Active -> Done (PUBLISH_NAMESPACE_DONE received, the peer withdrawing).
+    pub fn on_publish_namespace_done_received(&mut self) -> Result<(), NamespaceError> {
+        self.on_publish_namespace_done().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_publish_namespace_done_received".to_string(),
+        })
+    }
+
+    /// Active -> Done (PUBLISH_NAMESPACE_CANCEL sent, revoking an acceptance).
+    ///
+    /// Active is the acceptance: it is the state an announcement reaches by
+    /// being answered REQUEST_OK and no other way, which is why a cancellation
+    /// of one never answered is refused here rather than sent.
+    pub fn on_publish_namespace_cancel_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_publish_namespace_cancel().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_publish_namespace_cancel_sent".to_string(),
+        })
     }
 }
