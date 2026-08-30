@@ -3,12 +3,11 @@
 //! Wire format is identical to draft-08 except `filter_type=1`
 //! (NextGroupStart/LatestGroup) is removed from SUBSCRIBE.
 
-use crate::error::{
-    CodecError, MAX_GOAWAY_URI_LENGTH, MAX_MESSAGE_LENGTH, MAX_REASON_PHRASE_LENGTH,
-};
+use crate::error::CodecError;
 use crate::kvp::KeyValuePair;
 use crate::types::read_bytes;
 use crate::types::*;
+use crate::types::{check_group_range, check_location_range, check_open_ended_group_range};
 use crate::varint::VarInt;
 use bytes::{Buf, BufMut};
 
@@ -463,6 +462,125 @@ pub struct FetchCancel {
 // Unified Message Enum
 // ============================================================
 
+/// Read a Group Order from a message that must name a real order.
+///
+/// SUBSCRIBE_OK and FETCH_OK each say
+/// "Values of 0x0 and those larger than 0x2 are a protocol error": a responder
+/// reports the order it settled on, so deferring to the publisher is not an
+/// answer it can give. SUBSCRIBE and FETCH are the requests, and there
+/// 0x0 is exactly how a subscriber says it has no preference — "the original
+/// publisher's Group Order SHOULD be used". The two readers cannot be merged
+/// without either refusing traffic the requests permit or accepting a reply
+/// that tells the subscriber nothing.
+fn read_group_order_response(buf: &mut impl Buf) -> Result<GroupOrder, CodecError> {
+    if !buf.has_remaining() {
+        return Err(CodecError::UnexpectedEnd);
+    }
+    match GroupOrder::from_u8(buf.get_u8()).ok_or(CodecError::InvalidField)? {
+        GroupOrder::Publisher => Err(CodecError::InvalidField),
+        order => Ok(order),
+    }
+}
+
+/// Hold a TRACK_STATUS Status Code and the fields after it to Section 7.24.
+///
+/// "The 'Status Code' field provides additional information about the status of
+/// the track. It MUST hold one of the following values. Any other value is a
+/// malformed message." Two of those values - 0x01 and 0x02 - add "Subsequent
+/// fields MUST be zero, and any other value is a malformed message".
+///
+/// Applied on both sides. A malformed message is one this codec must not read
+/// and equally must not write: an encoder that emits an unassigned Status Code
+/// hands a conforming peer a message it is required to reject.
+fn check_track_status(
+    status_code: VarInt,
+    last_group_id: VarInt,
+    last_object_id: VarInt,
+) -> Result<(), CodecError> {
+    let code = crate::draft09::error_codes::TrackStatusCode::from_u64(status_code.into_inner())
+        .ok_or(CodecError::InvalidField)?;
+    if code.requires_zero_location()
+        && (last_group_id.into_inner() != 0 || last_object_id.into_inner() != 0)
+    {
+        return Err(CodecError::InvalidField);
+    }
+    Ok(())
+}
+
+/// Refuse a message whose optional fields disagree with the field that decides
+/// whether they are on the wire.
+///
+/// Presence is not a property of the Rust value: the decoder derives it from a
+/// Filter Type, a Content Exists flag or a Fetch Type, and reads exactly the
+/// fields that discriminator names. An encoder that instead writes whatever
+/// happens to be `Some` produces a frame its own reader refuses - short by the
+/// missing fields, so the declared length runs out mid-payload, or long by the
+/// surplus ones, so bytes are left over. Section 7 makes either a session
+/// close, which is why this refuses rather than papering over it.
+fn check_discriminators(message: &ControlMessage) -> Result<(), CodecError> {
+    match message {
+        ControlMessage::Subscribe(m) => {
+            // This draft dropped Filter Type 0x1, and the decoder refuses it.
+            if m.filter_type == FilterType::NextGroupStart {
+                return Err(CodecError::InvalidField);
+            }
+            let wants_start =
+                matches!(m.filter_type, FilterType::AbsoluteStart | FilterType::AbsoluteRange);
+            if wants_start != m.start_location.is_some() {
+                return Err(CodecError::InvalidField);
+            }
+            if (m.filter_type == FilterType::AbsoluteRange) != m.end_group.is_some() {
+                return Err(CodecError::InvalidField);
+            }
+            Ok(())
+        }
+        ControlMessage::SubscribeOk(m) => {
+            let has = m.content_exists == ContentExists::HasLargestLocation;
+            if has != m.largest_group_id.is_some() || has != m.largest_object_id.is_some() {
+                return Err(CodecError::InvalidField);
+            }
+            Ok(())
+        }
+        ControlMessage::Fetch(m) => {
+            let standalone = m.fetch_type == FetchType::Standalone;
+            let standalone_fields = [
+                m.track_namespace.is_some(),
+                m.track_name.is_some(),
+                m.start_group.is_some(),
+                m.start_object.is_some(),
+                m.end_group.is_some(),
+                m.end_object.is_some(),
+            ];
+            if standalone_fields.iter().any(|present| *present != standalone) {
+                return Err(CodecError::InvalidField);
+            }
+            let joining_fields =
+                [m.joining_subscribe_id.is_some(), m.preceding_group_offset.is_some()];
+            if joining_fields.contains(&standalone) {
+                return Err(CodecError::InvalidField);
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Refuse a Group Order of 0x0 on the messages that forbid it.
+///
+/// The decoders refuse it on the way in; without this the codec would still
+/// write a frame its own reader rejects.
+fn check_group_order(message: &ControlMessage) -> Result<(), CodecError> {
+    let order = match message {
+        ControlMessage::SubscribeOk(m) => m.group_order,
+        ControlMessage::FetchOk(m) => m.group_order,
+        _ => return Ok(()),
+    };
+    if order == GroupOrder::Publisher {
+        return Err(CodecError::InvalidField);
+    }
+    Ok(())
+}
+
 /// A decoded MoQT control message (draft-09).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ControlMessage {
@@ -520,6 +638,166 @@ pub enum ControlMessage {
     FetchCancel(FetchCancel),
 }
 
+/// Refuse a request whose range ends before it starts.
+///
+/// SUBSCRIBE's AbsoluteRange filter (Section 7.4), SUBSCRIBE_UPDATE
+/// (Section 7.5) and FETCH (Section 7.7) each state it, and the fields
+/// are not spelled the same way in the three places: an End Group is inclusive
+/// on SUBSCRIBE and FETCH and is the last group plus one on SUBSCRIBE_UPDATE,
+/// where zero means open ended, and an End Object is the last object plus one
+/// with zero meaning the whole group. The helpers this calls carry those
+/// conventions, one per shape.
+///
+/// Applied on both sides. A range that ends before it starts selects nothing,
+/// and the peer's only recourse is an error response or a session close, so
+/// writing one is not a way to ask for anything.
+fn check_ranges(message: &ControlMessage) -> Result<(), CodecError> {
+    match message {
+        ControlMessage::Subscribe(m) => match (&m.start_location, &m.end_group) {
+            (Some(start), Some(end_group)) => {
+                check_group_range(start.group.into_inner(), end_group.into_inner())
+            }
+            _ => Ok(()),
+        },
+        ControlMessage::SubscribeUpdate(m) => {
+            check_open_ended_group_range(m.start_group.into_inner(), m.end_group.into_inner())
+        }
+        ControlMessage::Fetch(m) => {
+            match (&m.start_group, &m.start_object, &m.end_group, &m.end_object) {
+                (Some(start_group), Some(start_object), Some(end_group), Some(end_object)) => {
+                    check_location_range(
+                        start_group.into_inner(),
+                        start_object.into_inner(),
+                        end_group.into_inner(),
+                        end_object.into_inner(),
+                    )
+                }
+                _ => Ok(()),
+            }
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Refuse a parameter list that names the same Parameter Type twice.
+///
+/// Section 7.1: "Senders MUST NOT repeat the same parameter type in a
+/// message. Receivers SHOULD check that there are no duplicate
+/// parameters and close the session as a 'Protocol Violation' if found."
+///
+/// Applied on both sides. Code that scans a parameter list for a key takes
+/// whichever copy it meets first, so one frame carrying two values for one type
+/// is read differently by two conforming implementations - which is what makes
+/// the sender's half a MUST NOT rather than advice.
+fn check_no_duplicate_parameters(parameters: &[KeyValuePair]) -> Result<(), CodecError> {
+    for (i, parameter) in parameters.iter().enumerate() {
+        if parameters[..i].iter().any(|earlier| earlier.key == parameter.key) {
+            return Err(CodecError::DuplicateParameter(parameter.key.into_inner()));
+        }
+    }
+    Ok(())
+}
+
+/// The setup parameters this draft describes as carrying a single integer.
+///
+/// Section 7.2.2.2 gives MAX_SUBSCRIBE_ID as "an initial value for the Maximum
+/// Subscribe ID". PATH (Section 7.2.2.1) is a URI string and carries no implied
+/// length, so it is absent; ROLE, the other varint-valued setup parameter,
+/// belongs to draft-07 and this draft does not define it.
+const SETUP_VARINT_PARAMETERS: &[u64] = &[0x02];
+
+/// The version-specific parameters this draft describes as carrying a single
+/// integer.
+///
+/// Section 7.1.1.2 gives DELIVERY TIMEOUT as "the duration in milliseconds"
+/// and Section 7.1.1.3 gives MAX CACHE DURATION as "An integer expressing a
+/// number of milliseconds". AUTHORIZATION INFO is "an ASCII string" and is
+/// absent for the same reason PATH is.
+///
+/// The two lists are not interchangeable. Setup parameters and version-specific
+/// parameters use separate namespaces, and 0x02 is MAX_SUBSCRIBE_ID in one and
+/// AUTHORIZATION INFO in the other - applying the setup list to a SUBSCRIBE
+/// would refuse every authorization string that is not accidentally a varint.
+const VERSION_VARINT_PARAMETERS: &[u64] = &[0x03, 0x04];
+
+/// Refuse a parameter whose value is not the shape its type implies.
+///
+/// Section 7.1: "If a receiver understands a parameter type, and the parameter
+/// length implied by that type does not match the Parameter Length field, the
+/// receiver MUST terminate the session with error code 'Parameter Length
+/// Mismatch'."
+///
+/// This draft frames every parameter as {Type, Length, Value} with no per-key
+/// table, so a parameter that came off the wire always arrives as bytes and its
+/// declared length is whatever the sender wrote. For a type whose definition
+/// says the value is one integer, the implied length is that varint's own
+/// length, and the two agree only when the value is exactly one varint with
+/// nothing after it.
+///
+/// A value already held as a varint is not checked: [`KeyValuePair::encode_d07`]
+/// derives its length field from the varint it is about to write, so those two
+/// cannot disagree. Only bytes can.
+fn check_parameter_lengths(
+    parameters: &[KeyValuePair],
+    varint_typed: &[u64],
+) -> Result<(), CodecError> {
+    for parameter in parameters {
+        let key = parameter.key.into_inner();
+        if !varint_typed.contains(&key) {
+            continue;
+        }
+        if let crate::kvp::KvpValue::Bytes(bytes) = &parameter.value {
+            let mut cursor = &bytes[..];
+            let one_varint = VarInt::decode(&mut cursor).is_ok() && !cursor.has_remaining();
+            if !one_varint {
+                return Err(CodecError::ParameterLengthMismatch(key));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Decode a version-specific parameter list, refusing a repeated type and a
+/// value whose length disagrees with its type.
+fn decode_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError> {
+    let parameters = KeyValuePair::decode_list_d07(buf)?;
+    check_no_duplicate_parameters(&parameters)?;
+    check_parameter_lengths(&parameters, VERSION_VARINT_PARAMETERS)?;
+    Ok(parameters)
+}
+
+/// Encode a version-specific parameter list, refusing a repeated type and a
+/// value whose length disagrees with its type.
+fn encode_parameters(parameters: &[KeyValuePair], buf: &mut impl BufMut) -> Result<(), CodecError> {
+    check_no_duplicate_parameters(parameters)?;
+    check_parameter_lengths(parameters, VERSION_VARINT_PARAMETERS)?;
+    KeyValuePair::encode_list_d07(parameters, buf);
+    Ok(())
+}
+
+/// Decode a setup parameter list.
+///
+/// Setup parameters use a namespace of their own, so the same key number means
+/// something different here than it does in every other message and the implied
+/// lengths are read from a different list.
+fn decode_setup_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError> {
+    let parameters = KeyValuePair::decode_list_d07(buf)?;
+    check_no_duplicate_parameters(&parameters)?;
+    check_parameter_lengths(&parameters, SETUP_VARINT_PARAMETERS)?;
+    Ok(parameters)
+}
+
+/// Encode a setup parameter list, under the setup namespace's implied lengths.
+fn encode_setup_parameters(
+    parameters: &[KeyValuePair],
+    buf: &mut impl BufMut,
+) -> Result<(), CodecError> {
+    check_no_duplicate_parameters(parameters)?;
+    check_parameter_lengths(parameters, SETUP_VARINT_PARAMETERS)?;
+    KeyValuePair::encode_list_d07(parameters, buf);
+    Ok(())
+}
+
 impl ControlMessage {
     /// Return the message type for this control message.
     pub fn message_type(&self) -> MessageType {
@@ -555,12 +833,18 @@ impl ControlMessage {
 
     /// Encode this control message (type ID + length prefix + payload).
     pub fn encode(&self, buf: &mut impl BufMut) -> Result<(), CodecError> {
+        check_discriminators(self)?;
+        check_group_order(self)?;
+        check_ranges(self)?;
         let mut payload = Vec::with_capacity(256);
         self.encode_payload(&mut payload)?;
 
-        if payload.len() > MAX_MESSAGE_LENGTH {
-            return Err(CodecError::MessageTooLong(payload.len()));
-        }
+        // No cap here. This draft frames a control message with a varint
+        // Length and states no maximum, and this module's own decoder applies
+        // none either - a ceiling on encode would refuse to write a message
+        // this codec will read. The 65,535-byte limit belongs to draft-11 and
+        // later, where the Length field is 16 bits wide and the limit is a
+        // consequence of the framing.
 
         VarInt::from_usize(self.message_type().id() as usize).encode(buf);
         VarInt::from_usize(payload.len()).encode(buf);
@@ -579,7 +863,40 @@ impl ControlMessage {
         }
         let payload_bytes = buf.copy_to_bytes(payload_len);
         let mut payload = &payload_bytes[..];
-        Self::decode_payload(msg_type, &mut payload)
+        let msg = match Self::decode_payload(msg_type, &mut payload) {
+            Ok(msg) => msg,
+            // The fields wanted more bytes than the Length allowed. This buffer
+            // is already bounded by that Length, so running out inside it cannot
+            // mean the message is still arriving - which is what the same error
+            // means everywhere else, and why a reader loops on it rather than
+            // closing. Here there is nothing left to arrive.
+            Err(
+                CodecError::UnexpectedEnd
+                | CodecError::Kvp(crate::kvp::KvpError::UnexpectedEnd)
+                | CodecError::Kvp(crate::kvp::KvpError::VarInt(
+                    crate::varint::VarIntError::UnexpectedEnd,
+                ))
+                | CodecError::VarInt(crate::varint::VarIntError::UnexpectedEnd),
+            ) => {
+                return Err(CodecError::ControlMessageLengthMismatch {
+                    declared: payload_len,
+                    detail: "its fields ran past the end",
+                });
+            }
+            Err(e) => return Err(e),
+        };
+        check_ranges(&msg)?;
+        // The declared length is part of the message, not a hint. Bytes left over
+        // after the fields have been read mean the sender and this reader disagree
+        // about the shape of the message, and guessing which of the two is right
+        // is how a trailing field gets silently dropped.
+        if payload.has_remaining() {
+            return Err(CodecError::ControlMessageLengthMismatch {
+                declared: payload_len,
+                detail: "its fields left bytes unread",
+            });
+        }
+        Ok(msg)
     }
 
     fn encode_payload(&self, buf: &mut impl BufMut) -> Result<(), CodecError> {
@@ -589,16 +906,13 @@ impl ControlMessage {
                 for v in &m.supported_versions {
                     v.encode(buf);
                 }
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_setup_parameters(&m.parameters, buf)?;
             }
             ControlMessage::ServerSetup(m) => {
                 m.selected_version.encode(buf);
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_setup_parameters(&m.parameters, buf)?;
             }
             ControlMessage::GoAway(m) => {
-                if m.new_session_uri.len() > MAX_GOAWAY_URI_LENGTH {
-                    return Err(CodecError::GoAwayUriTooLong);
-                }
                 VarInt::from_usize(m.new_session_uri.len()).encode(buf);
                 buf.put_slice(&m.new_session_uri);
             }
@@ -611,6 +925,7 @@ impl ControlMessage {
             ControlMessage::Subscribe(m) => {
                 m.subscribe_id.encode(buf);
                 m.track_alias.encode(buf);
+                m.track_namespace.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace.encode(buf);
                 VarInt::from_usize(m.track_name.len()).encode(buf);
                 buf.put_slice(&m.track_name);
@@ -623,7 +938,7 @@ impl ControlMessage {
                 if let Some(eg) = &m.end_group {
                     eg.encode(buf);
                 }
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_parameters(&m.parameters, buf)?;
             }
             ControlMessage::SubscribeOk(m) => {
                 m.subscribe_id.encode(buf);
@@ -636,12 +951,9 @@ impl ControlMessage {
                 if let Some(oid) = &m.largest_object_id {
                     oid.encode(buf);
                 }
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_parameters(&m.parameters, buf)?;
             }
             ControlMessage::SubscribeError(m) => {
-                if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
-                    return Err(CodecError::ReasonPhraseTooLong);
-                }
                 m.subscribe_id.encode(buf);
                 m.error_code.encode(buf);
                 VarInt::from_usize(m.reason_phrase.len()).encode(buf);
@@ -654,12 +966,9 @@ impl ControlMessage {
                 m.start_object.encode(buf);
                 m.end_group.encode(buf);
                 buf.put_u8(m.subscriber_priority);
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_parameters(&m.parameters, buf)?;
             }
             ControlMessage::SubscribeDone(m) => {
-                if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
-                    return Err(CodecError::ReasonPhraseTooLong);
-                }
                 m.subscribe_id.encode(buf);
                 m.status_code.encode(buf);
                 m.stream_count.encode(buf);
@@ -670,61 +979,64 @@ impl ControlMessage {
                 m.subscribe_id.encode(buf);
             }
             ControlMessage::Announce(m) => {
+                m.track_namespace.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace.encode(buf);
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_parameters(&m.parameters, buf)?;
             }
             ControlMessage::AnnounceOk(m) => {
+                m.track_namespace.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace.encode(buf);
             }
             ControlMessage::AnnounceError(m) => {
-                if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
-                    return Err(CodecError::ReasonPhraseTooLong);
-                }
+                m.track_namespace.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace.encode(buf);
                 m.error_code.encode(buf);
                 VarInt::from_usize(m.reason_phrase.len()).encode(buf);
                 buf.put_slice(&m.reason_phrase);
             }
             ControlMessage::AnnounceCancel(m) => {
-                if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
-                    return Err(CodecError::ReasonPhraseTooLong);
-                }
+                m.track_namespace.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace.encode(buf);
                 m.error_code.encode(buf);
                 VarInt::from_usize(m.reason_phrase.len()).encode(buf);
                 buf.put_slice(&m.reason_phrase);
             }
             ControlMessage::Unannounce(m) => {
+                m.track_namespace.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace.encode(buf);
             }
             ControlMessage::SubscribeAnnounces(m) => {
+                m.track_namespace_prefix.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace_prefix.encode(buf);
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_parameters(&m.parameters, buf)?;
             }
             ControlMessage::SubscribeAnnouncesOk(m) => {
+                m.track_namespace_prefix.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace_prefix.encode(buf);
             }
             ControlMessage::SubscribeAnnouncesError(m) => {
-                if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
-                    return Err(CodecError::ReasonPhraseTooLong);
-                }
+                m.track_namespace_prefix.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace_prefix.encode(buf);
                 m.error_code.encode(buf);
                 VarInt::from_usize(m.reason_phrase.len()).encode(buf);
                 buf.put_slice(&m.reason_phrase);
             }
             ControlMessage::UnsubscribeAnnounces(m) => {
+                m.track_namespace_prefix.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace_prefix.encode(buf);
             }
             ControlMessage::TrackStatusRequest(m) => {
+                m.track_namespace.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace.encode(buf);
                 VarInt::from_usize(m.track_name.len()).encode(buf);
                 buf.put_slice(&m.track_name);
             }
             ControlMessage::TrackStatus(m) => {
+                m.track_namespace.validate(TrackNamespaceRules::for_draft(9))?;
                 m.track_namespace.encode(buf);
                 VarInt::from_usize(m.track_name.len()).encode(buf);
                 buf.put_slice(&m.track_name);
+                check_track_status(m.status_code, m.last_group_id, m.last_object_id)?;
                 m.status_code.encode(buf);
                 m.last_group_id.encode(buf);
                 m.last_object_id.encode(buf);
@@ -765,7 +1077,7 @@ impl ControlMessage {
                         }
                     }
                 }
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_parameters(&m.parameters, buf)?;
             }
             ControlMessage::FetchOk(m) => {
                 m.subscribe_id.encode(buf);
@@ -773,12 +1085,9 @@ impl ControlMessage {
                 buf.put_u8(m.end_of_track);
                 m.largest_group_id.encode(buf);
                 m.largest_object_id.encode(buf);
-                KeyValuePair::encode_list_d07(&m.parameters, buf);
+                encode_parameters(&m.parameters, buf)?;
             }
             ControlMessage::FetchError(m) => {
-                if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
-                    return Err(CodecError::ReasonPhraseTooLong);
-                }
                 m.subscribe_id.encode(buf);
                 m.error_code.encode(buf);
                 VarInt::from_usize(m.reason_phrase.len()).encode(buf);
@@ -795,19 +1104,28 @@ impl ControlMessage {
         match msg_type {
             MessageType::ClientSetup => {
                 let num_versions = VarInt::decode(buf)?.into_inner() as usize;
+                // Not a rule this draft states. It says only that the server
+                // "MUST reply with one of the versions offered by the client"
+                // and that a peer with no version in common "MUST close the
+                // session" - outcomes of negotiation rather than parse errors,
+                // and a CLIENT_SETUP offering nothing decodes cleanly under the
+                // figure. It is refused here because there is no version a
+                // reply could name, so the session is already over and the
+                // early close is the more useful answer than a well-formed
+                // message no caller can act on.
                 if num_versions == 0 {
                     return Err(CodecError::InvalidField);
                 }
-                let mut supported_versions = Vec::with_capacity(num_versions);
+                let mut supported_versions = crate::types::reserve_bounded(num_versions, buf);
                 for _ in 0..num_versions {
                     supported_versions.push(VarInt::decode(buf)?);
                 }
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_setup_parameters(buf)?;
                 Ok(ControlMessage::ClientSetup(ClientSetup { supported_versions, parameters }))
             }
             MessageType::ServerSetup => {
                 let selected_version = VarInt::decode(buf)?;
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_setup_parameters(buf)?;
                 Ok(ControlMessage::ServerSetup(ServerSetup { selected_version, parameters }))
             }
             MessageType::GoAway => {
@@ -838,10 +1156,10 @@ impl ControlMessage {
                 let filter_val = VarInt::decode(buf)?.into_inner();
                 // Draft-09: filter_type=1 (NextGroupStart/LatestGroup) is removed.
                 if filter_val == 1 {
-                    return Err(CodecError::InvalidField);
+                    return Err(CodecError::InvalidFilterType(filter_val));
                 }
-                let filter_type =
-                    FilterType::from_u64(filter_val).ok_or(CodecError::InvalidField)?;
+                let filter_type = FilterType::from_u64(filter_val)
+                    .ok_or(CodecError::InvalidFilterType(filter_val))?;
                 let start_location = match filter_type {
                     FilterType::AbsoluteStart | FilterType::AbsoluteRange => {
                         Some(Location::decode(buf)?)
@@ -852,7 +1170,7 @@ impl ControlMessage {
                     FilterType::AbsoluteRange => Some(VarInt::decode(buf)?),
                     _ => None,
                 };
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::Subscribe(Subscribe {
                     subscribe_id,
                     track_alias,
@@ -872,13 +1190,12 @@ impl ControlMessage {
                 if buf.remaining() < 2 {
                     return Err(CodecError::UnexpectedEnd);
                 }
-                let group_order =
-                    GroupOrder::from_u8(buf.get_u8()).ok_or(CodecError::InvalidField)?;
+                let group_order = read_group_order_response(buf)?;
                 let content_exists_val = buf.get_u8();
                 let content_exists = match content_exists_val {
                     0 => ContentExists::NoLargestLocation,
                     1 => ContentExists::HasLargestLocation,
-                    _ => return Err(CodecError::InvalidField),
+                    other => return Err(CodecError::InvalidContentExists(other)),
                 };
                 let (largest_group_id, largest_object_id) =
                     if content_exists == ContentExists::HasLargestLocation {
@@ -888,7 +1205,7 @@ impl ControlMessage {
                     } else {
                         (None, None)
                     };
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::SubscribeOk(SubscribeOk {
                     subscribe_id,
                     expires,
@@ -921,7 +1238,7 @@ impl ControlMessage {
                     return Err(CodecError::UnexpectedEnd);
                 }
                 let subscriber_priority = buf.get_u8();
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::SubscribeUpdate(SubscribeUpdate {
                     subscribe_id,
                     start_group,
@@ -950,7 +1267,7 @@ impl ControlMessage {
             }
             MessageType::Announce => {
                 let track_namespace = TrackNamespace::decode(buf)?;
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::Announce(Announce { track_namespace, parameters }))
             }
             MessageType::AnnounceOk => {
@@ -985,7 +1302,7 @@ impl ControlMessage {
             }
             MessageType::SubscribeAnnounces => {
                 let track_namespace_prefix = TrackNamespace::decode(buf)?;
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::SubscribeAnnounces(SubscribeAnnounces {
                     track_namespace_prefix,
                     parameters,
@@ -1030,6 +1347,7 @@ impl ControlMessage {
                 let status_code = VarInt::decode(buf)?;
                 let last_group_id = VarInt::decode(buf)?;
                 let last_object_id = VarInt::decode(buf)?;
+                check_track_status(status_code, last_group_id, last_object_id)?;
                 Ok(ControlMessage::TrackStatus(TrackStatus {
                     track_namespace,
                     track_name,
@@ -1047,8 +1365,8 @@ impl ControlMessage {
                 let group_order =
                     GroupOrder::from_u8(buf.get_u8()).ok_or(CodecError::InvalidField)?;
                 let fetch_type_val = VarInt::decode(buf)?.into_inner();
-                let fetch_type =
-                    FetchType::from_u64(fetch_type_val).ok_or(CodecError::InvalidField)?;
+                let fetch_type = FetchType::from_u64(fetch_type_val)
+                    .ok_or(CodecError::InvalidFetchType(fetch_type_val))?;
                 let (
                     track_namespace,
                     track_name,
@@ -1075,7 +1393,7 @@ impl ControlMessage {
                         (None, None, None, None, None, None, Some(jsi), Some(pgo))
                     }
                 };
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::Fetch(Fetch {
                     subscribe_id,
                     subscriber_priority,
@@ -1097,12 +1415,11 @@ impl ControlMessage {
                 if buf.remaining() < 2 {
                     return Err(CodecError::UnexpectedEnd);
                 }
-                let group_order =
-                    GroupOrder::from_u8(buf.get_u8()).ok_or(CodecError::InvalidField)?;
+                let group_order = read_group_order_response(buf)?;
                 let end_of_track = buf.get_u8();
                 let largest_group_id = VarInt::decode(buf)?;
                 let largest_object_id = VarInt::decode(buf)?;
-                let parameters = KeyValuePair::decode_list_d07(buf)?;
+                let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::FetchOk(FetchOk {
                     subscribe_id,
                     group_order,

@@ -244,9 +244,9 @@ fn bench_kvp(c: &mut Criterion) {
     use moqtap_codec::kvp::KvpValue;
 
     // Mix of varint (even key) and byte (odd key) entries, typical size.
-    let pairs: Vec<KeyValuePair> = (0..16)
+    let pairs: Vec<KeyValuePair> = (0..16u64)
         .map(|i| {
-            if i % 2 == 0 {
+            if i.is_multiple_of(2) {
                 KeyValuePair {
                     key: VarInt::from_u64(i * 2).unwrap(),
                     value: KvpValue::Varint(VarInt::from_u64(12345).unwrap()),

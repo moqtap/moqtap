@@ -1,0 +1,977 @@
+{
+  "draft": 18,
+  "source_file": "draft-18.html",
+  "source_sha256": "45d10e235e796c0c63c0d7cbacc6fb49697316021fa9277b478af6459d771a52",
+  "source_sha256_of": "the draft-NN.html file as bytes on disk",
+  "generated_by": "crates/moqtap-codec/tools/extract-registries.py",
+  "row_definition": "One <tr> of a table identified as an error, status or termination code registry that assigns a code point. Header rows are excluded; empty-code line-wrap continuation rows are merged into the row above; range and expression code points count as one row each and are tagged kind=\"reserved\".",
+  "description_coverage_note": "rows_described_from_reason_column counts rows whose description is the Reason cell of the table itself, copied verbatim -- a phrase such as 'Internal Error', not the draft's full rule for the code. Where those drafts say more about a code, they say it in prose after the table, and this tool does not follow that prose. A legacy-shape draft therefore reaches full coverage by having a Reason column, which is a weaker claim than it looks. rows_described_from_section_prose is the strong one: it counts rows whose description was read from the definition list in the section the table's Specification column points at.",
+  "object_status_note": "object_status is a second registry family, counted under its own definition and reported separately. totals.rows and the registries list cover the error, status and termination code registries only, and are unchanged by its presence; totals.object_status_rows is not included in totals.rows and must not be added to it without a deliberate decision to do so. Only draft 19 has an IANA registry for Object Status (object_status.iana_registry); in drafts 07-18 the same code points are assigned in prose and object_status.form is 'prose-list'.",
+  "totals": {
+    "registries": 4,
+    "rows": 62,
+    "rows_with_description": 58,
+    "rows_described_from_reason_column": 0,
+    "rows_described_from_section_prose": 58,
+    "object_status_rows": 3,
+    "object_status_rows_also_counted_in_rows": 0
+  },
+  "registries": [
+    {
+      "registry": "Session Termination Error Codes",
+      "registry_id": "session_termination",
+      "shape": "iana",
+      "table": "table-17",
+      "section": "15.10.1. Session Termination Error Codes",
+      "leadin": "This document does not define any initial entries.",
+      "row_count": 21,
+      "rows": [
+        {
+          "code": "0x0",
+          "code_value": 0,
+          "kind": "assignment",
+          "name": "NO_ERROR",
+          "name_normalized": "NO_ERROR",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x1",
+          "code_value": 1,
+          "kind": "assignment",
+          "name": "INTERNAL_ERROR",
+          "name_normalized": "INTERNAL_ERROR",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x2",
+          "code_value": 2,
+          "kind": "assignment",
+          "name": "UNAUTHORIZED",
+          "name_normalized": "UNAUTHORIZED",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x3",
+          "code_value": 3,
+          "kind": "assignment",
+          "name": "PROTOCOL_VIOLATION",
+          "name_normalized": "PROTOCOL_VIOLATION",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x4",
+          "code_value": 4,
+          "kind": "assignment",
+          "name": "INVALID_REQUEST_ID",
+          "name_normalized": "INVALID_REQUEST_ID",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x5",
+          "code_value": 5,
+          "kind": "assignment",
+          "name": "DUPLICATE_TRACK_ALIAS",
+          "name_normalized": "DUPLICATE_TRACK_ALIAS",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x6",
+          "code_value": 6,
+          "kind": "assignment",
+          "name": "KEY_VALUE_FORMATTING_ERROR",
+          "name_normalized": "KEY_VALUE_FORMATTING_ERROR",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x8",
+          "code_value": 8,
+          "kind": "assignment",
+          "name": "INVALID_PATH",
+          "name_normalized": "INVALID_PATH",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x9",
+          "code_value": 9,
+          "kind": "assignment",
+          "name": "MALFORMED_PATH",
+          "name_normalized": "MALFORMED_PATH",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x10",
+          "code_value": 16,
+          "kind": "assignment",
+          "name": "GOAWAY_TIMEOUT",
+          "name_normalized": "GOAWAY_TIMEOUT",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x11",
+          "code_value": 17,
+          "kind": "assignment",
+          "name": "CONTROL_MESSAGE_TIMEOUT",
+          "name_normalized": "CONTROL_MESSAGE_TIMEOUT",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x12",
+          "code_value": 18,
+          "kind": "assignment",
+          "name": "DATA_STREAM_TIMEOUT",
+          "name_normalized": "DATA_STREAM_TIMEOUT",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x13",
+          "code_value": 19,
+          "kind": "assignment",
+          "name": "AUTH_TOKEN_CACHE_OVERFLOW",
+          "name_normalized": "AUTH_TOKEN_CACHE_OVERFLOW",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x14",
+          "code_value": 20,
+          "kind": "assignment",
+          "name": "DUPLICATE_AUTH_TOKEN_ALIAS",
+          "name_normalized": "DUPLICATE_AUTH_TOKEN_ALIAS",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x15",
+          "code_value": 21,
+          "kind": "assignment",
+          "name": "VERSION_NEGOTIATION_FAILED",
+          "name_normalized": "VERSION_NEGOTIATION_FAILED",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x16",
+          "code_value": 22,
+          "kind": "assignment",
+          "name": "MALFORMED_AUTH_TOKEN",
+          "name_normalized": "MALFORMED_AUTH_TOKEN",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x17",
+          "code_value": 23,
+          "kind": "assignment",
+          "name": "UNKNOWN_AUTH_TOKEN_ALIAS",
+          "name_normalized": "UNKNOWN_AUTH_TOKEN_ALIAS",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x18",
+          "code_value": 24,
+          "kind": "assignment",
+          "name": "EXPIRED_AUTH_TOKEN",
+          "name_normalized": "EXPIRED_AUTH_TOKEN",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x19",
+          "code_value": 25,
+          "kind": "assignment",
+          "name": "INVALID_AUTHORITY",
+          "name_normalized": "INVALID_AUTHORITY",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x1A",
+          "code_value": 26,
+          "kind": "assignment",
+          "name": "MALFORMED_AUTHORITY",
+          "name_normalized": "MALFORMED_AUTHORITY",
+          "description_source": "section 3.5 definition list (by code)",
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x7f * N + 0x9D",
+          "code_value": null,
+          "kind": "reserved",
+          "name": "Reserved for greasing",
+          "name_normalized": "RESERVED_FOR_GREASING",
+          "description_source": null,
+          "draft": 18,
+          "registry": "Session Termination Error Codes",
+          "registry_id": "session_termination"
+        }
+      ]
+    },
+    {
+      "registry": "REQUEST_ERROR Codes",
+      "registry_id": "request_error",
+      "shape": "iana",
+      "table": "table-18",
+      "section": "15.10.2. REQUEST_ERROR Codes",
+      "leadin": "This document does not define any initial entries.",
+      "row_count": 19,
+      "rows": [
+        {
+          "code": "0x0",
+          "code_value": 0,
+          "kind": "assignment",
+          "name": "INTERNAL_ERROR",
+          "name_normalized": "INTERNAL_ERROR",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x1",
+          "code_value": 1,
+          "kind": "assignment",
+          "name": "UNAUTHORIZED",
+          "name_normalized": "UNAUTHORIZED",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x2",
+          "code_value": 2,
+          "kind": "assignment",
+          "name": "TIMEOUT",
+          "name_normalized": "TIMEOUT",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x3",
+          "code_value": 3,
+          "kind": "assignment",
+          "name": "NOT_SUPPORTED",
+          "name_normalized": "NOT_SUPPORTED",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x4",
+          "code_value": 4,
+          "kind": "assignment",
+          "name": "MALFORMED_AUTH_TOKEN",
+          "name_normalized": "MALFORMED_AUTH_TOKEN",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x5",
+          "code_value": 5,
+          "kind": "assignment",
+          "name": "EXPIRED_AUTH_TOKEN",
+          "name_normalized": "EXPIRED_AUTH_TOKEN",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x6",
+          "code_value": 6,
+          "kind": "assignment",
+          "name": "GOING_AWAY",
+          "name_normalized": "GOING_AWAY",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x9",
+          "code_value": 9,
+          "kind": "assignment",
+          "name": "EXCESSIVE_LOAD",
+          "name_normalized": "EXCESSIVE_LOAD",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x10",
+          "code_value": 16,
+          "kind": "assignment",
+          "name": "DOES_NOT_EXIST",
+          "name_normalized": "DOES_NOT_EXIST",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x11",
+          "code_value": 17,
+          "kind": "assignment",
+          "name": "INVALID_RANGE",
+          "name_normalized": "INVALID_RANGE",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x12",
+          "code_value": 18,
+          "kind": "assignment",
+          "name": "MALFORMED_TRACK",
+          "name_normalized": "MALFORMED_TRACK",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x19",
+          "code_value": 25,
+          "kind": "assignment",
+          "name": "DUPLICATE_SUBSCRIPTION",
+          "name_normalized": "DUPLICATE_SUBSCRIPTION",
+          "description_source": "section 10.6 definition list (by code)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x20",
+          "code_value": 32,
+          "kind": "assignment",
+          "name": "UNINTERESTED",
+          "name_normalized": "UNINTERESTED",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x30",
+          "code_value": 48,
+          "kind": "assignment",
+          "name": "PREFIX_OVERLAP",
+          "name_normalized": "PREFIX_OVERLAP",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x31",
+          "code_value": 49,
+          "kind": "assignment",
+          "name": "NAMESPACE_TOO_LARGE",
+          "name_normalized": "NAMESPACE_TOO_LARGE",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x32",
+          "code_value": 50,
+          "kind": "assignment",
+          "name": "INVALID_JOINING_REQUEST_ID",
+          "name_normalized": "INVALID_JOINING_REQUEST_ID",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x33",
+          "code_value": 51,
+          "kind": "assignment",
+          "name": "UNSUPPORTED_EXTENSION",
+          "name_normalized": "UNSUPPORTED_EXTENSION",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x34",
+          "code_value": 52,
+          "kind": "assignment",
+          "name": "REDIRECT",
+          "name_normalized": "REDIRECT",
+          "description_source": "section 10.6 definition list (by name)",
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        },
+        {
+          "code": "0x7f * N + 0x9D",
+          "code_value": null,
+          "kind": "reserved",
+          "name": "Reserved for greasing",
+          "name_normalized": "RESERVED_FOR_GREASING",
+          "description_source": null,
+          "draft": 18,
+          "registry": "REQUEST_ERROR Codes",
+          "registry_id": "request_error"
+        }
+      ]
+    },
+    {
+      "registry": "PUBLISH_DONE Codes",
+      "registry_id": "publish_done",
+      "shape": "iana",
+      "table": "table-19",
+      "section": "15.10.3. PUBLISH_DONE Codes",
+      "leadin": "This document does not define any initial entries.",
+      "row_count": 11,
+      "rows": [
+        {
+          "code": "0x0",
+          "code_value": 0,
+          "kind": "assignment",
+          "name": "INTERNAL_ERROR",
+          "name_normalized": "INTERNAL_ERROR",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x1",
+          "code_value": 1,
+          "kind": "assignment",
+          "name": "UNAUTHORIZED",
+          "name_normalized": "UNAUTHORIZED",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x2",
+          "code_value": 2,
+          "kind": "assignment",
+          "name": "TRACK_ENDED",
+          "name_normalized": "TRACK_ENDED",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x3",
+          "code_value": 3,
+          "kind": "assignment",
+          "name": "SUBSCRIPTION_ENDED",
+          "name_normalized": "SUBSCRIPTION_ENDED",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x4",
+          "code_value": 4,
+          "kind": "assignment",
+          "name": "GOING_AWAY",
+          "name_normalized": "GOING_AWAY",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x5",
+          "code_value": 5,
+          "kind": "assignment",
+          "name": "TOO_FAR_BEHIND",
+          "name_normalized": "TOO_FAR_BEHIND",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x6",
+          "code_value": 6,
+          "kind": "assignment",
+          "name": "EXPIRED",
+          "name_normalized": "EXPIRED",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x8",
+          "code_value": 8,
+          "kind": "assignment",
+          "name": "UPDATE_FAILED",
+          "name_normalized": "UPDATE_FAILED",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x9",
+          "code_value": 9,
+          "kind": "assignment",
+          "name": "EXCESSIVE_LOAD",
+          "name_normalized": "EXCESSIVE_LOAD",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x12",
+          "code_value": 18,
+          "kind": "assignment",
+          "name": "MALFORMED_TRACK",
+          "name_normalized": "MALFORMED_TRACK",
+          "description_source": "section 10.11 definition list (by code)",
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        },
+        {
+          "code": "0x7f * N + 0x9D",
+          "code_value": null,
+          "kind": "reserved",
+          "name": "Reserved for greasing",
+          "name_normalized": "RESERVED_FOR_GREASING",
+          "description_source": null,
+          "draft": 18,
+          "registry": "PUBLISH_DONE Codes",
+          "registry_id": "publish_done"
+        }
+      ]
+    },
+    {
+      "registry": "Stream Reset Error Codes",
+      "registry_id": "stream_reset",
+      "shape": "iana",
+      "table": "table-20",
+      "section": "15.10.4. Stream Reset Error Codes",
+      "leadin": "This document does not define any initial entries.",
+      "row_count": 11,
+      "rows": [
+        {
+          "code": "0x0",
+          "code_value": 0,
+          "kind": "assignment",
+          "name": "INTERNAL_ERROR",
+          "name_normalized": "INTERNAL_ERROR",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x1",
+          "code_value": 1,
+          "kind": "assignment",
+          "name": "CANCELLED",
+          "name_normalized": "CANCELLED",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x2",
+          "code_value": 2,
+          "kind": "assignment",
+          "name": "DELIVERY_TIMEOUT",
+          "name_normalized": "DELIVERY_TIMEOUT",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x3",
+          "code_value": 3,
+          "kind": "assignment",
+          "name": "SESSION_CLOSED",
+          "name_normalized": "SESSION_CLOSED",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x4",
+          "code_value": 4,
+          "kind": "assignment",
+          "name": "GOING_AWAY",
+          "name_normalized": "GOING_AWAY",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x5",
+          "code_value": 5,
+          "kind": "assignment",
+          "name": "TOO_FAR_BEHIND",
+          "name_normalized": "TOO_FAR_BEHIND",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x6",
+          "code_value": 6,
+          "kind": "assignment",
+          "name": "UNKNOWN_OBJECT_STATUS",
+          "name_normalized": "UNKNOWN_OBJECT_STATUS",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x7",
+          "code_value": 7,
+          "kind": "assignment",
+          "name": "EXPIRED_AUTH_TOKEN",
+          "name_normalized": "EXPIRED_AUTH_TOKEN",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x9",
+          "code_value": 9,
+          "kind": "assignment",
+          "name": "EXCESSIVE_LOAD",
+          "name_normalized": "EXCESSIVE_LOAD",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x12",
+          "code_value": 18,
+          "kind": "assignment",
+          "name": "MALFORMED_TRACK",
+          "name_normalized": "MALFORMED_TRACK",
+          "description_source": "section 3.3.3 definition list (by code)",
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        },
+        {
+          "code": "0x7f * N + 0x9D",
+          "code_value": null,
+          "kind": "reserved",
+          "name": "Reserved for greasing",
+          "name_normalized": "RESERVED_FOR_GREASING",
+          "description_source": null,
+          "draft": 18,
+          "registry": "Stream Reset Error Codes",
+          "registry_id": "stream_reset"
+        }
+      ]
+    }
+  ],
+  "object_status": {
+    "registry": "Object Status",
+    "registry_id": "object_status",
+    "present": true,
+    "form": "prose-list",
+    "iana_registry": false,
+    "row_definition": "One code point assigned by the draft's Object Status registry. Draft 19 prints that registry as an IANA table; drafts 07-18 have no IANA registry for it and assign the same code points as one bullet each under the section defining the field. Counted separately from totals.rows, which covers the error, status and termination code registries only; the two are never summed.",
+    "section": "11.2.1.1. Object Status",
+    "definition_section": "11.2.1.1. Object Status",
+    "table": null,
+    "payload_column": false,
+    "payload_rule": "Any object with a status code other than zero MUST have an empty payload.",
+    "payload_rule_kind": "nonzero-must-be-empty",
+    "payload_note": "payload_source is payload-column when the draft's own Payload column supplied the value; blanket-rule when there is no column and the draft's blanket sentence covers the row directly (its code is non-zero and the sentence is about non-zero status codes); blanket-rule-complement for 0x0 under such a rule, where the value is inferred from the rule's silence rather than stated. A row with payload_column false and payload 'no' is therefore a different fact from a row with payload_column true and payload 'no': the first is this tool applying the draft's blanket rule, the second is the draft registering an answer for that status.",
+    "row_count": 3,
+    "rows_with_payload": 3,
+    "rows": [
+      {
+        "code": "0x0",
+        "code_value": 0,
+        "kind": "assignment",
+        "name": null,
+        "name_normalized": "NORMAL",
+        "name_source": "derived from the bullet's first sentence",
+        "payload": "yes",
+        "payload_source": "blanket-rule-complement",
+        "description_source": "section 11.2.1.1 bullet list",
+        "draft": 18,
+        "registry": "Object Status",
+        "registry_id": "object_status"
+      },
+      {
+        "code": "0x3",
+        "code_value": 3,
+        "kind": "assignment",
+        "name": null,
+        "name_normalized": "END_OF_GROUP",
+        "name_source": "derived from the bullet's first sentence",
+        "payload": "no",
+        "payload_source": "blanket-rule",
+        "description_source": "section 11.2.1.1 bullet list",
+        "draft": 18,
+        "registry": "Object Status",
+        "registry_id": "object_status"
+      },
+      {
+        "code": "0x4",
+        "code_value": 4,
+        "kind": "assignment",
+        "name": null,
+        "name_normalized": "END_OF_TRACK",
+        "name_source": "derived from the bullet's first sentence",
+        "payload": "no",
+        "payload_source": "blanket-rule",
+        "description_source": "section 11.2.1.1 bullet list",
+        "draft": 18,
+        "registry": "Object Status",
+        "registry_id": "object_status"
+      }
+    ]
+  },
+  "excluded_candidates": [
+    {
+      "kind": "table",
+      "table": "table-2",
+      "section": "1.4.1. Variable-Length Integers",
+      "header": [
+        "Byte Sequence",
+        "Decimal Value"
+      ],
+      "hex_rows": 8,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-3",
+      "section": "3.4. Unidirectional Stream Types",
+      "header": [
+        "ID",
+        "Type"
+      ],
+      "hex_rows": 3,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-5",
+      "section": "10. Control Messages",
+      "header": [
+        "ID",
+        "Messages",
+        "Stream"
+      ],
+      "hex_rows": 24,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-6",
+      "section": "10.12. FETCH",
+      "header": [
+        "Code",
+        "Fetch Type"
+      ],
+      "hex_rows": 3,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-7",
+      "section": "11.4.4. Fetch Header",
+      "header": [
+        "Value",
+        "Meaning"
+      ],
+      "hex_rows": 2,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-8",
+      "section": "11.4.4.1. Flags",
+      "header": [
+        "Bitmask Result (Serialization Flags & 0x03)",
+        "Meaning"
+      ],
+      "hex_rows": 4,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-9",
+      "section": "11.4.4.1. Flags",
+      "header": [
+        "Bitmask",
+        "Condition if set",
+        "Condition if not set (0)"
+      ],
+      "hex_rows": 5,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-10",
+      "section": "15.4. Setup Options",
+      "header": [
+        "Type",
+        "Name",
+        "Specification"
+      ],
+      "hex_rows": 6,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-11",
+      "section": "15.5. Authorization Token Alias Type",
+      "header": [
+        "Code",
+        "Name",
+        "Specification"
+      ],
+      "hex_rows": 4,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-12",
+      "section": "15.6. MOQT Auth Token Type",
+      "header": [
+        "Code",
+        "Name",
+        "Specification"
+      ],
+      "hex_rows": 2,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-13",
+      "section": "15.7. Message Parameters",
+      "header": [
+        "Parameter Type",
+        "Parameter Name",
+        "Specification"
+      ],
+      "hex_rows": 13,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-14",
+      "section": "15.8. Properties",
+      "header": [
+        "Type",
+        "Name",
+        "Scope",
+        "Specification"
+      ],
+      "hex_rows": 10,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-15",
+      "section": "15.8. Properties",
+      "header": [
+        "Type",
+        "Name",
+        "Scope",
+        "Specification"
+      ],
+      "hex_rows": 5,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    }
+  ],
+  "warnings": []
+}

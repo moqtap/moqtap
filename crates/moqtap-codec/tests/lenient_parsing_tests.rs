@@ -32,7 +32,7 @@ fn decode_unknown_message_type_produces_error() {
 #[test]
 fn decode_message_truncated_payload() {
     let mut buf = BytesMut::new();
-    // Type = 0x20 (ClientSetup, draft-14 §6.1.1)
+    // Type = 0x20 (ClientSetup, draft-14 Section 9.3)
     encode_varint_to(&mut buf, 0x20);
     // Length says 100 bytes, but we only provide 2
     encode_varint_to(&mut buf, 100);
@@ -57,7 +57,7 @@ fn decode_unknown_kvp_key_preserved() {
     assert_eq!(decoded.key, VarInt::from_u64(0xFE).unwrap());
 }
 
-/// draft-14 §6.4.1: Invalid FilterType values must return None
+/// draft-14 Section 9.7: Invalid FilterType values must return None
 #[test]
 fn decode_unknown_filter_type_error() {
     use moqtap_codec::types::FilterType;
@@ -74,12 +74,18 @@ fn decode_unknown_group_order_error() {
     assert!(GroupOrder::from_u8(0x03).is_none());
 }
 
-/// draft-14 §6: Invalid ObjectStatus values must return None
+/// A status value draft-14 does not assign must return None.
+///
+/// Draft-14 Section 10.2.1.1 assigns 0x0, 0x1, 0x3 and 0x4 and calls anything
+/// else a protocol error. 0x2 is the gap inside the assigned range, so it is
+/// the value a decoder is most likely to wave through by accident; 0xFF stands
+/// in for everything above the range.
 #[test]
 fn decode_unknown_object_status_error() {
     use moqtap_codec::types::ObjectStatus;
     assert!(ObjectStatus::from_u8(0xFF).is_none());
-    assert!(ObjectStatus::from_u8(0x04).is_none());
+    assert!(ObjectStatus::from_u8(0x02).is_none());
+    assert_eq!(ObjectStatus::from_u8(0x04), Some(ObjectStatus::EndOfTrack));
 }
 
 /// draft-14 §6: Invalid ForwardingPreference values must return None
@@ -90,11 +96,11 @@ fn decode_unknown_forwarding_preference_error() {
     assert!(ForwardingPreference::from_u8(0x02).is_none());
 }
 
-/// draft-14 §6.1.1: Zero-length ClientSetup payload is invalid (missing fields)
+/// draft-14 Section 9.3: Zero-length ClientSetup payload is invalid (missing fields)
 #[test]
 fn decode_message_length_zero() {
     let mut buf = BytesMut::new();
-    // Type = 0x20 (ClientSetup, draft-14 §6.1.1), length = 0
+    // Type = 0x20 (ClientSetup, draft-14 Section 9.3), length = 0
     encode_varint_to(&mut buf, 0x20);
     encode_varint_to(&mut buf, 0);
 

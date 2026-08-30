@@ -1,0 +1,416 @@
+{
+  "draft": 7,
+  "source_file": "draft-07.html",
+  "source_sha256": "53eb52578fca0c2415fff80678a9d2def9dfc47bb5c2c669c1c1313584ba3aa5",
+  "source_sha256_of": "the draft-NN.html file as bytes on disk",
+  "generated_by": "crates/moqtap-codec/tools/extract-registries.py",
+  "row_definition": "One <tr> of a table identified as an error, status or termination code registry that assigns a code point. Header rows are excluded; empty-code line-wrap continuation rows are merged into the row above; range and expression code points count as one row each and are tagged kind=\"reserved\".",
+  "description_coverage_note": "rows_described_from_reason_column counts rows whose description is the Reason cell of the table itself, copied verbatim -- a phrase such as 'Internal Error', not the draft's full rule for the code. Where those drafts say more about a code, they say it in prose after the table, and this tool does not follow that prose. A legacy-shape draft therefore reaches full coverage by having a Reason column, which is a weaker claim than it looks. rows_described_from_section_prose is the strong one: it counts rows whose description was read from the definition list in the section the table's Specification column points at.",
+  "object_status_note": "object_status is a second registry family, counted under its own definition and reported separately. totals.rows and the registries list cover the error, status and termination code registries only, and are unchanged by its presence; totals.object_status_rows is not included in totals.rows and must not be added to it without a deliberate decision to do so. Only draft 19 has an IANA registry for Object Status (object_status.iana_registry); in drafts 07-18 the same code points are assigned in prose and object_status.form is 'prose-list'.",
+  "totals": {
+    "registries": 3,
+    "rows": 21,
+    "rows_with_description": 21,
+    "rows_described_from_reason_column": 21,
+    "rows_described_from_section_prose": 0,
+    "object_status_rows": 5,
+    "object_status_rows_also_counted_in_rows": 0
+  },
+  "registries": [
+    {
+      "registry": "Termination",
+      "registry_id": "session_termination",
+      "shape": "legacy",
+      "table": "table-1",
+      "section": "3.5. Termination",
+      "leadin": "The application MAY use any error message and SHOULD use a relevant code, as defined below:",
+      "row_count": 8,
+      "rows": [
+        {
+          "code": "0x0",
+          "code_value": 0,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "NO_ERROR",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "Termination",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x1",
+          "code_value": 1,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "INTERNAL_ERROR",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "Termination",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x2",
+          "code_value": 2,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "UNAUTHORIZED",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "Termination",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x3",
+          "code_value": 3,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "PROTOCOL_VIOLATION",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "Termination",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x4",
+          "code_value": 4,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "DUPLICATE_TRACK_ALIAS",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "Termination",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x5",
+          "code_value": 5,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "PARAMETER_LENGTH_MISMATCH",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "Termination",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x6",
+          "code_value": 6,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "TOO_MANY_SUBSCRIBES",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "Termination",
+          "registry_id": "session_termination"
+        },
+        {
+          "code": "0x10",
+          "code_value": 16,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "GOAWAY_TIMEOUT",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "Termination",
+          "registry_id": "session_termination"
+        }
+      ]
+    },
+    {
+      "registry": "SUBSCRIBE_ERROR",
+      "registry_id": "subscribe_error",
+      "shape": "legacy",
+      "table": "table-2",
+      "section": "5.1. Subscriber Interactions",
+      "leadin": "The application SHOULD use a relevant error code in SUBSCRIBE_ERROR, as defined below:",
+      "row_count": 6,
+      "rows": [
+        {
+          "code": "0x0",
+          "code_value": 0,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "INTERNAL_ERROR",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_ERROR",
+          "registry_id": "subscribe_error"
+        },
+        {
+          "code": "0x1",
+          "code_value": 1,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "INVALID_RANGE",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_ERROR",
+          "registry_id": "subscribe_error"
+        },
+        {
+          "code": "0x2",
+          "code_value": 2,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "RETRY_TRACK_ALIAS",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_ERROR",
+          "registry_id": "subscribe_error"
+        },
+        {
+          "code": "0x3",
+          "code_value": 3,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "TRACK_DOES_NOT_EXIST",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_ERROR",
+          "registry_id": "subscribe_error"
+        },
+        {
+          "code": "0x4",
+          "code_value": 4,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "UNAUTHORIZED",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_ERROR",
+          "registry_id": "subscribe_error"
+        },
+        {
+          "code": "0x5",
+          "code_value": 5,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "TIMEOUT",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_ERROR",
+          "registry_id": "subscribe_error"
+        }
+      ]
+    },
+    {
+      "registry": "SUBSCRIBE_DONE",
+      "registry_id": "subscribe_done",
+      "shape": "legacy",
+      "table": "table-3",
+      "section": "5.1. Subscriber Interactions",
+      "leadin": "The application SHOULD use a relevant status code in SUBSCRIBE_DONE, as defined below:",
+      "row_count": 7,
+      "rows": [
+        {
+          "code": "0x0",
+          "code_value": 0,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "UNSUBSCRIBED",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_DONE",
+          "registry_id": "subscribe_done"
+        },
+        {
+          "code": "0x1",
+          "code_value": 1,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "INTERNAL_ERROR",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_DONE",
+          "registry_id": "subscribe_done"
+        },
+        {
+          "code": "0x2",
+          "code_value": 2,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "UNAUTHORIZED",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_DONE",
+          "registry_id": "subscribe_done"
+        },
+        {
+          "code": "0x3",
+          "code_value": 3,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "TRACK_ENDED",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_DONE",
+          "registry_id": "subscribe_done"
+        },
+        {
+          "code": "0x4",
+          "code_value": 4,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "SUBSCRIPTION_ENDED",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_DONE",
+          "registry_id": "subscribe_done"
+        },
+        {
+          "code": "0x5",
+          "code_value": 5,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "GOING_AWAY",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_DONE",
+          "registry_id": "subscribe_done"
+        },
+        {
+          "code": "0x6",
+          "code_value": 6,
+          "kind": "assignment",
+          "name": null,
+          "name_normalized": "EXPIRED",
+          "description_source": "reason-column",
+          "draft": 7,
+          "registry": "SUBSCRIBE_DONE",
+          "registry_id": "subscribe_done"
+        }
+      ]
+    }
+  ],
+  "object_status": {
+    "registry": "Object Status",
+    "registry_id": "object_status",
+    "present": true,
+    "form": "prose-list",
+    "iana_registry": false,
+    "row_definition": "One code point assigned by the draft's Object Status registry. Draft 19 prints that registry as an IANA table; drafts 07-18 have no IANA registry for it and assign the same code points as one bullet each under the section defining the field. Counted separately from totals.rows, which covers the error, status and termination code registries only; the two are never summed.",
+    "section": "7.1.1.1. Object Status",
+    "definition_section": "7.1.1.1. Object Status",
+    "table": null,
+    "payload_column": false,
+    "payload_rule": "Any object with a status code other than zero MUST have an empty payload.",
+    "payload_rule_kind": "nonzero-must-be-empty",
+    "payload_note": "payload_source is payload-column when the draft's own Payload column supplied the value; blanket-rule when there is no column and the draft's blanket sentence covers the row directly (its code is non-zero and the sentence is about non-zero status codes); blanket-rule-complement for 0x0 under such a rule, where the value is inferred from the rule's silence rather than stated. A row with payload_column false and payload 'no' is therefore a different fact from a row with payload_column true and payload 'no': the first is this tool applying the draft's blanket rule, the second is the draft registering an answer for that status.",
+    "row_count": 5,
+    "rows_with_payload": 5,
+    "rows": [
+      {
+        "code": "0x0",
+        "code_value": 0,
+        "kind": "assignment",
+        "name": null,
+        "name_normalized": "NORMAL",
+        "name_source": "derived from the bullet's first sentence",
+        "payload": "yes",
+        "payload_source": "blanket-rule-complement",
+        "description_source": "section 7.1.1.1 bullet list",
+        "draft": 7,
+        "registry": "Object Status",
+        "registry_id": "object_status"
+      },
+      {
+        "code": "0x1",
+        "code_value": 1,
+        "kind": "assignment",
+        "name": null,
+        "name_normalized": "OBJECT_DOES_NOT_EXIST",
+        "name_source": "derived from the bullet's first sentence",
+        "payload": "no",
+        "payload_source": "blanket-rule",
+        "description_source": "section 7.1.1.1 bullet list",
+        "draft": 7,
+        "registry": "Object Status",
+        "registry_id": "object_status"
+      },
+      {
+        "code": "0x3",
+        "code_value": 3,
+        "kind": "assignment",
+        "name": null,
+        "name_normalized": "END_OF_GROUP",
+        "name_source": "derived from the bullet's first sentence",
+        "payload": "no",
+        "payload_source": "blanket-rule",
+        "description_source": "section 7.1.1.1 bullet list",
+        "draft": 7,
+        "registry": "Object Status",
+        "registry_id": "object_status"
+      },
+      {
+        "code": "0x4",
+        "code_value": 4,
+        "kind": "assignment",
+        "name": null,
+        "name_normalized": "END_OF_TRACK_AND_GROUP",
+        "name_source": "derived from the bullet's first sentence",
+        "payload": "no",
+        "payload_source": "blanket-rule",
+        "description_source": "section 7.1.1.1 bullet list",
+        "draft": 7,
+        "registry": "Object Status",
+        "registry_id": "object_status"
+      },
+      {
+        "code": "0x5",
+        "code_value": 5,
+        "kind": "assignment",
+        "name": null,
+        "name_normalized": "END_OF_SUBGROUP",
+        "name_source": "derived from the bullet's first sentence",
+        "payload": "no",
+        "payload_source": "blanket-rule",
+        "description_source": "section 7.1.1.1 bullet list",
+        "draft": 7,
+        "registry": "Object Status",
+        "registry_id": "object_status"
+      }
+    ]
+  },
+  "excluded_candidates": [
+    {
+      "kind": "table",
+      "table": "table-4",
+      "section": "6. Control Messages",
+      "header": [
+        "ID",
+        "Messages"
+      ],
+      "hex_rows": 25,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "table",
+      "table": "table-5",
+      "section": "7. Data Streams",
+      "header": [
+        "ID",
+        "Stream Type"
+      ],
+      "hex_rows": 3,
+      "codes": null,
+      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+    },
+    {
+      "kind": "prose-list",
+      "table": null,
+      "section": "6.23. TRACK_STATUS",
+      "header": null,
+      "hex_rows": 5,
+      "codes": [
+        "0x00",
+        "0x01",
+        "0x02",
+        "0x03",
+        "0x04"
+      ],
+      "reason": "code points assigned in prose, one paragraph or bullet per code, with no table to match either registry layout; out of scope for this tool and recorded so the boundary stays auditable"
+    }
+  ],
+  "warnings": []
+}

@@ -1,1 +1,4 @@
-msrv = "1.85"
+# Keep in sync with `rust-version` in the workspace Cargo.toml. When these
+# disagree clippy silently prefers this file and warns on every crate, so a
+# stale value here lints the whole workspace against the wrong MSRV.
+msrv = "1.88"

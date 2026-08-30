@@ -184,7 +184,6 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
         ControlMessage::PublishNamespaceOk(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("parameters".into(), kvp_to_json_d14(&m.parameters));
             o
         }
         ControlMessage::PublishNamespaceError(m) => {
@@ -222,7 +221,6 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
         ControlMessage::SubscribeNamespaceOk(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("parameters".into(), kvp_to_json_d14(&m.parameters));
             o
         }
         ControlMessage::SubscribeNamespaceError(m) => {
@@ -277,7 +275,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("group_order".into(), vi(m.group_order as u64));
-            o.insert("end_of_track".into(), vi(m.end_of_track.into_inner()));
+            o.insert("end_of_track".into(), vi(m.end_of_track as u64));
             o.insert("end_location".into(), loc_to_json(&m.end_location));
             o.insert("parameters".into(), kvp_to_json_d14(&m.parameters));
             o

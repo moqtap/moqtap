@@ -4,9 +4,14 @@
 //! separate from the shared [`crate::types`] module so that other drafts
 //! can continue to use their own enums without collision.
 
-/// Draft-14 Object Status values (§10.2.1.1).
+/// Object status values, from MoQ Transport draft-14 Section 10.2.1.1
+/// "Object Status".
 ///
-/// Status is a varint on the wire. Any other value is a protocol error.
+/// Status is a varint on the wire. The draft assigns 0x0, 0x1, 0x3 and 0x4, and
+/// says of everything else: "Any other value SHOULD be treated as a protocol
+/// error and the session SHOULD be terminated with a PROTOCOL_VIOLATION".
+/// [`ObjectStatus::from_u64`] answers `None` for 0x2 and for every other
+/// unassigned value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ObjectStatus {
@@ -23,7 +28,19 @@ pub enum ObjectStatus {
 }
 
 impl ObjectStatus {
-    /// Convert a raw wire value to [`ObjectStatus`].
+    /// Every status draft-14 assigns, in ascending wire order.
+    ///
+    /// This is exactly the set [`ObjectStatus::from_u64`] accepts. Any other
+    /// value is one the draft does not assign.
+    pub const ALL: &[ObjectStatus] = &[
+        ObjectStatus::Normal,
+        ObjectStatus::ObjectDoesNotExist,
+        ObjectStatus::EndOfGroup,
+        ObjectStatus::EndOfTrack,
+    ];
+
+    /// Convert a raw wire value to [`ObjectStatus`], or `None` if draft-14 does
+    /// not assign that value.
     pub fn from_u64(v: u64) -> Option<Self> {
         match v {
             0x0 => Some(ObjectStatus::Normal),

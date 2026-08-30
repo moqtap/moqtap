@@ -14,8 +14,9 @@
 //!   PublishNamespaceCancel, FetchCancel, ClientSetup, ServerSetup
 
 #[allow(missing_docs)]
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
+/// Session, request, publish-done and data-stream-reset code registries.
+pub mod error_codes;
 #[allow(missing_docs)]
 /// Control message types with encode/decode.
 pub mod message;

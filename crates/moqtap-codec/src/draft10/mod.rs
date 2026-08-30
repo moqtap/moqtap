@@ -2,5 +2,6 @@
 //!
 //! Wire format is identical to draft-09; only the version number differs.
 pub mod data_stream;
+pub mod error_codes;
 pub mod message;
 pub mod types;

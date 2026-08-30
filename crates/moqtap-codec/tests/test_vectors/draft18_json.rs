@@ -1,7 +1,7 @@
 use moqtap_codec::draft18::message::ControlMessage;
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 use moqtap_codec::types::*;
-use moqtap_codec::varint::VarInt;
+use moqtap_codec::varint::{Moqt18 as Wire, VarInt};
 use serde_json::{Map, Value};
 
 fn vi(v: u64) -> Value {
@@ -48,20 +48,20 @@ fn d18_option_name(key: u64) -> Option<&'static str> {
 
 fn decode_subscription_filter(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let filter_type = VarInt::decode(&mut buf).unwrap().into_inner();
+    let filter_type = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
     let mut obj = Map::new();
     obj.insert("filter_type".into(), vi(filter_type));
     match filter_type {
         3 => {
-            let start_group = VarInt::decode(&mut buf).unwrap().into_inner();
-            let start_object = VarInt::decode(&mut buf).unwrap().into_inner();
+            let start_group = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
+            let start_object = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
             obj.insert("start_group".into(), vi(start_group));
             obj.insert("start_object".into(), vi(start_object));
         }
         4 => {
-            let start_group = VarInt::decode(&mut buf).unwrap().into_inner();
-            let start_object = VarInt::decode(&mut buf).unwrap().into_inner();
-            let end_group = VarInt::decode(&mut buf).unwrap().into_inner();
+            let start_group = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
+            let start_object = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
+            let end_group = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
             obj.insert("start_group".into(), vi(start_group));
             obj.insert("start_object".into(), vi(start_object));
             obj.insert("end_group".into(), vi(end_group));
@@ -73,7 +73,7 @@ fn decode_subscription_filter(bytes: &[u8]) -> Value {
 
 fn auth_token_to_json_d18(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let alias_type = match VarInt::decode(&mut buf) {
+    let alias_type = match VarInt::decode_moqt::<Wire>(&mut buf) {
         Ok(v) => v,
         Err(_) => return Value::String(hex::encode(bytes)),
     };
@@ -82,22 +82,22 @@ fn auth_token_to_json_d18(bytes: &[u8]) -> Value {
     o.insert("alias_type".into(), vi(at));
     match at {
         0 | 2 => {
-            if let Ok(ta) = VarInt::decode(&mut buf) {
+            if let Ok(ta) = VarInt::decode_moqt::<Wire>(&mut buf) {
                 o.insert("token_alias".into(), vi(ta.into_inner()));
             }
         }
         1 => {
-            if let Ok(ta) = VarInt::decode(&mut buf) {
+            if let Ok(ta) = VarInt::decode_moqt::<Wire>(&mut buf) {
                 o.insert("token_alias".into(), vi(ta.into_inner()));
             }
-            if let Ok(tt) = VarInt::decode(&mut buf) {
+            if let Ok(tt) = VarInt::decode_moqt::<Wire>(&mut buf) {
                 o.insert("token_type".into(), vi(tt.into_inner()));
             }
             // Draft-18: token_value runs to end of bytes (no inner length).
             o.insert("token_value".into(), Value::String(hex::encode(buf)));
         }
         _ => {
-            if let Ok(tt) = VarInt::decode(&mut buf) {
+            if let Ok(tt) = VarInt::decode_moqt::<Wire>(&mut buf) {
                 o.insert("token_type".into(), vi(tt.into_inner()));
             }
             o.insert("token_value".into(), Value::String(hex::encode(buf)));
@@ -108,8 +108,8 @@ fn auth_token_to_json_d18(bytes: &[u8]) -> Value {
 
 fn decode_largest_object(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let group = VarInt::decode(&mut buf).unwrap().into_inner();
-    let object = VarInt::decode(&mut buf).unwrap().into_inner();
+    let group = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
+    let object = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
     let mut obj = Map::new();
     obj.insert("group".into(), vi(group));
     obj.insert("object".into(), vi(object));
@@ -118,7 +118,7 @@ fn decode_largest_object(bytes: &[u8]) -> Value {
 
 fn decode_track_namespace_prefix(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    match TrackNamespace::decode_allow_empty(&mut buf) {
+    match TrackNamespace::decode_allow_empty_moqt::<Wire>(&mut buf) {
         Ok(ns) => ns_to_json(&ns),
         Err(_) => Value::String(hex::encode(bytes)),
     }

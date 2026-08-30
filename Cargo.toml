@@ -10,7 +10,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/moqtap/moqtap"
 homepage = "https://github.com/moqtap/moqtap"
@@ -18,7 +18,7 @@ keywords = ["moqt", "quic", "streaming", "media", "protocol"]
 categories = ["network-programming"]
 
 [workspace.dependencies]
-moqtap-codec = { path = "crates/moqtap-codec", version = "0.3.0", default-features = false }
+moqtap-codec = { path = "crates/moqtap-codec", version = "0.4.0", default-features = false }
 wtransport = { version = "0.7", features = ["dangerous-configuration", "quinn"] }
 moqtap-trace = { path = "crates/moqtap-trace", version = "0.2.0" }
 moqtap-client = { path = "crates/moqtap-client", version = "0.3.0" }

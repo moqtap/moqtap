@@ -9,8 +9,9 @@
 //! - PublishNamespaceDone simplifies to just request_id
 
 #[allow(missing_docs)]
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
+/// Error and status code registries.
+pub mod error_codes;
 #[allow(missing_docs)]
 /// Control message types with encode/decode.
 pub mod message;

@@ -1,6 +1,26 @@
 //! MoQT draft version enum for runtime dispatch.
 
-use crate::varint::VarInt;
+use crate::varint::{Moqt17, Moqt18, VarInt, VarIntError};
+use bytes::{Buf, BufMut};
+
+/// A variable-length integer encoding used by some MoQT draft.
+///
+/// The MoQT variants are named for the draft that introduced each revision,
+/// not for the drafts that use it — [`DraftVersion::varint_encoding`] is the
+/// one place that maps drafts to encodings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VarIntEncoding {
+    /// The QUIC variable-length integer, RFC 9000 Section 16: a two-bit length
+    /// prefix, 1/2/4/8 bytes, values up to 2^62 - 1.
+    Rfc9000,
+    /// MoQT's own, as introduced in draft-17 Section 1.4.1: the length is the
+    /// number of leading 1 bits in the first byte. Draft-17 omits the 7-byte
+    /// length and rejects that code point.
+    Moqt17,
+    /// MoQT's own, as revised in draft-18, which restored the 7-byte length so
+    /// all of 1 to 9 bytes are defined.
+    Moqt18,
+}
 
 /// MoQT draft version for runtime codec selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,7 +81,8 @@ impl DraftVersion {
     ///
     /// Drafts 07–14 all use `moq-00` and negotiate the draft version in
     /// CLIENT_SETUP / SERVER_SETUP. Draft-15+ encode the draft number in the
-    /// ALPN itself (`moqt-<N>`), per §3.1.2 of each spec.
+    /// ALPN itself (`moqt-<N>`), so version selection happens during the TLS
+    /// handshake rather than after it.
     pub fn quic_alpn(&self) -> &'static [u8] {
         match self {
             DraftVersion::Draft07
@@ -128,6 +149,75 @@ impl DraftVersion {
         self.number() >= 11
     }
 
+    /// Which variable-length integer encoding this draft's wire format uses.
+    ///
+    /// Matched draft by draft rather than derived from the number. The series
+    /// has already changed encoding once mid-stream and revised it again a
+    /// draft later, so there is no rule to extrapolate from: adding a variant
+    /// to [`DraftVersion`] must fail to compile here until someone reads that
+    /// draft and says which encoding it uses.
+    pub fn varint_encoding(&self) -> VarIntEncoding {
+        match self {
+            DraftVersion::Draft07
+            | DraftVersion::Draft08
+            | DraftVersion::Draft09
+            | DraftVersion::Draft10
+            | DraftVersion::Draft11
+            | DraftVersion::Draft12
+            | DraftVersion::Draft13
+            | DraftVersion::Draft14
+            | DraftVersion::Draft15
+            | DraftVersion::Draft16 => VarIntEncoding::Rfc9000,
+            DraftVersion::Draft17 => VarIntEncoding::Moqt17,
+            DraftVersion::Draft18 | DraftVersion::Draft19 => VarIntEncoding::Moqt18,
+        }
+    }
+
+    /// Whether this draft uses one of MoQT's own variable-length integers
+    /// rather than RFC 9000's.
+    pub fn uses_moqt_varint(&self) -> bool {
+        self.varint_encoding() != VarIntEncoding::Rfc9000
+    }
+
+    /// The total encoded length of a variable-length integer, from its first
+    /// byte, under this draft's encoding.
+    ///
+    /// Available without a buffer, because a reader needs it to know how many
+    /// bytes to wait for before it can decode at all. On draft-17 a first byte
+    /// of `11111100` reports 7 even though the draft forbids that length: the
+    /// reader waits for the whole field, then [`Self::decode_varint`] rejects
+    /// it.
+    pub fn varint_len(&self, first_byte: u8) -> usize {
+        match self.varint_encoding() {
+            VarIntEncoding::Rfc9000 => 1 << (first_byte >> 6),
+            VarIntEncoding::Moqt17 | VarIntEncoding::Moqt18 => {
+                if first_byte == 0xFF {
+                    9
+                } else {
+                    first_byte.leading_ones() as usize + 1
+                }
+            }
+        }
+    }
+
+    /// Decode a variable-length integer under this draft's encoding.
+    pub fn decode_varint(&self, buf: &mut impl Buf) -> Result<VarInt, VarIntError> {
+        match self.varint_encoding() {
+            VarIntEncoding::Rfc9000 => VarInt::decode(buf),
+            VarIntEncoding::Moqt17 => VarInt::decode_moqt::<Moqt17>(buf),
+            VarIntEncoding::Moqt18 => VarInt::decode_moqt::<Moqt18>(buf),
+        }
+    }
+
+    /// Encode a variable-length integer under this draft's encoding.
+    pub fn encode_varint(&self, value: VarInt, buf: &mut impl BufMut) {
+        match self.varint_encoding() {
+            VarIntEncoding::Rfc9000 => value.encode(buf),
+            VarIntEncoding::Moqt17 => value.encode_moqt::<Moqt17>(buf),
+            VarIntEncoding::Moqt18 => value.encode_moqt::<Moqt18>(buf),
+        }
+    }
+
     /// The draft number (e.g. 7, 14, 17).
     pub fn number(&self) -> u8 {
         match self {
@@ -157,6 +247,52 @@ impl std::fmt::Display for DraftVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The draft-to-encoding map, stated once so a change to it is a change to
+    /// this list rather than a silent consequence of a comparison.
+    #[test]
+    fn every_draft_states_its_varint_encoding() {
+        use VarIntEncoding::*;
+        let expected = [
+            (DraftVersion::Draft07, Rfc9000),
+            (DraftVersion::Draft08, Rfc9000),
+            (DraftVersion::Draft09, Rfc9000),
+            (DraftVersion::Draft10, Rfc9000),
+            (DraftVersion::Draft11, Rfc9000),
+            (DraftVersion::Draft12, Rfc9000),
+            (DraftVersion::Draft13, Rfc9000),
+            (DraftVersion::Draft14, Rfc9000),
+            (DraftVersion::Draft15, Rfc9000),
+            (DraftVersion::Draft16, Rfc9000),
+            (DraftVersion::Draft17, Moqt17),
+            (DraftVersion::Draft18, Moqt18),
+            (DraftVersion::Draft19, Moqt18),
+        ];
+        for (draft, encoding) in expected {
+            assert_eq!(draft.varint_encoding(), encoding, "{draft}");
+            assert_eq!(draft.uses_moqt_varint(), encoding != Rfc9000, "{draft}");
+        }
+    }
+
+    /// The same value, in the encoding each era actually uses. 5000 is the
+    /// interesting size: two bytes under both, with different bits.
+    #[test]
+    fn varint_len_and_round_trip_follow_the_encoding() {
+        let mut buf = Vec::new();
+        DraftVersion::Draft14.encode_varint(VarInt::from_usize(5000), &mut buf);
+        assert_eq!(buf, vec![0x53, 0x88]);
+        assert_eq!(DraftVersion::Draft14.varint_len(buf[0]), 2);
+
+        let mut buf = Vec::new();
+        DraftVersion::Draft19.encode_varint(VarInt::from_usize(5000), &mut buf);
+        assert_eq!(buf, vec![0x93, 0x88]);
+        assert_eq!(DraftVersion::Draft19.varint_len(buf[0]), 2);
+
+        // 0x40 is a two-byte prefix under RFC 9000 and the one-byte value 64
+        // from draft-17 on.
+        assert_eq!(DraftVersion::Draft14.varint_len(0x40), 2);
+        assert_eq!(DraftVersion::Draft19.varint_len(0x40), 1);
+    }
 
     #[test]
     fn from_alpn_resolves_drafts_15_plus() {

@@ -138,9 +138,9 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
                 Value::String(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
             o.insert("subscriber_priority".into(), vi(m.subscriber_priority as u64));
-            o.insert("group_order".into(), vi(m.group_order.into_inner()));
-            o.insert("forward".into(), vi(m.forward.into_inner()));
-            o.insert("filter_type".into(), vi(m.filter_type.into_inner()));
+            o.insert("group_order".into(), vi(m.group_order as u64));
+            o.insert("forward".into(), vi(m.forward as u64));
+            o.insert("filter_type".into(), vi(m.filter_type as u64));
             if let Some(sg) = &m.start_group {
                 o.insert("start_group".into(), vi(sg.into_inner()));
             }
@@ -158,8 +158,8 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
             o.insert("expires".into(), vi(m.expires.into_inner()));
-            o.insert("group_order".into(), vi(m.group_order.into_inner()));
-            o.insert("content_exists".into(), vi(m.content_exists.into_inner()));
+            o.insert("group_order".into(), vi(m.group_order as u64));
+            o.insert("content_exists".into(), vi(m.content_exists as u64));
             if let Some(loc) = &m.largest_location {
                 o.insert("largest_location".into(), loc_to_json(loc));
             }
@@ -183,7 +183,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("start_object".into(), vi(m.start_object.into_inner()));
             o.insert("end_group".into(), vi(m.end_group.into_inner()));
             o.insert("subscriber_priority".into(), vi(m.subscriber_priority as u64));
-            o.insert("forward".into(), vi(m.forward.into_inner()));
+            o.insert("forward".into(), vi(m.forward as u64));
             o.insert("parameters".into(), kvp_to_json_msg(&m.parameters));
             o
         }
@@ -276,9 +276,18 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
                 Value::String(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
             o.insert("subscriber_priority".into(), vi(m.subscriber_priority as u64));
-            o.insert("group_order".into(), vi(m.group_order.into_inner()));
-            o.insert("forward".into(), vi(m.forward.into_inner()));
-            o.insert("filter_type".into(), vi(m.filter_type.into_inner()));
+            o.insert("group_order".into(), vi(m.group_order as u64));
+            o.insert("forward".into(), vi(m.forward as u64));
+            o.insert("filter_type".into(), vi(m.filter_type as u64));
+            if let Some(sg) = &m.start_group {
+                o.insert("start_group".into(), vi(sg.into_inner()));
+            }
+            if let Some(so) = &m.start_object {
+                o.insert("start_object".into(), vi(so.into_inner()));
+            }
+            if let Some(eg) = &m.end_group {
+                o.insert("end_group".into(), vi(eg.into_inner()));
+            }
             o.insert("parameters".into(), kvp_to_json_msg(&m.parameters));
             o
         }
@@ -287,8 +296,8 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
             o.insert("expires".into(), vi(m.expires.into_inner()));
-            o.insert("group_order".into(), vi(m.group_order.into_inner()));
-            o.insert("content_exists".into(), vi(m.content_exists.into_inner()));
+            o.insert("group_order".into(), vi(m.group_order as u64));
+            o.insert("content_exists".into(), vi(m.content_exists as u64));
             if let Some(loc) = &m.largest_location {
                 o.insert("largest_location".into(), loc_to_json(loc));
             }
@@ -309,7 +318,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("subscriber_priority".into(), vi(m.subscriber_priority as u64));
-            o.insert("group_order".into(), vi(m.group_order.into_inner()));
+            o.insert("group_order".into(), vi(m.group_order as u64));
             o.insert("fetch_type".into(), vi(m.fetch_type as u64));
             match &m.fetch_payload {
                 FetchPayload::Standalone {
@@ -330,8 +339,13 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
                     o.insert("end_group".into(), vi(end_group.into_inner()));
                     o.insert("end_object".into(), vi(end_object.into_inner()));
                 }
-                FetchPayload::Joining { joining_subscribe_id, joining_start } => {
-                    o.insert("joining_subscribe_id".into(), vi(joining_subscribe_id.into_inner()));
+                FetchPayload::Joining { joining_request_id, joining_start } => {
+                    // The key is the corpus's spelling, not this draft's. The
+                    // draft renamed the field to Joining Request ID; the shared
+                    // vector files still say joining_subscribe_id, and they are
+                    // maintained elsewhere, so the name is translated here
+                    // rather than changed there.
+                    o.insert("joining_subscribe_id".into(), vi(joining_request_id.into_inner()));
                     o.insert("joining_start".into(), vi(joining_start.into_inner()));
                 }
             }
@@ -341,8 +355,8 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
         ControlMessage::FetchOk(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("group_order".into(), vi(m.group_order.into_inner()));
-            o.insert("end_of_track".into(), vi(m.end_of_track.into_inner()));
+            o.insert("group_order".into(), vi(m.group_order as u64));
+            o.insert("end_of_track".into(), vi(m.end_of_track as u64));
             o.insert("end_location".into(), loc_to_json(&m.end_location));
             o.insert("parameters".into(), kvp_to_json_msg(&m.parameters));
             o
@@ -371,22 +385,22 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
                 Value::String(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
-            o.insert("group_order".into(), vi(m.group_order.into_inner()));
-            o.insert("content_exists".into(), vi(m.content_exists.into_inner()));
+            o.insert("group_order".into(), vi(m.group_order as u64));
+            o.insert("content_exists".into(), vi(m.content_exists as u64));
             if let Some(loc) = &m.largest_location {
                 o.insert("largest_location".into(), loc_to_json(loc));
             }
-            o.insert("forward".into(), vi(m.forward.into_inner()));
+            o.insert("forward".into(), vi(m.forward as u64));
             o.insert("parameters".into(), kvp_to_json_msg(&m.parameters));
             o
         }
         ControlMessage::PublishOk(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("forward".into(), vi(m.forward.into_inner()));
+            o.insert("forward".into(), vi(m.forward as u64));
             o.insert("subscriber_priority".into(), vi(m.subscriber_priority as u64));
-            o.insert("group_order".into(), vi(m.group_order.into_inner()));
-            o.insert("filter_type".into(), vi(m.filter_type.into_inner()));
+            o.insert("group_order".into(), vi(m.group_order as u64));
+            o.insert("filter_type".into(), vi(m.filter_type as u64));
             if let Some(sg) = &m.start_group {
                 o.insert("start_group".into(), vi(sg.into_inner()));
             }

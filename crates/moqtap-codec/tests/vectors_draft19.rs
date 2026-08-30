@@ -2,8 +2,9 @@
 
 mod test_vectors;
 
+use moqtap_codec::dispatch::AnySubgroupHeader;
 use moqtap_codec::draft19::message::ControlMessage;
-use test_vectors::{load_vectors, vectors_dir};
+use test_vectors::{dispatch_check, load_vectors, vectors_dir};
 
 fn run_message_vectors(relative_path: &str) {
     let path = vectors_dir().join(relative_path);
@@ -41,8 +42,10 @@ fn run_message_vectors(relative_path: &str) {
         if vector.error.is_some() {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
-            let result = ControlMessage::decode(&mut &bytes[..]);
-            assert!(result.is_err(), "[{}] expected error but decoded successfully", vector.id);
+            match ControlMessage::decode(&mut &bytes[..]) {
+                Ok(_) => panic!("[{}] expected error but decoded successfully", vector.id),
+                Err(e) => vector.assert_error(&e),
+            }
         }
     }
 }
@@ -82,7 +85,9 @@ d19_test!(d19_unknown_type, "unknown-type.json");
 // ─────────────────────────────────────────────────────────────
 
 use bytes::Buf;
-use moqtap_codec::draft19::data_stream::{DatagramHeader, FetchHeader, SubgroupHeader};
+use moqtap_codec::draft19::data_stream::{
+    DatagramHeader, FetchHeader, FetchObjectHeader, SubgroupHeader,
+};
 use moqtap_codec::varint::VarInt;
 
 fn js_str(v: &serde_json::Value, key: &str) -> String {
@@ -158,78 +163,41 @@ fn run_subgroup_vectors(relative_path: &str) {
                 .and_then(|v| v.as_array())
                 .unwrap_or_else(|| panic!("[{}] missing objects array", vector.id));
 
-            let has_properties = header.has_properties();
-            let mut prev_object_id: Option<u64> = None;
-            let mut first_object = true;
+            let any_header = AnySubgroupHeader::Draft19(header.clone());
+            let mut object_bytes = Vec::new();
+            let objects = dispatch_check::check_subgroup_objects(
+                &vector.id,
+                &any_header,
+                &mut cursor,
+                expected_objs,
+                &mut object_bytes,
+            );
 
-            for eo in expected_objs {
-                let delta = VarInt::decode(&mut cursor)
-                    .unwrap_or_else(|e| panic!("[{}] object delta decode failed: {e}", vector.id))
-                    .into_inner();
+            for dropped in 0..objects.len() {
+                dispatch_check::check_elide(&any_header, &objects, dropped);
+            }
 
-                let resolved_id = match prev_object_id {
-                    None => delta,
-                    Some(prev) => prev + delta + 1,
-                };
-                prev_object_id = Some(resolved_id);
-
-                if first_object && subgroup_id_mode == 1 {
+            if subgroup_id_mode == 1 {
+                if let Some(first) = objects.first() {
                     assert_eq!(
-                        resolved_id.to_string(),
+                        first.object_id.to_string(),
                         js_str(expected, "subgroup_id"),
                         "[{}] subgroup_id (from first object) mismatch",
                         vector.id
                     );
                 }
-                first_object = false;
+            }
 
+            if vector.is_canonical() {
+                let mut out = Vec::new();
+                header.encode(&mut out);
+                out.extend_from_slice(&object_bytes);
                 assert_eq!(
-                    resolved_id.to_string(),
-                    js_str(eo, "object_id"),
-                    "[{}] object_id mismatch",
+                    hex::encode(&out),
+                    vector.hex,
+                    "[{}] re-encoded subgroup mismatch",
                     vector.id
                 );
-
-                if has_properties {
-                    let props_len = VarInt::decode(&mut cursor).unwrap().into_inner() as usize;
-                    cursor.advance(props_len);
-                }
-
-                let payload_len = VarInt::decode(&mut cursor)
-                    .unwrap_or_else(|e| panic!("[{}] payload_length decode failed: {e}", vector.id))
-                    .into_inner() as usize;
-
-                if payload_len == 0 {
-                    if let Some(s) = js_str_opt(eo, "status") {
-                        let status = VarInt::decode(&mut cursor).unwrap();
-                        assert_eq!(
-                            status.into_inner().to_string(),
-                            s,
-                            "[{}] object_status mismatch",
-                            vector.id
-                        );
-                    }
-                }
-
-                if let Some(expected_hex) = js_str_opt(eo, "payload_hex") {
-                    if payload_len > 0 {
-                        assert!(
-                            cursor.remaining() >= payload_len,
-                            "[{}] not enough bytes for payload",
-                            vector.id
-                        );
-                        let payload = &cursor[..payload_len];
-                        assert_eq!(
-                            hex::encode(payload),
-                            expected_hex,
-                            "[{}] payload_hex mismatch",
-                            vector.id
-                        );
-                        cursor.advance(payload_len);
-                    } else {
-                        assert_eq!(expected_hex, "", "[{}] expected empty payload_hex", vector.id);
-                    }
-                }
             }
         }
 
@@ -237,14 +205,19 @@ fn run_subgroup_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            let result = SubgroupHeader::decode(&mut cursor);
-            if result.is_ok() {
-                let obj_result = VarInt::decode(&mut cursor);
-                assert!(
-                    obj_result.is_err() || cursor.has_remaining(),
-                    "[{}] expected decode error but succeeded",
-                    vector.id
-                );
+            // Whichever step failed is the failure this vector is evidence of.
+            // The objects are read too, because a vector calling a subgroup
+            // stream malformed says it about the stream, not its header.
+            let failure = match SubgroupHeader::decode(&mut cursor) {
+                Err(e) => Some(e),
+                Ok(header) => dispatch_check::drain_subgroup_objects(
+                    &AnySubgroupHeader::Draft19(header),
+                    &mut cursor,
+                ),
+            };
+            match failure {
+                Some(e) => vector.assert_error(&e),
+                None => panic!("[{}] expected decode error but succeeded", vector.id),
             }
         }
     }
@@ -260,7 +233,13 @@ fn run_datagram_vectors(relative_path: &str) {
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
 
-            let hdr = DatagramHeader::decode(&mut cursor)
+            // A datagram's payload runs to the end of the transport datagram
+            // and is delimited by nothing else, so `DatagramHeader::decode`
+            // stops at the header and hands the tail back. Every rule about
+            // that payload belongs to a reader holding both halves, and
+            // `decode_object` is it. These runners answer the endpoint
+            // profile, and an endpoint reads a whole datagram.
+            let (hdr, payload) = DatagramHeader::decode_object(&mut cursor)
                 .unwrap_or_else(|e| panic!("[{}] datagram decode failed: {e}", vector.id));
 
             assert_eq!(
@@ -306,9 +285,31 @@ fn run_datagram_vectors(relative_path: &str) {
             }
             if let Some(expected_hex) = js_str_opt(expected, "payload_hex") {
                 assert_eq!(
-                    hex::encode(cursor),
+                    hex::encode(&payload),
                     expected_hex,
                     "[{}] payload_hex mismatch",
+                    vector.id
+                );
+            }
+
+            // The vectors are the encoder's account too: what decoded from
+            // these bytes has to write back as these bytes. Without it a
+            // published datagram vector cannot catch an encoder and decoder
+            // that disagree, because only one of the two is ever run.
+            //
+            // Ablation: writing the Object ID from a datagram header whose Type
+            // says there is none — `[datagram-no-object-id] re-encoded datagram
+            // mismatch / left: "0405640080" / right: "04056480"`, measured on
+            // draft-19. The decoder honours the bit either way, so nothing else
+            // in these suites notices.
+            if vector.is_canonical() {
+                let mut out = Vec::new();
+                hdr.encode(&mut out);
+                out.extend_from_slice(&payload);
+                assert_eq!(
+                    hex::encode(&out),
+                    vector.hex,
+                    "[{}] re-encoded datagram mismatch",
                     vector.id
                 );
             }
@@ -318,17 +319,36 @@ fn run_datagram_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            let result = DatagramHeader::decode(&mut cursor);
-            assert!(result.is_err(), "[{}] expected decode error but succeeded", vector.id);
+            match DatagramHeader::decode_object(&mut cursor) {
+                Ok(_) => panic!("[{}] expected decode error but succeeded", vector.id),
+                Err(e) => vector.assert_error(&e),
+            }
         }
     }
 }
 
-/// Decode draft-18 fetch object stream and verify objects against test
-/// vectors. Draft-18 changed flag semantics so that 0x08 = Group ID Delta
-/// present, 0x04 = Object ID Delta present (the layout still has Group
-/// before Object on the wire), and the first object's deltas are
-/// interpreted as absolute values.
+/// Decode a draft-19 fetch stream and check every object against the
+/// vectors.
+///
+/// The framing comes from [`FetchObjectHeader`], which is what the vectors are
+/// here to hold to account; the Group ID, Subgroup ID, Object ID and priority
+/// each object resolves to are computed here, because draft-19 Section 11.4.4
+/// defines them against the *previous* object on the stream and a single
+/// object header cannot see one.
+///
+/// The arithmetic is the section's, restated:
+///
+///   - The first object carries both deltas and they are absolute.
+///   - Later, a Group ID Delta moves the group by `delta + 1` (Ascending
+///     order, the only ordering these vectors use) and the Object ID becomes
+///     the Object ID Delta; with no Group ID Delta the group is unchanged and
+///     the Object ID Delta is added to the previous ID, or the previous ID
+///     plus one when there is no Object ID Delta either.
+///   - The Subgroup ID follows Table 8: zero, the previous object's, the
+///     previous object's plus one, or an explicit field.
+///   - An End of Range indicator (Section 11.4.4.2) supplies the prior Group
+///     and Object ID for whatever follows it, but leaves the prior Subgroup ID
+///     and priority as the last real object set them.
 fn run_fetch_vectors(relative_path: &str) {
     let path = vectors_dir().join(relative_path);
     let file = load_vectors(&path);
@@ -360,19 +380,56 @@ fn run_fetch_vectors(relative_path: &str) {
             let mut first_object = true;
 
             for eo in expected_objs {
-                let flags = VarInt::decode(&mut cursor).unwrap().into_inner();
+                let before = cursor.len();
+                let object = FetchObjectHeader::decode(&mut cursor)
+                    .unwrap_or_else(|e| panic!("[{}] fetch object decode failed: {e}", vector.id));
+                let consumed = &bytes[bytes.len() - before..bytes.len() - cursor.len()];
 
                 let expected_flags_str = js_str(eo, "serialization_flags");
                 let expected_flags =
                     u64::from_str_radix(expected_flags_str.trim_start_matches("0x"), 16).unwrap();
-                assert_eq!(flags, expected_flags, "[{}] serialization_flags mismatch", vector.id);
+                assert_eq!(
+                    object.flags(),
+                    expected_flags,
+                    "[{}] serialization_flags mismatch",
+                    vector.id
+                );
 
-                // End-of-range markers carry absolute Group ID and
-                // Object ID followed by Object Payload Length only.
-                if flags == 0x8C || flags == 0x10C {
-                    let group_id = VarInt::decode(&mut cursor).unwrap().into_inner();
-                    let object_id = VarInt::decode(&mut cursor).unwrap().into_inner();
-                    let payload_length = VarInt::decode(&mut cursor).unwrap().into_inner() as usize;
+                // The framing the decoder chose has to be the framing the
+                // publisher wrote, byte for byte, or the fields after it were
+                // read from the wrong offsets.
+                if vector.is_canonical() {
+                    let mut reencoded = Vec::new();
+                    object.encode(&mut reencoded).unwrap_or_else(|e| {
+                        panic!("[{}] fetch object re-encode refused: {e}", vector.id)
+                    });
+                    assert_eq!(
+                        hex::encode(&reencoded),
+                        hex::encode(consumed),
+                        "[{}] re-encoded fetch object mismatch",
+                        vector.id
+                    );
+                }
+
+                // End of Range indicators carry an absolute Group ID and
+                // Object ID in the delta fields, and nothing else.
+                if object.end_of_range().is_some() {
+                    let group_id = object
+                        .group_id_delta
+                        .expect("an End of Range indicator states its Group ID")
+                        .into_inner();
+                    let object_id = object
+                        .object_id_delta
+                        .expect("an End of Range indicator states its Object ID")
+                        .into_inner();
+                    assert!(
+                        object.subgroup_id.is_none()
+                            && object.publisher_priority.is_none()
+                            && object.properties.is_none(),
+                        "[{}] an End of Range indicator carries no Subgroup ID, priority \
+                         or properties",
+                        vector.id
+                    );
                     prev_group_id = group_id;
                     prev_object_id = Some(object_id);
 
@@ -391,7 +448,8 @@ fn run_fetch_vectors(relative_path: &str) {
 
                     if let Some(expected_hex) = js_str_opt(eo, "payload_hex") {
                         assert_eq!(
-                            payload_length, 0,
+                            object.payload_length.into_inner(),
+                            0,
                             "[{}] end-of-range expected zero payload",
                             vector.id
                         );
@@ -401,41 +459,13 @@ fn run_fetch_vectors(relative_path: &str) {
                     continue;
                 }
 
-                let group_id_delta = if flags & 0x08 != 0 {
-                    Some(VarInt::decode(&mut cursor).unwrap().into_inner())
-                } else {
-                    None
-                };
+                let group_id_delta = object.group_id_delta.map(VarInt::into_inner);
+                let object_id_delta = object.object_id_delta.map(VarInt::into_inner);
 
-                // Subgroup ID is explicit only when the two LSBs == 0b11 and
-                // bit 0x40 (DATAGRAM) is clear.
-                let datagram_flag = flags & 0x40 != 0;
-                let explicit_subgroup = !datagram_flag && (flags & 0x03) == 0x03;
-                if explicit_subgroup {
-                    prev_subgroup_id = VarInt::decode(&mut cursor).unwrap().into_inner();
-                }
-
-                let object_id_delta = if flags & 0x04 != 0 {
-                    Some(VarInt::decode(&mut cursor).unwrap().into_inner())
-                } else {
-                    None
-                };
-
-                // First object's deltas are absolute values per spec; the
-                // group reset zeroes prior subgroup/object state unless the
-                // current object overrode the subgroup itself.
                 let group_id = if first_object {
-                    let g = group_id_delta.expect("first fetch object must include Group ID Delta");
-                    if !explicit_subgroup {
-                        prev_subgroup_id = 0;
-                    }
                     prev_object_id = None;
-                    g
+                    group_id_delta.expect("first fetch object must include Group ID Delta")
                 } else if let Some(d) = group_id_delta {
-                    // Ascending order (the only ordering exercised by these vectors).
-                    if !explicit_subgroup {
-                        prev_subgroup_id = 0;
-                    }
                     prev_object_id = None;
                     prev_group_id + d + 1
                 } else {
@@ -454,23 +484,34 @@ fn run_fetch_vectors(relative_path: &str) {
                 };
                 prev_object_id = Some(object_id);
 
-                let priority_present = flags & 0x10 != 0;
-                let priority = if priority_present {
-                    assert!(cursor.remaining() >= 1);
-                    let p = cursor[0];
-                    cursor.advance(1);
-                    prev_priority = p;
-                    p
+                // Table 8. An object with the Datagram bit set has no Subgroup
+                // ID at all, so the prior one is left where it was.
+                let subgroup_id = if object.is_datagram() {
+                    None
                 } else {
-                    prev_priority
+                    Some(match object.subgroup_id_mode() {
+                        0b00 => 0,
+                        0b01 => prev_subgroup_id,
+                        0b10 => prev_subgroup_id + 1,
+                        _ => object
+                            .subgroup_id
+                            .expect("mode 0b11 puts a Subgroup ID on the wire")
+                            .into_inner(),
+                    })
                 };
-
-                if flags & 0x20 != 0 {
-                    let props_len = VarInt::decode(&mut cursor).unwrap().into_inner() as usize;
-                    cursor.advance(props_len);
+                if let Some(id) = subgroup_id {
+                    prev_subgroup_id = id;
                 }
 
-                let payload_length = VarInt::decode(&mut cursor).unwrap().into_inner() as usize;
+                let priority = match object.publisher_priority {
+                    Some(p) => {
+                        prev_priority = p;
+                        p
+                    }
+                    None => prev_priority,
+                };
+
+                let payload_length = object.payload_length.into_inner() as usize;
 
                 assert_eq!(
                     group_id.to_string(),
@@ -480,8 +521,8 @@ fn run_fetch_vectors(relative_path: &str) {
                 );
                 if let Some(sgid) = js_str_opt(eo, "subgroup_id") {
                     assert_eq!(
-                        prev_subgroup_id.to_string(),
-                        sgid,
+                        subgroup_id.map(|id| id.to_string()),
+                        Some(sgid),
                         "[{}] subgroup_id mismatch",
                         vector.id
                     );
@@ -500,6 +541,14 @@ fn run_fetch_vectors(relative_path: &str) {
                         vector.id
                     );
                 }
+                // A vector that names properties must have had them framed,
+                // and one that does not must not.
+                assert_eq!(
+                    object.properties.is_some(),
+                    eo.get("object_properties").is_some(),
+                    "[{}] object_properties presence mismatch",
+                    vector.id
+                );
 
                 if let Some(expected_hex) = js_str_opt(eo, "payload_hex") {
                     if payload_length > 0 {
@@ -518,14 +567,23 @@ fn run_fetch_vectors(relative_path: &str) {
 
                 first_object = false;
             }
+
+            assert!(
+                !cursor.has_remaining(),
+                "[{}] {} byte(s) left over after the last object",
+                vector.id,
+                cursor.remaining()
+            );
         }
 
         if vector.error.is_some() {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            let result = FetchHeader::decode(&mut cursor);
-            assert!(result.is_err(), "[{}] expected decode error but succeeded", vector.id);
+            match FetchHeader::decode(&mut cursor) {
+                Ok(_) => panic!("[{}] expected decode error but succeeded", vector.id),
+                Err(e) => vector.assert_error(&e),
+            }
         }
     }
 }
@@ -540,6 +598,24 @@ fn d19_data_stream_datagram() {
     run_datagram_vectors("transport/draft19/codec/data-streams/datagram.json");
 }
 
+/// The committed fetch vectors, decoded by [`FetchObjectHeader`] rather than
+/// by hand, and re-encoded back to the bytes they came from.
+///
+/// The re-encode is what makes the framing checkable rather than merely
+/// plausible: a decoder that read the right number of bytes from the wrong
+/// offsets can still produce field values that pass every other assertion, and
+/// only writing them back out again catches it.
+///
+/// # What this catches, observed by making the change and running it
+///
+/// Swapping the Subgroup ID and Object ID Delta reads in
+/// `FetchObjectHeader::decode`:
+///
+/// ```text
+/// assertion `left == right` failed: [fetch-with-subgroup-id-present] re-encoded fetch object mismatch
+///   left: "1f0000078004"
+///  right: "1f0007008004"
+/// ```
 #[test]
 fn d19_data_stream_fetch() {
     run_fetch_vectors("transport/draft19/codec/data-streams/fetch-header.json");

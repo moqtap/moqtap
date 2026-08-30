@@ -9,6 +9,8 @@
 
 /// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
+/// Session termination, per-message error and status codes.
+pub mod error_codes;
 /// Control message types with encode/decode.
 pub mod message;
 /// Draft-11 types.

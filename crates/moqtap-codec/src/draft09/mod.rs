@@ -6,5 +6,6 @@
 //! - DatagramStatus gains `extension_headers_length` field
 //! - `filter_type=1` (LatestGroup/NextGroupStart) removed from SUBSCRIBE
 pub mod data_stream;
+pub mod error_codes;
 pub mod message;
 pub mod types;

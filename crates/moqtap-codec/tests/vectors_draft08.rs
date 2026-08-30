@@ -3,13 +3,15 @@
 mod test_vectors;
 
 use bytes::{Buf, BufMut};
+use moqtap_codec::dispatch::AnySubgroupHeader;
 use moqtap_codec::draft08::data_stream::{
-    DatagramHeader, DatagramStatusHeader, FetchHeader, FetchObjectHeader, ObjectHeader, StreamType,
+    DatagramHeader, DatagramStatusHeader, FetchHeader, FetchObjectHeader, StreamType,
     SubgroupHeader,
 };
 use moqtap_codec::draft08::message::ControlMessage;
+use moqtap_codec::error::CodecError;
 use moqtap_codec::varint::VarInt;
-use test_vectors::{load_vectors, vectors_dir};
+use test_vectors::{dispatch_check, load_vectors, vectors_dir};
 
 fn run_message_vectors(relative_path: &str) {
     let path = vectors_dir().join(relative_path);
@@ -47,8 +49,10 @@ fn run_message_vectors(relative_path: &str) {
         if vector.error.is_some() {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
-            let result = ControlMessage::decode(&mut &bytes[..]);
-            assert!(result.is_err(), "[{}] expected error but decoded successfully", vector.id);
+            match ControlMessage::decode(&mut &bytes[..]) {
+                Ok(_) => panic!("[{}] expected error but decoded successfully", vector.id),
+                Err(e) => vector.assert_error(&e),
+            }
         }
     }
 }
@@ -163,66 +167,25 @@ fn run_subgroup_vectors(relative_path: &str) {
                 .and_then(|v| v.as_array())
                 .unwrap_or_else(|| panic!("[{}] missing objects array", vector.id));
 
-            let mut decoded_objects = Vec::new();
-            for eo in expected_objs {
-                let obj = ObjectHeader::decode(&mut cursor)
-                    .unwrap_or_else(|e| panic!("[{}] object decode failed: {e}", vector.id));
-                assert_eq!(
-                    obj.object_id.into_inner().to_string(),
-                    js_str(eo, "object_id"),
-                    "[{}] object_id mismatch",
-                    vector.id
-                );
-                assert_eq!(
-                    obj.extension_count.into_inner().to_string(),
-                    js_str(eo, "extension_count"),
-                    "[{}] extension_count mismatch",
-                    vector.id
-                );
-                assert_eq!(
-                    obj.payload_length.into_inner().to_string(),
-                    js_str(eo, "payload_length"),
-                    "[{}] payload_length mismatch",
-                    vector.id
-                );
-                if let Some(s) = js_str_opt(eo, "object_status") {
-                    assert_eq!(
-                        (obj.object_status as u64).to_string(),
-                        s,
-                        "[{}] object_status mismatch",
-                        vector.id
-                    );
-                }
+            let any_header = AnySubgroupHeader::Draft08(header.clone());
+            let mut object_bytes = Vec::new();
+            let objects = dispatch_check::check_subgroup_objects(
+                &vector.id,
+                &any_header,
+                &mut cursor,
+                expected_objs,
+                &mut object_bytes,
+            );
 
-                let plen = obj.payload_length.into_inner() as usize;
-                assert!(
-                    cursor.remaining() >= plen,
-                    "[{}] payload underrun: need {plen}, have {}",
-                    vector.id,
-                    cursor.remaining()
-                );
-                let mut payload = vec![0u8; plen];
-                cursor.copy_to_slice(&mut payload);
-                if let Some(expected_hex) = js_str_opt(eo, "payload_hex") {
-                    assert_eq!(
-                        hex::encode(&payload),
-                        expected_hex,
-                        "[{}] payload_hex mismatch",
-                        vector.id
-                    );
-                }
-
-                decoded_objects.push((obj, payload));
+            for dropped in 0..objects.len() {
+                dispatch_check::check_elide(&any_header, &objects, dropped);
             }
 
             if vector.is_canonical() {
                 let mut out = Vec::new();
                 encode_stream_type(StreamType::Subgroup, &mut out);
                 header.encode(&mut out);
-                for (obj, payload) in &decoded_objects {
-                    obj.encode(&mut out);
-                    out.put_slice(payload);
-                }
+                out.extend_from_slice(&object_bytes);
                 assert_eq!(
                     hex::encode(&out),
                     vector.hex,
@@ -236,9 +199,21 @@ fn run_subgroup_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            let consumed_type = VarInt::decode(&mut cursor).is_ok();
-            let header_ok = consumed_type && SubgroupHeader::decode(&mut cursor).is_ok();
-            assert!(!header_ok, "[{}] expected decode error but succeeded", vector.id);
+            // `decode_stream` reads the leading type and hands the header the
+            // shape that type declares. A fixed shape reads fields the stream
+            // never carried: a whole stream then looks truncated, and a
+            // truncated one is refused over the wrong missing field.
+            let failure = match SubgroupHeader::decode_stream(&mut cursor) {
+                Err(e) => Some(e),
+                Ok(header) => dispatch_check::drain_subgroup_objects(
+                    &AnySubgroupHeader::Draft08(header),
+                    &mut cursor,
+                ),
+            };
+            match failure {
+                Some(e) => vector.assert_error(&e),
+                None => panic!("[{}] expected decode error but succeeded", vector.id),
+            }
         }
     }
 }
@@ -332,9 +307,16 @@ fn run_datagram_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            let consumed_type = VarInt::decode(&mut cursor).is_ok();
-            let header_ok = consumed_type && DatagramHeader::decode(&mut cursor).is_ok();
-            assert!(!header_ok, "[{}] expected decode error but succeeded", vector.id);
+            // Either the stream type varint or the header itself; whichever
+            // failed is the failure this vector is evidence of.
+            let failure = match VarInt::decode(&mut cursor) {
+                Err(e) => Some(CodecError::from(e)),
+                Ok(_) => DatagramHeader::decode(&mut cursor).err(),
+            };
+            match failure {
+                Some(e) => vector.assert_error(&e),
+                None => panic!("[{}] expected decode error but succeeded", vector.id),
+            }
         }
     }
 }
@@ -407,9 +389,16 @@ fn run_datagram_status_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            let consumed_type = VarInt::decode(&mut cursor).is_ok();
-            let header_ok = consumed_type && DatagramStatusHeader::decode(&mut cursor).is_ok();
-            assert!(!header_ok, "[{}] expected decode error but succeeded", vector.id);
+            // Either the stream type varint or the header itself; whichever
+            // failed is the failure this vector is evidence of.
+            let failure = match VarInt::decode(&mut cursor) {
+                Err(e) => Some(CodecError::from(e)),
+                Ok(_) => DatagramStatusHeader::decode(&mut cursor).err(),
+            };
+            match failure {
+                Some(e) => vector.assert_error(&e),
+                None => panic!("[{}] expected decode error but succeeded", vector.id),
+            }
         }
     }
 }
@@ -523,9 +512,16 @@ fn run_fetch_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            let consumed_type = VarInt::decode(&mut cursor).is_ok();
-            let header_ok = consumed_type && FetchHeader::decode(&mut cursor).is_ok();
-            assert!(!header_ok, "[{}] expected decode error but succeeded", vector.id);
+            // Either the stream type varint or the header itself; whichever
+            // failed is the failure this vector is evidence of.
+            let failure = match VarInt::decode(&mut cursor) {
+                Err(e) => Some(CodecError::from(e)),
+                Ok(_) => FetchHeader::decode(&mut cursor).err(),
+            };
+            match failure {
+                Some(e) => vector.assert_error(&e),
+                None => panic!("[{}] expected decode error but succeeded", vector.id),
+            }
         }
     }
 }

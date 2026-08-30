@@ -1,0 +1,858 @@
+{
+  "draft": 19,
+  "baseline_draft": 18,
+  "source_file": "draft-19.html",
+  "source_sha256": "f01d50293c6c82553c413948930253005f10c1589c870cdbad532336303368d5",
+  "source_sha256_of": "the draft-NN.html file as bytes on disk",
+  "baseline_source_file": "draft-18.html",
+  "baseline_source_sha256": "45d10e235e796c0c63c0d7cbacc6fb49697316021fa9277b478af6459d771a52",
+  "generated_by": "hand-extracted; not the output of a committed script",
+  "method": [
+    "The change list is draft-19 Appendix A.1, 'Since draft-ietf-moq-transport-18', read in full and transcribed verbatim into appendix_entry.",
+    "Every affected section was located by reading draft-19, not inferred from the appendix wording. Section numbers moved between the two drafts (draft-19 inserts 3.1.3, 3.3.2, 5.1.3, 5.1.4, 6.3, 10.2.10-10.2.14, 10.3.1.6, 10.3.1.7, 10.19.1 and 15.9), so every section number here is a draft-19 number unless the field name says baseline.",
+    "Classification was decided from the section text of both drafts, not from the appendix summary. Where the appendix files a change under 'Notable Editorial Changes' but the section text changes required behavior, the classification here says so and the discrepancy is recorded in the entry.",
+    "Wire before/after layouts are transcribed from the <pre> artwork blocks of draft-18.html and draft-19.html respectively.",
+    "changes_not_in_appendix holds differences found by diffing the two drafts section by section that Appendix A.1 does not mention. That list is the result of a full section-by-section text diff of sections 1-15, so it is complete with respect to prose, artwork and registry tables; it deliberately omits pure section-number reference churn (e.g. 'Section 3.3.2' -> 'Section 3.3.3') and figure/table renumbering."
+  ],
+  "classification_definitions": {
+    "wire-incompatible": "Bytes on the wire change meaning, or a code point is added, retired or moved. A conformant draft-18 endpoint and a conformant draft-19 endpoint can produce or reject different byte sequences for the same intent.",
+    "semantic": "No field layout or code point changes, but required behavior, state machine or validity rules change. Encoders and decoders can be shared; the logic around them cannot.",
+    "editorial": "Prose, naming in the document, or structure changes with no change to bytes and no change to required behavior."
+  },
+  "totals": {
+    "appendix_entries": 20,
+    "appendix_entries_by_classification": {
+      "wire-incompatible": 6,
+      "semantic": 12,
+      "editorial": 2
+    },
+    "changes_not_in_appendix": 17,
+    "changes_not_in_appendix_by_classification": {
+      "wire-incompatible": 3,
+      "semantic": 4,
+      "editorial": 10
+    },
+    "appendix_entries_the_working_group_filed_as_editorial": 2,
+    "appendix_entries_filed_as_editorial_that_change_required_behavior": 1,
+    "registry_row_delta_over_the_four_extracted_registries": {
+      "draft_18": 62,
+      "draft_19": 64,
+      "added": ["session termination 0x1B", "REQUEST_ERROR 0x35", "REQUEST_ERROR 0x36"],
+      "removed": ["REQUEST_ERROR 0x19"]
+    }
+  },
+
+  "changes": [
+    {
+      "id": "A1-01",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Add Range Filters that can filter Objects from Subscriptions and SUBSCRIBE_TRACKS (#1765)",
+      "sections": [
+        "5.1.3 Range Filters (the normative definition)",
+        "5.1.4 Combining Filters",
+        "6.3 Filtering SUBSCRIBE_TRACKS",
+        "6.3.1 Relay Resource Protection in Large Namespaces",
+        "10.2.10 SUBGROUP FILTER Parameter",
+        "10.2.11 OBJECTID FILTER Parameter",
+        "10.2.12 PRIORITY FILTER Parameter",
+        "10.2.13 OBJECT PROPERTY FILTER Parameter",
+        "10.2.14 TRACK PROPERTY FILTER Parameter",
+        "10.3.1.6 MAX FILTER RANGES",
+        "10.6 REQUEST_ERROR (INVALID_FILTER, CONFLICTING_FILTERS definitions)",
+        "10.12.3 Fetch Handling (gaps in a FETCH response no longer imply non-existence when filters were requested)",
+        "11.4.3 Closing Subgroup Streams (relay next-Object determination accounts for filtered-out Objects)",
+        "15.4 Setup Options (0x06 MAX_FILTER_RANGES)",
+        "15.7 Message Parameters (0x25-0x29)",
+        "15.11.2 REQUEST_ERROR Codes (0x35, 0x36)"
+      ],
+      "classification": "wire-incompatible",
+      "classification_basis": "Five new Message Parameter code points, one new Setup Option code point and two new REQUEST_ERROR code points are assigned. Draft-18 section 10.2 says 'An endpoint that receives an unknown Message Parameter MUST close the session with PROTOCOL_VIOLATION', so a draft-18 receiver terminates the session on any of 0x25-0x29 rather than ignoring them.",
+      "wire": {
+        "before": "No parameter types 0x25-0x29 exist in draft-18. Draft-18 section 15.7 assigns 0x21 SUBSCRIPTION_FILTER and 0x22 GROUP_ORDER with nothing between 0x22 and 0x32. No Setup Option 0x06 exists (draft-18 section 15.4 goes 0x05 AUTHORITY, 0x07 MOQT_IMPLEMENTATION). REQUEST_ERROR codes 0x35 and 0x36 are unassigned.",
+        "after": "See the range_filters object in this file for the full layout of each of the five parameters, the SetID width, the Property Type field and the range encoding."
+      },
+      "notes": [
+        "Range Filters are gated: draft-19 section 5.1.3 says 'Range Filters are only allowed if the setup option MAX_FILTER_RANGES is non-zero', and section 10.3.1.6 says 'The default value is 0, so if not specified, the peer MUST NOT send any such filter parameters.' A peer that never sends MAX_FILTER_RANGES can never legally receive one of these parameters.",
+        "Filtering changes the meaning of holes in delivered Object IDs. Draft-19 section 10.12.3: 'Any gaps in the Group and Object IDs in the response stream indicate objects that do not exist unless filters were requested.' Draft-18 has no such caveat.",
+        "Draft-19 section 11.4.3 adds 'unless the intervening Objects did not pass the subscriber's filters' to the two conditions under which a relay may treat an Object as the next Object on a Subgroup stream."
+      ]
+    },
+    {
+      "id": "A1-02",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Add MAX_REQUEST_UPDATES Setup Option and TOO_MANY_REQUEST_UPDATES error (#1613)",
+      "sections": [
+        "10.3.1.7 MAX_REQUEST_UPDATES",
+        "10.9 REQUEST_UPDATE",
+        "3.5 Termination (TOO_MANY_REQUEST_UPDATES definition)",
+        "15.4 Setup Options (0x08)",
+        "15.11.1 Session Termination Error Codes (0x1B)"
+      ],
+      "classification": "wire-incompatible",
+      "classification_basis": "New Setup Option code point 0x08 and new Session Termination Error Code 0x1B. The option itself is ignorable by an older peer (section 10.3 'Receivers MUST ignore unrecognized Setup Options'), but the error code appears in a QUIC/WebTransport session close and a draft-18 peer has no name for it.",
+      "wire": {
+        "before": "Draft-18 section 15.4 Setup Options registry has no 0x08. Draft-18 section 15.10.1 Session Termination Error Codes end at MALFORMED_AUTHORITY (0x1A) before the greasing reservation.",
+        "after": "Setup Option 0x08 MAX_REQUEST_UPDATES, a Key-Value-Pair with an even Type, therefore a bare varint value with no length prefix (section 1.4.3: 'Value: A single varint encoded value when Type is even'). Section 10.3.1.7: 'The value is encoded as a variable-length integer.' Session Termination Error Code 0x1B TOO_MANY_REQUEST_UPDATES, specification pointer Section 3.5."
+      },
+      "notes": [
+        "Semantics of 0 are opposite to those of MAX_FILTER_RANGES. Section 10.3.1.7: 'A value of 0 means the endpoint does not limit REQUEST_UPDATE concurrency. If not present, the default value is 0.' Section 10.3.1.6: MAX_FILTER_RANGES default 0 means the peer MUST NOT send filter parameters at all.",
+        "The limit is per request stream, not per session: 'The sender MUST NOT have more than MAX_REQUEST_UPDATES outstanding REQUEST_UPDATEs on any single request stream at a time. Each REQUEST_OK or REQUEST_ERROR response restores one credit on that stream.'",
+        "Exceeding it is a session error, not a request error: 'If an endpoint receives a REQUEST_UPDATE on a stream that already has MAX_REQUEST_UPDATES outstanding REQUEST_UPDATEs, it MUST close the session with TOO_MANY_REQUEST_UPDATES.'"
+      ]
+    },
+    {
+      "id": "A1-03",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Allow multiple concurrent subscriptions per Track (#1775)",
+      "sections": [
+        "5.1 Subscriptions",
+        "10.6 REQUEST_ERROR (DUPLICATE_SUBSCRIPTION definition deleted)",
+        "15.11.2 REQUEST_ERROR Codes (0x19 removed)"
+      ],
+      "classification": "wire-incompatible",
+      "classification_basis": "A code point is retired from a registry: REQUEST_ERROR 0x19 DUPLICATE_SUBSCRIPTION is deleted from the draft-19 table and its definition removed from section 10.6. A draft-19 endpoint has no defined meaning for 0x19 and never emits it. The accompanying rule change in section 5.1 is semantic.",
+      "wire": {
+        "before": "Draft-18 section 15.10.2 row: 'DUPLICATE_SUBSCRIPTION | 0x19 | Section 10.6'. Draft-18 section 10.6: 'DUPLICATE_SUBSCRIPTION (0x19): The PUBLISH or SUBSCRIBE request attempted to create a subscription to a Track with the same role as an existing subscription.'",
+        "after": "No 0x19 row in draft-19 section 15.11.2; the registry goes UNSUPPORTED_EXTENSION (0x12) then UNINTERESTED (0x20)."
+      },
+      "notes": [
+        "Draft-18 section 5.1 rule that is gone: 'For a given Track, an endpoint can have at most one subscription to a Track acting as the publisher and at most one acting as a subscriber. If an endpoint receives a message attempting to establish a second subscription to a Track with the same role, it MUST fail that request with a DUPLICATE_SUBSCRIPTION error.'",
+        "Draft-19 replacement: 'An endpoint MAY have multiple concurrent subscriptions to the same Track, each identified by a unique Request ID. A publisher MAY assign the same or different Track Aliases to these subscriptions.'",
+        "New duplicate-delivery obligation: 'When an Object matches the filters of multiple subscriptions to the same Track, the publisher MUST send the Object once for each matching subscription, even when those subscriptions share the same Track Alias.' Because a Track Alias no longer identifies a unique subscription, 'the subscriber re-applies each subscription's filter to determine which subscription a received Object belongs to.' This is a receive-path demultiplexing change for any implementation that keyed subscription state on Track Alias alone.",
+        "Draft-18's pending-state tiebreak rule is also gone: 'If a publisher receives a SUBSCRIBE request for a Track with an existing subscription in Pending (publisher) state, it MUST fail that request with a DUPLICATE_SUBSCRIPTION error. If a subscriber receives a PUBLISH for a Track with a subscription in the Pending (Subscriber) state, it MUST ensure the subscription it initiated transitions to the Terminated state before sending PUBLISH_OK.'"
+      ]
+    },
+    {
+      "id": "A1-04",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Move GROUP_ORDER from PUBLISH_OK to SUBSCRIBE_TRACKS (#1777)",
+      "sections": [
+        "10.2.8 GROUP ORDER Parameter",
+        "10.19.1 Parameters on SUBSCRIBE_TRACKS",
+        "7.1 Definitions"
+      ],
+      "classification": "wire-incompatible",
+      "classification_basis": "The parameter's own encoding is unchanged (Parameter Type 0x22, uint8), but the set of messages it may legally appear in changed, and section 10.2.1 makes appearing elsewhere a session-killing offence: 'Each Message Parameter definition indicates the message types in which it can appear. If it appears in some other type of message, the receiving endpoint MUST close the connection with a PROTOCOL_VIOLATION.' A draft-18 subscriber that puts GROUP_ORDER in PUBLISH_OK has its session closed by a draft-19 peer.",
+      "wire": {
+        "before": "Draft-18 section 10.2.8: 'The GROUP_ORDER parameter (Parameter Type 0x22) is a uint8. It MAY appear in a SUBSCRIBE, PUBLISH_OK, or FETCH.' Omission text: 'If omitted from SUBSCRIBE, the publisher's preference from the Track is used.'",
+        "after": "Draft-19 section 10.2.8: 'The GROUP_ORDER parameter (Parameter Type 0x22) is a uint8. It MAY appear in a SUBSCRIBE, SUBSCRIBE_TRACKS, or FETCH.' Omission text: 'If omitted from SUBSCRIBE or SUBSCRIBE_TRACKS, the publisher's preference from the Track is used.' Values are unchanged: Ascending (0x1), Descending (0x2), anything else is a PROTOCOL_VIOLATION."
+      },
+      "notes": [
+        "Draft-19 section 10.19.1 defines the propagation: 'If the GROUP_ORDER parameter is present in this message, PUBLISH messages resulting from this SUBSCRIBE_TRACKS will include the GROUP_ORDER parameter with the same value. If the GROUP_ORDER parameter is omitted from this message, PUBLISH messages resulting from this SUBSCRIBE_TRACKS will use the publisher's default group order preference (see Section 12.5).'",
+        "Net effect on the allowed-message set for 0x22: PUBLISH_OK is removed, SUBSCRIBE_TRACKS is added, SUBSCRIBE and FETCH are unchanged. Note that draft-19 section 10.19.1 also newly states GROUP_ORDER may appear on PUBLISH ('PUBLISH messages resulting from this SUBSCRIBE_TRACKS will include the GROUP_ORDER parameter'), which section 10.2.8 does not list. See open_questions."
+      ]
+    },
+    {
+      "id": "A1-05",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Rename PUBLISH_BLOCKED to PUBLISH_SKIPPED (#1779)",
+      "sections": [
+        "10.20 PUBLISH_SKIPPED",
+        "10 Control Messages, Table 5",
+        "6.1 Subscribing to Namespaces"
+      ],
+      "classification": "semantic",
+      "classification_basis": "Byte-for-byte identical message: same type 0xF, same body. The name change alone is editorial, but section 6.1 changes when the message is sent and what it forbids, which is behavior.",
+      "wire": {
+        "before": "PUBLISH_BLOCKED Message {\n  Type (vi64) = 0xF,\n  Length (16),\n  Track Namespace Suffix (..),\n  Track Name Length (vi64),\n  Track Name (..),\n}",
+        "after": "PUBLISH_SKIPPED Message {\n  Type (vi64) = 0xF,\n  Length (16),\n  Track Namespace Suffix (..),\n  Track Name Length (vi64),\n  Track Name (..),\n}"
+      },
+      "notes": [
+        "Trigger widened. Draft-18 section 6.1: 'If a Subscription cannot be created because there are no available bidirectional streams, the Publisher sends a PUBLISH_BLOCKED message...' Draft-19: 'If a Subscription cannot be created because there are no available bidirectional streams or any other reason, the Publisher sends a PUBLISH_SKIPPED message... to indicate the Full Track Name of the Subscription that was not created.'",
+        "The prohibition it creates is now scoped, not permanent. Draft-18: 'The Publisher MUST NOT send a PUBLISH for a Track after PUBLISH_BLOCKED has been sent.' Draft-19: 'The Publisher MUST NOT send a PUBLISH for a Track for a given SUBSCRIBE_TRACKS after PUBLISH_SKIPPED has been sent, scoped to a single PUBLISH. If, for example, the publisher disconnects from a relay and later reconnects and sends a new PUBLISH, the relay MAY send the new PUBLISH downstream.'",
+        "Section 10.20 lead-in also moves from inability to intent: 'to indicate it cannot send a PUBLISH message' becomes 'to indicate it will not send a PUBLISH message'."
+      ]
+    },
+    {
+      "id": "A1-06",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Remove Request ID from GOAWAY (#1623)",
+      "sections": ["10.4 GOAWAY", "3.6 Session Migration"],
+      "classification": "wire-incompatible",
+      "classification_basis": "A trailing optional field is deleted from the message body. Because control messages carry an explicit Message Length and section 10 requires 'If the length does not match the length of the Message Body, the receiver MUST close the session with a PROTOCOL_VIOLATION', a draft-18 control-stream GOAWAY carrying the Request ID is a length mismatch at a draft-19 receiver and closes the session.",
+      "wire": {
+        "before": "GOAWAY Message {\n  Type (vi64) = 0x10,\n  Length (16),\n  New Session URI Length (vi64),\n  New Session URI (..),\n  Timeout (vi64),\n  [Request ID (vi64)],\n}",
+        "after": "GOAWAY Message {\n  Type (vi64) = 0x10,\n  Length (16),\n  New Session URI Length (vi64),\n  New Session URI (..),\n  Timeout (vi64),\n}"
+      },
+      "notes": [
+        "The whole draft-18 field definition is deleted, and with it a validity rule and a mandatory rejection rule: 'Request ID: Present only when sent on the control stream. The smallest peer Request ID that was not or might not have been processed prior to sending the GOAWAY. If no requests have been processed, this is 0 (at a server) or 1 (at a client). If the parity of the Request ID does not match the receiver's parity, the endpoint MUST close the session with INVALID_REQUEST_ID. Requests with a Request ID equal to or greater than the indicated value, as well as any requests that arrive after the GOAWAY, MUST be rejected with REQUEST_ERROR using error code GOING_AWAY. Requests with a Request ID less than the indicated value were or might have been processed; their status can be determined from the response on each request stream.'",
+        "Draft-19 keeps GOING_AWAY as a REQUEST_ERROR code but demotes its use to optional: 'An endpoint that receives a GOAWAY MAY reject new requests with an appropriate error code (e.g., REQUEST_ERROR with error code GOING_AWAY).' That sentence is present in draft-18 too; what is gone is the MUST-reject rule tied to the Request ID watermark.",
+        "In draft-18 the field was 'Present only when sent on the control stream', so a request-stream GOAWAY already had the draft-19 layout. Only the control-stream form changes on the wire."
+      ]
+    },
+    {
+      "id": "A1-07",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Clarify session vs. per-request GOAWAY migration (#1787)",
+      "sections": ["3.6 Session Migration", "10.4 GOAWAY"],
+      "classification": "editorial",
+      "classification_basis": "Two explanatory sentences added and a heading renamed. No normative keyword changes, no field changes. Both drafts already allowed GOAWAY on a request stream and both already had 'GOAWAY | Control, Request' in Table 5.",
+      "wire": null,
+      "notes": [
+        "Heading 3.6 'Migration' becomes 'Session Migration'.",
+        "Added to 3.6: 'A GOAWAY on the control stream migrates the entire session, as described in this section. A GOAWAY on a single request stream instead migrates only that request, leaving the rest of the session in place; see Section 10.4.'",
+        "Added to 10.4: 'This allows, for example, moving the publishers and subscribers of a common set of tracks to a common relay without draining their entire session.'"
+      ]
+    },
+    {
+      "id": "A1-08",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Define FIN vs. RST/STOP_SENDING semantics on request streams (#1698)",
+      "sections": [
+        "3.3.2 Graceful Request Stream Closure (new section)",
+        "3.3.3 Request Cancellation and Rejection (was 3.3.2)",
+        "6.1 Subscribing to Namespaces",
+        "10.9.1 Updating Subscriptions",
+        "10.11 PUBLISH_DONE",
+        "11.4.1 Stream Cancellation"
+      ],
+      "classification": "semantic",
+      "classification_basis": "No message or field changes; the QUIC-level closure discipline for bidirectional request streams becomes normative. Draft-18 said implementations 'SHOULD cancel requests by abruptly terminating any directions of a stream that are still open by resetting or sending STOP_SENDING' and said nothing about what a FIN means; draft-19 adds MUST NOT and MUST rules on FIN ordering and states that a FIN is not a cancellation.",
+      "wire": null,
+      "notes": [
+        "New rule, draft-19 section 3.3.2: 'A FIN only indicates that an endpoint will send no further messages in that direction; it is not a request cancellation. An endpoint MUST NOT send a FIN on a direction of a request stream until it has sent all required messages on that direction for its request type. In particular, an endpoint sending a response to a request MUST send the corresponding response message, and the publisher of an Established subscription MUST send PUBLISH_DONE, before sending a FIN.'",
+        "New failure rule: 'An endpoint that receives a FIN before all required messages have arrived treats the request as failed.'",
+        "Cancellation is now direction-specific: 'Implementations cancel a request by abruptly terminating any directions of the stream that are still open, using RESET_STREAM for a direction they are sending and STOP_SENDING for a direction they are receiving. An endpoint that has already sent a FIN on its sending direction and subsequently wishes to cancel sends STOP_SENDING on the receiving direction.'",
+        "Consequence in 6.1: draft-18 'A SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS can be cancelled by closing the stream with either a FIN or RESET_STREAM' becomes 'is cancelled as described in Section 3.3.3, by resetting or sending STOP_SENDING on the stream.' Cancelling by FIN is no longer valid.",
+        "Consequence in 10.11: draft-18's 'A sender SHOULD send FIN on the subscription's bidi stream immediately after sending PUBLISH_DONE' is deleted, superseded by the general rule and by 'An endpoint SHOULD send a FIN promptly after a message when it has nothing further to send on that direction and will not need to respond to a future REQUEST_UPDATE. A requester, with the exception of the sender of PUBLISH, MAY FIN immediately after sending a message if it will not send a REQUEST_UPDATE.'",
+        "Consequence in 11.4.1: draft-18's per-request-type list ('Termination of a bidi request stream terminates the Subscription, Fetch, Track Status, Publish Namespace, or Subscribe Namespace request. When possible, Publishers SHOULD send a PUBLISH_DONE...') is replaced by 'Closing a bidirectional request stream is governed by Section 3.3.3.'",
+        "Consequence in 10.9.1: on a failed REQUEST_UPDATE, SUBSCRIBE_TRACKS joins SUBSCRIBE_NAMESPACE and PUBLISH_NAMESPACE in 'the responder MUST close the bidi stream (see Section 3.3.2)'."
+      ]
+    },
+    {
+      "id": "A1-09",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Unexpected REQUEST_UPDATE is a session error (#1784)",
+      "sections": ["10.9 REQUEST_UPDATE"],
+      "classification": "semantic",
+      "classification_basis": "New MUST-close rule on a previously unspecified condition. No field change.",
+      "wire": null,
+      "notes": [
+        "Draft-19 section 10.9, immediately after the two legal cases (the requester of SUBSCRIBE, FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS updating on the same bidi stream, and a subscriber modifying a PUBLISH-established subscription): 'An endpoint that receives a REQUEST_UPDATE other than in the two cases above MUST close the session with a PROTOCOL_VIOLATION.'",
+        "Same section relaxes the response obligation for the coalescing case: 'The receiver of a REQUEST_UPDATE MUST respond with exactly one REQUEST_OK or REQUEST_ERROR message indicating if the update was successful, unless it is coalescing failed updates to produce just one REQUEST_ERROR for multiple REQUEST_UPDATE messages.' Draft-18 had no exception. This interacts with MAX_REQUEST_UPDATES credit accounting: one REQUEST_ERROR may now answer several REQUEST_UPDATEs."
+      ]
+    },
+    {
+      "id": "A1-10",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Update Forward State handling for relays (#1782)",
+      "sections": ["9.2 Forward Handling"],
+      "classification": "semantic",
+      "classification_basis": "A SHOULD becomes a conditional MUST plus explicit discretion. No field change; the FORWARD parameter (0x10, uint8) is untouched.",
+      "wire": null,
+      "notes": [
+        "Draft-18: 'Relays SHOULD set the Forward flag to 1 when a new subscription needs to be sent upstream, regardless of the value of the Forward field from the downstream subscription. Subscriptions that are not forwarded consume resources from the publisher, so a publisher might deprioritize, reject, or close those subscriptions to ensure other subscriptions can be delivered.'",
+        "Draft-19: 'If one or more downstream subscribers to a track have Forward=1, the relay MUST set Forward=1 upstream in order to receive and forward the requested Objects. When no downstream subscriber has Forward=1, the relay chooses the upstream Forward value at its discretion', followed by a two-bullet tradeoff discussion (pre-warming the cache versus consuming upstream resources).",
+        "The draft-18 warning that unforwarded subscriptions might be deprioritized, rejected or closed by the publisher is gone."
+      ]
+    },
+    {
+      "id": "A1-11",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Clarify authorization trust model for namespace subscriptions (#1656)",
+      "sections": ["6.1 Subscribing to Namespaces", "6.2 Publishing Namespaces"],
+      "classification": "semantic",
+      "classification_basis": "Filed as a clarification, but it establishes where authorization comes from for NAMESPACE messages and declares a previously undefined interleaving legal. No field change.",
+      "wire": null,
+      "notes": [
+        "New in 6.1: 'By sending SUBSCRIBE_NAMESPACE, the subscriber indicates that it trusts the relay to be authoritative for namespaces matching the requested prefix. NAMESPACE messages received on the SUBSCRIBE_NAMESPACE response stream inherit this trust and do not independently carry authorization.'",
+        "New in 6.2: 'A subscriber can receive a PUBLISH_NAMESPACE on a request stream for a namespace that falls within an active SUBSCRIBE_NAMESPACE prefix. This occurs when SUBSCRIBE_NAMESPACE or its response is in flight at the same time as a PUBLISH_NAMESPACE, or when an original publisher sends PUBLISH_NAMESPACE to advertise namespaces within the prefix being discovered. Such a PUBLISH_NAMESPACE is valid and MAY carry an AUTHORIZATION TOKEN parameter. Its lifetime is independent of the SUBSCRIBE_NAMESPACE stream.'"
+      ]
+    },
+    {
+      "id": "A1-12",
+      "appendix_group": "Session and Control Plane",
+      "appendix_entry": "Clarify namespace discovery and NAMESPACE sending (#1710)",
+      "sections": ["6 Namespace Discovery", "6.1 Subscribing to Namespaces", "6.2 Publishing Namespaces"],
+      "classification": "semantic",
+      "classification_basis": "The condition that triggers a MUST-send of NAMESPACE is restated in different terms, and the matching rule is pinned to a named algorithm. No field change.",
+      "wire": null,
+      "notes": [
+        "Draft-18 6.2: 'If a publisher is authoritative for a given namespace, or is a relay that has received an authorized PUBLISH_NAMESPACE for that namespace from an upstream publisher, it MUST send a NAMESPACE message to any subscriber that has sent SUBSCRIBE_NAMESPACE for that namespace, or a prefix of that namespace. A publisher MAY send the PUBLISH_NAMESPACE to any other subscriber.'",
+        "Draft-19 6.2: 'If a publisher is the Original Publisher for one or more tracks in a given namespace, or is a relay that has received an authorized PUBLISH_NAMESPACE for that namespace from an upstream publisher, it MUST send a NAMESPACE message that includes this namespace to any subscriber that has sent a SUBSCRIBE_NAMESPACE whose prefix matches this namespace.' The trailing MAY sentence is deleted.",
+        "New in 6.1: 'The Track Namespace Prefix carried in these messages is compared against the namespaces known to the receiver using Namespace Prefix Matching (Section 9.5, Paragraph 6).' That paragraph exists unchanged in draft-18; only the cross-reference is new.",
+        "Section 6 lead-in now names the mechanism: 'Namespace discovery can be done in the context of an established MOQT session using SUBSCRIBE_NAMESPACE (see Section 6.1).'"
+      ]
+    },
+    {
+      "id": "A1-13",
+      "appendix_group": "Data Plane Wire Format and Handling",
+      "appendix_entry": "Delivery timeouts are both Track and Object Properties (#1476)",
+      "sections": [
+        "8 Delivery Timeouts and Data Reliability",
+        "12.1 SUBGROUP_DELIVERY_TIMEOUT",
+        "12.2 OBJECT_DELIVERY_TIMEOUT",
+        "15.8 Properties (Scope column)"
+      ],
+      "classification": "wire-incompatible",
+      "classification_basis": "Two existing Property code points gain a byte position they could not previously occupy: 0x02 and 0x06 may now appear inside the Object Properties block (section 11.2.1.2), not only in the Track Properties field. The encoding of each value (varint, even type, so no length prefix) is unchanged; what changes is where the type is legal, and therefore what a decoder must accept without treating it as an unknown or misplaced property.",
+      "wire": {
+        "before": "Draft-18 section 15.8 rows: '0x02 | OBJECT_DELIVERY_TIMEOUT | Track | Section 12.2' and '0x06 | SUBGROUP_DELIVERY_TIMEOUT | Track | Section 12.1'. Draft-18 section 12.1/12.2 each say 'is a Track Property'.",
+        "after": "Draft-19 section 15.8 rows: '0x02 | OBJECT_DELIVERY_TIMEOUT | Track, Object | Section 12.2' and '0x06 | SUBGROUP_DELIVERY_TIMEOUT | Track, Object | Section 12.1'."
+      },
+      "notes": [
+        "Placement rule, identical wording in 12.1 and 12.2: 'As an Object Property on the first object in a subgroup, it overrides the Track-level value for that subgroup; it is ignored on any other object in the subgroup.'",
+        "Precedence rule, section 8: 'For each type of timeout, the publisher's value is the Object Property when present on the first object of the subgroup, and the Track Property otherwise. If both the publisher's value and the subscriber's value are non-zero, the smaller of the two is used.' Draft-18 had only the publisher-versus-subscriber minimum.",
+        "Neither draft defines a session-close rule for a Track-scoped property arriving as an Object Property, except inside the Mandatory Track Property range 0x4000-0x7FFF, where section 2.5.1 makes it a Malformed Track. 0x02 and 0x06 are outside that range, so this widening cannot be detected as a hard error by a draft-18 peer; it is an interop hazard for any implementation that rejects out-of-scope known properties on its own initiative."
+      ]
+    },
+    {
+      "id": "A1-14",
+      "appendix_group": "Data Plane Wire Format and Handling",
+      "appendix_entry": "Make the Object Status payload rule extensible via IANA registry (#1760)",
+      "sections": ["11.2.1.1 Object Status", "15.9 Object Status (new IANA registry)"],
+      "classification": "semantic",
+      "classification_basis": "No code point is added, removed or moved: draft-19 defines exactly the same three statuses as draft-18 (0x0 Normal, 0x3 End of Group, 0x4 End of Track), and any other value is still a PROTOCOL_VIOLATION. What changes is where the status-versus-payload rule comes from. For the three currently defined statuses the two rules agree byte for byte, so no encoder or decoder output changes today.",
+      "wire": {
+        "before": "Draft-18 section 11.2.1.1, one flat sentence: 'Any object with a status code other than zero MUST have an empty payload.' No Object Status registry exists; draft-18 section 15.9 is Session-Level Track Names.",
+        "after": "Draft-19 section 11.2.1.1: 'An Object MUST have an empty payload unless its Object Status value is registered as permitting a payload in the Object Status registry (Section 15.9). Of the values defined in this document, only Normal (0x0) permits a payload.' Draft-19 section 15.9, Table 16, has a Payload column: 0x0 Normal / Yes, 0x3 End of Group / No, 0x4 End of Track / No, all pointing at Section 11.2.1.1. Registration policy: 'New Object Status values are registered using the Specification Required policy ([RFC8126], Section 4.6). Each registration MUST indicate whether the status permits a payload.'"
+      },
+      "notes": [
+        "The rule that changes is the one keyed off the status value, not off the payload length. An implementation that decides 'status must be zero if there are payload bytes' happens to agree with both drafts for 0x0/0x3/0x4, and will disagree with draft-19 the moment a registered status with Payload=Yes exists.",
+        "Related new sentence in the same section, not called out in the appendix: 'There is no Object Status value indicating the end of a Subgroup. The end of a Subgroup is signaled by closing its stream with a FIN (see Section 11.4.3).'",
+        "Draft-19 section 15.9 is the first IANA registry in these drafts for Object Status. It is a sibling of, not a part of, the Error Codes section (15.11), so its three rows are not part of the 64 rows counted for the four error, status and termination registries; the two counts are never summed."
+      ]
+    },
+    {
+      "id": "A1-15",
+      "appendix_group": "Data Plane Wire Format and Handling",
+      "appendix_entry": "Datagrams take precedence in cross-forwarding-preference scheduling ties (#1780)",
+      "sections": ["7.2 Scheduling Algorithm"],
+      "classification": "semantic",
+      "classification_basis": "A previously implementation-dependent tiebreak is given a defined outcome, inside the SHOULD-scoped scheduling algorithm. No field change.",
+      "wire": null,
+      "notes": [
+        "Draft-18, final tiebreak: 'If the two objects have different Forwarding Preferences the order is implementation dependent.'",
+        "Draft-19: 'If the two objects have different Forwarding Preferences the datagram is sent first.'"
+      ]
+    },
+    {
+      "id": "A1-16",
+      "appendix_group": "Data Plane Wire Format and Handling",
+      "appendix_entry": "Remove relay exception for reordering or dropping objects (#1762)",
+      "sections": ["9.6 Relay Track Handling"],
+      "classification": "semantic",
+      "classification_basis": "An escape clause on a MUST NOT is deleted, strictly narrowing what a relay may do. No field change.",
+      "wire": null,
+      "notes": [
+        "Draft-18: 'A relay MUST NOT reorder or drop objects received on a multi-object stream when forwarding to subscribers, unless it has application specific information.'",
+        "Draft-19: 'A relay MUST NOT reorder or drop objects received on a multi-object stream when forwarding to subscribers.'",
+        "This sits next to the filtering work: draft-19 section 11.4.3 separately allows a relay to omit Objects that do not pass the subscriber's filters, so the removed exception is not the mechanism by which filtered Objects are skipped."
+      ]
+    },
+    {
+      "id": "A1-17",
+      "appendix_group": "Data Plane Wire Format and Handling",
+      "appendix_entry": "Specify relay processing rules for known Track Properties (#1771)",
+      "sections": ["2.5 Properties"],
+      "classification": "semantic",
+      "classification_basis": "A MAY becomes a MUST NOT with named exceptions, plus new forwarding and caching obligations. No field change.",
+      "wire": null,
+      "notes": [
+        "Draft-18: 'If a Relay supports a Property, it MAY be modified, added, removed, and/or cached, subject to the processing rules specified in the definition.'",
+        "Draft-19: 'If a Relay supports a Property, it MUST follow the processing rules in the Property's definition. Unless those rules permit otherwise, a Relay MUST NOT modify, add, or remove the Property; it MUST forward the Property to downstream subscribers and MUST cache it with the Track or Object if the Track or Object is cached.'",
+        "The default for a supported property flips from permissive to forward-unchanged, matching the pre-existing rule for unsupported properties in the preceding paragraph."
+      ]
+    },
+    {
+      "id": "A1-18",
+      "appendix_group": "Data Plane Wire Format and Handling",
+      "appendix_entry": "Recommend Immutable Properties for relay-visible, unmodifiable data (#1759)",
+      "sections": ["11.2.1.2 Object Properties", "12.7 Immutable Properties (referenced, unchanged)"],
+      "classification": "semantic",
+      "classification_basis": "Adds a SHOULD steering publishers toward an existing mechanism. Section 12.7 itself is byte-identical between the two drafts, so nothing new is defined; the recommendation is what is new.",
+      "wire": null,
+      "notes": [
+        "Added to 11.2.1.2: 'Object Properties set by the Original Publisher that are intended to be visible to relays, but not modified by them, SHOULD be placed in Immutable Properties (Section 12.7), which enables end-to-end authentication schemes.'"
+      ]
+    },
+    {
+      "id": "A1-19",
+      "appendix_group": "Notable Editorial Changes",
+      "appendix_entry": "Rename control Message Payload field to Message Body (#1756)",
+      "sections": ["10 Control Messages"],
+      "classification": "editorial",
+      "classification_basis": "The field is renamed in the artwork and in the length rule. Position, width and the PROTOCOL_VIOLATION on length mismatch are unchanged, so no byte moves.",
+      "wire": {
+        "before": "MOQT Control Message {\n  Message Type (vi64),\n  Message Length (16),\n  Message Payload (..),\n}",
+        "after": "MOQT Control Message {\n  Message Type (vi64),\n  Message Length (16),\n  Message Body (..),\n}"
+      },
+      "notes": [
+        "Length rule reworded only: 'The length is set to the number of bytes in the Message Body, which is defined by each message type. If the length does not match the length of the Message Body, the receiver MUST close the session with a PROTOCOL_VIOLATION.'"
+      ]
+    },
+    {
+      "id": "A1-20",
+      "appendix_group": "Notable Editorial Changes",
+      "appendix_entry": "Clarify Group and Subgroup terminology and object model (#1708)",
+      "sections": ["1.2 Terms and Definitions", "2.1 Objects", "2.3 Group IDs (2.3.1)"],
+      "classification": "semantic",
+      "classification_basis": "Filed as editorial, but section 2.1 deletes a normative statement about Object ordering and adds a normative statement about what a gap means. Those are decoder-visible rules, not wording.",
+      "wire": null,
+      "notes": [
+        "Deleted from 2.1: 'Objects within a Group are in ascending order by Object ID.' An implementation that relied on that to validate or sort within a Group has lost its warrant.",
+        "Added to 2.1: 'A gap in the observed Object IDs does not by itself convey any information about the skipped Objects. Skipped Objects remain in the unknown state until they are received or their non-existence is signalled, for example in a FETCH stream (see Section 11.4.4) or via a Prior Object ID Gap (see Section 12.9).' This is the object-model half of the same statement that section 10.12.3 makes for FETCH gaps under filtering.",
+        "Also moved out of 2.1 (it survives verbatim in 9.7): 'A relay MUST NOT combine, split, or otherwise modify object payloads.'",
+        "1.2 Group definition: 'A temporal sequence of objects' becomes 'A collection of objects within a track'; a Subgroup entry is added: 'A sequence of one or more objects from the same group, sent on a single transport stream whenever possible.'",
+        "2.3.1: 'Subscribers to these Tracks SHOULD NOT use range filters which span multiple Groups' becomes '...SHOULD NOT use Location filters...', disambiguating from the new Range Filters."
+      ]
+    }
+  ],
+
+  "range_filters": {
+    "summary": "Five new Message Parameters, types 0x25-0x29, defined normatively in draft-19 Section 5.1.3 and registered in Section 15.7. Sections 10.2.10-10.2.14 are one-paragraph pointers that carry the per-parameter validity rules only; the encoding lives entirely in 5.1.3.",
+    "encoding_family": {
+      "statement": "These are Message Parameters (Section 10.2), NOT Key-Value-Pairs (Section 1.4.3). Message Parameters have their own framing and there is no odd/even Type rule for them.",
+      "message_parameter_framing": "Message Parameter {\n  Type Delta (vi64),\n  Value (..)\n}",
+      "quote_section_10_2": "Type Delta: The difference between this Parameter Type and the previous Parameter Type in the message, or the Parameter Type itself for the first parameter. Parameters MUST be serialized in ascending order by Type. If the resulting Type would be greater than 2^64 - 1, the endpoint MUST close the session with a PROTOCOL_VIOLATION. Value: The encoding is specified by each parameter definition. The encodings defined in this draft are: uint8: A single-byte unsigned integer (0-255); varint: A variable-length integer; Location: Two consecutive varints (Group, Object); Length-prefixed: A varint length followed by that many bytes",
+      "why_this_matters": "The Key-Value-Pair rule 'Length: Only present when Type is odd' (Section 1.4.3) governs Setup Options and Properties. It does not govern Message Parameters. Two of the five Range Filter types are even (0x26, 0x28) and all five are length-prefixed; that is not a contradiction because the odd/even rule does not apply here.",
+      "parameter_block_bounding": "Section 10.2: 'Because unknown parameters cannot be skipped, the block is bounded by a parameter count rather than a length.' Every message carrying parameters carries a Number of Parameters varint, so a repeated Range Filter parameter counts once per occurrence."
+    },
+    "artwork_verbatim_section_5_1_3": "SUBGROUP_FILTER { Type=0x25, Length, [SetID], Range... }\nOBJECTID_FILTER { Type=0x26, Length, [SetID], Range... }\nPRIORITY_FILTER { Type=0x27, Length, [SetID], Range... }\nOBJECT_PROPERTY_FILTER { Type=0x28, Length, [SetID], [Property Type], Range... }\nTRACK_PROPERTY_FILTER  { Type=0x29, Length, [SetID], [Property Type], Range... }\nRange { Start, [End] }",
+    "prose_verbatim_section_5_1_3": [
+      "Range Filters are parameters in SUBSCRIBE, FETCH, or SUBSCRIBE_TRACKS that tell a publisher to filter tracks (via TRACK PROPERTY FILTER) and objects according to subscriber-provided criteria. Range filters are specified as ranges of integer values in Track and Object Properties and other Object header fields (Subgroup ID, Object ID, and Publisher Priority). There are five Range Filter parameter types, 0x25-0x29, as shown below.",
+      "Each Range Filter is a sequence of Start/End (vi64) inclusive Range pairs prefixed with a Length (vi64) in bytes and a SetID (8 bits).",
+      "The Track and Object Property Filters include an additional prefix for Property Type (vi64).",
+      "The final End in a sequence of Ranges can be omitted to indicate no end.",
+      "Start is delta encoded from the prior Range's End or from 0 for the first Range, and End is delta encoded from the current Range's Start.",
+      "Any delta encoding that results in a value that exceeds 2^64-1 MUST be rejected with REQUEST_ERROR with error code INVALID_FILTER.",
+      "For example, to express ranges 3-5 and 10-15: the first Start is 3 (delta from 0), the first End is 2 (5 minus 3), the second Start is 5 (10 minus 5), and the second End is 5 (15 minus 10).",
+      "All filter parameters with the same SetID value are combined using logical \"AND\" operations, then all the resulting sets are combined using logical \"OR\" operations. The final result is SetID=0 OR SetID=1 OR ... SetID=255, where each SetID=i is the AND of filters with SetID=i.",
+      "The Track Property filter parameter MAY appear multiple times in a SUBSCRIBE_TRACKS message or REQUEST_UPDATE for it.",
+      "All other filter parameters MAY appear multiple times in a FETCH, SUBSCRIBE, SUBSCRIBE_TRACKS, PUBLISH_OK, or REQUEST_UPDATE (on a subscription, from the subscriber only) message. If the same combination of Parameter Type, SetID, and Property Type (only in the Track and Object Property Filters) repeat in any message, an endpoint MUST reject this with REQUEST_ERROR with error code INVALID_FILTER.",
+      "In REQUEST_UPDATE, Length can be 0 to remove a filter parameter or non-zero to replace that entire filter parameter including all sets and Property Types. If a filter parameter is omitted from REQUEST_UPDATE, the value is unchanged. If omitted from other messages, the default is no filter.",
+      "Range Filters are only allowed if the setup option MAX_FILTER_RANGES is non-zero, which limits the total number of Ranges allowed in all Range Filter parameters for a given subscription or fetch. If this limit is exceeded, an endpoint MUST reject this with REQUEST_ERROR with error code INVALID_FILTER.",
+      "The Track Property Filter can be used in SUBSCRIBE_TRACKS to filter PUBLISH messages with required Track Property types and values. PUBLISH messages which pass the filter will be forwarded while those which do not pass it will not be forwarded nor will any Objects.",
+      "The Object Property Filter can be used to filter Objects with required Object Property types and values. It only filters Object Properties in the Object header, and does not evaluate Track Properties in PUBLISH messages."
+    ],
+    "field_layout": {
+      "notation": "Bracketed fields are optional; draft-19 Section 1.4 states the document 'uses the conventions detailed in ([RFC9000], Section 1.3) when describing the binary encoding', in which [x] marks an optional field.",
+      "value_encoding": "Length-prefixed, in the Section 10.2 sense: a varint Length in bytes followed by exactly that many bytes. Length is NOT bracketed in the artwork, so it is always present, including in the Length=0 removal form.",
+      "fields_in_order": [
+        {
+          "field": "Type Delta",
+          "width": "vi64",
+          "presence": "always",
+          "note": "Message Parameter framing, not part of the filter value. Repeated parameters of the same Type are encoded with Type Delta 0 for each occurrence after the first; Section 10.2 requires ascending order by Type."
+        },
+        {
+          "field": "Length",
+          "width": "vi64, counted in bytes",
+          "presence": "always",
+          "note": "Covers SetID + [Property Type] + all Ranges. Length=0 is legal only in REQUEST_UPDATE and means 'remove this filter parameter'; in that form no SetID, Property Type or Range bytes follow."
+        },
+        {
+          "field": "SetID",
+          "width": "8 bits, i.e. one fixed byte, NOT a varint",
+          "presence": "present whenever Length > 0",
+          "note": "Value range 0-255, confirmed by 'The final result is SetID=0 OR SetID=1 OR ... SetID=255'. Filters sharing a SetID are ANDed; the SetIDs are ORed. This is the only fixed-width integer inside these parameters."
+        },
+        {
+          "field": "Property Type",
+          "width": "vi64",
+          "presence": "only in OBJECT_PROPERTY_FILTER (0x28) and TRACK_PROPERTY_FILTER (0x29), and only when Length > 0",
+          "note": "Names the Property whose value is being range-filtered. Sections 10.2.13 and 10.2.14 both require it to be even: the type 'MUST be even, i.e. a single integer value (see Figure 2), otherwise the endpoint MUST reject this with REQUEST_ERROR with error code INVALID_FILTER'. Even Property types are single-varint Key-Value-Pair values (Section 1.4.3), which is what makes a numeric range meaningful. The other three filter parameters have no Property Type field at all."
+        },
+        {
+          "field": "Range...",
+          "width": "one or more Range structures, filling the remaining Length bytes",
+          "presence": "present whenever Length > 0",
+          "note": "There is no range count; the ranges run to the end of the Length-delimited value. A decoder must be driven by the byte budget, not by a counter."
+        }
+      ],
+      "range_structure": {
+        "artwork": "Range { Start, [End] }",
+        "start": "vi64. Delta-encoded from the previous Range's End, or from 0 for the first Range in this parameter.",
+        "end": "vi64. Delta-encoded from this Range's Start. Inclusive.",
+        "open_ended": "Only the final End in a sequence may be omitted, and omitting it means the range has no upper bound. Because Ranges are not individually delimited, the omission is detectable only by the Length budget running out after a Start.",
+        "overflow": "Any delta that makes a resolved value exceed 2^64-1 MUST be rejected with REQUEST_ERROR / INVALID_FILTER. This is a request error, not a session error.",
+        "worked_example_from_the_draft": {
+          "intent": "ranges 3-5 and 10-15",
+          "encoded_values_in_order": [3, 2, 5, 5],
+          "derivation": "first Start = 3 (delta from 0); first End = 2 (5 minus 3); second Start = 5 (10 minus 5, i.e. delta from the previous End); second End = 5 (15 minus 10, i.e. delta from this Start)"
+        },
+        "open_ended_example_derived": "A single unbounded range starting at 3 is Length covering SetID plus one varint, SetID, then Start=3 with no End. Draft-19 gives no worked example of the open-ended form; this is derived from the two quoted rules, not quoted."
+      }
+    },
+    "per_parameter": [
+      {
+        "name": "SUBGROUP_FILTER",
+        "type": "0x25",
+        "type_decimal": 37,
+        "section": "10.2.10",
+        "filters_on": "Subgroup ID (an Object header field)",
+        "has_property_type_field": false,
+        "extra_validity_rules": [],
+        "quote": "The SUBGROUP_FILTER parameter (Type 0x25) selects objects with specified Ranges of Subgroup ID. See Section 5.1.3."
+      },
+      {
+        "name": "OBJECTID_FILTER",
+        "type": "0x26",
+        "type_decimal": 38,
+        "section": "10.2.11",
+        "filters_on": "Object ID (an Object header field)",
+        "has_property_type_field": false,
+        "extra_validity_rules": [],
+        "quote": "The OBJECTID_FILTER parameter (Type 0x26) selects objects with specified Ranges of Object ID. See Section 5.1.3."
+      },
+      {
+        "name": "PRIORITY_FILTER",
+        "type": "0x27",
+        "type_decimal": 39,
+        "section": "10.2.12",
+        "filters_on": "Publisher Priority (an Object header field, 8 bits)",
+        "has_property_type_field": false,
+        "extra_validity_rules": [
+          "A resolved range endpoint above 255 MUST be rejected with REQUEST_ERROR / INVALID_FILTER."
+        ],
+        "quote": "The PRIORITY_FILTER parameter (Type 0x27) selects objects with specified Ranges of Publisher Priority. See Section 5.1.3. If a decoded value exceeds 255, the endpoint MUST reject this with REQUEST_ERROR with error code INVALID_FILTER since Publisher Priority is an 8-bit field."
+      },
+      {
+        "name": "OBJECT_PROPERTY_FILTER",
+        "type": "0x28",
+        "type_decimal": 40,
+        "section": "10.2.13",
+        "filters_on": "the value of one Object Property, named by the Property Type field",
+        "has_property_type_field": true,
+        "extra_validity_rules": [
+          "Property Type MUST be even, otherwise REQUEST_ERROR / INVALID_FILTER.",
+          "Evaluated only against Object Properties in the Object header; it does not look at Track Properties in PUBLISH."
+        ],
+        "quote": "The OBJECT_PROPERTY_FILTER parameter (Type 0x28) selects objects with required Ranges of Property Value for a required Object Property Type which MUST be even, i.e. a single integer value (see Figure 2), otherwise the endpoint MUST reject this with REQUEST_ERROR with error code INVALID_FILTER. See Section 5.1.3."
+      },
+      {
+        "name": "TRACK_PROPERTY_FILTER",
+        "type": "0x29",
+        "type_decimal": 41,
+        "section": "10.2.14",
+        "filters_on": "the value of one Track Property, named by the Property Type field; selects whole Tracks, not Objects",
+        "has_property_type_field": true,
+        "extra_validity_rules": [
+          "Property Type MUST be even, otherwise REQUEST_ERROR / INVALID_FILTER.",
+          "Applies to SUBSCRIBE_TRACKS (and REQUEST_UPDATE for it) only; a PUBLISH that fails the filter is not forwarded, and neither are any of its Objects."
+        ],
+        "quote": "The TRACK_PROPERTY_FILTER parameter (Type 0x29) selects tracks with required Ranges of Property Value for a required Track Property Type which MUST be even, i.e. a single integer value (see Figure 2), otherwise the endpoint MUST reject this with REQUEST_ERROR with error code INVALID_FILTER. See Section 5.1.3."
+      }
+    ],
+    "combination_semantics": {
+      "within_a_set": "AND across all filter parameters carrying the same SetID.",
+      "across_sets": "OR across SetIDs: 'The final result is SetID=0 OR SetID=1 OR ... SetID=255'.",
+      "with_other_filters": "Section 5.1.4: 'Pass = Forward AND Location Filters AND Range Filters', and 'All filter types are combined using logical \"AND\" operations... which can be evaluated in any order. The Forward parameter is also a type of filter. The publisher MUST forward only objects that pass all filters.'"
+    },
+    "error_handling_summary": {
+      "REQUEST_ERROR / INVALID_FILTER (0x36)": [
+        "delta encoding resolves above 2^64-1",
+        "PRIORITY_FILTER value above 255",
+        "OBJECT_PROPERTY_FILTER or TRACK_PROPERTY_FILTER with an odd Property Type",
+        "duplicate (Parameter Type, SetID, Property Type) combination in one message",
+        "total Ranges across all Range Filter parameters for one subscription or fetch exceeds MAX_FILTER_RANGES"
+      ],
+      "REQUEST_ERROR / CONFLICTING_FILTERS (0x35)": [
+        "Section 10.6: 'In response to SUBSCRIBE_TRACKS, the filter parameters conflict among too many subscribers to aggregate the subscription upstream or otherwise efficiently service it.'",
+        "Section 6.3.1 names it as one of three relay defences alongside the pre-existing NAMESPACE_TOO_LARGE and PREFIX_OVERLAP."
+      ],
+      "note": "Every Range Filter failure mode in draft-19 is a REQUEST_ERROR, never a session close. Contrast MAX_REQUEST_UPDATES, whose overflow is a session close with TOO_MANY_REQUEST_UPDATES."
+    }
+  },
+
+  "parameter_message_applicability": {
+    "authority": "draft-19 Section 5.1.3 for the four Object-side filters and for TRACK_PROPERTY_FILTER; Section 10.2.1 supplies the enforcement rule: 'Each Message Parameter definition indicates the message types in which it can appear. If it appears in some other type of message, the receiving endpoint MUST close the connection with a PROTOCOL_VIOLATION.'",
+    "new_parameters": [
+      {
+        "parameter": "SUBGROUP_FILTER (0x25)",
+        "allowed_in": ["FETCH", "SUBSCRIBE", "SUBSCRIBE_TRACKS", "PUBLISH_OK", "REQUEST_UPDATE (on a subscription, from the subscriber only)"],
+        "repeatable": true,
+        "repeat_constraint": "the combination of Parameter Type and SetID MUST NOT repeat in one message"
+      },
+      {
+        "parameter": "OBJECTID_FILTER (0x26)",
+        "allowed_in": ["FETCH", "SUBSCRIBE", "SUBSCRIBE_TRACKS", "PUBLISH_OK", "REQUEST_UPDATE (on a subscription, from the subscriber only)"],
+        "repeatable": true,
+        "repeat_constraint": "the combination of Parameter Type and SetID MUST NOT repeat in one message"
+      },
+      {
+        "parameter": "PRIORITY_FILTER (0x27)",
+        "allowed_in": ["FETCH", "SUBSCRIBE", "SUBSCRIBE_TRACKS", "PUBLISH_OK", "REQUEST_UPDATE (on a subscription, from the subscriber only)"],
+        "repeatable": true,
+        "repeat_constraint": "the combination of Parameter Type and SetID MUST NOT repeat in one message"
+      },
+      {
+        "parameter": "OBJECT_PROPERTY_FILTER (0x28)",
+        "allowed_in": ["FETCH", "SUBSCRIBE", "SUBSCRIBE_TRACKS", "PUBLISH_OK", "REQUEST_UPDATE (on a subscription, from the subscriber only)"],
+        "repeatable": true,
+        "repeat_constraint": "the combination of Parameter Type, SetID and Property Type MUST NOT repeat in one message"
+      },
+      {
+        "parameter": "TRACK_PROPERTY_FILTER (0x29)",
+        "allowed_in": ["SUBSCRIBE_TRACKS", "REQUEST_UPDATE for a SUBSCRIBE_TRACKS"],
+        "repeatable": true,
+        "repeat_constraint": "the combination of Parameter Type, SetID and Property Type MUST NOT repeat in one message",
+        "note": "This one is deliberately narrower than the other four. Section 5.1.3 splits them into two sentences: 'The Track Property filter parameter MAY appear multiple times in a SUBSCRIBE_TRACKS message or REQUEST_UPDATE for it. All other filter parameters MAY appear multiple times in a FETCH, SUBSCRIBE, SUBSCRIBE_TRACKS, PUBLISH_OK, or REQUEST_UPDATE...'"
+      }
+    ],
+    "gating_setup_options": [
+      {
+        "option": "MAX_FILTER_RANGES",
+        "option_type": "0x06",
+        "section": "10.3.1.6",
+        "registry_row": "draft-19 Section 15.4: '0x06 | MAX_FILTER_RANGES | Section 10.3.1.6'",
+        "encoding": "Setup Options are Key-Value-Pairs (Section 10.3). Type 0x06 is even, so the value is a bare varint with no Length field (Section 1.4.3).",
+        "gates": ["SUBGROUP_FILTER (0x25)", "OBJECTID_FILTER (0x26)", "PRIORITY_FILTER (0x27)", "OBJECT_PROPERTY_FILTER (0x28)", "TRACK_PROPERTY_FILTER (0x29)"],
+        "default": "0",
+        "meaning_of_default": "Zero forbids the feature outright: 'The default value is 0, so if not specified, the peer MUST NOT send any such filter parameters.'",
+        "direction": "The option limits the PEER: 'limits the peer's total number of Ranges (Start/End pairs) allowed concurrently in all Range filter parameters for a given subscription or fetch.' An endpoint therefore sends MAX_FILTER_RANGES to say what it is willing to receive, and reads the peer's value to know what it may send.",
+        "unit": "Ranges, i.e. Start/End pairs, summed across ALL Range Filter parameters attached to one subscription or fetch. Not bytes, not parameters, not Sets.",
+        "violation": "REQUEST_ERROR with INVALID_FILTER (both 5.1.3 and 10.3.1.6 say so)",
+        "quote": "The MAX_FILTER_RANGES option (Type 0x06) limits the peer's total number of Ranges (Start/End pairs) allowed concurrently in all Range filter Section 5.1.3 parameters for a given subscription or fetch. The default value is 0, so if not specified, the peer MUST NOT send any such filter parameters. If this limit is exceeded, an endpoint MUST reject this with REQUEST_ERROR with error code INVALID_FILTER."
+      },
+      {
+        "option": "MAX_REQUEST_UPDATES",
+        "option_type": "0x08",
+        "section": "10.3.1.7",
+        "registry_row": "draft-19 Section 15.4: '0x08 | MAX_REQUEST_UPDATES | Section 10.3.1.7'",
+        "encoding": "Key-Value-Pair, even Type, bare varint value. Section 10.3.1.7: 'The value is encoded as a variable-length integer.'",
+        "gates": ["REQUEST_UPDATE concurrency per request stream"],
+        "gates_range_filters": false,
+        "default": "0",
+        "meaning_of_default": "Zero means unlimited, the opposite of MAX_FILTER_RANGES: 'A value of 0 means the endpoint does not limit REQUEST_UPDATE concurrency. If not present, the default value is 0.'",
+        "accounting": "'A REQUEST_UPDATE is considered outstanding from when it is sent until the sender receives the corresponding REQUEST_OK or REQUEST_ERROR response... Each REQUEST_OK or REQUEST_ERROR response restores one credit on that stream.' Scope is one request stream, not the session.",
+        "violation": "session close with TOO_MANY_REQUEST_UPDATES (Session Termination Error Code 0x1B)",
+        "relationship_to_range_filters": "None directly. It bounds how many REQUEST_UPDATE messages may be in flight, and a REQUEST_UPDATE is one of the messages that can carry or remove a Range Filter, so the two options bound different axes of the same feature: MAX_FILTER_RANGES bounds filter size, MAX_REQUEST_UPDATES bounds how fast filters can be churned."
+      }
+    ],
+    "renamed_parameter": {
+      "parameter": "0x21",
+      "before": "SUBSCRIPTION_FILTER, defined in draft-18 Section 10.2.9 and registered in draft-18 Section 15.7",
+      "after": "LOCATION_FILTER, draft-19 Section 10.2.9 and Section 15.7",
+      "wire_change": "none",
+      "detail": "Code point, length-prefixed encoding, allowed messages (SUBSCRIBE, PUBLISH_OK, REQUEST_UPDATE for a subscription) and omission defaults are all identical. The payload structure is renamed in step: draft-18 'Subscription Filter { Filter Type (vi64), [Start Location (Location),] [End Group Delta (vi64),] }' becomes draft-19 'Location Filter { ... }' with the same three fields, and the four Filter Type values are unchanged (Next Group Start 0x1, Largest Object 0x2, AbsoluteStart 0x3, AbsoluteRange 0x4). The rename exists to distinguish it from the new Range Filters.",
+      "classification": "editorial"
+    }
+  },
+
+  "registry_deltas": {
+    "note": "Row counts for the four registries the committed extraction covers are 62 on draft-18 and 64 on draft-19; the deltas below account for exactly that difference (-1 +2 +1).",
+    "setup_options_15_4": {
+      "added": [
+        {"code": "0x06", "name": "MAX_FILTER_RANGES", "specification": "Section 10.3.1.6"},
+        {"code": "0x08", "name": "MAX_REQUEST_UPDATES", "specification": "Section 10.3.1.7"}
+      ],
+      "removed": [],
+      "renamed": []
+    },
+    "message_parameters_15_7": {
+      "added": [
+        {"code": "0x25", "name": "SUBGROUP_FILTER", "specification": "Section 10.2.10"},
+        {"code": "0x26", "name": "OBJECTID_FILTER", "specification": "Section 10.2.11"},
+        {"code": "0x27", "name": "PRIORITY_FILTER", "specification": "Section 10.2.12"},
+        {"code": "0x28", "name": "OBJECT_PROPERTY_FILTER", "specification": "Section 10.2.13"},
+        {"code": "0x29", "name": "TRACK_PROPERTY_FILTER", "specification": "Section 10.2.14"}
+      ],
+      "removed": [],
+      "renamed": [{"code": "0x21", "from": "SUBSCRIPTION_FILTER", "to": "LOCATION_FILTER"}]
+    },
+    "properties_15_8": {
+      "added": [],
+      "removed": [],
+      "scope_changed": [
+        {"code": "0x02", "name": "OBJECT_DELIVERY_TIMEOUT", "from": "Track", "to": "Track, Object"},
+        {"code": "0x06", "name": "SUBGROUP_DELIVERY_TIMEOUT", "from": "Track", "to": "Track, Object"}
+      ],
+      "application_range_changed": {"from": "0x38 to 0x3F (1-byte encoding)", "to": "0x78 to 0x7F (1-byte encoding)", "unchanged": "0x3800 to 0x3FFF (2-byte encoding)"}
+    },
+    "object_status_15_9": {
+      "status": "new registry in draft-19; draft-18 has no IANA registry for Object Status",
+      "rows": [
+        {"code": "0x0", "name": "Normal", "payload": "Yes", "specification": "Section 11.2.1.1"},
+        {"code": "0x3", "name": "End of Group", "payload": "No", "specification": "Section 11.2.1.1"},
+        {"code": "0x4", "name": "End of Track", "payload": "No", "specification": "Section 11.2.1.1"}
+      ],
+      "policy": "Specification Required ([RFC8126], Section 4.6); each registration MUST indicate whether the status permits a payload.",
+      "code_points_changed": false
+    },
+    "session_termination_error_codes": {
+      "draft_18_section": "15.10.1",
+      "draft_19_section": "15.11.1",
+      "added": [{"code": "0x1B", "name": "TOO_MANY_REQUEST_UPDATES", "specification": "Section 3.5"}],
+      "removed": []
+    },
+    "request_error_codes": {
+      "draft_18_section": "15.10.2",
+      "draft_19_section": "15.11.2",
+      "added": [
+        {"code": "0x35", "name": "CONFLICTING_FILTERS", "specification": "Section 10.6"},
+        {"code": "0x36", "name": "INVALID_FILTER", "specification": "Section 10.6"}
+      ],
+      "removed": [{"code": "0x19", "name": "DUPLICATE_SUBSCRIPTION"}]
+    },
+    "publish_done_codes": {
+      "draft_18_section": "15.10.3",
+      "draft_19_section": "15.11.3",
+      "added": [],
+      "removed": []
+    },
+    "stream_reset_error_codes": {
+      "draft_18_section": "15.10.4",
+      "draft_19_section": "15.11.4",
+      "added": [],
+      "removed": []
+    },
+    "control_message_types_table_5": {
+      "changed": [
+        {"code": "0xF", "from": "PUBLISH_BLOCKED (Section 10.20)", "to": "PUBLISH_SKIPPED (Section 10.20)", "stream": "Request"},
+        {"code": "0x1E", "from": "PUBLISH_OK (Section 10.5)", "to": "RESERVED (PUBLISH_OK in <= 17)", "stream": "Request", "note": "Not mentioned in Appendix A.1. See changes_not_in_appendix."}
+      ]
+    }
+  },
+
+  "changes_not_in_appendix": [
+    {
+      "id": "X-01",
+      "sections": ["10 Control Messages, Table 5"],
+      "classification": "wire-incompatible",
+      "what": "Control message type 0x1E changes from 'PUBLISH_OK (Section 10.5)' to 'RESERVED (PUBLISH_OK in <= 17)'. In draft-19 no message may be sent with type 0x1E, and section 10 says 'An endpoint that receives an unknown message type MUST close the session.'",
+      "why_it_is_subtle": "In both drafts PUBLISH_OK is only a shorthand for REQUEST_OK (type 0x7) sent in response to PUBLISH; section 10.5 is REQUEST_OK in both, and its body is byte-identical between the drafts. Draft-18's Table 5 nonetheless still carried a live 0x1E row pointing at section 10.5. Draft-19 retires that row. An implementation that took draft-18's table literally and accepted or emitted 0x1E is wrong under draft-19."
+    },
+    {
+      "id": "X-02",
+      "sections": ["2.5 Properties", "12 MOQT Properties"],
+      "classification": "wire-incompatible",
+      "what": "The 1-byte application-specific Property range moves from 0x38-0x3F to 0x78-0x7F, in both places that state it: section 2.5 ('0x78 to 0x7F (1-byte encoding): 8 code points') and the section 12 lead-in ('Property types in ranges reserved for application-specific use (0x78-0x7F, 0x3800-0x3FFF) are not defined by MOQT').",
+      "why_it_matters": "Draft-18 contradicted itself: its section 15.8 registration policy already read '0x78 to 0x7F: Reserved for application-specific use (1-byte encoding, no registration)' while sections 2.5 and 12 said 0x38-0x3F. Draft-19 resolves the contradiction in favour of 0x78-0x7F. Draft-18's 0x38-0x3F range overlaps real assignments (0x3C Prior Group ID Gap, 0x3E Prior Object ID Gap), which is presumably why."
+    },
+    {
+      "id": "X-03",
+      "sections": ["15.8 Properties"],
+      "classification": "semantic",
+      "what": "The skip rule for unknown Property types is corrected. Draft-18: 'Endpoints MUST ignore unknown Property types, skipping them using the length field.' Draft-19: 'Endpoints MUST ignore unknown Property types, skipping them according to the Key-Value-Pair encoding; odd types use their length field, even types are skipped by parsing a varint value.'",
+      "why_it_matters": "Draft-18's wording implies every property has a length field. It does not: section 1.4.3 gives a Length only to odd types. A decoder written to draft-18's sentence desynchronises on the first unknown even-typed property."
+    },
+    {
+      "id": "X-04",
+      "sections": ["10.2.15 EXPIRES Parameter"],
+      "classification": "wire-incompatible",
+      "what": "The set of messages that may carry EXPIRES (0x08) grows. Draft-18: 'It MAY appear in SUBSCRIBE_OK, PUBLISH, PUBLISH_OK, or REQUEST_UPDATE_OK.' Draft-19: 'It MAY appear in SUBSCRIBE_OK, PUBLISH, PUBLISH_OK, SUBSCRIBE_NAMESPACE_OK, SUBSCRIBE_TRACKS_OK, PUBLISH_NAMESPACE_OK, or REQUEST_UPDATE_OK.'",
+      "why_it_matters": "Section 10.2.1 makes a parameter in a message that does not allow it a PROTOCOL_VIOLATION session close, so a draft-18 receiver kills the session on a draft-19 SUBSCRIBE_TRACKS_OK carrying EXPIRES. All the added names are shorthands for REQUEST_OK (0x7), so the decoder must know which request the stream belongs to in order to validate."
+    },
+    {
+      "id": "X-05",
+      "sections": ["10.6.1 Redirect Structure", "10.6 REQUEST_ERROR"],
+      "classification": "semantic",
+      "what": "SUBSCRIBE_TRACKS joins the namespace-scoped request types whose Redirect MUST have an empty Track Name ('SUBSCRIBE_NAMESPACE, PUBLISH_NAMESPACE, SUBSCRIBE_TRACKS'), enforced by 'an endpoint that receives a non-empty Track Name in a Redirect for a namespace-scoped request MUST close the session with a PROTOCOL_VIOLATION'. Separately, the list of requests that can draw a REDIRECT gains PUBLISH and SUBSCRIBE_TRACKS: draft-18 'SUBSCRIBE, FETCH, TRACK_STATUS, PUBLISH_NAMESPACE and SUBSCRIBE_NAMESPACE' becomes draft-19 'SUBSCRIBE, FETCH, TRACK_STATUS, PUBLISH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE, and SUBSCRIBE_TRACKS'.",
+      "why_it_matters": "The Redirect structure itself is unchanged, but a validity rule now fires on a request type it did not previously cover."
+    },
+    {
+      "id": "X-06",
+      "sections": ["6.3 Filtering SUBSCRIBE_TRACKS", "6.3.1 Relay Resource Protection in Large Namespaces"],
+      "classification": "semantic",
+      "what": "Two entirely new sections. 6.3 states that Track Property Filters select Tracks in a namespace and any Range Filter can then filter the resulting Objects. 6.3.1 adds relay guidance: 'Relays SHOULD aggregate and propagate filters upstream on subscriptions, especially namespace subscriptions, to conserve and protect their resources from excessive load', and names NAMESPACE_TOO_LARGE, CONFLICTING_FILTERS and PREFIX_OVERLAP as the rejection codes.",
+      "why_it_is_here": "Appendix A.1's Range Filter entry does not mention these sections; they were located by diffing the table of contents. NAMESPACE_TOO_LARGE and PREFIX_OVERLAP already exist in draft-18's registry, so only CONFLICTING_FILTERS is new."
+    },
+    {
+      "id": "X-07",
+      "sections": ["3.1.3 Dereferencing a MOQT URI (new section)", "3.1.4 WebTransport", "3.1.5 Native QUIC", "3.1.6 Connection URL"],
+      "classification": "editorial",
+      "what": "Prose that sat at the end of 3.1.2 in draft-18 is promoted to its own section 3.1.3, pushing WebTransport, Native QUIC and Connection URL down by one. One content change inside it: the ALPN example 'moqt/1, moqt/2' becomes 'moqt-1, moqt-2', matching section 3.1's rule that draft ALPNs are formed by appending the draft number to 'moqt-'."
+    },
+    {
+      "id": "X-08",
+      "sections": ["3.1 Session establishment"],
+      "classification": "editorial",
+      "what": "The RFC-editor removal marker moves. Draft-18 put '[[RFC editor: please remove the remainder of this section before publication.]]' before the sentence naming the final ALPN 'moqt'; draft-19 puts it after, so the final-version ALPN survives publication and only the draft-numbering convention is removed."
+    },
+    {
+      "id": "X-09",
+      "sections": ["1.4.1 Variable-Length Integers"],
+      "classification": "editorial",
+      "what": "Added: 'Note that, as a result, the same numeric value can be represented by more than one byte sequence. For example, the value 0 can be encoded as 0x00, 0x8000, 0xc00000, or any longer form.' The underlying rule ('Variable length integers do not need to be encoded using the minimum number of bytes; any encoding length that can represent the value is valid') is identical in draft-18.",
+      "why_it_matters_anyway": "It is a direct warning against byte-comparison of encoded varints and against round-trip equality tests that assume minimal encoding. The rule did not change; only its visibility did."
+    },
+    {
+      "id": "X-10",
+      "sections": ["1.5.1 Parsing Serialized Names"],
+      "classification": "editorial",
+      "what": "The three canonical-encoding rules are reordered: the 'a period MUST be followed by exactly two hex digits' rule moves from third to first. Wording of all three is unchanged."
+    },
+    {
+      "id": "X-11",
+      "sections": ["7.1 Definitions"],
+      "classification": "semantic",
+      "what": "The sources of the three scheduling inputs are restated to point at parameters and Track Properties instead of at messages. Subscriber Priority: draft-18 'It is specified in the SUBSCRIBE or FETCH message, and can be updated via REQUEST_UPDATE message' becomes 'It is carried in the SUBSCRIBER_PRIORITY parameter (Section 10.2.7), and can be updated.' Publisher Priority: draft-18 'A default can be specified in the parameters of PUBLISH, or SUBSCRIBE_OK' becomes 'A default for the subscription is specified in the DEFAULT_PUBLISHER_PRIORITY Track Property (Section 12.4)... which overrides the default.' Group Order: the publisher's preference is now explicitly 'carried in the DEFAULT_PUBLISHER_GROUP_ORDER Track Property (Section 12.5)', and the subscriber may express it 'in the SUBSCRIBE or SUBSCRIBE_TRACKS message'.",
+      "why_it_matters": "This is the prose half of A1-04. Draft-18's text implied publisher priority defaults travelled as message parameters; draft-19 says they travel as Track Properties."
+    },
+    {
+      "id": "X-12",
+      "sections": ["12.3 MAX CACHE DURATION"],
+      "classification": "editorial",
+      "what": "The consequence of cache expiry is replaced by a cross-reference. Draft-18: 'Once Objects have expired from cache, their state becomes unknown, and a relay that handles a downstream request that includes those Objects re-requests them.' Draft-19: 'Once Objects have expired from cache, their state becomes unknown (see Section 2.1).' The re-request obligation is not restated anywhere; section 2.1 defines the unknown state but does not require a re-request."
+    },
+    {
+      "id": "X-13",
+      "sections": ["11.4.2 Subgroup Header"],
+      "classification": "editorial",
+      "what": "The PROPERTIES bit (0x01) description is re-punctuated so that the 'Objects with no properties set Properties Length to 0' clause attaches to the bit-set-to-1 case instead of trailing after the bit-set-to-0 case. Same rule, less ambiguous reading order."
+    },
+    {
+      "id": "X-14",
+      "sections": ["10.16 NAMESPACE", "10.17 NAMESPACE_DONE", "11.3.1 Object Datagram", "11.4.2 Subgroup Header"],
+      "classification": "editorial",
+      "what": "Four artwork blocks change their type-field notation from 'Type (i)' to 'Type (vi64)', matching every other message in the document. No widths, values or ranges change."
+    },
+    {
+      "id": "X-15",
+      "sections": ["10.18 SUBSCRIBE_NAMESPACE"],
+      "classification": "editorial",
+      "what": "The prefix-matching example is rewritten from tuple notation to the serialized name format of section 1.5: namespaces ('example.com', 'meeting=123', 'participant=100') become example.2ecom-123-100, and the matching prefix becomes example.2ecom-123."
+    },
+    {
+      "id": "X-16",
+      "sections": ["3.3 Session initialization"],
+      "classification": "editorial",
+      "what": "Added: 'When this is done before the handshake completes using 0-RTT, the security implications described in Section 3.3.1 apply.' Section 3.3.1 itself changes one example from SUBSCRIBE_NAMESPACE to SUBSCRIBE_TRACKS ('For a SUBSCRIBE_TRACKS request, sending that upstream could cause the Relay to receive a number of new Subscriptions on the replaying client's behalf'), which is the more accurate message for that hazard."
+    },
+    {
+      "id": "X-17",
+      "sections": ["13 Security Considerations", "13.3 Authorization"],
+      "classification": "editorial",
+      "what": "'node' / 'node-level' is replaced by 'Endpoint' / 'Endpoint-level' throughout, aligning with the defined term in section 1.2. No rule changes."
+    }
+  ],
+
+  "open_questions": [
+    {
+      "id": "Q-01",
+      "topic": "Range Filter allowed-message list is stated twice, differently",
+      "detail": "Section 5.1.3's opening sentence says 'Range Filters are parameters in SUBSCRIBE, FETCH, or SUBSCRIBE_TRACKS'. Six paragraphs later the same section says the four Object-side filters 'MAY appear multiple times in a FETCH, SUBSCRIBE, SUBSCRIBE_TRACKS, PUBLISH_OK, or REQUEST_UPDATE (on a subscription, from the subscriber only) message.' PUBLISH_OK and REQUEST_UPDATE appear only in the second list. Sections 10.2.10-10.2.14 list no messages at all, so there is no third opinion.",
+      "resolution_used_here": "The longer, later list is treated as normative because it is the one attached to the repetition and removal rules, and because the REQUEST_UPDATE removal form (Length=0) is meaningless unless REQUEST_UPDATE may carry these parameters. An implementation should accept the longer list and should not reject on the shorter one."
+    },
+    {
+      "id": "Q-02",
+      "topic": "Repeated parameters versus ascending Type Delta order",
+      "detail": "Section 10.2 requires 'Parameters MUST be serialized in ascending order by Type', while section 5.1.3 requires the Range Filter parameters to be repeatable within one message. A second occurrence of the same Type can only be encoded with Type Delta 0, which is non-decreasing rather than strictly ascending. The draft does not say this explicitly anywhere.",
+      "impact": "An encoder must emit Type Delta 0 for repeats; a decoder that enforces strict monotonicity on Type Delta rejects every legal multi-Set filter. This is not new in draft-19 (draft-18 has the same ascending-order sentence and the same repeatability language for AUTHORIZATION TOKEN) but draft-19 is the first version where the repeatable parameters are numerous and structurally complex."
+    },
+    {
+      "id": "Q-03",
+      "topic": "MAX_FILTER_RANGES accounting boundary",
+      "detail": "The limit is 'the total number of Ranges (Start/End pairs) allowed concurrently in all Range filter parameters for a given subscription or fetch'. 'Concurrently' plus REQUEST_UPDATE's replace-whole-parameter semantics implies the count is evaluated against the post-update state of the subscription, not per message, but the draft does not spell out the evaluation point.",
+      "impact": "Determines whether a REQUEST_UPDATE that swaps a large filter for a small one is judged before or after the swap."
+    },
+    {
+      "id": "Q-04",
+      "topic": "Open-ended range detection",
+      "detail": "Ranges are not individually delimited and there is no range count; only the parameter's byte Length bounds the sequence. The omitted final End is therefore detectable only by exhausting the Length after reading a Start. A parameter whose Length ends mid-varint, or a Length that leaves exactly one varint, are the two cases a decoder must distinguish, and the draft gives no worked example of the open-ended encoding.",
+      "impact": "Two implementations can disagree about a truncated final varint: one reads an open-ended range, the other a malformed parameter. Section 5.1.3 provides no error code for a malformed Range sequence as such; INVALID_FILTER is defined only for the enumerated conditions."
+    },
+    {
+      "id": "Q-05",
+      "topic": "GROUP_ORDER on PUBLISH",
+      "detail": "Section 10.2.8 lists GROUP_ORDER's allowed messages as SUBSCRIBE, SUBSCRIBE_TRACKS and FETCH. Section 10.19.1 says 'PUBLISH messages resulting from this SUBSCRIBE_TRACKS will include the GROUP_ORDER parameter with the same value', which requires PUBLISH to be an allowed message. Section 10.2.1 makes the mismatch a session close.",
+      "impact": "A receiver enforcing 10.2.8 literally would close the session on a PUBLISH that 10.19.1 requires. Treat PUBLISH as allowed for 0x22."
+    },
+    {
+      "id": "Q-06",
+      "topic": "Message Parameters registry has no repeatability column",
+      "detail": "Draft-19 section 15.7 still ends with the editor's note 'Message Parameters - List which params can be repeated in the table.' The table has no such column, so repeatability is only discoverable from each parameter's defining section. Same note is present in draft-18."
+    }
+  ]
+}
