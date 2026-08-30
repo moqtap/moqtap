@@ -5,16 +5,17 @@ All notable changes to moqtap-trace will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-08-29
 
-**This ships as 0.2.0.** Not 0.1.1: `EventData` gained variants and a
-`#[non_exhaustive]` attribute, `TraceEvent` and `TraceHeader` gained public
-fields, and `Perspective` and `DetailLevel` gained an `Other` variant. Any
-exhaustive `match` and any struct literal over those types stops compiling.
-Under Cargo's 0.x rules the minor position *is* the major position, so `^0.1.0`
-would hand that break to every current consumer under a patch number.
+Implements version 2 of the `.moqtrace` format.
 
-It implements version 2 of the `.moqtrace` format.
+**Breaking, which is why this is 0.2.0 and not 0.1.1.** `EventData` gained
+variants and a `#[non_exhaustive]` attribute, `TraceEvent` and `TraceHeader`
+gained public fields, and `Perspective` and `DetailLevel` gained an `Other`
+variant. Any exhaustive `match` and any struct literal over those types stops
+compiling. Under Cargo's 0.x rules the minor position *is* the major position,
+so `^0.1.0` would hand that break to every current consumer under a patch
+number.
 
 ### Added
 
