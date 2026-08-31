@@ -1,10 +1,22 @@
 name: Build Rustdoc
 
+# `master` is this repository's default branch and `main` has never existed, so
+# the branch half of this trigger matched nothing until `master` was added: only
+# the tag push rebuilt the docs. Both names are listed so the branch build
+# survives a rename in either direction.
+#
+# Deliberately NOT `branches: ['**']`, unlike `ci.yml`. The last step here
+# dispatches a rebuild of the public site, so widening this to every branch
+# would republish moqtap.dev from whatever unmerged branch was pushed last.
+# Rustdoc *correctness* on a feature branch is covered without that: `ci.yml`'s
+# `doc` job runs `cargo doc --workspace --no-deps` under `RUSTDOCFLAGS=-D
+# warnings` on every branch, which is the half that can fail. This workflow only
+# adds publication.
 on:
   push:
     tags:
       - "*-v*"
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   rustdoc:

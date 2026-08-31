@@ -19,8 +19,8 @@ Add the crates you need to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-moqtap-codec = "0.1"
-moqtap-client = "0.1"
+moqtap-codec = "0.4"
+moqtap-client = "0.4"
 ```
 
 Each draft is a separate feature flag on both crates (`draft07`..`draft17`). The client defaults to `draft14`; the codec defaults to `all-drafts`. Enable additional drafts to negotiate them at runtime.
@@ -124,7 +124,7 @@ moqtap-codec          Pure codec, no I/O. Foundation for everything.
 
 ## Spec Compliance
 
-This implementation covers MoQT drafts 07 through 17. Each draft is a
+This implementation covers MoQT drafts 07 through 19. Each draft is a
 separate module in both `moqtap-codec` and `moqtap-client`.
 
 ## License

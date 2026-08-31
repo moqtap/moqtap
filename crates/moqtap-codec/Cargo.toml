@@ -1,7 +1,7 @@
 [package]
 name = "moqtap-codec"
 description = "MoQT (Media over QUIC Transport) wire codec — draft-07 through draft-19 message encoding/decoding"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

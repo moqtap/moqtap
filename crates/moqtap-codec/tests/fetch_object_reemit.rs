@@ -694,8 +694,8 @@ mod draft16 {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Draft-15: the reader resolves into the header, and there was no
-// encoder at all until this round
+// Draft-15: the reader resolves into the header, and for a long time
+// there was no encoder at all
 // ─────────────────────────────────────────────────────────────
 
 #[cfg(feature = "draft15")]
@@ -771,9 +771,9 @@ mod draft15 {
         )
     }
 
-    /// The encoder written this round is the reader's inverse, which is what
-    /// this asserts before anything is removed: draft-15 had a fetch object
-    /// reader and no way at all to put one back on a stream.
+    /// The encoder is the reader's inverse, which is what this asserts before
+    /// anything is removed: draft-15 had a fetch object reader and no way at
+    /// all to put one back on a stream.
     #[test]
     fn a_stream_written_back_unchanged_is_byte_identical() {
         let wire = sample_stream();

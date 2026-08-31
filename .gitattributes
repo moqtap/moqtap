@@ -1,5 +1,25 @@
-# The decision-log fixture is compared against a rendered log byte for byte, so
-# nothing may rewrite a byte of it in either direction. `-text` disables the
-# clean and smudge filters outright, which does not depend on git's text/binary
-# heuristic agreeing with us.
+# Line endings, and why this file exists.
+#
+# The impairment crate's acceptance criterion is a byte comparison between a
+# committed decision-log fixture and a log rendered at run time. The renderer
+# emits U+000A and nothing else, on every platform. Without the rule below, a
+# clone made with `core.autocrlf = true` rewrites the fixture's line endings on
+# checkout, and the comparison is then a test of the developer's git config.
+#
+# `text=auto eol=lf` normalises every text file to LF in the repository and
+# checks it out as LF everywhere, so a Windows working tree and a Linux one hold
+# the same bytes.
+* text=auto eol=lf
+
+# The fixtures are exempted from conversion entirely rather than merely pinned
+# to LF. A fixture is the phase's product, not source code: nothing may rewrite
+# a byte of it, in either direction, for any reason. `-text` disables the clean
+# and smudge filters outright, which is a stronger statement than "convert it to
+# LF" and does not depend on git's text/binary heuristic agreeing with us.
+#
+# This is deliberately belt and braces with the comparison itself, which strips
+# a trailing carriage return from both sides before comparing. Either mechanism
+# alone would do on a fresh clone; together they mean a checkout that predates
+# this file, or a developer who overrode it, still cannot turn the acceptance
+# criterion into a platform-dependent coin flip.
 crates/quinn-netem/tests/fixtures/*.log -text

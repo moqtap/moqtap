@@ -17,6 +17,7 @@ use serde::Deserialize;
 use moqtap_codec::draft17::data_stream::{DatagramHeader, FetchHeader, SubgroupHeader};
 use moqtap_codec::draft17::message::ControlMessage;
 use moqtap_codec::kvp::KeyValuePair;
+use moqtap_codec::varint::Moqt17;
 use moqtap_codec::varint::VarInt;
 
 // ── Vector loading ────────────────────────────────────────────
@@ -194,9 +195,18 @@ fn build_synthetic_subgroup(n_objects: usize, payload_size: usize) -> Vec<u8> {
     let mut buf = Vec::with_capacity(32 + n_objects * (8 + payload_size));
 
     // Header: mode 0 (subgroup_id = 0, no field), priority byte present.
+    //
+    // `encode_moqt::<Moqt17>` and not `encode`. Draft-17 reads its header
+    // fields with MoQT's own variable-length integer rather than RFC 9000's,
+    // and the two disagree above 63 — so `group_id = 100` written in the RFC
+    // form is read back as a different number of bytes, every object after it
+    // is parsed at the wrong offset, and the length that comes out sends
+    // `advance` off the end of the buffer. The failure is loud but arrives far
+    // from its cause, which is why the encoder here has to be the one the
+    // decoder under test actually uses.
     buf.put_u8(0x10);
-    VarInt::from_u64(42).unwrap().encode(&mut buf); // track_alias
-    VarInt::from_u64(100).unwrap().encode(&mut buf); // group_id
+    VarInt::from_u64(42).unwrap().encode_moqt::<Moqt17>(&mut buf); // track_alias
+    VarInt::from_u64(100).unwrap().encode_moqt::<Moqt17>(&mut buf); // group_id
     buf.put_u8(128); // publisher_priority
 
     // Objects. No properties bit, so each object is: delta, payload_len, payload.

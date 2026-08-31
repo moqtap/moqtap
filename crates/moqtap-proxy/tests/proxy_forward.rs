@@ -6,6 +6,12 @@
 //!
 //! This is the baseline check that the proxy's pass-through control path
 //! (`wants_control_mutation = false`) does not alter or drop bytes.
+//!
+//! Draft-14 throughout: the fixtures are draft-14 CLIENT_SETUP /
+//! SERVER_SETUP / SUBSCRIBE messages and the session is configured for
+//! draft-14, so the file compiles and runs exactly when that draft does.
+
+#![cfg(feature = "draft14")]
 
 mod common;
 
@@ -93,6 +99,14 @@ async fn passthrough_forwards_setup_and_subscribe_unchanged() {
                 skip_upstream_cert_verify: true,
                 upstream_ca_certs: Vec::new(),
                 upstream_connect_timeout_secs: 5,
+                upstream_transport_config: None,
+                upstream_socket: None,
+                egress: Default::default(),
+                shape: None,
+                upstream_transport_profile: None,
+                upstream_installer: None,
+                #[cfg(feature = "qlog")]
+                upstream_qlog: None,
             },
             b"moq-00".to_vec(),
             Arc::new(NoOpProxyObserver),
@@ -139,6 +153,27 @@ async fn passthrough_forwards_setup_and_subscribe_unchanged() {
         AnyControlMessage::Draft14(inner) => {
             assert_eq!(inner, expected_subscribe_clone);
         }
+        // The arm above binds a whole `ControlMessage`, so it covers the
+        // Draft14 variant outright. This one is reachable only where some
+        // *other* draft's variant exists to be mismatched — on a
+        // `--features draft14` build `AnyControlMessage` has exactly one
+        // variant and the arm is dead. Gated rather than `#[allow]`ed:
+        // silencing `unreachable_patterns` here would also cover the arm
+        // above, which is the one that must stay exhaustive.
+        #[cfg(any(
+            feature = "draft07",
+            feature = "draft08",
+            feature = "draft09",
+            feature = "draft10",
+            feature = "draft11",
+            feature = "draft12",
+            feature = "draft13",
+            feature = "draft15",
+            feature = "draft16",
+            feature = "draft17",
+            feature = "draft18",
+            feature = "draft19"
+        ))]
         other => panic!("expected SUBSCRIBE on upstream, got {other:?}"),
     }
 

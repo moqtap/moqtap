@@ -5,6 +5,22 @@ All notable changes to moqtap-codec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-08-31
+
+### Fixed
+
+- **A build with no draft feature compiles without warnings again.**
+  `AnySubgroupHeader::encode_stream`, `encode_stream_checked` and
+  `AnyFetchHeader::encode_stream` compile their `match` to no arms at all when
+  no draft is enabled, which leaves their parameters read by nothing. Each
+  already allowed `unreachable_code` for exactly that shape; they now allow the
+  warnings that come with it. No effect on any build that enables a draft,
+  which is every build that can encode anything.
+
+  Reached by `cargo check -p moqtap-codec --no-default-features` under
+  `RUSTFLAGS="-D warnings"`. It stayed hidden because the local recipe for that
+  row does not set the flag and CI, which does, had never run.
+
 ## [0.4.0] - 2026-08-30
 
 Draft-conformance release. Parameter, filter and token values stop being opaque

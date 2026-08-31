@@ -1,7 +1,7 @@
 [package]
 name = "moqtap-proxy"
 description = "MoQT intercepting proxy — transparent forwarding with inline frame parsing"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,15 +9,123 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+readme = "README.md"
+# 43 files and half the package, driving a loopback QUIC peer across thirteen
+# drafts for a consumer who is not developing this crate. The source is on
+# GitHub for anyone who wants to run them. Unit tests inside `src/` are packaged
+# as usual, which is why `rcgen` remains a dev-dependency.
+exclude = ["tests/"]
 
 [features]
-default = []
+# Source-compatible with 0.3.0: a plain `cargo build` still compiles every
+# draft. Reduced draft sets are opt-in via `--no-default-features --features
+# draftNN`, which is what CI's per-draft rows exercise.
+default = ["all-drafts"]
+
+all-drafts = [
+    "draft07",
+    "draft08",
+    "draft09",
+    "draft10",
+    "draft11",
+    "draft12",
+    "draft13",
+    "draft14",
+    "draft15",
+    "draft16",
+    "draft17",
+    "draft18",
+    "draft19",
+]
+
+# Each proxy draft feature forwards to BOTH dependencies. Forwarding only to
+# the client would leave `moqtap-codec` on its own default (all drafts),
+# because the proxy depends on the codec directly as well.
+draft07 = ["moqtap-client/draft07", "moqtap-codec/draft07"]
+draft08 = ["moqtap-client/draft08", "moqtap-codec/draft08"]
+draft09 = ["moqtap-client/draft09", "moqtap-codec/draft09"]
+draft10 = ["moqtap-client/draft10", "moqtap-codec/draft10"]
+draft11 = ["moqtap-client/draft11", "moqtap-codec/draft11"]
+draft12 = ["moqtap-client/draft12", "moqtap-codec/draft12"]
+draft13 = ["moqtap-client/draft13", "moqtap-codec/draft13"]
+draft14 = ["moqtap-client/draft14", "moqtap-codec/draft14"]
+draft15 = ["moqtap-client/draft15", "moqtap-codec/draft15"]
+draft16 = ["moqtap-client/draft16", "moqtap-codec/draft16"]
+draft17 = ["moqtap-client/draft17", "moqtap-codec/draft17"]
+draft18 = ["moqtap-client/draft18", "moqtap-codec/draft18"]
+draft19 = ["moqtap-client/draft19", "moqtap-codec/draft19"]
+
 cert-gen = ["rcgen"]
 webtransport = ["wtransport", "moqtap-client/webtransport"]
 
+# Two features rather than one, and they are independent. `impair` buys the
+# ability to install a datagram impairment on a leg's socket at runtime and
+# costs one path dependency. `serde` buys `Serialize` and `Deserialize` on the
+# configuration types — the shaping profile and the two transport profiles — so
+# a caller can read them from a file rather than build them in code.
+#
+# Neither implies the other, and the reason is that a caller wanting an
+# impaired proxy configured in Rust should not build serde to get one, while a
+# caller reading a shaping profile from a file may never impair anything.
+#
+# No JSON parser here. This crate deserializes into its own types and never
+# reads a file, so the format is the caller's choice and the parser is the
+# caller's dependency.
+#
+# `dep:` rather than the bare form used by `cert-gen` and `webtransport` above.
+# The bare form on `quinn-netem` would create a public feature named for the
+# crate, which would appear on docs.rs beside the draft features and could be
+# enabled individually to no effect. `serde` is spelled out for the opposite
+# reason: the feature and the dependency share a name, so the entry has to say
+# which one it means.
+impair = ["dep:quinn-netem"]
+serde = ["dep:serde"]
+
+# A QUIC-layer capture of a connection, written by quinn itself: packets sent
+# and received, congestion and loss, in the JSON-SEQ format the qlog tooling
+# reads. It sits *underneath* everything this crate reports — a datagram this
+# crate never sees is still a record in there — so it complements the object
+# layer rather than replacing it.
+#
+# Off by default because of what it costs. `cargo tree -p moqtap-proxy
+# --features qlog -e normal`, compared with the same command without the
+# feature, is nineteen crates longer: `qlog` itself, then `serde_with` and the
+# whole `darling` proc-macro chain underneath it, then `serde_json` and its
+# own dependencies. A crate that parses one MoQT stream should not make
+# everybody build a derive-macro toolchain to do it.
+#
+# `quinn/qlog` rather than a `dep:` edge of this crate's own. The sink is a
+# quinn type and the only setter for it is a method on
+# `quinn::TransportConfig`, so the capture has to be compiled into quinn or it
+# does not exist at all. Nothing here names the `qlog` crate: this crate hands
+# quinn a writer and reads the bytes back as bytes, which is also what keeps a
+# renamed field in that crate's serde attributes from passing unnoticed.
+qlog = ["quinn/qlog"]
+
+# `single_range_in_vec_init` reads `[a..=b]` and `vec![a..=b]` as a probable
+# mistake for a collection of the values *in* that range, and suggests a
+# `collect`. That is the right guess in most crates and the wrong one in this
+# module: a `RangeSet` is built from ranges, so `RangeSet::new([0..=99])` is one
+# element of the type the constructor takes, not a description of a hundred.
+# Following the suggestion would change the type and, on a wide range, allocate
+# every value in it.
+#
+# Crate-scoped rather than seventeen `#[allow]`s at the call sites, because in
+# `shape` a single-range literal is the ordinary case rather than the exception
+# — the one place it is worth arguing about is here.
+[lints.clippy]
+single_range_in_vec_init = "allow"
+
 [dependencies]
+# Both arrive here without default features: `moqtap-codec` because the root
+# `[workspace.dependencies]` entry says so, `moqtap-client` because of the line
+# below AND the matching `default-features = false` on the root entry. The
+# second half is load-bearing — cargo silently ignores this line if the
+# workspace entry lacks it, warning only at the manifest level, where
+# `RUSTFLAGS = "-D warnings"` cannot reach; every reduced-draft build then
+# quietly becomes the all-drafts build.
 moqtap-codec = { workspace = true }
-moqtap-client = { workspace = true }
+moqtap-client = { workspace = true, default-features = false }
 bytes = { workspace = true }
 quinn = { workspace = true }
 rustls = { workspace = true }
@@ -29,6 +137,22 @@ rcgen = { version = "0.14", optional = true }
 ring = "0.17"
 time = "0.3"
 wtransport = { workspace = true, optional = true }
+# Optional, and off unless `impair` asks for it. The forwarding path is still
+# agnostic: both socket seams take an `Arc<dyn quinn::AsyncUdpSocket>` and know
+# nothing about impairment. What this edge adds is a control-plane verb that can
+# install a profile on a leg's socket, which needs the profile type by name.
+quinn-netem = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 rcgen = "0.14"
+# The unit tests that gate the two serde detours — the shaping mirror and the
+# side names — need a format to round-trip through. A dev-dependency, as
+# everywhere else in this workspace: reading a file is the caller's job.
+serde_json = { workspace = true }
+# Also a dev-dependency, unconditionally and with the decorator compiled, so the
+# integration tests get it whatever the feature flags say. `quinn-socket` is the
+# non-default feature that compiles the `AsyncUdpSocket` decorator; without it
+# the crate is the zero-dependency decision engine and `quinn_netem::socket`
+# does not exist.
+quinn-netem = { workspace = true, features = ["quinn-socket"] }

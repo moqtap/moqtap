@@ -12,23 +12,28 @@
 //! Non-matching frames (CLIENT_SETUP, SERVER_SETUP) must flow through
 //! unchanged even though `wants_control_mutation = true` forces the
 //! parse-then-forward path.
+//!
+//! Draft-14 throughout: the hook matches on
+//! `AnyControlMessage::Draft14(..)` and rewrites a draft-14 SUBSCRIBE, so
+//! the file compiles and runs exactly when that draft does.
+
+#![cfg(feature = "draft14")]
 
 mod common;
 
 use std::sync::{Arc, Mutex};
 
-use moqtap_codec::dispatch::{AnyControlMessage, AnyDatagramHeader};
+use bytes::Bytes;
+
+use moqtap_codec::dispatch::AnyControlMessage;
 use moqtap_codec::draft14::message::{ClientSetup, ControlMessage, ServerSetup, Subscribe};
 use moqtap_codec::types::{FilterType, Forward, GroupOrder, TrackNamespace};
 use moqtap_codec::varint::VarInt;
 use moqtap_codec::version::DraftVersion;
 
-use moqtap_proxy::event::{ProxySide, SessionId};
-use moqtap_proxy::hook::ProxyHook;
+use moqtap_proxy::action::{Action, Interest};
+use moqtap_proxy::hook::{FrameCtx, ProxyHook};
 use moqtap_proxy::observer::NoOpProxyObserver;
-use moqtap_proxy::session::{ProxySession, ProxySessionConfig, UpstreamTransportType};
-
-use tokio_util::sync::CancellationToken;
 
 const DRAFT14_VERSION: u64 = 0xff000000 + 14;
 
@@ -53,24 +58,27 @@ impl RewritingHook {
 }
 
 impl ProxyHook for RewritingHook {
-    fn wants_control_mutation(&self) -> bool {
-        true
+    /// 0.3.x's `wants_control_mutation() -> true`. Declaring
+    /// [`Interest::CONTROL`] is what routes the control stream through
+    /// `pipe_control_mutating`, where a returned [`Action`] is still
+    /// executable because the bytes have not been written yet.
+    fn interest(&self) -> Interest {
+        Interest::CONTROL
     }
 
     fn on_control_message(
         &self,
-        _session_id: SessionId,
-        _side: ProxySide,
+        _cx: &FrameCtx<'_>,
         message: &AnyControlMessage,
-        _raw_bytes: &[u8],
-    ) -> Option<Vec<u8>> {
+        _raw: &[u8],
+    ) -> Action {
         self.seen.lock().unwrap().push(message.clone());
 
         let AnyControlMessage::Draft14(ControlMessage::Subscribe(sub)) = message else {
-            return None;
+            return Action::Pass;
         };
         if sub.track_namespace.0 != self.from {
-            return None;
+            return Action::Pass;
         }
 
         let mut rewritten = sub.clone();
@@ -79,17 +87,7 @@ impl ProxyHook for RewritingHook {
         AnyControlMessage::Draft14(ControlMessage::Subscribe(rewritten))
             .encode(&mut buf)
             .expect("re-encode subscribe");
-        Some(buf)
-    }
-
-    fn on_datagram(
-        &self,
-        _session_id: SessionId,
-        _side: ProxySide,
-        _header: &AnyDatagramHeader,
-        _raw_bytes: &[u8],
-    ) -> Option<Vec<u8>> {
-        None
+        Action::Replace(Bytes::from(buf))
     }
 }
 
@@ -140,40 +138,11 @@ async fn subscribe_namespace_foo_is_rewritten_to_bar() {
         let _ = conn.closed().await;
     });
 
-    let (proxy_front_ep, proxy_addr) = common::spawn_quic_server(&[b"moq-00"]);
     let (hook, hook_seen) = RewritingHook::new(vec![b"foo".to_vec()], vec![b"bar".to_vec()]);
-
-    let cancel = CancellationToken::new();
-    let proxy_cancel = cancel.clone();
     let hook_for_session: Arc<dyn ProxyHook> = hook.clone();
-    let proxy_task = tokio::spawn(async move {
-        let incoming = proxy_front_ep.accept().await.expect("proxy accept");
-        let client_conn = incoming.await.expect("proxy tls");
+    let proxy = common::spawn_proxy(upstream_addr, Arc::new(NoOpProxyObserver), hook_for_session);
 
-        let session = ProxySession::new(
-            SessionId(1),
-            ProxySessionConfig {
-                draft: DraftVersion::Draft14,
-                upstream_transport: UpstreamTransportType::Quic,
-                upstream_addr: upstream_addr.to_string(),
-                skip_upstream_cert_verify: true,
-                upstream_ca_certs: Vec::new(),
-                upstream_connect_timeout_secs: 5,
-            },
-            b"moq-00".to_vec(),
-            Arc::new(NoOpProxyObserver),
-            hook_for_session,
-            proxy_cancel,
-        );
-        let _ = session.run(client_conn).await;
-    });
-
-    let client_ep = common::client_endpoint(&[b"moq-00"]);
-    let client_conn = client_ep
-        .connect(proxy_addr, "localhost")
-        .expect("client connect")
-        .await
-        .expect("client handshake");
+    let (_client_ep, client_conn) = common::connect_client(proxy.addr, b"moq-00").await;
 
     let (send, recv) = client_conn.open_bi().await.expect("open_bi");
     let (mut framed_send, mut framed_recv) = common::frame_bi(send, recv, DraftVersion::Draft14);
@@ -226,7 +195,6 @@ async fn subscribe_namespace_foo_is_rewritten_to_bar() {
     );
 
     client_conn.close(0u32.into(), b"done");
-    cancel.cancel();
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), proxy_task).await;
+    proxy.shutdown().await;
     let _ = tokio::time::timeout(std::time::Duration::from_secs(2), upstream_task).await;
 }

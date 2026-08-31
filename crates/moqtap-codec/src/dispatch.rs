@@ -457,7 +457,11 @@ impl AnySubgroupHeader {
     /// back with [`Self::decode_stream`] lose their first field and shift
     /// every field after it. Use this for a stream's first write and
     /// [`Self::encode`] only once the stream is already open.
-    #[allow(unreachable_code)]
+    // A build with no draft feature compiles this match to no arms at all,
+    // which leaves the parameter read by nothing. That is the same shape
+    // `unreachable_code` is allowed for here, and it is a real configuration
+    // — CI checks it — rather than a hypothetical one.
+    #[allow(unreachable_code, unused_variables)]
     pub fn encode_stream(&self, buf: &mut impl BufMut) {
         match self {
             #[cfg(feature = "draft07")]
@@ -514,7 +518,7 @@ impl AnySubgroupHeader {
     ///
     /// [`CodecError::InvalidField`] if the header's fields disagree with its
     /// own type. A refused header leaves `buf` untouched.
-    #[allow(unreachable_code)]
+    #[allow(unreachable_code, unused_variables, unused_mut)]
     pub fn encode_stream_checked(&self, buf: &mut impl BufMut) -> Result<(), CodecError> {
         let mut body = Vec::with_capacity(32);
         match self {
@@ -1337,7 +1341,7 @@ impl AnyFetchHeader {
     /// Fetch was the carrier this pair was missing: `decode_stream` has
     /// existed here all along with nothing on the other side of it, so a
     /// fetch stream the codec wrote could not be read back by the codec.
-    #[allow(unreachable_code)]
+    #[allow(unreachable_code, unused_variables)]
     pub fn encode_stream(&self, buf: &mut impl BufMut) {
         match self {
             #[cfg(feature = "draft07")]

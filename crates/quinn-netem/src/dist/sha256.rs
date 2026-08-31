@@ -49,10 +49,16 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     msg.extend_from_slice(&bit_len.to_be_bytes());
 
     let mut h = H0;
-    for block in msg.chunks_exact(64) {
+    // `as_chunks` rather than `chunks_exact`: the block and word sizes are
+    // constants, so the compiler carries them in the type and the loop body
+    // reads a `&[u8; 4]` it can hand straight to `from_be_bytes` instead of
+    // rebuilding the array index by index. The padding above makes the
+    // message a whole number of blocks, so the remainder half of each pair
+    // is empty by construction.
+    for block in msg.as_chunks::<64>().0 {
         let mut w = [0u32; 64];
-        for (i, word) in block.chunks_exact(4).enumerate() {
-            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        for (i, word) in block.as_chunks::<4>().0.iter().enumerate() {
+            w[i] = u32::from_be_bytes(*word);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -83,8 +89,8 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     }
 
     let mut out = [0u8; 32];
-    for (chunk, word) in out.chunks_exact_mut(4).zip(h.iter()) {
-        chunk.copy_from_slice(&word.to_be_bytes());
+    for (chunk, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(h.iter()) {
+        *chunk = word.to_be_bytes();
     }
     out
 }

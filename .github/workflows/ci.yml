@@ -1,11 +1,31 @@
 name: CI
 
+# `master` is this repository's default branch and always has been; `main` has
+# never existed here. While these lists named `main` alone, no push to any
+# branch and no pull request ever started this workflow — only a `codec-v*` tag
+# push did — so every job below was dormant for the whole of the project's
+# history and "checked in CI" described a file rather than a run.
+#
+# So the branch filter is now `**`, which is every branch including ones with
+# slashes in the name, rather than a list of names. A named list is a promise
+# that the names stay right, and this repository has already broken that promise
+# once by never having the branch it named. The work that most needs a CI run is
+# the work on a branch that has not merged yet; a filter that only fires on the
+# default branch runs the gates after the point where they could still change
+# anything.
+#
+# There is no tag filter here, and that is not an oversight. The tag filter was
+# `codec-v*` alone while `publish.yml` fired on six different `<short>-v*`
+# prefixes, so a `proxy-v*` tag published a crate to crates.io without running a
+# single gate. Widening this filter would have fixed the coverage and left the
+# race: two workflows starting on the same tag push, with nothing stopping the
+# publish from finishing first. So `publish.yml` calls this workflow through
+# `workflow_call` below and gates itself on the result, which both closes the
+# gap and means a tag produces one CI run instead of two.
 on:
   push:
-    branches: [main]
-    tags: ['codec-v*']
+    branches: ['**']
   pull_request:
-    branches: [main]
   workflow_call:
 
 env:
@@ -37,20 +57,115 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # `required-features` on a test target does not make the target fail to
+      # build under a feature set that does not satisfy it — it makes cargo
+      # skip the target entirely, silently, and report success. An exit code
+      # cannot tell a clean result from an empty one, so the row above stays
+      # green by building nothing.
+      #
+      # So ask the build to account for every test target the manifest
+      # declares, by name rather than by count: a failure then says which
+      # target went missing instead of that one did. `cargo metadata` lists
+      # every test target whatever its `required-features` say, which is what
+      # makes it the thing to compare against — comparing one build to another
+      # is satisfied by two equally empty answers whenever a target's
+      # `required-features` are off in both.
+      #
+      # This is the half of that question that does not depend on which drafts
+      # are enabled, so it is asked once here. The per-draft matrix asks the
+      # other half, thirteen times, against a reduced feature set.
+      #
+      # The clippy row above has already compiled all of this, and a cached
+      # unit still emits `compiler-artifact`, so the enumeration is nearly free.
+      - name: Assert the default build compiled every test target
+        run: |
+          set -euo pipefail
+          SCRIPT=$(cat <<'PY'
+          import json, sys
+          mode, crate = sys.argv[1], sys.argv[2]
+          names = set()
+          if mode == "declared":
+              meta = json.load(sys.stdin)
+              pkg = next(p for p in meta["packages"] if p["name"] == crate)
+              names = {t["name"] for t in pkg["targets"] if t["kind"] == ["test"]}
+          else:
+              for line in sys.stdin:
+                  line = line.strip()
+                  if not line.startswith("{"):
+                      continue
+                  msg = json.loads(line)
+                  if msg.get("reason") != "compiler-artifact":
+                      continue
+                  target = msg.get("target", {})
+                  if target.get("kind") == ["test"] and crate in msg.get("package_id", ""):
+                      names.add(target["name"])
+          print(" ".join(sorted(names)))
+          PY
+          )
+          status=0
+          for crate in moqtap-proxy moqtap-client; do
+            declared=$(cargo metadata --format-version 1 --no-deps \
+                         | python3 -c "$SCRIPT" declared "$crate")
+            built=$(cargo clippy -p "$crate" --all-targets \
+                      --message-format=json -- -D warnings \
+                    | python3 -c "$SCRIPT" built "$crate")
+            echo "$crate: $(echo "$built" | wc -w) built, $(echo "$declared" | wc -w) declared"
+            if [ "$built" != "$declared" ]; then
+              echo "::error::$crate default features built '$built', the manifest declares '$declared'"
+              status=1
+            fi
+          done
+          exit $status
 
   test:
-    name: Test
+    name: Test (${{ matrix.row.name }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      # A red cell must not cancel its siblings. Whether a failure is specific
+      # to one platform is the only question a three-OS matrix exists to
+      # answer, and it cannot be answered if the first failure cancels the
+      # other two.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # Each row runs on every OS. `--workspace` covers only the default
+        # feature set, so any behaviour behind a non-default feature needs its
+        # own row here or it is compiled by nothing on any platform.
+        row:
+          - name: workspace
+            args: "--workspace"
+
+          # The socket suite, and with it the committed adapter that reports
+          # every impairment it decides on and then forwards the datagram
+          # untouched. The suite is run against that adapter and is required to
+          # fail; the test asserting it fails is the only thing standing between
+          # this crate and a suite which certifies a decorator that decides
+          # everything and applies nothing. That is not hypothetical: such a
+          # decorator was written here once, reported total loss, delivered
+          # every byte intact over a real endpoint, and finished
+          # `6 passed; 0 failed`.
+          #
+          # The row names `quinn-socket` explicitly rather than relying on the
+          # `--workspace` row, where the feature arrives only as a side effect
+          # of the proxy's dev-dependency being unified in — a resolution that
+          # can change without anyone touching this crate.
+          - name: netem wire gates
+            args: "-p quinn-netem --features quinn-socket"
+
+          # `webtransport` is not in the proxy's default set, so the WebTransport
+          # arm of the listener is compiled by no default build and by no row
+          # above. There is a `webtransport` job below, but it is ubuntu-only,
+          # and the listener's bind and address handling is exactly the kind of
+          # code that differs between platforms.
+          - name: proxy webtransport
+            args: "-p moqtap-proxy --features webtransport"
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      - run: cargo test ${{ matrix.row.args }}
 
   features:
     name: Feature flags (${{ matrix.draft }})
@@ -71,6 +186,7 @@ jobs:
           - draft16
           - draft17
           - draft18
+          - draft19
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,9 +195,279 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # A green `cargo check` row is NOT evidence that one draft was compiled.
+      # Cargo ignores a member manifest's `default-features = false` on a
+      # `workspace = true` dependency unless the `[workspace.dependencies]`
+      # entry carries it too; the only diagnostic is a cargo *manifest*
+      # warning, and the `RUSTFLAGS: "-D warnings"` above reaches rustc, not
+      # cargo. Measured: with the root entry unfixed, every row below compiled
+      # all thirteen drafts and exited 0. So assert the resolved feature list
+      # itself, and assert the whole list — a `grep -c draft` style check is
+      # satisfied by the all-drafts build as well.
+      #
+      # `--prefix none` is load-bearing. This read `cargo tree`'s default
+      # output and skipped the `├── ` decoration with a `^[^A-Za-z]*` prefix
+      # in the grep — which is a locale-sensitive character class applied to
+      # non-ASCII drawing characters. It matched on the developer's Windows
+      # shell and matched nothing on the Linux runner, so every dependency
+      # line was dropped, only the root package survived, and all fourteen
+      # rows failed on their first real execution. The resolution was
+      # identical on both platforms; the gate was asserting cargo's rendering.
+      # `--prefix none` emits the same data with no decoration to skip, so the
+      # pattern anchors on the crate name and there is nothing left to be
+      # locale-sensitive about.
+      - name: Assert single-draft feature resolution
+        run: |
+          set -euo pipefail
+          want="moqtap_client=${{ matrix.draft }} moqtap_codec=${{ matrix.draft }}"
+          for crate in moqtap-client moqtap-proxy; do
+            got=$(cargo tree -p "$crate" --no-default-features \
+                    --features ${{ matrix.draft }} \
+                    --edges normal --depth 1 --prefix none -f '{lib}={f}' \
+                  | grep -E '^moqtap_(client|codec)=' \
+                  | LC_ALL=C sort | paste -sd' ' -) || true
+            echo "$crate resolves: $got"
+            if [ "$got" != "$want" ]; then
+              echo "::error::$crate resolved '$got', expected '$want'"
+              exit 1
+            fi
+          done
       - run: cargo check -p moqtap-codec --no-default-features --features ${{ matrix.draft }}
       - run: cargo clippy -p moqtap-codec --no-default-features --features ${{ matrix.draft }} --all-targets -- -D warnings
       - run: cargo test -p moqtap-codec --no-default-features --features ${{ matrix.draft }}
+      # Library surface under a reduced draft set. `moqtap-proxy`'s `draftNN` forwards to
+      # `moqtap-client/draftNN`, and the global `RUSTFLAGS` above reaches path
+      # dependencies, so a client warning is a proxy build failure. The client
+      # row runs first deliberately: it fails faster and names the right crate,
+      # instead of surfacing as an error inside a dependency of a matrix cell
+      # labelled `moqtap-proxy`.
+      - run: cargo check -p moqtap-client --no-default-features --features ${{ matrix.draft }} --lib
+      - run: cargo check -p moqtap-proxy --no-default-features --features ${{ matrix.draft }} --lib
+      - run: cargo clippy -p moqtap-proxy --no-default-features --features ${{ matrix.draft }} --lib -- -D warnings
+      # Test and example targets under a reduced draft set. Everything above
+      # this line is `--lib`, and the three-OS `test` matrix runs the tests only
+      # under the default all-drafts build, so the proxy's ~37 test binaries and
+      # its example were compiled by NO job under a single draft: a `#[cfg]` in
+      # a test file naming a draft that this cell does not enable is a build
+      # failure nobody would have seen until somebody ran it by hand.
+      #
+      # The client sat in that gap longer and with far more behind it. Its
+      # shared loopback harness imported one draft's framed streams with no
+      # `cfg` at all, so on twelve of the thirteen drafts every one of its ~200
+      # test targets failed at the first line of `tests/common/mod.rs`, and
+      # four more test files named a draft they never gated. Measured on
+      # 2026-08-25 by running this row by hand for each draft.
+      - run: cargo clippy -p moqtap-proxy --no-default-features --features ${{ matrix.draft }} --all-targets -- -D warnings
+      - run: cargo clippy -p moqtap-client --no-default-features --features ${{ matrix.draft }} --all-targets -- -D warnings
+      # Those invocations on their own are a gate that cannot fail, and the
+      # step below is the actual work.
+      #
+      # `required-features` on a test target does not make the target fail to
+      # build under a feature set that does not satisfy it — it makes cargo skip
+      # the target entirely, silently, and report success. An exit code cannot
+      # tell a clean result from an empty one, so the rows above would stay green
+      # by building nothing.
+      #
+      # Measured by adding `required-features` to one test target and re-running
+      # this step: with `["draft14"]` the reduced build lost a target while the
+      # default build kept it, so reduced-vs-default caught it; with a feature
+      # that is off in BOTH builds, reduced and default both lost it and
+      # reduced-vs-default was satisfied by two equally empty answers. What
+      # catches that one is the set `cargo metadata`
+      # declares, which lists every test target in the manifest whatever its
+      # `required-features` say. Names rather than counts, so a failure says
+      # which target went missing instead of that one did.
+      #
+      # The default-features half of that comparison does not depend on the
+      # draft this cell enables, and it is the expensive half now that the
+      # client is in it: it builds every draft's code and ~200 test targets. It
+      # runs once, in the `clippy` job, rather than identically in all thirteen
+      # cells.
+      - name: Assert the reduced-draft build compiled every test target
+        run: |
+          set -euo pipefail
+          SCRIPT=$(cat <<'PY'
+          import json, sys
+          mode, crate = sys.argv[1], sys.argv[2]
+          names = set()
+          if mode == "declared":
+              meta = json.load(sys.stdin)
+              pkg = next(p for p in meta["packages"] if p["name"] == crate)
+              names = {t["name"] for t in pkg["targets"] if t["kind"] == ["test"]}
+          else:
+              for line in sys.stdin:
+                  line = line.strip()
+                  if not line.startswith("{"):
+                      continue
+                  msg = json.loads(line)
+                  if msg.get("reason") != "compiler-artifact":
+                      continue
+                  target = msg.get("target", {})
+                  if target.get("kind") == ["test"] and crate in msg.get("package_id", ""):
+                      names.add(target["name"])
+          print(" ".join(sorted(names)))
+          PY
+          )
+          # The same flags as the rows above, so cargo replays those builds'
+          # artifact messages from its cache instead of repeating the work.
+          # A cached unit still emits `compiler-artifact`, which is what makes
+          # this enumeration nearly free.
+          status=0
+          for crate in moqtap-proxy moqtap-client; do
+            declared=$(cargo metadata --format-version 1 --no-deps \
+                         | python3 -c "$SCRIPT" declared "$crate")
+            reduced=$(cargo clippy -p "$crate" --no-default-features \
+                        --features ${{ matrix.draft }} --all-targets \
+                        --message-format=json -- -D warnings \
+                      | python3 -c "$SCRIPT" built "$crate")
+            echo "$crate ${{ matrix.draft }}: $(echo "$reduced" | wc -w) built, $(echo "$declared" | wc -w) declared"
+            if [ "$reduced" != "$declared" ]; then
+              echo "::error::$crate --features ${{ matrix.draft }} built '$reduced', the manifest declares '$declared'"
+              status=1
+            fi
+          done
+          exit $status
+
+  webtransport:
+    name: WebTransport feature
+    runs-on: ubuntu-latest
+    # `webtransport` is not in either crate's default features, so no
+    # other job compiles the wtransport arms of the transport wrappers.
+    # Without this they can rot silently against a wtransport upgrade.
+    #
+    # This job owns the lint and build surface for the feature. The proxy's
+    # tests under it moved to the three-OS `test` matrix, which runs the same
+    # command on this platform and on two more; repeating it here would spend a
+    # second ubuntu run to learn nothing new.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p moqtap-client --features webtransport --all-targets
+      - run: cargo check -p moqtap-proxy --features webtransport --all-targets
+      - run: cargo clippy -p moqtap-client --features webtransport --all-targets -- -D warnings
+      - run: cargo clippy -p moqtap-proxy --features webtransport --all-targets -- -D warnings
+      - run: cargo test -p moqtap-client --features webtransport
+
+  cert-gen:
+    name: Certificate generation feature
+    runs-on: ubuntu-latest
+    # `cert-gen` is off by default and gates `src/cert.rs` together with two
+    # whole-file `#![cfg(feature = "cert-gen")]` test files. No job and no
+    # recipe had ever enabled it, so the module, its documentation example and
+    # eleven integration tests were compiled by nothing: the code was published
+    # in the crate and checked by no run at all.
+    #
+    # `cargo test` rather than `--test cert_tests --test listener_tests`,
+    # because scoping to those two binaries would skip the documentation
+    # example in the module — which is the part of the feature a user reads
+    # first, and the part that rots quietest.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p moqtap-proxy --features cert-gen --all-targets
+      - run: cargo clippy -p moqtap-proxy --features cert-gen --all-targets -- -D warnings
+      - run: cargo test -p moqtap-proxy --features cert-gen
+
+  impair:
+    name: Impairment features
+    runs-on: ubuntu-latest
+    # `impair` and `serde` are both off by default, so the proxy's impairment
+    # control plane and the derives on its configuration types are compiled by
+    # no other job. The `--workspace` rows do build `quinn-netem` — the proxy
+    # dev-depends on it — which makes it easy to assume this surface is covered
+    # when none of the proxy code behind these two features has been seen by a
+    # compiler at all.
+    #
+    # Three axes and not two. Neither proxy feature implies the other, so a row
+    # that built both would leave each alone unproven: code that needs serde to
+    # compile would pass here and fail for the caller who asked for `impair`
+    # alone, which is the cheaper of the two and therefore the one more people
+    # will use.
+    #
+    # `quinn-netem --features serde` is the third: the derives live in that
+    # crate because nothing outside it can implement `Serialize` for its types,
+    # and the workspace clippy job sees only default features, so a lint firing
+    # inside those derives is invisible everywhere else.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p quinn-netem --all-targets --features serde -- -D warnings
+      - run: cargo test -p quinn-netem --features serde
+      - run: cargo clippy -p moqtap-proxy --all-targets --features impair -- -D warnings
+      - run: cargo test -p moqtap-proxy --features impair
+      - run: cargo clippy -p moqtap-proxy --all-targets --features serde -- -D warnings
+      - run: cargo test -p moqtap-proxy --features serde
+
+  qlog:
+    name: qlog capture feature
+    runs-on: ubuntu-latest
+    # `qlog` is off by default and is the only thing anywhere in this workspace
+    # that turns on `quinn/qlog`. Two distinct things are therefore compiled by
+    # no other job: the module behind the feature, and quinn itself with its
+    # capture code in it. The second is the reason this is a job rather than a
+    # line somewhere else — quinn exposes the sink through one mutating method
+    # on `TransportConfig` and nothing else, so an upgrade that moves it breaks
+    # only this build, and without a row here it would break for whoever
+    # enabled the feature next instead.
+    #
+    # `cargo test` rather than `--lib`: the feature also gates a documentation
+    # example showing the only construction path `#[non_exhaustive]` leaves
+    # open, and that example is what a reader copies first.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p moqtap-proxy --features qlog --all-targets
+      - run: cargo clippy -p moqtap-proxy --all-targets --features qlog -- -D warnings
+      - run: cargo test -p moqtap-proxy --features qlog
+
+  determinism:
+    name: Reproducibility (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    # The impairment engine's product claim is that a seed and a profile
+    # determine the decision sequence exactly, on any machine. No single runner
+    # can check that — each one only ever sees itself — so what makes the claim
+    # testable at all is that all three assert against the same committed
+    # fixture, computed by hand rather than blessed from the implementation.
+    # Three runners agreeing with one file is the closest a test matrix gets to
+    # comparing machines with each other.
+    #
+    # `--release` because the statistical tests in this crate run hundreds of
+    # thousands of iterations and there is no optimisation override for the
+    # test profile; the debug build spends minutes where this spends seconds.
+    # It also puts the engine through a second set of optimisation decisions,
+    # which is where integer arithmetic that relies on undefined or
+    # implementation-defined behaviour tends to first disagree with itself.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p quinn-netem --release
 
   features-combos:
     name: Feature flags (combos)
@@ -93,12 +479,103 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Oldest + newest together — exercises the runtime dispatch path.
-      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft17
+      # Keep the second draft pinned to the newest draft the crate supports.
+      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft19
       # Two adjacent drafts.
       - run: cargo test -p moqtap-codec --no-default-features --features draft13,draft14
       # Default (all-drafts) is already covered by the `test` job, but verify
       # the crate still builds with no draft features enabled at all.
       - run: cargo check -p moqtap-codec --no-default-features
+      # The fourteenth row of the draft sweep: zero drafts, for the client and
+      # the proxy library. Same reasoning as the matrix job — resolution is
+      # asserted, not inferred from an exit code.
+      - name: Assert zero-draft feature resolution
+        run: |
+          set -euo pipefail
+          want="moqtap_client= moqtap_codec="
+          for crate in moqtap-client moqtap-proxy; do
+            got=$(cargo tree -p "$crate" --no-default-features \
+                    --edges normal --depth 1 --prefix none -f '{lib}={f}' \
+                  | grep -E '^moqtap_(client|codec)=' \
+                  | LC_ALL=C sort | paste -sd' ' -) || true
+            echo "$crate resolves: $got"
+            if [ "$got" != "$want" ]; then
+              echo "::error::$crate resolved '$got', expected '$want'"
+              exit 1
+            fi
+          done
+      - run: cargo check -p moqtap-client --no-default-features --lib
+      # The proxy is refused with no draft at all, at const-evaluation:
+      # `capability::DEFAULT_DRAFT` has nothing to be, because a proxy that
+      # compiled no draft can parse nothing and a silent default would name a
+      # draft the build does not have. The refusal is the behaviour under test,
+      # so this asserts the message rather than merely a non-zero exit — a build
+      # that broke for some other reason would satisfy a bare `if !`.
+      - name: A zero-draft proxy is refused, and says why
+        run: |
+          set -uo pipefail
+          out=$(cargo check -p moqtap-proxy --no-default-features --lib 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::a zero-draft proxy built; DEFAULT_DRAFT has acquired a fallback"
+            exit 1
+          fi
+          echo "$out" | grep -q 'this build compiled no draft at all' || {
+            echo "::error::the zero-draft proxy failed for some other reason"
+            exit 1
+          }
+
+      # `quinn-netem` has no draft features, so it is deliberately absent from
+      # the per-draft matrix above: every row there asserts a resolved draft
+      # string, and a crate with no drafts to resolve would report a mismatch on
+      # all thirteen for no reason. Its feature axes are the rows below instead.
+      #
+      # The featureless build is not reachable from any other job. `--workspace`
+      # unifies features, and the proxy's dev-dependency asks for
+      # `quinn-socket`, so the crate is never built without it there.
+      - run: cargo check -p quinn-netem --all-targets
+      - run: cargo test -p quinn-netem
+      - run: cargo check -p quinn-netem --features quinn-socket --all-targets
+      - run: cargo check -p quinn-netem --features serde --all-targets
+      - run: cargo test -p quinn-netem --features serde
+
+      # The engine depends on nothing. That is not a nicety — it is what lets
+      # the reproducibility gate be an ordinary `#[test]` with no runtime, no
+      # QUIC stack and no network, and it is one careless `use` away from being
+      # untrue. An exit code cannot notice a new dependency, so assert the tree.
+      # Each optional dependency is expected under exactly one feature and
+      # nowhere else: `quinn` under `quinn-socket`, because the socket adapter
+      # is the only code that may reach it, and `serde` under `serde`, because
+      # the derives are the only reason it is in the manifest.
+      #
+      # `serde` is the axis this gate most needs to watch. A derive crate is the
+      # easy place for a convenience dependency to arrive unnoticed — it is
+      # already "the one with dependencies" — and the featureless row would stay
+      # green while it happened.
+      #
+      # This gate spent a while naming a package that had been renamed away.
+      # What saved it was cargo answering an unknown `-p` with an error rather
+      # than an empty tree: the rows failed loudly instead of certifying the
+      # dependency set of a crate that was not there. Keep the package name in
+      # one place per row for that reason — a gate is only as good as its
+      # subject, and a wrong subject is not visible in a green run.
+      - name: Assert the engine's dependency set
+        run: |
+          set -euo pipefail
+          check() {   # $1 = feature args, $2 = expected tree
+            local got
+            got=$(cargo tree -p quinn-netem --edges normal --depth 1 \
+                    --prefix none -f '{lib}' $1 \
+                  | LC_ALL=C sort | paste -sd' ' -)
+            echo "quinn-netem ${1:-<no features>} resolves: $got"
+            if [ "$got" != "$2" ]; then
+              echo "::error::quinn-netem ${1:-<no features>} resolved '$got', expected '$2'"
+              exit 1
+            fi
+          }
+          check "" "quinn_netem"
+          check "--features quinn-socket" "quinn quinn_netem"
+          check "--features serde" "quinn_netem serde"
 
   doc:
     name: Documentation
@@ -113,6 +590,38 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps
 
+  versions:
+    name: Release numbering
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      # Asserts three things no other job here can see, all of them invisible
+      # until `cargo publish` runs: that every `[workspace.dependencies]` pin
+      # equals the member's own version; that no crate sits at an
+      # already-published version while its changelog carries unreleased
+      # changes; and that no crate sits at an already-published version while
+      # its `src/` has moved away from what was published. The last two are a
+      # pair — the first catches a change with a changelog entry and no
+      # number, the second a change with no changelog entry at all, which is
+      # how a public field was once added to a published crate with every gate
+      # green. The script's own docstring records each time this bit.
+      #
+      # Expect this job to go red on the first commit that edits `src/` after
+      # a release, and to stay red until the version is bumped. That is the
+      # reminder working: a crate whose code has moved past its published
+      # version is a release nobody can reproduce from the registry. Bumping
+      # in the same commit avoids the red entirely.
+      #
+      # It reaches crates.io — one API call per crate, plus one `.crate`
+      # download per crate that is *at* a published version — and fails closed
+      # if it cannot. An unverifiable version is not a verified one, so a
+      # crates.io outage stops this pipeline by design rather than by
+      # accident.
+      - run: python3 scripts/check-versions.py
+
   msrv:
     name: MSRV
     runs-on: ubuntu-latest
@@ -120,9 +629,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
+      # Must match `rust-version` in the workspace Cargo.toml. Using
+      # `@stable` here made this job a duplicate of `test` and enforced
+      # nothing — the declared MSRV could break without CI noticing.
+      # It had: the declared 1.83 was already unbuildable when this was
+      # pinned, because `time` requires 1.88.
+      - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace
+      - run: cargo check --workspace --all-targets
 
   deny:
     name: Dependency audit
@@ -136,9 +650,17 @@ jobs:
   bench-smoke:
     name: Codec bench (smoke)
     runs-on: ubuntu-latest
-    # Only check that benches still build + run on PRs and main pushes.
-    # A longer run happens in `bench-full` on codec tags.
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    # Only check that benches still build + run on pull requests and pushes to
+    # the default branch. A longer run happens in `bench-full` on codec tags.
+    #
+    # This condition names the branch a second time, and independently of the
+    # `on:` block: fixing the trigger alone would start the workflow and still
+    # skip this job on every push, because the ref is `refs/heads/master`. Both
+    # names are matched here for the same reason they are matched above.
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
     steps:
       - uses: actions/checkout@v4
         with:

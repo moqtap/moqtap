@@ -5,17 +5,19 @@ name: Publish Crate
 # indistinguishable from a publish that succeeded. Add the prefix in the same
 # change that adds the crate.
 #
-# `cli-v*` has been listed since the first release and its crate lives
-# elsewhere, unpushed. It is kept: a prefix with no crate fails loudly at
-# `cargo publish -p`, which is the safe direction, while a crate with no prefix
-# fails silently.
+# There is deliberately no `cli-v*` prefix. That tool is not a crate in this
+# workspace and is not distributed through crates.io, so a prefix for it here
+# would be a publish trigger aimed at something that must never be published.
+# An earlier revision kept it on the argument that a prefix with no crate
+# fails loudly and is therefore the safe direction; that holds only while the
+# crate is merely missing, and it stopped holding once the answer became that
+# it must not be here at all.
 on:
   push:
     tags:
       - "codec-v*"
       - "trace-v*"
       - "client-v*"
-      - "cli-v*"
       - "proxy-v*"
       - "netem-v*"
 
@@ -23,8 +25,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Publishing is irreversible: crates.io permits a yank but never a replace.
+  # So the whole of CI runs first, at the tagged commit, and `publish` does not
+  # start unless it is green. Before this, `ci.yml` and `publish.yml` both
+  # triggered on a tag push and raced — a crate could reach the registry while
+  # its own test matrix was still running, or after it had gone red.
+  #
+  # `ci.yml` therefore no longer triggers on tags itself. It is reached here
+  # instead, so a tag produces exactly one CI run rather than two.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   publish:
     name: Publish to crates.io
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +65,6 @@ jobs:
             trace)  CRATE="moqtap-trace"  ;;
             client) CRATE="moqtap-client" ;;
             proxy)  CRATE="moqtap-proxy"  ;;
-            cli)    CRATE="moqtap-cli"    ;;
             netem)  CRATE="quinn-netem"   ;;
             *)
               echo "::error::tag prefix '${SHORT}' maps to no crate. Add it to the case in publish.yml and to the tag list above — both, or the tag fires nothing."

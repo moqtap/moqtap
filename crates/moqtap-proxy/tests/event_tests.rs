@@ -2,19 +2,34 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+// The event enum itself is draft-agnostic; only the *payloads* the Debug
+// checks below build are not. Each import is gated on the draft whose
+// codec type it names, so the draft-agnostic two-thirds of this file
+// still compiles and runs on every row of the draft matrix.
+#[cfg(feature = "draft07")]
+use moqtap_codec::dispatch::AnyObjectHeader;
+#[cfg(feature = "draft14")]
 use moqtap_codec::dispatch::{
-    AnyControlMessage, AnyDatagramHeader, AnyFetchHeader, AnyObjectHeader, AnySubgroupHeader,
+    AnyControlMessage, AnyDatagramHeader, AnyFetchHeader, AnySubgroupHeader,
 };
+#[cfg(feature = "draft07")]
 use moqtap_codec::draft07::data_stream::ObjectHeader;
+#[cfg(feature = "draft07")]
 use moqtap_codec::draft07::types::ObjectStatus;
+#[cfg(feature = "draft14")]
 use moqtap_codec::draft14::data_stream::{
     DatagramObject, DatagramType, FetchHeader, SubgroupHeader, SubgroupStreamType,
 };
+#[cfg(feature = "draft14")]
 use moqtap_codec::draft14::message::{ControlMessage, GoAway};
+#[cfg(any(feature = "draft07", feature = "draft14"))]
 use moqtap_codec::varint::VarInt;
+use moqtap_codec::version::DraftVersion;
 
 use moqtap_proxy::event::*;
+use moqtap_proxy::framer::ObjectMeta;
 use moqtap_proxy::observer::*;
+use moqtap_proxy::parser::data::DataStreamType;
 
 // ============================================================
 // ProxySide
@@ -60,6 +75,7 @@ fn session_id_copy_eq_hash() {
 // ============================================================
 
 #[test]
+#[cfg(feature = "draft14")]
 fn data_stream_header_kind_subgroup() {
     let header = AnySubgroupHeader::Draft14(SubgroupHeader {
         stream_type: SubgroupStreamType::from_u8(0x14).unwrap(),
@@ -74,6 +90,7 @@ fn data_stream_header_kind_subgroup() {
 }
 
 #[test]
+#[cfg(feature = "draft14")]
 fn data_stream_header_kind_fetch() {
     let header = AnyFetchHeader::Draft14(FetchHeader { request_id: VarInt::from_u64(2).unwrap() });
     let kind = DataStreamHeaderKind::Fetch(header);
@@ -98,6 +115,7 @@ fn proxy_event_session_started() {
 }
 
 #[test]
+#[cfg(feature = "draft14")]
 fn proxy_event_control_message() {
     let msg =
         AnyControlMessage::Draft14(ControlMessage::GoAway(GoAway { new_session_uri: vec![] }));
@@ -111,6 +129,7 @@ fn proxy_event_control_message() {
 }
 
 #[test]
+#[cfg(feature = "draft14")]
 fn proxy_event_datagram() {
     let header = AnyDatagramHeader::Draft14(DatagramObject {
         datagram_type: DatagramType::from_u8(0x00).unwrap(),
@@ -133,10 +152,11 @@ fn proxy_event_datagram() {
 }
 
 #[test]
+#[allow(deprecated)]
+#[cfg(feature = "draft07")]
 fn proxy_event_object_header() {
-    // Draft-14 subgroup objects require stateful per-stream context and are
-    // not dispatched via AnyObjectHeader — use draft-07 here to exercise the
-    // event's debug formatting.
+    // `ObjectHeader` is deprecated and no longer emitted, but it is still
+    // part of the enum until the next major release.
     let header = AnyObjectHeader::Draft07(ObjectHeader {
         object_id: VarInt::from_u64(0).unwrap(),
         payload_length: VarInt::from_u64(100).unwrap(),
@@ -149,6 +169,30 @@ fn proxy_event_object_header() {
     };
     let debug = format!("{event:?}");
     assert!(debug.contains("ObjectHeader"));
+}
+
+#[test]
+fn proxy_event_object() {
+    let event = ProxyEvent::Object {
+        session_id: SessionId(1),
+        side: ProxySide::ProxyToClient,
+        meta: ObjectMeta {
+            draft: DraftVersion::Draft19,
+            stream_kind: DataStreamType::Subgroup,
+            track_alias: Some(1),
+            group_id: 7,
+            subgroup_id: None,
+            object_id: 3,
+            publisher_priority: Some(128),
+            index_in_stream: 3,
+            payload_len: 4,
+            status: None,
+            end_of_range: None,
+        },
+    };
+    let debug = format!("{event:?}");
+    assert!(debug.contains("Object"));
+    assert!(debug.contains("Draft19"));
 }
 
 #[test]
@@ -220,6 +264,7 @@ struct CollectingObserver {
 }
 
 impl ProxyObserver for CollectingObserver {
+    #[allow(deprecated)]
     fn on_event(&self, event: &ProxyEvent) {
         let label = match event {
             ProxyEvent::SessionStarted { .. } => "SessionStarted",
@@ -227,12 +272,17 @@ impl ProxyObserver for CollectingObserver {
             ProxyEvent::ControlMessage { .. } => "ControlMessage",
             ProxyEvent::DataStreamHeader { .. } => "DataStreamHeader",
             ProxyEvent::ObjectHeader { .. } => "ObjectHeader",
+            ProxyEvent::Object { .. } => "Object",
             ProxyEvent::Datagram { .. } => "Datagram",
             ProxyEvent::BiStreamOpened { .. } => "BiStreamOpened",
             ProxyEvent::UniStreamOpened { .. } => "UniStreamOpened",
             ProxyEvent::ParseError { .. } => "ParseError",
             ProxyEvent::StreamClosed { .. } => "StreamClosed",
+            ProxyEvent::StreamReset { .. } => "StreamReset",
             ProxyEvent::SessionEnded { .. } => "SessionEnded",
+            // `ProxyEvent` is `#[non_exhaustive]`; new variants land here
+            // rather than breaking the build.
+            _ => "Unknown",
         };
         self.events.lock().unwrap().push(label.to_string());
     }

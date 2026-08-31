@@ -5,6 +5,15 @@ All notable changes to quinn-netem will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-08-31
+
+No behaviour change. The SHA-256 used to pin the distribution tables reads its
+input through `as_chunks` rather than `chunks_exact`, which carries the block
+and word sizes in the type and lets a word be handed to `from_be_bytes`
+directly instead of rebuilt index by index. Rust 1.98's
+`clippy::chunks_exact_to_as_chunks` is what prompted it; the determinism gate
+is what confirms the digest is unchanged.
+
 ## [0.1.0] - 2026-08-29
 
 Initial release.
