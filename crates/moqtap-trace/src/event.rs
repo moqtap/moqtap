@@ -229,8 +229,8 @@ pub struct TraceEvent {
     pub peer: Option<String>,
     /// Event-specific data.
     pub data: EventData,
-    /// Keys on this event that this version of the crate does not recognise,
-    /// kept verbatim.
+    /// Keys on this event that this version of the crate could not use, kept
+    /// verbatim.
     ///
     /// Optional keys may be added to an existing event type without a format
     /// version bump, so "unknown keys MUST be ignored" is a rule about
@@ -239,6 +239,13 @@ pub struct TraceEvent {
     /// re-segmentation — would otherwise emit a valid file that looks like it
     /// never carried them, and one tool's ignorance would become permanent for
     /// every reader downstream of it.
+    ///
+    /// A key this crate *does* know lands here too when its value is not of a
+    /// type that key can hold — `"ta": "hello"` on an event 1, say. SPEC.md
+    /// treats such a key as unrecognised: the value is ignored for meaning,
+    /// the field that would have held it reads `None`, and the entry is
+    /// written back unchanged. Knowing more about a key must not mean
+    /// preserving it less.
     ///
     /// [`EventData::Unknown`] already does this for an event type the crate
     /// cannot name. This is the same guarantee one level down, for a key on a
@@ -281,6 +288,20 @@ pub enum EventData {
         raw: Option<Vec<u8>>,
     },
     /// A QUIC stream was opened (event type 1).
+    ///
+    /// The four optional identifiers are what a `headers` recording has
+    /// instead of the stream header bytes. No detail level records the bytes
+    /// of a `SUBGROUP_HEADER`, a fetch header or a datagram header, so a value
+    /// carried only there has nothing left to be re-parsed from — and before
+    /// these fields existed the model could express group, object, priority
+    /// and status and nothing else, which left a `headers` trace unable to say
+    /// which track a stream belonged to.
+    ///
+    /// Each is `None` when the recorder did not know it — and also when the
+    /// file carried the key with a value that is not an unsigned integer, in
+    /// which case the entry is kept verbatim in [`TraceEvent::extra`] instead
+    /// of being read here. A reader must not refuse a stream for lacking one:
+    /// every recording predating the keys lacks all four.
     StreamOpened {
         /// QUIC stream ID.
         stream_id: u64,
@@ -288,6 +309,28 @@ pub enum EventData {
         direction: Direction,
         /// Stream type.
         stream_type: StreamType,
+        /// Track alias the stream carries. Meaningful on any stream type.
+        track_alias: Option<u64>,
+        /// Subgroup ID, on a [`StreamType::Subgroup`] stream.
+        subgroup_id: Option<u64>,
+        /// Fetch request ID, on a [`StreamType::Fetch`] stream.
+        ///
+        /// A recorder must write it there. It is the only correlation between
+        /// the stream and the FETCH that asked for it, and unlike a subgroup
+        /// stream a fetch stream carries no track alias to identify it by
+        /// instead — so without it a fetch stream in a `headers` trace names
+        /// nothing at all.
+        fetch_request_id: Option<u64>,
+        /// Group ID, on a [`StreamType::Datagram`] stream.
+        ///
+        /// Scoped to datagrams because on a subgroup stream every object
+        /// carries the group of the stream by construction, so a copy here
+        /// would be a second field with no independent source. Where it does
+        /// appear alongside an [`ObjectHeader`](EventData::ObjectHeader) for
+        /// the same stream, the object header is authoritative: this copy
+        /// serves a reader that has not yet seen an object, and a
+        /// disagreement between the two is not corruption.
+        group_id: Option<u64>,
     },
     /// A QUIC stream was closed (event type 2).
     StreamClosed {
@@ -417,8 +460,10 @@ pub enum EventData {
     Unknown {
         /// The event type discriminant that was read.
         event_type: u64,
-        /// Every key and value from the event map other than `"n"`, `"t"`,
-        /// `"p"` and `"e"`.
+        /// Every key and value from the event map other than `"n"`, `"t"`
+        /// and `"e"` — and other than `"p"`, when a peer was read from it. A
+        /// `"p"` that is not text is kept here like any other value this crate
+        /// could not use.
         fields: Vec<(Value, Value)>,
     },
 }
@@ -437,10 +482,12 @@ impl TraceEvent {
     /// Attach unrecognised keys, for a caller reconstructing an event it did
     /// not decode itself.
     ///
-    /// Keys that collide with ones the event's own type owns are dropped on
-    /// serialization rather than written twice, since a CBOR map with a
-    /// repeated key is malformed and the event's own value is the one the
-    /// reader would have produced.
+    /// Keys that collide with ones the event writes from its own fields are
+    /// dropped on serialization rather than written twice, since a CBOR map
+    /// with a repeated key is malformed and the event's own value is the one
+    /// the reader would have produced. A key the event's type merely *defines*
+    /// does not collide: an optional field holding `None` writes nothing, so
+    /// the entry here is the only copy of that key and is written.
     #[must_use]
     pub fn with_extra(mut self, extra: Vec<(Value, Value)>) -> Self {
         self.extra = extra;
@@ -562,7 +609,18 @@ impl serde::Serialize for TraceEvent {
             EventData::ControlMessage { stream_id, raw, .. } => {
                 3 + usize::from(stream_id.is_some()) + usize::from(raw.is_some())
             }
-            EventData::StreamOpened { .. } => 3,
+            EventData::StreamOpened {
+                track_alias,
+                subgroup_id,
+                fetch_request_id,
+                group_id,
+                ..
+            } => {
+                3 + usize::from(track_alias.is_some())
+                    + usize::from(subgroup_id.is_some())
+                    + usize::from(fetch_request_id.is_some())
+                    + usize::from(group_id.is_some())
+            }
             EventData::StreamClosed { .. } => 2,
             EventData::ObjectHeader { .. } => 5,
             EventData::ObjectPayload { payload, .. } => 4 + usize::from(payload.is_some()),
@@ -596,14 +654,20 @@ impl serde::Serialize for TraceEvent {
             }
             EventData::Unknown { fields, .. } => fields.len(),
         };
-        // A key the event's own type owns is written from the field, so an
-        // `extra` entry repeating it is dropped: a CBOR map with a duplicate
-        // key is malformed, and the field is what a reader produced.
-        let owned = variant_keys(self.event_type());
+        // A key this event writes from one of its own fields is written from
+        // there, so an `extra` entry naming it is dropped rather than written
+        // twice: a CBOR map with a duplicate key is malformed, and the field
+        // is what a reader produced. A key the type merely *defines* is not
+        // one of those — an optional field holding `None` writes nothing, and
+        // the entry here is then a value the decode could not use, which has
+        // to go back out.
         let extra = || {
-            self.extra
-                .iter()
-                .filter(move |(k, _)| !k.as_text().is_some_and(|key| owned.contains(&key)))
+            self.extra.iter().filter(move |(k, _)| {
+                !k.as_text().is_some_and(|key| {
+                    writes_common_key(self.peer.as_deref(), key)
+                        || writes_variant_key(&self.data, key)
+                })
+            })
         };
 
         let entries = 3 /* n, t, e */
@@ -631,11 +695,31 @@ impl serde::Serialize for TraceEvent {
                     map.serialize_entry("raw", &ByteStr(raw))?;
                 }
             }
-            EventData::StreamOpened { stream_id, direction, stream_type } => {
+            EventData::StreamOpened {
+                stream_id,
+                direction,
+                stream_type,
+                track_alias,
+                subgroup_id,
+                fetch_request_id,
+                group_id,
+            } => {
                 map.serialize_entry("e", &EVENT_STREAM_OPENED)?;
                 map.serialize_entry("sid", stream_id)?;
                 map.serialize_entry("d", &direction.to_u64())?;
                 map.serialize_entry("st", &stream_type.to_u64())?;
+                if let Some(ta) = track_alias {
+                    map.serialize_entry("ta", ta)?;
+                }
+                if let Some(sg) = subgroup_id {
+                    map.serialize_entry("sg", sg)?;
+                }
+                if let Some(fri) = fetch_request_id {
+                    map.serialize_entry("fri", fri)?;
+                }
+                if let Some(g) = group_id {
+                    map.serialize_entry("g", g)?;
+                }
             }
             EventData::StreamClosed { stream_id, error_code } => {
                 map.serialize_entry("e", &EVENT_STREAM_CLOSED)?;
@@ -888,68 +972,150 @@ fn get_trace_id(pairs: &[(Value, Value)]) -> Result<Option<[u8; TRACE_ID_LEN]>, 
 
 /// Read a track namespace: an array of byte strings, tolerating text entries
 /// from encoders that lose the distinction.
-fn get_namespace(pairs: &[(Value, Value)]) -> Result<Option<Vec<Vec<u8>>>, MoqTraceError> {
-    match get_value(pairs, "ns") {
-        None => Ok(None),
-        Some(Value::Array(items)) => {
-            let mut namespace = Vec::with_capacity(items.len());
-            for item in items {
-                match as_bytes(&item).or_else(|| item.as_text().map(|t| t.as_bytes().to_vec())) {
-                    Some(field) => namespace.push(field),
-                    None => {
-                        return Err(MoqTraceError::InvalidEvent(
-                            "'ns' entry is neither bytes nor text".into(),
-                        ))
-                    }
-                }
-            }
-            Ok(Some(namespace))
-        }
-        Some(_) => Err(MoqTraceError::InvalidEvent("'ns' is not a CBOR array".into())),
-    }
-}
-
-/// Keys the common event fields own. Everything else in an unknown event's
-/// map belongs to the type this crate cannot name, and is kept verbatim.
-const COMMON_KEYS: [&str; 4] = ["n", "t", "p", "e"];
-
-/// The keys each known event type owns, in the order it writes them.
 ///
-/// Everything else on such an event is a key this version does not recognise,
-/// and goes to [`TraceEvent::extra`] rather than being dropped. Adding a key
-/// to an event type means adding it here too — a key read into a named field
-/// but missing from this list would be written twice, once from the field and
-/// once from `extra`.
-fn variant_keys(event_type: u64) -> &'static [&'static str] {
-    match event_type {
-        EVENT_CONTROL_MESSAGE => &["d", "mt", "msg", "sid", "raw"],
-        EVENT_STREAM_OPENED => &["sid", "d", "st"],
-        EVENT_STREAM_CLOSED => &["sid", "ec"],
-        EVENT_OBJECT_HEADER => &["sid", "g", "o", "pp", "os"],
-        EVENT_OBJECT_PAYLOAD => &["sid", "g", "o", "sz", "pl"],
-        EVENT_STATE_CHANGE => &["from", "to"],
-        EVENT_ERROR => &["ec", "reason"],
-        EVENT_ANNOTATION => &["label", "data"],
-        EVENT_PEER_CONNECTED => &["endpoint", "transport", "role", "side"],
-        EVENT_PEER_DISCONNECTED => &["ec", "reason"],
-        EVENT_SUBSCRIPTION_DERIVATION => {
-            &["u", "d", "kind", "traceId", "ns", "tn", "tdr", "tus", "tuo", "tdo"]
+/// Answers `None` for anything else — a `"ns"` that is not an array, or an
+/// array holding something that is neither bytes nor text. `"ns"` is optional,
+/// and the rule for an optional key whose value this reader cannot use is that
+/// the key is kept as an unrecognised one rather than that the event dies; the
+/// caller then still has the derivation's upstream and downstream
+/// subscriptions, which are what make it a derivation at all.
+///
+/// It used to return an error, which cost more than the field. `read_next`
+/// propagates it, so `collect::<Result<Vec<_>, _>>()` — the documented idiom —
+/// stopped at that event and yielded none of the ones after it. One namespace
+/// an encoder wrote oddly took the rest of the recording with it.
+fn get_namespace(pairs: &[(Value, Value)]) -> Option<Vec<Vec<u8>>> {
+    let Some(Value::Array(items)) = get_value(pairs, "ns") else {
+        return None;
+    };
+    let mut namespace = Vec::with_capacity(items.len());
+    for item in items {
+        let field = as_bytes(&item).or_else(|| item.as_text().map(|t| t.as_bytes().to_vec()))?;
+        namespace.push(field);
+    }
+    Some(namespace)
+}
+
+/// The three keys every event carries whatever its type. All are required, so
+/// a value the reader cannot use is a malformed event rather than something to
+/// keep: there would be no event left to hang the kept key on.
+const REQUIRED_COMMON_KEYS: [&str; 3] = ["n", "t", "e"];
+
+/// Whether the common event fields account for `key` — the required three
+/// always, and `"p"` only when a peer was actually read from it.
+///
+/// `"p"` is optional, and optional means it can also be *unusable*: a `"p"`
+/// that is not text leaves [`TraceEvent::peer`] `None`, and the entry then
+/// belongs in [`TraceEvent::extra`] like any other value the reader could not
+/// use. Excluding the key unconditionally would delete it instead.
+fn writes_common_key(peer: Option<&str>, key: &str) -> bool {
+    REQUIRED_COMMON_KEYS.contains(&key) || (key == "p" && peer.is_some())
+}
+
+/// Whether `key` is written from one of `data`'s own fields — equivalently,
+/// on an event that was decoded, whether the decode used it. The common keys
+/// are not this function's business; [`writes_common_key`] answers for those.
+///
+/// Deliberately not "does this event type define `key`". The two part company
+/// on a defined key whose value the decode could not use: SPEC.md treats such
+/// a key as unrecognised, so its field stays `None` and the entry goes to
+/// [`TraceEvent::extra`], from where the serializer writes it back unchanged.
+/// Asking about the type's whole vocabulary instead keeps the key out of
+/// `extra` while no field holds it either, and merely reading the file deletes
+/// the value — which is how adding `"ta"`, `"sg"`, `"fri"` and `"g"` to event
+/// 1 made this reader preserve *less* than while it had never heard of them.
+///
+/// The match is exhaustive on purpose: a new variant does not compile until
+/// its keys are listed, and both ways of getting a list wrong are silent. A
+/// key left out is written twice, once from the field and once from `extra`,
+/// and a CBOR map with a duplicate key is malformed; a key wrongly listed is
+/// dropped from every rewrite.
+fn writes_variant_key(data: &EventData, key: &str) -> bool {
+    /// `always` are the keys the variant writes unconditionally; `optional`
+    /// pairs each of the rest with whether its field holds a value.
+    fn among(key: &str, always: &[&str], optional: &[(&str, bool)]) -> bool {
+        always.contains(&key) || optional.iter().any(|&(k, written)| written && k == key)
+    }
+
+    match data {
+        EventData::ControlMessage { stream_id, raw, .. } => {
+            among(key, &["d", "mt", "msg"], &[("sid", stream_id.is_some()), ("raw", raw.is_some())])
         }
-        // An unknown event type keeps every non-common key in
-        // `EventData::Unknown::fields`. Nothing is collected into `extra` for
-        // one — see the `Unknown` arm below — so this list is never consulted
-        // for it, and the empty slice is not a claim that it owns no keys.
-        _ => &[],
+        EventData::StreamOpened {
+            track_alias, subgroup_id, fetch_request_id, group_id, ..
+        } => among(
+            key,
+            &["sid", "d", "st"],
+            &[
+                ("ta", track_alias.is_some()),
+                ("sg", subgroup_id.is_some()),
+                ("fri", fetch_request_id.is_some()),
+                ("g", group_id.is_some()),
+            ],
+        ),
+        EventData::StreamClosed { .. } => among(key, &["sid", "ec"], &[]),
+        EventData::ObjectHeader { .. } => among(key, &["sid", "g", "o", "pp", "os"], &[]),
+        EventData::ObjectPayload { payload, .. } => {
+            among(key, &["sid", "g", "o", "sz"], &[("pl", payload.is_some())])
+        }
+        EventData::StateChange { .. } => among(key, &["from", "to"], &[]),
+        EventData::Error { .. } => among(key, &["ec", "reason"], &[]),
+        EventData::Annotation { .. } => among(key, &["label", "data"], &[]),
+        EventData::PeerConnected { endpoint, transport, role, side } => among(
+            key,
+            &[],
+            &[
+                ("endpoint", endpoint.is_some()),
+                ("transport", transport.is_some()),
+                ("role", role.is_some()),
+                ("side", side.is_some()),
+            ],
+        ),
+        EventData::PeerDisconnected { reason, .. } => {
+            among(key, &["ec"], &[("reason", reason.is_some())])
+        }
+        EventData::SubscriptionDerivation {
+            trace_id,
+            namespace,
+            track_name,
+            t_downstream_received,
+            t_upstream_sent,
+            t_upstream_ok_received,
+            t_downstream_ok_sent,
+            ..
+        } => among(
+            key,
+            &["u", "d", "kind"],
+            &[
+                ("traceId", trace_id.is_some()),
+                ("ns", namespace.is_some()),
+                ("tn", track_name.is_some()),
+                ("tdr", t_downstream_received.is_some()),
+                ("tus", t_upstream_sent.is_some()),
+                ("tuo", t_upstream_ok_received.is_some()),
+                ("tdo", t_downstream_ok_sent.is_some()),
+            ],
+        ),
+        // An unknown event type writes every key it read straight back out of
+        // `fields`, so those are the ones an `extra` entry would duplicate.
+        // Decoding one collects nothing into `extra` — see the `Unknown` arm
+        // below — but a caller may have attached some by hand.
+        EventData::Unknown { fields, .. } => fields.iter().any(|(k, _)| k.as_text() == Some(key)),
     }
 }
 
-/// Every key on `pairs` that neither the common fields nor `event_type` owns.
-fn unrecognised_keys(pairs: &[(Value, Value)], event_type: u64) -> Vec<(Value, Value)> {
-    let owned = variant_keys(event_type);
+/// Every key on `pairs` that the event decoded from it does not write back out
+/// of a field of its own: a key this crate has never heard of, and a key it
+/// knows whose value it could not use.
+fn unrecognised_keys(
+    pairs: &[(Value, Value)],
+    peer: Option<&str>,
+    data: &EventData,
+) -> Vec<(Value, Value)> {
     pairs
         .iter()
         .filter(|(k, _)| match k.as_text() {
-            Some(key) => !COMMON_KEYS.contains(&key) && !owned.contains(&key),
+            Some(key) => !writes_common_key(peer, key) && !writes_variant_key(data, key),
             // A non-text map key is not one this format defines, so it is
             // unrecognised by construction.
             None => true,
@@ -986,6 +1152,20 @@ impl TryFrom<Value> for TraceEvent {
                     stream_id: require_uint(&pairs, "sid")?,
                     direction: require_direction(&pairs, "d")?,
                     stream_type: StreamType::from_cbor(&st_val)?,
+                    // Read whatever is usable, including a key outside the
+                    // stream type it is scoped to. A writer must not produce
+                    // one, but "ignore" is the same read-past-and-keep rule
+                    // that governs `extra`: dropping it here would make this
+                    // reader's opinion permanent for every reader downstream.
+                    // A value that is not an unsigned integer is not usable —
+                    // the field stays `None` and the key goes to `extra`,
+                    // which is that same rule one step over. Neither reading
+                    // past a key nor failing to understand its value is a
+                    // licence to delete it.
+                    track_alias: get_uint(&pairs, "ta"),
+                    subgroup_id: get_uint(&pairs, "sg"),
+                    fetch_request_id: get_uint(&pairs, "fri"),
+                    group_id: get_uint(&pairs, "g"),
                 }
             }
             EVENT_STREAM_CLOSED => EventData::StreamClosed {
@@ -1046,7 +1226,7 @@ impl TryFrom<Value> for TraceEvent {
                     downstream,
                     kind: DerivationKind::parse(&require_text(&pairs, "kind")?),
                     trace_id: get_trace_id(&pairs)?,
-                    namespace: get_namespace(&pairs)?,
+                    namespace: get_namespace(&pairs),
                     track_name: get_bytes(&pairs, "tn")
                         .or_else(|| get_text(&pairs, "tn").map(String::into_bytes)),
                     t_downstream_received: get_int(&pairs, "tdr"),
@@ -1059,18 +1239,21 @@ impl TryFrom<Value> for TraceEvent {
                 event_type: other,
                 fields: pairs
                     .iter()
-                    .filter(|(k, _)| !k.as_text().is_some_and(|s| COMMON_KEYS.contains(&s)))
+                    .filter(|(k, _)| {
+                        !k.as_text().is_some_and(|s| writes_common_key(peer.as_deref(), s))
+                    })
                     .cloned()
                     .collect(),
             },
         };
 
         let extra = match &data {
-            // `fields` already holds every non-common key on this event.
-            // Collecting them into `extra` as well would write each one twice
-            // and produce a CBOR map with duplicate keys.
+            // `fields` already holds every key on this event the common
+            // fields did not consume, a `"p"` this crate could not use among
+            // them. Collecting them into `extra` as well would write each one
+            // twice and produce a CBOR map with duplicate keys.
             EventData::Unknown { .. } => Vec::new(),
-            _ => unrecognised_keys(&pairs, event_type),
+            other => unrecognised_keys(&pairs, peer.as_deref(), other),
         };
         Ok(TraceEvent { seq, timestamp, peer, data, extra })
     }

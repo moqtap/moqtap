@@ -337,9 +337,12 @@ fn an_unknown_event_type_keeps_its_fields_verbatim() {
 
 /// A key no reader knows, on an event type it does.
 ///
-/// The keys are the ones PROPOSAL-v3 §§1-3 propose. Reading them back off a
-/// file written by the other implementation is what makes "additive" a checked
-/// claim rather than an assumption.
+/// Every key is `x-` prefixed, the range SPEC.md reserves for private use and
+/// promises never to define. The fixture borrowed keys from this proposal's own
+/// sections until §2 shipped and claimed two of them, at which point the case
+/// went on passing while measuring less — which is why the reservation exists.
+/// Reading them back off a file the other implementation wrote is what makes
+/// "an unrecognised key survives" a checked claim rather than an assumption.
 #[test]
 fn an_unrecognised_key_on_a_known_event_survives_a_round_trip() {
     let Some(root) = root() else { return };
@@ -349,17 +352,39 @@ fn an_unrecognised_key_on_a_known_event_survives_a_round_trip() {
     assert_eq!(
         events[0].extra,
         vec![
-            (Value::Text("ta".into()), Value::Integer(7.into())),
-            (Value::Text("sg".into()), Value::Integer(2.into())),
+            (Value::Text("x-ta".into()), Value::Integer(7.into())),
+            (Value::Text("x-sg".into()), Value::Integer(2.into())),
         ]
     );
-    assert_eq!(events[1].extra, vec![(Value::Text("ta".into()), Value::Integer(7.into()))]);
     assert_eq!(
         events[2].extra,
         vec![
-            (Value::Text("ek".into()), Value::Text("decode".into())),
-            (Value::Text("raw".into()), Value::Bytes(vec![0x99, 0x01])),
+            (Value::Text("x-ek".into()), Value::Text("decode".into())),
+            (Value::Text("x-raw".into()), Value::Bytes(vec![0x99, 0x01])),
         ]
+    );
+
+    // Structural, not shallow: a copy that kept only the top level would pass
+    // every assertion above and lose this one.
+    let nested = events[1]
+        .extra
+        .iter()
+        .find(|(k, _)| k.as_text() == Some("x-nested"))
+        .map(|(_, v)| v)
+        .expect("the object header carries a nested unrecognised key");
+    assert_eq!(
+        nested,
+        &Value::Map(vec![
+            (Value::Text("blob".into()), Value::Bytes(vec![0x0f, 0xf0])),
+            (
+                Value::Text("inner".into()),
+                Value::Map(vec![(Value::Text("depth".into()), Value::Integer(3.into()))])
+            ),
+            (
+                Value::Text("list".into()),
+                Value::Array(vec![Value::Integer(1.into()), Value::Text("two".into())])
+            ),
+        ])
     );
 
     // Ignoring an unrecognised key is allowed. Dropping one is not: this round

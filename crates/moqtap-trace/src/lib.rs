@@ -20,9 +20,11 @@
 //! carrying something newer than it knows. An unrecognised event type arrives
 //! as [`EventData::Unknown`](event::EventData::Unknown) with its fields
 //! intact; an unrecognised key on an event type this crate *does* know arrives
-//! in [`TraceEvent::extra`](event::TraceEvent::extra); an unrecognised
-//! perspective, detail level or drop policy is kept verbatim in the matching
-//! `Other` variant. The enums are `#[non_exhaustive]` for the same reason —
+//! in [`TraceEvent::extra`](event::TraceEvent::extra) — as does a key it does
+//! know whose value is not of a type that key can hold, since knowing more
+//! about a key must not mean preserving it less; an unrecognised perspective,
+//! detail level or drop policy is kept verbatim in the matching `Other`
+//! variant. The enums are `#[non_exhaustive]` for the same reason —
 //! matching on one needs a wildcard arm, and gains a variant without breaking
 //! you.
 //!

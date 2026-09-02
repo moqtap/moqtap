@@ -7,7 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`EventData::StreamOpened` carries the stream's identifiers** — `track_alias`
+  (`"ta"`), `subgroup_id` (`"sg"`), `fetch_request_id` (`"fri"`) and `group_id`
+  (`"g"`), each `Option<u64>` and each written only when set.
+
+  No detail level records the bytes of a `SUBGROUP_HEADER`, a fetch header or a
+  datagram header, so a value carried only there had nowhere to live: the model
+  could express group, object, priority and status and nothing else. A
+  `"headers"` recording therefore could not say which track a stream belonged
+  to, which is most of what the level exists for, and a fetch stream had nothing
+  at all tying it to the FETCH that asked for it.
+
+  `"sg"`, `"fri"` and `"g"` are each scoped to one stream type, since on the
+  others they have no source. This crate does not write one outside its scope
+  and does not reject one it finds there — it reads it into the field and writes
+  it back, on the same rule that governs `extra`: a reader may decline to
+  understand something, but not decide on the next reader's behalf that it never
+  existed.
+
+  **Breaking for anyone constructing or exhaustively destructuring the variant**,
+  the way `TraceEvent::extra` was for 0.3.0. Reading is unaffected: every key is
+  optional, and a file written before they existed carries none.
+
 ### Fixed
+
+- **A defined key whose value has an unusable type is kept instead of deleted
+  from everywhere.** An optional key read through a type-checked getter left its
+  field `None` when the value was not one that field could hold. The same key
+  was *also* kept out of `extra`, because what went to `extra` was decided by
+  asking which keys the event **type** defines rather than which ones the decode
+  had used. The entry then survived in neither place, and reading a trace and
+  writing it back deleted it.
+
+  SPEC.md: "A defined key whose value has an unusable type is treated as
+  unrecognised." Such a key now lands in `extra`, is ignored for meaning, and is
+  written back unchanged. The keys it applies to are `"p"` on any event — on an
+  event type this crate cannot name it joins the rest in
+  `EventData::Unknown::fields` — `"sid"` and `"raw"` on event 0, `"ta"`, `"sg"`,
+  `"fri"` and `"g"` on event 1, `"pl"` on event 4, `"endpoint"`, `"transport"`,
+  `"role"` and `"side"` on event 8, `"reason"` on event 9, and `"traceId"`,
+  `"tn"`, `"tdr"`, `"tus"`, `"tuo"` and `"tdo"` on event 10.
+
+  The hole is as old as `extra`: 0.3.0 started keeping a key this crate had
+  never heard of while still dropping one it knew and could not use, so knowing
+  more about a key made it preserve less. Event 1's four keys, added above, are
+  four more keys falling through the same hole rather than a new one, and that
+  part of it has not been released.
+
+  Nothing changes for a value of the type its key is defined to carry: it still
+  reads into its field and is still written from there, so a file whose types
+  conform rewrites byte for byte as before. SPEC.md's bound on the rule is
+  unchanged as well: a **required** key with an unusable type is still a
+  malformed event, since there is no event to construct without it. So are the
+  two optional keys that are refused rather than read through a getter that can
+  answer "no" — a `"traceId"` that is not 16 bytes, and an `"ns"` that is not a
+  CBOR array — both of which still make the event malformed.
+
+  On the writing side, an `extra` entry is dropped as a duplicate only when the
+  event really does write that key from one of its own fields. An entry naming
+  an optional key whose field is empty is now written, which is how a value the
+  reading half kept gets back out; an entry naming a key an
+  `EventData::Unknown` already carries in `fields` is now dropped, where before
+  it was written a second time into a map that a duplicate key makes malformed.
 
 - **A control message with no `"msg"` key is read rather than refused.** The
   decoder required the key and returned `InvalidEvent("missing 'msg'")`
