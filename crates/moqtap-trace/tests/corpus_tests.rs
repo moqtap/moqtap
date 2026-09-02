@@ -174,10 +174,23 @@ fn case_bytes(root: &Path, id: &str, file: &str) -> Vec<u8> {
 /// corpus being *removed* after that, which SPEC.md and the corpus README both
 /// forbid and which would go equally quiet in `@moqtap/trace`. That is the
 /// price of not blocking on a dependency this repository does not own.
+///
+/// **Set `MOQTAP_REQUIRE_CORPUS=1` to turn the report into a failure.** The
+/// tolerance above is right for a developer's checkout and wrong for CI, where
+/// a missing corpus means every test in this file returns before asserting
+/// anything and the run goes green having checked nothing. `cargo test`
+/// captures stdout, so without this the report reaches nobody: the print is
+/// visible under `--nocapture` and invisible in exactly the place the answer
+/// matters. One environment variable in the workflow is the whole fix, and
+/// this end of it works whether or not that ever happens.
 #[test]
 fn corpus_is_reachable() {
+    let required = std::env::var_os("MOQTAP_REQUIRE_CORPUS").is_some();
     match root() {
         Some(dir) => println!("corpus: {}", dir.display()),
+        None if required => {
+            panic!("MOQTAP_REQUIRE_CORPUS is set. {}", corpus::CORPUS_MISSING_MESSAGE)
+        }
         // Printed rather than asserted, and visible under `--nocapture`.
         None => eprintln!("SKIPPING every corpus test. {}", corpus::CORPUS_MISSING_MESSAGE),
     }
