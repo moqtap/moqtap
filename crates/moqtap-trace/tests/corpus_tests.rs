@@ -160,6 +160,46 @@ fn case_bytes(root: &Path, id: &str, file: &str) -> Vec<u8> {
     fs::read(root.join(id).join(file)).unwrap_or_else(|e| panic!("read {id}/{file}: {e}"))
 }
 
+/// Whether an environment variable is set to something meaning yes.
+///
+/// Absent, empty, `0`, `false`, `no` and `off` are all no, in any case. Every
+/// other value is yes. See [`corpus_is_reachable`] for why the distinction
+/// between this and a presence test is load-bearing here.
+fn env_flag(name: &str) -> bool {
+    flag_value(std::env::var(name).ok().as_deref())
+}
+
+/// The decision [`env_flag`] makes, without the environment.
+///
+/// Split out so it can be tested at all: setting a process-wide variable from
+/// a test races every other test in the binary, and the parsing is the half
+/// that carries the risk.
+fn flag_value(value: Option<&str>) -> bool {
+    match value {
+        Some(v) => {
+            !matches!(v.trim().to_ascii_lowercase().as_str(), "" | "0" | "false" | "no" | "off")
+        }
+        None => false,
+    }
+}
+
+/// A flag is off when absent, and off when set to something meaning no.
+///
+/// The second half is the one worth pinning. A presence test agrees with this
+/// everywhere except the values in the middle, and those are where the damage
+/// is: `CI=false` under a presence test switches the requirement on in the
+/// checkout that asked for it off.
+#[test]
+fn a_flag_reads_its_value_and_not_merely_its_presence() {
+    for off in [None, Some(""), Some("0"), Some("false"), Some("no"), Some("off"), Some("  FALSE ")]
+    {
+        assert!(!flag_value(off), "{off:?} should be off");
+    }
+    for on in [Some("1"), Some("true"), Some("yes"), Some("on"), Some("anything")] {
+        assert!(flag_value(on), "{on:?} should be on");
+    }
+}
+
 /// Reports whether the corpus is reachable, rather than requiring it.
 ///
 /// The corpus lives in the `test-vectors` repository, which this workspace
@@ -193,7 +233,20 @@ fn case_bytes(root: &Path, id: &str, file: &str) -> Vec<u8> {
 /// moves, which SPEC.md and the corpus README both forbid and which would go
 /// equally quiet in `@moqtap/trace`.
 ///
-/// **Set `MOQTAP_REQUIRE_CORPUS=1` to turn the report into a failure.** The
+/// **Set `MOQTAP_REQUIRE_CORPUS=1` to turn the report into a failure**, and
+/// `0`, `false`, `no`, `off` or empty to keep it a report. The value is read
+/// rather than merely its presence, which matters more than it looks: the
+/// obvious `var_os(..).is_some()` makes `MOQTAP_REQUIRE_CORPUS=0` mean *on*,
+/// so the doc and the code would disagree about the one thing a reader would
+/// reach for to switch it off. It also makes the `CI` keying below unsafe —
+/// `CI=false` is set deliberately, by build tools and local wrappers, to relax
+/// exactly this kind of CI-conditional behaviour, and under a presence test it
+/// would switch the requirement *on* in the checkout that asked for it off.
+/// The person hitting that has no corpus, a red build they cannot fix, and a
+/// message telling them to clone a repository — while the variable they would
+/// reach for is already set to `false`.
+///
+/// The
 /// tolerance above is right for a developer's checkout and wrong for CI, where
 /// a missing corpus means every test in this file returns before asserting
 /// anything and the run goes green having checked nothing. `cargo test`
@@ -203,7 +256,7 @@ fn case_bytes(root: &Path, id: &str, file: &str) -> Vec<u8> {
 /// this end of it works whether or not that ever happens.
 #[test]
 fn corpus_is_reachable() {
-    let required = std::env::var_os("MOQTAP_REQUIRE_CORPUS").is_some();
+    let required = env_flag("MOQTAP_REQUIRE_CORPUS");
     match root() {
         Some(dir) => println!("corpus: {}", dir.display()),
         None if required => {
