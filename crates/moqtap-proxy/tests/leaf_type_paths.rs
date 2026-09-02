@@ -37,11 +37,11 @@
 //!
 //! # Why the exhaustive match
 //!
-//! The sibling CLI matches `ProxySide` with four arms and no wildcard. That
-//! compiles only while the enum has exactly those four variants **and** the
-//! path reaches the same enum, so the match below is the sibling's constraint
-//! restated where this crate's own test suite can see it. A fifth variant
-//! breaks it here first.
+//! `ProxySide` is not `#[non_exhaustive]`, so a downstream observer may match
+//! it with four arms and no wildcard. That compiles only while the enum has
+//! exactly those four variants **and** the path reaches the same enum, so the
+//! match below restates that constraint where this crate's own test suite can
+//! see it. A fifth variant breaks it here first.
 //!
 //! The other four are named as types rather than matched: `ObjectMeta` is a
 //! struct a consumer reads fields off, `BypassReason` is `#[non_exhaustive]`
@@ -64,8 +64,7 @@ fn every_leaf_type_still_answers_to_its_historical_path() {
     let _ = takes_all as fn(ProxySide, Leg, DataStreamType, BypassReason, &ObjectMeta);
 }
 
-/// Four arms, no wildcard — the shape the sibling CLI's observer compiles
-/// with.
+/// Four arms, no wildcard — the shape a downstream observer compiles with.
 #[test]
 fn proxy_side_still_has_exactly_four_variants() {
     fn name(side: ProxySide) -> &'static str {

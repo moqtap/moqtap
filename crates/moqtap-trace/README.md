@@ -5,7 +5,7 @@ MoQT session trace file reader and writer.
 This crate defines the `.moqtrace` binary format and provides the I/O
 primitives for reading and writing trace files. Relay and client developers
 can integrate moqtap-trace into their own software to emit trace files,
-which can then be inspected with the moqtap CLI or in the browser.
+which can then be inspected in the browser.
 
 It writes format version 2 and reads versions 1 and 2.
 

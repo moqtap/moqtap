@@ -3,7 +3,7 @@
 //! Two types because there are two jobs. [`Stats`] is a set of atomic words
 //! folded into on the datagram path, so reading it takes no lock and cannot
 //! stall a send. [`StatsSnapshot`] is a `Copy` struct of plain integers, so a
-//! scenario can build an expected value by struct literal and compare it.
+//! caller can build an expected value by struct literal and compare it.
 //!
 //! # The conservation identity, and why `datagrams_seen` is counted separately
 //!
@@ -223,7 +223,7 @@ impl Stats {
     }
 }
 
-/// Plain integers — no `Duration`, no float — so a scenario can assert on it
+/// Plain integers — no `Duration`, no float — so a caller can assert on it
 /// and a report can print it.
 ///
 /// **Deliberately not `#[non_exhaustive]`.** That attribute on a *struct*
@@ -245,7 +245,7 @@ impl Stats {
 /// for, so it releases datagrams in clumps and the average rate — not the
 /// micro-burst shape — is what stays exact.
 /// [`StatsSnapshot::released_from_queue`] divided by
-/// [`StatsSnapshot::release_batches`] is the mean clump, so a scenario can see
+/// [`StatsSnapshot::release_batches`] is the mean clump, so a caller can see
 /// that quantisation instead of assuming a smooth pacing that is not happening.
 ///
 /// They are asserted by a plain gate rather than an ignored calibration: all
@@ -288,7 +288,7 @@ pub struct StatsSnapshot {
     pub release_batches: u64,
     /// Datagrams the release path released, i.e. not passed straight through.
     /// `released_from_queue / release_batches` is the mean clump — the number a
-    /// scenario reads to see the release path's quantisation instead of
+    /// caller reads to see the release path's quantisation instead of
     /// assuming smooth pacing that is not happening.
     pub released_from_queue: u64,
     /// Largest number of datagrams one wake-up released.
@@ -439,7 +439,7 @@ mod tests {
     ///
     /// One shared cell would make this test read `1_000` at the end instead of
     /// `1_700`: the uplink's last decision would have overwritten the
-    /// downlink's standing backlog, and a scenario reading the field would be
+    /// downlink's standing backlog, and a caller reading the field would be
     /// told the shim was holding a third less memory than it was.
     #[test]
     fn the_two_directions_keep_separate_backlog_gauges() {

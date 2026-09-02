@@ -9,7 +9,7 @@
 //!    itself.
 //! 2. **`classify`'s verdict**, reached through the *public* API
 //!    ([`Capabilities::supports`], [`Capabilities::supports_on`],
-//!    [`classify`]) — the table a scenario author reads.
+//!    [`classify`]) — the table a caller reads.
 //! 3. **What a real proxy session does**, observed end-to-end over QUIC.
 //!
 //! `Site::StreamEnd` is swept **twice** — `is_control_stream: false` and
@@ -517,7 +517,7 @@ fn published(cell: Cell) -> Support {
 }
 
 /// `classify`'s verdict for one cell, reached through the public API a
-/// scenario author uses.
+/// caller uses.
 fn classified(cell: Cell) -> Support {
     let caps = Capabilities::for_draft(cell.draft);
     match cell.column {

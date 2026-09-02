@@ -59,7 +59,7 @@ Neither is on by default, which is what keeps the engine dependency-free.
 
 - `quinn-socket` — the `ImpairedUdpSocket` decorator. Adds `quinn`.
 - `serde` — `Serialize` and `Deserialize` for every type reachable from
-  `ImpairProfile` and `Preset`, so a scenario can be a config file instead of
+  `ImpairProfile` and `Preset`, so a profile can be a config file instead of
   Rust. Adds `serde`.
 
 Two things about that format are worth knowing before writing one. **An unknown
@@ -90,7 +90,7 @@ own documentation.
   holds, an inter-arrival assertion does not.
 - The floor is **reported, never enforced**. A delay model finer than the host's
   wake latency is not invalid, only one whose fine structure this host cannot
-  render, and refusing it would reject scenarios deliverable on platforms nobody
+  render, and refusing it would reject profiles deliverable on platforms nobody
   has measured.
 - The release path reports its own batching — wake-ups taken, largest batch
   released — so a caller reading a release error can attribute it to the

@@ -126,7 +126,7 @@ fn response() -> Vec<u8> {
 
 /// A hook that turns every FETCH it sees into a Descending one.
 ///
-/// Standing in for the reason the proxy exists: a scenario author changing
+/// Standing in for the reason the proxy exists: a caller changing
 /// what one peer asked for and watching what the other does about it. What
 /// makes it a gate rather than a demonstration is that the *subscriber* asked
 /// for Ascending, so a session filing the order it read on the way in would

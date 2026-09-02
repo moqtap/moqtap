@@ -52,9 +52,9 @@
 //! that explains it, and the frame is forwarded unchanged. Nothing a hook can
 //! return tears a session down by accident.
 //!
-//! Degradation the proxy imposed on *itself* — a stream it could not frame, a
-//! queue that filled, a hold it clamped, a release timer coarser than it asked
-//! for — is reported as [`event::ProxyEvent::Impairment`] rather than absorbed
+//! A limit the proxy hit in *itself* — a stream it could not frame, a queue
+//! that filled, a hold it clamped, a release timer coarser than it asked for —
+//! is reported as [`event::ProxyEvent::Impairment`] rather than absorbed
 //! silently.
 //!
 //! Those reports arrive **after** the thing they describe, never before: the
@@ -76,7 +76,7 @@
 //! leaves it absent for the four reports that are about a profile, a draft or
 //! the host rather than about a connection at all.
 //!
-//! # Three layers to degrade at
+//! # Three layers to intervene at
 //!
 //! Everything below is one of three, stacked, and which one a question
 //! belongs to is usually the whole of the answer. Underneath the transport
@@ -98,7 +98,7 @@
 //! which is where the scheduler's queue fills. Nothing runs the other way — an
 //! object this crate held back or removed was never handed to QUIC at all, so
 //! there is nothing for QUIC to repair and the peer's stack cannot tell it
-//! apart from a relay that published less. That is also why a scenario picks a
+//! apart from a relay that published less. That is also why a run picks a
 //! layer rather than turning all three on: *does the player survive a bad
 //! network?* is the bottom two, *does it survive a bad relay?* is the top one,
 //! and a run with both armed cannot attribute what it saw to either.
@@ -114,10 +114,10 @@
 //!
 //! # The conditions these three layers reach
 //!
-//! An inventory rather than a tutorial: the industry-recognised degradation
-//! classes, and the type that produces each. It is here so that "can this
-//! reproduce X?" is answered by a list with names in it rather than by reading
-//! three modules. Every row was checked against the code.
+//! An inventory rather than a tutorial: the network and delivery conditions
+//! each layer can produce, and the type that produces each. It is here so that
+//! "can this reproduce X?" is answered by a list with names in it rather than
+//! by reading three modules. Every row was checked against the code.
 //!
 //! **Socket layer** — a `quinn_netem::DirectionProfile`, one per direction, so
 //! every row below is independently settable uplink and downlink:
@@ -168,7 +168,7 @@
 //! | Per-track bandwidth budgets | [`shape::ClassRule`] keyed on `track_alias` or `priority` |
 //! | Control-message drop, delay, rewrite | [`hook::ProxyHook::on_control_message`] |
 //! | Protocol fault injection | [`control::ProxyControl::inject_control`], raw bytes |
-//! | Datagram-mode degradation | [`hook::ProxyHook::on_datagram`] |
+//! | Datagram-mode impairment | [`hook::ProxyHook::on_datagram`] |
 //!
 //! Two cross-cutting properties, each with a limit worth knowing:
 //!
@@ -186,7 +186,7 @@
 //!   runs whether or not a profile was configured, and a figure on the wrong
 //!   side of that line can only ever be a partial count.
 //!
-//! # Shaping — degradation without a hook
+//! # Shaping — impairment without a hook
 //!
 //! A [`shape::ShapeProfile`] on [`session::ProxySessionConfig::shape`] is the
 //! other way to impair a session, and it is **configuration rather than hook
@@ -292,7 +292,7 @@
 //! Everything above shapes MoQT objects, which sit *above* QUIC: damage
 //! there is indistinguishable from a relay that dropped or delayed media,
 //! and QUIC will never repair it because as far as QUIC is concerned
-//! nothing was lost. The other place to degrade traffic is *below* QUIC,
+//! nothing was lost. The other place to impair traffic is *below* QUIC,
 //! on the datagrams themselves, where damage is precisely what the peer's
 //! QUIC stack is built to absorb — loss triggers retransmission, jitter
 //! inflates the RTT estimate, a rate limit drives the congestion

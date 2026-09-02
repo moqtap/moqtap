@@ -259,8 +259,8 @@ impl MatcherField {
 /// `#[non_exhaustive]` *with* a [`Default`], exactly as
 /// [`EgressConfig`](crate::action::EgressConfig) is. The pairing is
 /// load-bearing: `#[non_exhaustive]` alone would make this type
-/// unconstructible from an integration-test crate or from a scenario
-/// author's code, because struct-expression *and* functional-update syntax
+/// unconstructible from an integration-test crate or from a caller's
+/// code, because struct-expression *and* functional-update syntax
 /// are both illegal outside the defining crate. Note what that leaves:
 /// `..Matcher::default()` is **also** illegal there (`E0639`), so an
 /// outside caller writes `let mut m = Matcher::default();` and then assigns
@@ -287,7 +287,7 @@ pub struct Matcher {
     /// left to match nothing.
     ///
     /// Written as the variant's own name in kebab-case —
-    /// `"client-to-proxy"` — by a mapping in the scenario module rather than
+    /// `"client-to-proxy"` — by the `side_serde` mapping below rather than
     /// by a derive, because [`ProxySide`] lives in a module that carries no
     /// serde dependency of its own.
     #[cfg_attr(feature = "serde", serde(with = "side_serde"))]

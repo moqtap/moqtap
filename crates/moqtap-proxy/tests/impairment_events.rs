@@ -763,7 +763,7 @@ async fn the_impairment_sequence_is_exactly_what_the_run_did() {
 ///
 /// `MOQTAP_RELEASE_TIMER=condvar` forces the coarse wheel, and a session
 /// running on it reports `CoarseReleaseTimer` once, on its first deferred
-/// release, with `leg: None` — a correct report about a real degradation.
+/// release, with `leg: None` — a correct report about a real impairment.
 /// The main gate delays three objects, so it would land in the middle of the
 /// sequence and the whole-vector `assert_eq!` would fail on an element that
 /// is not a defect.

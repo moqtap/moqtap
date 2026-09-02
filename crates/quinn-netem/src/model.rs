@@ -30,7 +30,7 @@ const PPB_ONE: u32 = 1_000_000_000;
 /// Under the `serde` feature a probability is written and read as `ProbPpb` —
 /// one integer, parts per billion — and never as the numerator above. That
 /// scale belongs to the comparison [`Prob::hits`] performs; putting it into a
-/// file format would publish 2^32 as a number a scenario author has to know,
+/// file format would publish 2^32 as a number a caller has to know,
 /// and would accept values above it that no constructor can produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -213,7 +213,7 @@ pub enum LossModel {
     /// state compares `<` against `one_minus_k`, the Bad state compares `>`
     /// against `h`. The asymmetry between those two operators is netem's, and
     /// it is kept rather than tidied up: the entire reason to implement this
-    /// chain instead of a nicer one is so that a scenario written against `tc`
+    /// chain instead of a nicer one is so that a profile written against `tc`
     /// produces the same burst structure here.
     GilbertElliott {
         /// Good -> Bad transition probability.
@@ -334,7 +334,7 @@ pub struct ReorderModel {
 ///
 /// netem compares `>=` here where reorder compares `<`. The operators are
 /// netem's and are kept, for the reason the Gilbert-Elliott asymmetry is kept:
-/// a scenario ported from `tc` has to produce the same stream.
+/// a profile ported from `tc` has to produce the same stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "kebab-case", deny_unknown_fields))]

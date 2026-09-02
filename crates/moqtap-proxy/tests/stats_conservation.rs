@@ -31,7 +31,7 @@
 //!
 //! The identity has two documented holes, and a fixture that merely widened
 //! the assertion to accommodate them would be gating nothing. Both are
-//! properties of the *scenario*, so both are removed by building a scenario
+//! properties of the *run*, so both are removed by building a run
 //! that cannot produce them:
 //!
 //! * **A `STOP_SENDING`-driven teardown clears its queue rather than

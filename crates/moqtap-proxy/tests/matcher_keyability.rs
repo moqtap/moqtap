@@ -273,7 +273,7 @@ fn profile(matcher: Matcher) -> ShapeProfile {
 
 /// `Matcher` is `#[non_exhaustive]`, so functional-update syntax is `E0639`
 /// from an integration-test crate: every matcher here is a `default()` plus
-/// assignments, which is what a scenario author writes too.
+/// assignments, which is what a caller writes too.
 fn keyed(kind: Option<MatchKind>, edit: impl Fn(&mut Matcher)) -> Matcher {
     let mut m = Matcher::default();
     m.stream_kind = kind;

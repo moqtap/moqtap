@@ -505,7 +505,7 @@ impl ProxyControl {
     /// It does not touch any session's own
     /// [`ShapeStats`](crate::shape::ShapeStats). Those are a session's for
     /// its whole life, and a proxy-level verb that silently rewrote them
-    /// would make a scenario reading both see two different pasts.
+    /// would make a caller reading both see two different pasts.
     ///
     /// It does not clear the class rows themselves, only their counters. The
     /// rows are sized once, from the first shaped session this proxy
@@ -844,7 +844,7 @@ impl ProxyControl {
     /// is not impaired is not an error and not a state change. The other leg
     /// keeps whatever it has.
     ///
-    /// The counters and the decision log are **not** cleared. A scenario
+    /// The counters and the decision log are **not** cleared. A caller
     /// that armed an impairment, cleared it and then read what it had done
     /// would otherwise find nothing, with no counter anywhere saying a phase
     /// had been discarded.
@@ -952,7 +952,7 @@ impl ProxyControl {
     ///   quotes `code` and `reason`. That wording is the point: a hook's
     ///   `Action::CloseSession` reaches the same latch and reports `*hook
     ///   closed the session*`, and for a while both said the latter, so an
-    ///   operator ending a session was recorded as the scenario under test
+    ///   operator ending a session was recorded as the run under test
     ///   ending it.
     /// * one
     ///   [`ImpairmentKind::QueuedBytesAtTeardown`](crate::event::ImpairmentKind::QueuedBytesAtTeardown)
@@ -1147,7 +1147,7 @@ impl ProxyControl {
     /// the held messages live in a local deque of the control pipe, the
     /// pipe returns from seven places, and a report wired into some of them
     /// would be a promise that is kept for some teardowns and not others —
-    /// which is worse than no promise, because a scenario would then read
+    /// which is worse than no promise, because a caller would then read
     /// the absence of the event as delivery. The report that would be worth
     /// having has to be raised by something whose completeness is
     /// structural, the way `SessionGuard` is for the session census, and
@@ -1871,7 +1871,7 @@ impl Drop for AbortOnDrop {
 /// it is one `HashMap` header behind an `Arc` and allocates nothing until a
 /// stream registers.
 ///
-/// Engine-internal despite living in a `pub` module: a scenario author names
+/// Engine-internal despite living in a `pub` module: a caller names
 /// a [`StreamKey`], never a registry.
 ///
 /// # Why a lookup miss is not an error

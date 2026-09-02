@@ -241,7 +241,7 @@ fn object_meta() -> ObjectMeta {
 /// * **Every method is reachable through the vtable**, including the three
 ///   whose real call sites are behind an `Interest` gate. A trait method
 ///   that stopped being dispatchable would fail here rather than in a
-///   scenario nobody ran.
+///   case nobody ran.
 /// * **The values come back**, so a dispatch that fell through to the
 ///   default body is distinguishable from one that reached the impl.
 ///

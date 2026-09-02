@@ -1,4 +1,4 @@
-//! QUIC transport parameters as a value a scenario author can write down.
+//! QUIC transport parameters as a value a caller can write down.
 //!
 //! A [`TransportProfile`] is a typed, serializable, per-leg description of
 //! the QUIC knobs a run wants: congestion controller, windows, loss-detection

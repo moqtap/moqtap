@@ -2,7 +2,7 @@
 
 A Rust implementation of [MoQT (Media over QUIC Transport)](https://datatracker.ietf.org/doc/draft-ietf-moq-transport/).
 
-moqtap provides a modular crate ecosystem for building MoQT debugging and tracing tools: a wire codec, a QUIC-backed client, session tracing, and a CLI debugging tool.
+moqtap provides a modular crate ecosystem for building MoQT debugging and tracing tools: a wire codec, a QUIC-backed client, an intercepting proxy, session tracing, and a UDP impairment engine.
 
 ## Crates
 
@@ -12,6 +12,7 @@ moqtap provides a modular crate ecosystem for building MoQT debugging and tracin
 | [`moqtap-client`](crates/moqtap-client) | MoQT protocol client — outbound QUIC transport via quinn, session state machine, subscribe/fetch/publish flows |
 | [`moqtap-proxy`](crates/moqtap-proxy) | Transparent intercepting proxy — inline MoQT frame parsing, observer/hook traits, self-signed cert generation |
 | [`moqtap-trace`](crates/moqtap-trace) | Trace file I/O — `.moqtrace` binary format reader/writer for integration into relays, clients, and debugging tools |
+| [`quinn-netem`](crates/quinn-netem) | Deterministic UDP datagram impairment — loss, delay, reorder, duplication, corruption and rate shaping beneath a quinn endpoint |
 
 ## Using as a library
 
@@ -23,7 +24,7 @@ moqtap-codec = "0.4"
 moqtap-client = "0.4"
 ```
 
-Each draft is a separate feature flag on both crates (`draft07`..`draft17`). The client defaults to `draft14`; the codec defaults to `all-drafts`. Enable additional drafts to negotiate them at runtime.
+Each draft is a separate feature flag on both crates (`draft07`..`draft19`), and both default to `all-drafts`. Turn default features off and name only the drafts you need to build a smaller subset; a draft that is not enabled cannot be negotiated at runtime.
 
 ### Connect and subscribe (draft-14)
 
@@ -91,7 +92,7 @@ decodes against a `DraftVersion` selected at runtime from the enabled features.
 
 ## Development
 
-Requires Rust 1.83+ and [just](https://github.com/casey/just) (optional).
+Requires Rust 1.88+ and [just](https://github.com/casey/just) (optional).
 
 ```sh
 # Run all checks (what CI runs)
@@ -103,8 +104,8 @@ just test
 # Format code
 just fmt
 
-# Build release binary
-just build
+# Build documentation and open it
+just doc
 
 # Dependency audit
 just deny
@@ -120,6 +121,9 @@ moqtap-codec          Pure codec, no I/O. Foundation for everything.
     +-- moqtap-proxy      Intercepting proxy (depends on codec + client transport).
     |
     +-- moqtap-trace      Event capture, .moqtrace format, metrics.
+
+quinn-netem           Standalone UDP impairment engine, no MoQT dependency.
+                      Used by moqtap-proxy behind its `impair` feature.
 ```
 
 ## Spec Compliance

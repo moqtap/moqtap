@@ -313,7 +313,7 @@ macro_rules! past_the_end_gates {
 
             /// What the peer sends once the track is bound.
             ///
-            /// Every scenario keeps to **one** framing throughout. A track sent
+            /// Every case keeps to **one** framing throughout. A track sent
             /// two ways is the other condition of the same list, and a gate
             /// that fired both would not say which one it was measuring.
             #[derive(Debug, Clone, Copy)]

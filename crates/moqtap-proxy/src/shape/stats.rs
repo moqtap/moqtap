@@ -181,7 +181,7 @@
 //! hook action that changes a unit's size after it was seen: `Replace`,
 //! `ReplacePayload` and `Truncate` are all charged in full on the left and
 //! by what they actually wrote on the right. Both are properties of the
-//! *scenario*, not of the recorder, which is why the fixture that asserts
+//! *run*, not of the recorder, which is why the fixture that asserts
 //! the identity takes no hook action and runs its streams to completion
 //! before it reads.
 
@@ -471,7 +471,7 @@ pub struct ClassStats {
     /// Units that waited behind a *different* class's unit on the same
     /// stream. Separates configured shaping from head-of-line blocking;
     /// conflating it with `tokens_exhausted_episodes` would hide which of
-    /// the two a scenario actually produced.
+    /// the two a run actually produced.
     pub starved_behind_other_class: u64,
 }
 
@@ -1325,7 +1325,7 @@ impl ShapeRecorder {
     ///
     /// Once per stream, latched by the caller. Head-gating means such a
     /// stream's throughput is decided by whichever class is at its head, so
-    /// without this count a scenario author cannot tell configured shaping
+    /// without this count a caller cannot tell configured shaping
     /// from head-of-line blocking.
     pub(crate) fn note_mixed_class_stream(&self, side: ProxySide) {
         self.leg(Direction::from(side)).streams_with_mixed_classes.fetch_add(1, Ordering::Relaxed);

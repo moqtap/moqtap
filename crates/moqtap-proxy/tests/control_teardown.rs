@@ -535,7 +535,7 @@ impl Run {
 ///
 /// Both legs, from one call, because a session has two peers and a close
 /// that reached only the one the caller happened to be watching would look
-/// perfectly correct from there. The relay's half is the one a scenario
+/// perfectly correct from there. The relay's half is the one a caller
 /// depends on without ever seeing: a relay left to discover the session had
 /// ended by timing out keeps its subscription state alive for its whole
 /// idle timeout.

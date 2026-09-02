@@ -33,7 +33,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 | `AcceptedConn` | Enum returned by `Listener::accept`: `Quic { conn, alpn }` or `WebTransport(conn)` |
 | `UpstreamTransportType` | Upstream relay transport: `Quic` or `WebTransport { url }` |
 | `ProxyControl` | Handle on a running proxy — census, statistics, close a session, reset a stream, inject a control message, replace a leg's settings |
-| `ProxyObserver` | Trait for receiving structured events (implement for logging, tracing, GUI) |
+| `ProxyObserver` | Trait for receiving structured events (implement for logging, tracing, or a UI) |
 | `ProxyHook` | Trait for deciding what happens to a frame, object, datagram or stream. Every method is synchronous, defaulted and returns an `Action` or `StreamAction` the engine executes; `Interest` says which sites are armed at all |
 | `Capabilities` | What is expressible at a site, on a draft, on a kind of stream. Ask before acting; the engine asks again and reports a `Refusal` |
 | `ShapeProfile` | Named token buckets and class rules that pace media egress with no hook code — configuration rather than callbacks |
@@ -46,7 +46,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Caller (CLI / GUI)                                 │
+│  Caller (application code)                          │
 │  Provides ProxyObserver + ProxyHook implementations │
 └──────────────────────┬──────────────────────────────┘
                        │ drives

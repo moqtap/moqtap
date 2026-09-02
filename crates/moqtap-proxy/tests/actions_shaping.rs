@@ -1922,7 +1922,7 @@ async fn drop_tail_discards_exactly_the_overflow() {
 ///
 /// Pure counts, and it is the plain statement of why `Block` is the default:
 /// one policy costs latency and no bytes, the other costs bytes and no
-/// latency, and a scenario author picks between them by reading two numbers.
+/// latency, and a caller picks between them by reading two numbers.
 /// If both signatures could be produced by one policy, the choice would be
 /// decoration.
 ///
@@ -4480,7 +4480,7 @@ impl ProxyHook for MixedClassHook {
 /// everything behind it, so the eleven unlimited objects wait on a bucket
 /// that is not theirs.
 ///
-/// That is a real cost and it has to be **loud**, or a scenario author reads
+/// That is a real cost and it has to be **loud**, or a caller reads
 /// head-of-line blocking as the shaping they configured. Three producers say
 /// it, and this row gates all three together because any one alone is
 /// ambiguous:
@@ -4847,7 +4847,7 @@ async fn priority_class_run(
 /// `publisher_priority` is `Option<u8>` on Draft15 **through** Draft19 and
 /// `Some(_)` on 07-14 (`dispatch.rs:381-394`). A revision that
 /// drew the line at 17 would leave drafts 15 and 16 unexercised on both
-/// sides — and 15 and 16 are exactly where the acceptance scenario
+/// sides — and 15 and 16 are exactly where the acceptance case
 /// ("`StrictPriority` starves video while audio flows") first goes silently
 /// wrong.
 ///

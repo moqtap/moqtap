@@ -7,7 +7,7 @@
 //! any of it: every admission decision here goes through
 //! [`crate::capability::classify`], the same function
 //! [`Capabilities::supports`](crate::capability::Capabilities::supports)
-//! publishes, so the table a scenario author reads before a run and the code
+//! publishes, so the table a caller reads before a run and the code
 //! that runs it are literally the same code. A cell that the table calls
 //! `No(WrongSite { .. })` is refused here *with the refusal value classify
 //! returned*, not with one this file rebuilt from the [`Action`] it was

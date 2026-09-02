@@ -822,7 +822,7 @@ async fn a_five_millisecond_delay_is_never_released_early() {
 ///   5 ms, 200 µs spacing and assert p95 release error under a per-platform
 ///   budget, the test that catches a CI runner with a pathological
 ///   scheduler — belongs in a dedicated calibration job. The release error
-///   is reported in `Counters::release_errors` so a scenario can prove its
+///   is reported in `Counters::release_errors` so a caller can prove its
 ///   timing was honoured rather than assume it. That reporting is what this
 ///   test reads, and it is what such a job would read too.
 ///
@@ -1523,7 +1523,7 @@ fn never_grants(max_hold: Duration) -> ShapeProfile {
 
 /// **A clamp says what it cut short, and says nothing when there was
 /// nothing to say.** The two producers of `HoldClamped`, in one test, on the
-/// event surface a scenario report is written from.
+/// event surface a run report is written from.
 ///
 /// # Why both legs, and why they must be one test
 ///
@@ -2000,14 +2000,14 @@ async fn cancel_with_a_terminal_behind_the_hold(window: Duration) {
 /// `ConnectionLost(ApplicationClosed(… b"proxy session ended"))`: the
 /// session's own `relay.close()` had already torn the connection down.
 ///
-/// With a 32-byte object the same scenario failed 12 runs out of 14 — a
+/// With a 32-byte object the same case failed 12 runs out of 14 — a
 /// race, not a certainty. The object size below is what turns the race into
 /// a fact, and the reasoning is in its doc comment. It is deliberately
 /// separate from [`cancelling_while_an_object_is_held_tears_down_promptly`]
 /// so that one stays a clean measurement of a different property.
 ///
 /// [`cancelling_while_an_object_is_held_tears_down_promptly`] is the same
-/// scenario on tokio's default current-thread runtime and passed every time,
+/// case on tokio's default current-thread runtime and passed every time,
 /// which is exactly why this was filed separately: the difference is
 /// scheduling, and the runtime this failed on is the one a real deployment
 /// uses (`#[tokio::main]` is multi-thread by default).

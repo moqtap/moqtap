@@ -1,4 +1,4 @@
-//! Egress shaping — the configuration a scenario author writes, and the
+//! Egress shaping — the configuration a caller writes, and the
 //! pure primitives the scheduler is built from.
 //!
 //! A [`ShapeProfile`] describes what one session's *media* egress is
@@ -12,7 +12,7 @@
 //! # Why this module is `pub`
 //!
 //! Unlike the engine internals (`egress`, `exec`, `release_timer`), a
-//! scenario author *constructs* these types, so they are public and every
+//! caller *constructs* these types, so they are public and every
 //! item below carries a rustdoc comment.
 //!
 //! # The two constructor shapes, and why they differ
@@ -32,7 +32,7 @@
 //! makes a struct unconstructible outside this crate, because
 //! struct-expression *and* functional-update syntax are both illegal there
 //! — the entire public configuration surface would be unreachable from an
-//! integration-test crate and from every scenario author's code.
+//! integration-test crate and from every caller's code.
 //!
 //! Note precisely what the `Default` buys, because it is one step less than
 //! it looks: `..Default::default()` is **also** `E0639` outside this crate,
@@ -41,7 +41,7 @@
 //! every construction site. What the `Default` provides is a *value* to
 //! start from, not a syntax. Inside this crate both forms compile, which is
 //! why the unit tests below use the shorter one; a sentence claiming the
-//! functional-update form works for a scenario author was measured false
+//! functional-update form works for an outside caller was measured false
 //! (11 × `E0639` out of tree, on all four structs).
 //!
 //! # State of the module
@@ -484,7 +484,7 @@ pub struct ClassRule {
 /// profile that did not restate both depths.
 ///
 /// That hand-written `Default` is also what the written form defaults every
-/// key to, so a scenario file may omit `queue` entirely or name only the one
+/// key to, so a serialized profile may omit `queue` entirely or name only the one
 /// knob it cares about. It is the one config in this module where the derived
 /// default would be the unusable value and the written default is therefore
 /// worth having.
@@ -786,7 +786,7 @@ mod tests {
     /// Kept beside the table below rather than folded into it: this is the
     /// one rejection that is about the *proxy's* topology rather than about
     /// the profile's internal consistency, and it is the rejection a
-    /// scenario author is most likely to trip.
+    /// caller is most likely to trip.
     #[test]
     fn try_new_rejects_an_egress_side() {
         for side in [ProxySide::ProxyToClient, ProxySide::ProxyToRelay] {

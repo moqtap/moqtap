@@ -15,7 +15,7 @@
 //! the whole run reported
 //! `objects_seen: 2` and a *single* blocked episode. The shaper had stopped
 //! reading after two objects and the transport absorbed a megabyte of the
-//! consequence. A scenario written that way measures the receive window,
+//! consequence. A test written that way measures the receive window,
 //! not the shaper.
 //!
 //! With the same session behind a 64 KiB window the source stalls at
@@ -29,7 +29,7 @@
 //! and `ProxySessionConfig::upstream_transport_config` already carry an
 //! `Arc<quinn::TransportConfig>` into the front-end bind and the upstream
 //! connect respectively, and `stream_receive_window` lives on that type. A
-//! scenario that wants the publisher to feel the shaper sets a small window
+//! caller that wants the publisher to feel the shaper sets a small window
 //! on the leg that *receives* from it — the listener — and gets
 //! backpressure end to end. This file is the evidence that the knob does
 //! that, and the size of the difference it makes.
@@ -42,7 +42,7 @@
 //! field of `quinn::TransportConfig`, which is fixed at endpoint bind or at
 //! connect and applies to *every* stream of every connection made through
 //! it. There is no `RecvStream` knob and no per-stream override, so a
-//! scenario cannot shrink the window of the one stream it is shaping and
+//! caller cannot shrink the window of the one stream it is shaping and
 //! leave the rest alone. A fixture that wants a narrow window narrows the
 //! whole leg.
 //!
@@ -199,7 +199,7 @@ const TRACK_ALIAS: u64 = 1;
 
 // ── the windows, and the separation between them ───────────────────────
 
-/// The per-stream receive window a scenario that wants felt backpressure
+/// The per-stream receive window a caller that wants felt backpressure
 /// configures, in bytes.
 ///
 /// 64 KiB, and the two properties that matter are that it is a round number

@@ -1444,7 +1444,7 @@ impl PendingQueue {
         if by_discipline {
             // The head itself waited on **another class**, not on its own
             // bucket. Same counter as a same-stream head of another class,
-            // because to a scenario author they are one question — *was I held
+            // because to a caller they are one question — *was I held
             // up by my rate, or by somebody else?* — and the answer is the same
             // in both. What it is emphatically not is
             // `tokens_exhausted_episodes`: the bucket was never asked.
@@ -1694,7 +1694,7 @@ impl PendingQueue {
     /// [`Self::head_release`] would describe a park belonging to a unit that
     /// is gone. Nothing reads it — every caller returns immediately, the
     /// queue is empty or cleared, and `head_release` answers `None` on an
-    /// empty deque — so there is no failure scenario here to fix. It is
+    /// empty deque — so there is no failure case here to fix. It is
     /// written down because "unreachable today" is a property of the
     /// callers, not of this function.
     pub(crate) async fn drain_ignoring_release_times<S: EgressSink>(
@@ -1881,7 +1881,7 @@ struct CloserInner {
 /// Carried alongside the code and the reason because
 /// [`ProxyEvent::SessionEnded`](crate::event::ProxyEvent::SessionEnded)
 /// names the cause in prose, and the two callers are not interchangeable to
-/// anyone reading that: a hook's `Action::CloseSession` is the scenario
+/// anyone reading that: a hook's `Action::CloseSession` is the run
 /// under test deciding something, while
 /// [`ProxyControl::close_session`](crate::control::ProxyControl::close_session)
 /// is the operator outside it pulling the plug. The recorded pair alone

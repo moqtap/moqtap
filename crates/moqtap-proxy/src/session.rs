@@ -290,7 +290,7 @@ pub struct ProxySession {
     hook: Arc<dyn ProxyHook>,
     cancel: CancellationToken,
     /// This session's slow-path counters, shared with every forwarding
-    /// task. One per session, not per process: a scenario asserting that a
+    /// task. One per session, not per process: a test asserting that a
     /// session touched no slow path must not be spoiled by another session
     /// running beside it.
     counters: Arc<Recorder>,
@@ -422,7 +422,7 @@ impl ProxySession {
     ///
     /// Readable **while the session runs**, which is the point: the
     /// `ProxySession` is constructed behind an `Arc` before the accept task
-    /// is spawned (`tests/common/mod.rs`), so a scenario can sample its
+    /// is spawned (`tests/common/mod.rs`), so a test can sample its
     /// classes without waiting for teardown and without a control plane.
     ///
     /// A session with no [`ShapeProfile`] ends — and begins, and stays — at
@@ -827,7 +827,7 @@ impl ProxySession {
                 // Named, not assumed. A close reaches the same latch from a
                 // hook's `Action::CloseSession` and from
                 // `ProxyControl::close_session`, and reporting both as the
-                // hook's told an observer that the scenario under test ended
+                // hook's told an observer that the run under test ended
                 // the session when the operator outside it had.
                 let who = match origin {
                     CloseOrigin::Hook => "hook",
@@ -4653,7 +4653,7 @@ fn data_stream_request(command: Option<StreamCommand>) -> StreamRequest {
 /// 2. **[`EgressConfig::max_hold`]** is the ceiling, so a target whose gate
 ///    is somehow never released costs a bounded delay rather than a stream
 ///    that lives forever. It is the same ceiling a `Hold` gets, for the same
-///    reason — a scenario may not make a stream unkillable.
+///    reason — a caller may not make a stream unkillable.
 /// 3. **A target that cannot end later than now resolves immediately** and
 ///    says so once. Three cases are one report: a key that was never
 ///    forwarded, a stream that has already ended, and *this* stream. The
@@ -5162,9 +5162,9 @@ async fn pipe_data_framed(
                                         // Two classes on one stream means the
                                         // head decides the whole stream's
                                         // throughput. Said once, with a
-                                        // counter behind it, or a scenario
-                                        // author reads head-of-line blocking
-                                        // as their configured shaping.
+                                        // counter behind it, or a caller
+                                        // reads head-of-line blocking as
+                                        // their configured shaping.
                                         match first_class {
                                             None => first_class = Some(last_class),
                                             Some(first)
@@ -5981,7 +5981,7 @@ async fn forward_datagrams(
                 }
 
                 // The hook fires even when the header did not decode: an
-                // undecodable datagram is exactly the case a scenario wants
+                // undecodable datagram is exactly the case a hook wants
                 // to see, and `header: None` is what tells it apart.
                 let cx = FrameCtx::new(
                     ctx.session_id,

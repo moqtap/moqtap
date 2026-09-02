@@ -499,14 +499,14 @@ fn no_peer_can_present(addr: &std::net::SocketAddr) -> bool {
     addr.port() == 0 || addr.ip().is_unspecified()
 }
 
-/// A named scenario.
+/// A named profile.
 ///
 /// **Not `#[non_exhaustive]`**, for [`ProfileError`]'s reason applied one type
 /// over: the tests that hold the presets stable enumerate *every* variant, and
 /// from an external test crate `#[non_exhaustive]` would force a `_` arm into
 /// that enumeration. An eighth preset would then ship exercised by nothing,
 /// with no failing test to say so. This is a closed vocabulary of named
-/// scenarios, not an extension point.
+/// profiles, not an extension point.
 ///
 /// A closed vocabulary is exactly what a configuration file wants to name, so
 /// the written form is the variant's own name in kebab-case — `lossy-edge`,

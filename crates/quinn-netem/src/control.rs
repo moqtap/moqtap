@@ -2,14 +2,14 @@
 //!
 //! [`ImpairHandle`] is the only way to change what a running socket is doing.
 //! It is a cheap clone of one piece of shared state — two engines, a set of
-//! counters, a decision log and a flag — so a scenario and a spawned task can
+//! counters, a decision log and a flag — so a caller and a spawned task can
 //! hold one each and both talk about the same link.
 //!
 //! # What arming resets, and what it deliberately does not
 //!
 //! Arming builds two fresh engines, zeroes both directions' datagram counters
 //! and sets the tick origin to the moment of the call, so tick 0 means "armed".
-//! It does not clear the statistics: a scenario that arms twice would otherwise
+//! It does not clear the statistics: a caller that arms twice would otherwise
 //! lose the first phase's totals with nothing to say they had been discarded.
 //!
 //! # A refused profile changes nothing
@@ -42,7 +42,7 @@ use crate::{Direction, Tick};
 ///
 /// Cloning shares the state rather than copying it: two handles to one socket
 /// arm the same engines and read the same counters. That is what lets a
-/// scenario keep a handle while the socket it decorates is owned by a runtime
+/// caller keep a handle while the socket it decorates is owned by a runtime
 /// it cannot reach into.
 #[derive(Debug, Clone)]
 pub struct ImpairHandle {
@@ -180,7 +180,7 @@ impl ImpairHandle {
 
     /// Take the recorded log, leaving an empty one behind.
     ///
-    /// Taking rather than borrowing, so a scenario that captures a phase, reads
+    /// Taking rather than borrowing, so a caller that captures a phase, reads
     /// it, and captures another does not have to remember to subtract the first
     /// phase from the second.
     pub fn take_log(&self) -> DecisionLog {
@@ -426,9 +426,9 @@ mod tests {
 
     /// Disarming stops the impairment and keeps the counters.
     ///
-    /// The second half is the one worth pinning: a scenario reads the counters
+    /// The second half is the one worth pinning: a caller reads the counters
     /// *after* it has stopped the impairment, so a `disarm` that cleared them
-    /// would leave every such scenario reading zeros and concluding that
+    /// would leave every such caller reading zeros and concluding that
     /// nothing happened.
     #[test]
     fn disarming_stops_deciding_and_keeps_the_counters() {

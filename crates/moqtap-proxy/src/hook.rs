@@ -157,7 +157,7 @@ pub struct StreamCtx<'a> {
 
 /// Context for an object decision.
 ///
-/// Everything a scenario matches on is on `meta`, without re-parsing.
+/// Everything a hook matches on is on `meta`, without re-parsing.
 /// `arrived_at` lives here and **not** on [`ObjectMeta`], which is
 /// `Copy + PartialEq + Eq` and is compared by value across the test suite.
 #[derive(Debug, Clone, Copy)]

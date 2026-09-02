@@ -112,7 +112,7 @@ pub struct Counters {
 ///
 /// Measured **end to end** — from the unit's `release_at` to the instant
 /// its bytes were handed to the destination stream — so it includes the
-/// wheel, the runtime wake and the engine, which is what a scenario
+/// wheel, the runtime wake and the engine, which is what a caller
 /// actually cares about. A sample taken inside the release thread would
 /// have reported 0.55 ms while the object went out at 0.9 ms.
 ///

@@ -66,7 +66,7 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  Caller (CLI / GUI / web)                        │
+│  Caller (application code)                       │
 │  Decides what to do, processes events            │
 └───────────────────┬──────────────────────────────┘
                     │ drives

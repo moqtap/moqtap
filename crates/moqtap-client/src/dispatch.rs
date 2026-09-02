@@ -1,7 +1,7 @@
 //! Unified multi-draft entry-point types.
 //!
-//! This module is the facade downstream consumers (e.g. a CLI or desktop app)
-//! use to hold a MoQT connection without caring which draft was negotiated.
+//! This module is the facade downstream consumers use to hold a MoQT
+//! connection without caring which draft was negotiated.
 //! It mirrors [`moqtap_codec::dispatch`]: one enum variant per enabled draft,
 //! gated on its feature flag.
 //!

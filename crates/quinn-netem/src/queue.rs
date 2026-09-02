@@ -152,7 +152,7 @@ impl BucketState {
 ///
 /// It is a bound on grants, not on bytes leaving a socket. Anything upstream
 /// that clamps how long a datagram may be held will release datagrams this
-/// function never granted, so a scenario meaning to observe this bound must
+/// function never granted, so a caller meaning to observe this bound must
 /// keep such a clamp from binding inside its sampling window.
 ///
 /// `now` is expected to be monotone: an earlier `now` refills nothing and does
@@ -242,7 +242,7 @@ pub enum Admission {
 ///
 /// The queue is modelled as occupancy in bytes that leaks at `rate_bps`, not
 /// as a list of held datagrams. Occupancy is the quantity a congestion
-/// scenario is about — how deep the standing backlog is, and therefore how
+/// profile is about — how deep the standing backlog is, and therefore how
 /// much delay it adds — and holding it as one integer keeps [`offer`]
 /// allocation-free and its trace exactly reproducible. A list would carry
 /// per-datagram release ticks that nothing here reads and would put an

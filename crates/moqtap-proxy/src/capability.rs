@@ -2,7 +2,7 @@
 //!
 //! One function answers that question — [`classify`] — and it has exactly
 //! two callers: [`Capabilities::supports`] / [`Capabilities::supports_on`],
-//! which publish the table a scenario author reads before a run, and the
+//! which publish the table a caller reads before a run, and the
 //! engine's executor, which decides what actually happens during one. That
 //! is the whole of the design: the table and the engine are the same code,
 //! so the table cannot become a documented lie about the engine.
@@ -288,7 +288,7 @@ pub enum Support {
     /// one `ProxyEvent::ActionRefused` per attempt.
     No(Refusal),
     /// Executable, gated on a per-unit fact the table caller did not
-    /// supply. The precondition is named so a scenario can test for it.
+    /// supply. The precondition is named so a caller can test for it.
     Conditional(Precondition),
     /// **No value of [`Action`](crate::action::Action) or
     /// [`StreamAction`](crate::action::StreamAction) can carry this kind to

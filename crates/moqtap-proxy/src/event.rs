@@ -166,7 +166,7 @@ pub enum ProxyEvent {
     /// all three say a unit was seen and understood, and none of them says
     /// where it ended up. Withholding it until after the send would make an
     /// undecodable-or-dropped datagram invisible, which is exactly the case
-    /// a scenario is usually watching for.
+    /// an observer is usually watching for.
     ///
     /// Emitted only when an observer is attached — the decode is skipped
     /// entirely otherwise — and only when the header actually decoded. A

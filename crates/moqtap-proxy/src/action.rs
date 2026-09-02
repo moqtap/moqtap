@@ -150,7 +150,7 @@ impl Gate {
 /// reach the wire until it is released. So
 /// `Action::Drop(DropMode::Elide).delayed(d)` deletes this object *and*
 /// head-of-line-blocks everything after it on that stream for `d`: one
-/// decision, two effects, both on the wire. That is a scenario worth
+/// decision, two effects, both on the wire. That is a case worth
 /// expressing — a relay that loses an object and stalls while it notices —
 /// and refusing it would take it away. `Hold { then: Drop(_) }` is the
 /// same impairment under a [`Gate`] instead of a clock.
@@ -283,7 +283,7 @@ pub enum Action {
     /// the truncated prefix, then `RESET_STREAM` with `code`.
     /// `code` is stated rather than defaulted, exactly as in
     /// [`Self::ResetStream`]. A truncation is a *simulated* publisher
-    /// abandonment and the code is the whole of what the scenario is
+    /// abandonment and the code is the whole of what it is
     /// simulating: `0x0` INTERNAL_ERROR reads as "the proxy did this", `0x2`
     /// DELIVERY_TIMEOUT reads as *a relay hit its delivery timeout*, and the
     /// two make a subscriber take different paths. There is no default that is
@@ -478,14 +478,14 @@ pub enum StreamAction {
     /// named by the key has ended.
     ///
     /// Head-of-line simulation: two streams that a relay would have
-    /// interleaved are forced into sequence, so a scenario can reproduce a
+    /// interleaved are forced into sequence, so a caller can reproduce a
     /// subscriber that stalls behind an unrelated group.
     ///
     /// Valid at **both** stream sites — it defers the first write, not the
     /// stream's existence.
     ///
     /// One stream is exempt, and it is worth knowing before writing a
-    /// scenario against it: on the drafts whose control plane is a pair of
+    /// hook against it: on the drafts whose control plane is a pair of
     /// unidirectional streams, a stream that turns out to *be* one of them
     /// is not held. Holding a control stream's first write would hold
     /// SETUP, and the session with it. The open site cannot tell in
@@ -497,7 +497,7 @@ pub enum StreamAction {
     /// [`StreamCtx::key`](crate::hook::StreamCtx::key) on a stream the hook
     /// was shown earlier. A key naming a stream that has already ended, or
     /// that never existed in this session, **proceeds immediately** and
-    /// reports `Impairment { SerializeTargetUnknown }` once — a scenario
+    /// reports `Impairment { SerializeTargetUnknown }` once — a caller
     /// cannot deadlock a stream by naming the wrong one, and the mistake is
     /// reported rather than silently waited out.
     SerializeAfter(StreamKey),
@@ -540,7 +540,7 @@ pub struct EgressConfig {
     /// 30 s hold armed before a laptop sleeps may fire immediately on
     /// resume (Windows `QueryPerformanceCounter`) or 30 s after resume
     /// (Linux `CLOCK_MONOTONIC`). Irrelevant on CI; surprising when
-    /// debugging a scenario on a laptop.
+    /// debugging a run on a laptop.
     pub max_hold: Duration,
     /// How long a requested close gives this session's egress queues to
     /// flush before both legs are closed anyway. Default 100 ms.

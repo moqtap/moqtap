@@ -1120,7 +1120,7 @@ async fn close_session_carries_the_requested_code_and_reason() {
     common::init_crypto();
 
     const CLOSE_CODE: u32 = 0x2;
-    const CLOSE_REASON: &[u8] = b"scenario asked for this";
+    const CLOSE_REASON: &[u8] = b"the hook asked for this";
 
     let relay = Arc::new(FakeRelay::bind(ALPN));
     let observer = Arc::new(RecordingObserver::new());

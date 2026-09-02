@@ -478,7 +478,7 @@ fn a_held_datagram_is_delivered_without_the_inner_socket() {
 /// Four load-independent integer identities, no duration among them. They exist
 /// because the release path releases in clumps — the sleep primitive has a
 /// floor of roughly half a millisecond on the development platform, so pacing
-/// finer than that arrives as several datagrams at once — and a scenario that
+/// finer than that arrives as several datagrams at once — and a test that
 /// cannot see the clumping will assume smooth pacing that is not happening.
 ///
 /// The identities are what makes those four counters unfakeable by silence: an

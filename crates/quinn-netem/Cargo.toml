@@ -23,7 +23,7 @@ readme = "README.md"
 quinn-socket = ["dep:quinn"]
 
 # `Serialize` and `Deserialize` for every type reachable from `ImpairProfile`
-# and `Preset`, so a scenario can be written in a config file instead of in
+# and `Preset`, so a profile can be written in a config file instead of in
 # Rust. The orphan rule permits the derive nowhere but here; the alternative is
 # a set of mirror types in the consumer that compile green on the day a field is
 # added here and silently stop carrying it.

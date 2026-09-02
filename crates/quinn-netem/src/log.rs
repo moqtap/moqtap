@@ -278,7 +278,7 @@ impl DecisionLog {
     /// Panic unless this log matches `fixture`, printing the differing record.
     ///
     /// An ergonomic wrapper over [`DecisionLog::diff_fixture`], kept for
-    /// call-site readability at the top of a scenario. It is **not** the
+    /// call-site readability at the top of a test. It is **not** the
     /// surface to assert a gate through: a helper whose only outcome is "panic
     /// or return `()`" tells its caller nothing, and a test written against it
     /// passes just as happily against an empty body. Gates assert on
