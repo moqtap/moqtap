@@ -229,6 +229,23 @@ pub struct TraceEvent {
     pub peer: Option<String>,
     /// Event-specific data.
     pub data: EventData,
+    /// Keys on this event that this version of the crate does not recognise,
+    /// kept verbatim.
+    ///
+    /// Optional keys may be added to an existing event type without a format
+    /// version bump, so "unknown keys MUST be ignored" is a rule about
+    /// *reading past* them. It is not a licence to drop them: a tool that
+    /// reads a trace and writes it back — a redaction pass, a filter, a
+    /// re-segmentation — would otherwise emit a valid file that looks like it
+    /// never carried them, and one tool's ignorance would become permanent for
+    /// every reader downstream of it.
+    ///
+    /// [`EventData::Unknown`] already does this for an event type the crate
+    /// cannot name. This is the same guarantee one level down, for a key on a
+    /// type it can.
+    ///
+    /// Empty for every event this crate constructs itself.
+    pub extra: Vec<(Value, Value)>,
 }
 
 /// Event-specific payload, discriminated by type.
@@ -399,12 +416,25 @@ pub enum EventData {
 impl TraceEvent {
     /// An event with no peer identifier — the single-session case.
     pub fn new(seq: u64, timestamp: i64, data: EventData) -> Self {
-        TraceEvent { seq, timestamp, peer: None, data }
+        TraceEvent { seq, timestamp, peer: None, data, extra: Vec::new() }
     }
 
     /// An event attributed to `peer` — the relay-tap case.
     pub fn for_peer(seq: u64, timestamp: i64, peer: impl Into<String>, data: EventData) -> Self {
-        TraceEvent { seq, timestamp, peer: Some(peer.into()), data }
+        TraceEvent { seq, timestamp, peer: Some(peer.into()), data, extra: Vec::new() }
+    }
+
+    /// Attach unrecognised keys, for a caller reconstructing an event it did
+    /// not decode itself.
+    ///
+    /// Keys that collide with ones the event's own type owns are dropped on
+    /// serialization rather than written twice, since a CBOR map with a
+    /// repeated key is malformed and the event's own value is the one the
+    /// reader would have produced.
+    #[must_use]
+    pub fn with_extra(mut self, extra: Vec<(Value, Value)>) -> Self {
+        self.extra = extra;
+        self
     }
 
     /// The event type discriminant this event serializes as.
@@ -548,7 +578,20 @@ impl serde::Serialize for TraceEvent {
             }
             EventData::Unknown { fields, .. } => fields.len(),
         };
-        let entries = 3 /* n, t, e */ + usize::from(self.peer.is_some()) + variant_entries;
+        // A key the event's own type owns is written from the field, so an
+        // `extra` entry repeating it is dropped: a CBOR map with a duplicate
+        // key is malformed, and the field is what a reader produced.
+        let owned = variant_keys(self.event_type());
+        let extra = || {
+            self.extra
+                .iter()
+                .filter(move |(k, _)| !k.as_text().is_some_and(|key| owned.contains(&key)))
+        };
+
+        let entries = 3 /* n, t, e */
+            + usize::from(self.peer.is_some())
+            + variant_entries
+            + extra().count();
 
         let mut map = ser.serialize_map(Some(entries))?;
         map.serialize_entry("n", &self.seq)?;
@@ -692,6 +735,12 @@ impl serde::Serialize for TraceEvent {
             }
         }
 
+        // Last, so the event's own keys keep the positions a reader expects
+        // and the file stays diffable against one written without them.
+        for (k, v) in extra() {
+            map.serialize_entry(k, v)?;
+        }
+
         map.end()
     }
 }
@@ -820,6 +869,51 @@ fn get_namespace(pairs: &[(Value, Value)]) -> Result<Option<Vec<Vec<u8>>>, MoqTr
 /// map belongs to the type this crate cannot name, and is kept verbatim.
 const COMMON_KEYS: [&str; 4] = ["n", "t", "p", "e"];
 
+/// The keys each known event type owns, in the order it writes them.
+///
+/// Everything else on such an event is a key this version does not recognise,
+/// and goes to [`TraceEvent::extra`] rather than being dropped. Adding a key
+/// to an event type means adding it here too — a key read into a named field
+/// but missing from this list would be written twice, once from the field and
+/// once from `extra`.
+fn variant_keys(event_type: u64) -> &'static [&'static str] {
+    match event_type {
+        EVENT_CONTROL_MESSAGE => &["d", "mt", "msg", "sid", "raw"],
+        EVENT_STREAM_OPENED => &["sid", "d", "st"],
+        EVENT_STREAM_CLOSED => &["sid", "ec"],
+        EVENT_OBJECT_HEADER => &["sid", "g", "o", "pp", "os"],
+        EVENT_OBJECT_PAYLOAD => &["sid", "g", "o", "sz", "pl"],
+        EVENT_STATE_CHANGE => &["from", "to"],
+        EVENT_ERROR => &["ec", "reason"],
+        EVENT_ANNOTATION => &["label", "data"],
+        EVENT_PEER_CONNECTED => &["endpoint", "transport", "role", "side"],
+        EVENT_PEER_DISCONNECTED => &["ec", "reason"],
+        EVENT_SUBSCRIPTION_DERIVATION => {
+            &["u", "d", "kind", "traceId", "ns", "tn", "tdr", "tus", "tuo", "tdo"]
+        }
+        // An unknown event type keeps every non-common key in
+        // `EventData::Unknown::fields`. Nothing is collected into `extra` for
+        // one — see the `Unknown` arm below — so this list is never consulted
+        // for it, and the empty slice is not a claim that it owns no keys.
+        _ => &[],
+    }
+}
+
+/// Every key on `pairs` that neither the common fields nor `event_type` owns.
+fn unrecognised_keys(pairs: &[(Value, Value)], event_type: u64) -> Vec<(Value, Value)> {
+    let owned = variant_keys(event_type);
+    pairs
+        .iter()
+        .filter(|(k, _)| match k.as_text() {
+            Some(key) => !COMMON_KEYS.contains(&key) && !owned.contains(&key),
+            // A non-text map key is not one this format defines, so it is
+            // unrecognised by construction.
+            None => true,
+        })
+        .cloned()
+        .collect()
+}
+
 impl TryFrom<Value> for TraceEvent {
     type Error = MoqTraceError;
 
@@ -927,6 +1021,13 @@ impl TryFrom<Value> for TraceEvent {
             },
         };
 
-        Ok(TraceEvent { seq, timestamp, peer, data })
+        let extra = match &data {
+            // `fields` already holds every non-common key on this event.
+            // Collecting them into `extra` as well would write each one twice
+            // and produce a CBOR map with duplicate keys.
+            EventData::Unknown { .. } => Vec::new(),
+            _ => unrecognised_keys(&pairs, event_type),
+        };
+        Ok(TraceEvent { seq, timestamp, peer, data, extra })
     }
 }

@@ -113,6 +113,15 @@ optional-features:
 determinism:
     cargo test -p quinn-netem --release
 
+# Rewrite this crate's half of the shared .moqtrace corpus.
+#
+# The other half comes from `bun run corpus` in moqtap-js/packages/trace, and
+# both belong to one commit: `tests/corpus_tests.rs` compares the two files of
+# each case, so regenerating one alone fails rather than drifts. The corpus
+# lives in the test-vectors repository, which is a submodule here.
+corpus:
+    cargo run -p moqtap-trace --example generate_corpus
+
 # Run the codec test suite against each individual draft feature (matches CI).
 test-features:
     #!/usr/bin/env bash

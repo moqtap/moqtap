@@ -19,10 +19,17 @@
 //! Traces outlive the code that reads them, so nothing here rejects a file for
 //! carrying something newer than it knows. An unrecognised event type arrives
 //! as [`EventData::Unknown`](event::EventData::Unknown) with its fields
-//! intact; an unrecognised perspective, detail level or drop policy is kept
-//! verbatim in the matching `Other` variant. The enums are `#[non_exhaustive]`
-//! for the same reason — matching on one needs a wildcard arm, and gains a
-//! variant without breaking you.
+//! intact; an unrecognised key on an event type this crate *does* know arrives
+//! in [`TraceEvent::extra`](event::TraceEvent::extra); an unrecognised
+//! perspective, detail level or drop policy is kept verbatim in the matching
+//! `Other` variant. The enums are `#[non_exhaustive]` for the same reason —
+//! matching on one needs a wildcard arm, and gains a variant without breaking
+//! you.
+//!
+//! All three are kept rather than skipped because reading and writing a trace
+//! back out is a normal thing to do to one — a redaction pass, a filter, a
+//! re-segmentation — and a reader that drops what it did not recognise makes
+//! its own ignorance permanent for every reader downstream of it.
 //!
 //! # Modules
 //!

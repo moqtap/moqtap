@@ -5,6 +5,61 @@ All notable changes to moqtap-trace will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-02
+
+**Breaking, which is why this is 0.3.0 and not 0.2.1.** `TraceEvent` gained a
+public field, `extra`, so any struct literal over it stops compiling. Under
+Cargo's 0.x rules the minor position *is* the major position, so `^0.2.0` would
+hand that break to every current consumer under a patch number.
+
+The fix at each site is one line, and `TraceEvent::new` / `TraceEvent::for_peer`
+avoid it entirely — a constructor does not have to be edited every time the
+struct gains a field, which is why they exist.
+
+### Added
+
+- **`TraceEvent::extra: Vec<(Value, Value)>`** — every key on an event that
+  neither the common fields nor the event's own type owns, kept verbatim and
+  written back out.
+
+  The format lets optional keys be added to an existing event type without a
+  version bump, and SPEC.md says unknown keys "MUST be ignored". That was read
+  as making new keys safe. They were safe to *read past* and silently destroyed
+  by any read-modify-write — a redaction pass, a filter, a re-segmentation, a
+  download with annotations applied. The output is a valid file that looks like
+  it never carried the key, so one tool's ignorance became permanent for every
+  reader downstream of it.
+
+  `EventData::Unknown` already gave that guarantee for an event *type* this
+  crate cannot name. This is the same guarantee one level down, for a key on a
+  type it can.
+
+  An `EventData::Unknown` event does not fill `extra`: its `fields` already
+  hold every non-common key, and collecting them twice writes a CBOR map with
+  duplicate keys. An `extra` entry whose key collides with one the event's type
+  owns is dropped on serialization for the same reason — the field is what a
+  reader would have produced.
+
+- **`TraceEvent::with_extra`** — attaches unrecognised keys, for a caller
+  reconstructing an event it did not decode itself.
+
+### Changed
+
+- The crate is now checked against the shared `.moqtrace` corpus, in
+  `tests/corpus_tests.rs`. Half its files were written by `@moqtap/trace` and a
+  quarter were recorded from third-party relays, so for the first time this
+  crate's reader is tested on bytes it did not write. `examples/generate_corpus`
+  writes this crate's half.
+
+  The corpus earned its place immediately: it caught the duplicate-key bug
+  above on the first run of the new code, before either implementation had a
+  test naming the behaviour.
+
+  Two of its files carry the non-canonical encodings SPEC.md requires readers
+  to accept — integers past 2^32 as CBOR float64, byte strings under RFC 8746
+  tag 64. Both rules exist because both were broken in released code, and until
+  now nothing exercised either form in this crate.
+
 ## [0.2.0] - 2026-08-29
 
 Implements version 2 of the `.moqtrace` format.

@@ -519,3 +519,93 @@ fn a_float_carrying_a_fraction_is_not_an_integer() {
     ]);
     assert!(TraceEvent::try_from(cbor).is_err());
 }
+
+// ── unrecognised keys on a recognised event type ───────────
+
+fn stream_opened() -> TraceEvent {
+    TraceEvent::new(
+        0,
+        100,
+        EventData::StreamOpened {
+            stream_id: 4,
+            direction: Direction::Receive,
+            stream_type: StreamType::Subgroup,
+        },
+    )
+}
+
+/// "Unknown keys MUST be ignored" is a rule about reading past them. A reader
+/// that drops one turns any read-modify-write into a file that looks like it
+/// never carried the key — and the tools that rewrite a trace are exactly the
+/// ones it passes through on its way to someone else.
+#[test]
+fn an_unrecognised_key_is_kept_rather_than_dropped() {
+    let extra = vec![
+        (Value::Text("ta".into()), Value::Integer(7.into())),
+        (Value::Text("sg".into()), Value::Integer(2.into())),
+    ];
+    let event = stream_opened().with_extra(extra.clone());
+
+    let read = roundtrip(&event);
+    assert_eq!(read.extra, extra);
+    assert_eq!(read, event);
+}
+
+#[test]
+fn an_event_that_carried_none_reads_back_with_none() {
+    assert!(roundtrip(&stream_opened()).extra.is_empty());
+}
+
+/// A CBOR map with a duplicate key is malformed. The field is what a reader
+/// produced, so the field wins and the colliding entry is dropped.
+#[test]
+fn an_extra_key_never_displaces_one_the_event_type_owns() {
+    let event = stream_opened().with_extra(vec![
+        (Value::Text("sid".into()), Value::Integer(999.into())),
+        (Value::Text("ta".into()), Value::Integer(7.into())),
+    ]);
+
+    let read = roundtrip(&event);
+    assert!(matches!(read.data, EventData::StreamOpened { stream_id: 4, .. }));
+    assert_eq!(read.extra, vec![(Value::Text("ta".into()), Value::Integer(7.into()))]);
+}
+
+/// `EventData::Unknown::fields` already holds every non-common key on such an
+/// event. Collecting them into `extra` as well writes each one twice and
+/// yields a map with duplicate keys.
+#[test]
+fn an_unknown_event_type_does_not_also_fill_extra() {
+    let fields = vec![
+        (Value::Text("note".into()), Value::Text("hi".into())),
+        (Value::Text("count".into()), Value::Integer(3.into())),
+    ];
+    let event =
+        TraceEvent::new(0, 0, EventData::Unknown { event_type: 99, fields: fields.clone() });
+
+    let read = roundtrip(&event);
+    assert!(read.extra.is_empty());
+    assert!(
+        matches!(read.data, EventData::Unknown { event_type: 99, fields: ref f } if *f == fields)
+    );
+}
+
+/// A non-text map key is not one this format defines, so it is unrecognised by
+/// construction and kept like any other.
+#[test]
+fn a_non_text_key_is_unrecognised_and_kept() {
+    let cbor = Value::Map(vec![
+        (Value::Text("n".into()), Value::Integer(0.into())),
+        (Value::Text("t".into()), Value::Integer(100.into())),
+        (Value::Text("e".into()), Value::Integer(2.into())),
+        (Value::Text("sid".into()), Value::Integer(4.into())),
+        (Value::Text("ec".into()), Value::Integer(0.into())),
+        (Value::Integer(1000.into()), Value::Text("keyed by integer".into())),
+    ]);
+
+    let event = TraceEvent::try_from(cbor).unwrap();
+    assert_eq!(
+        event.extra,
+        vec![(Value::Integer(1000.into()), Value::Text("keyed by integer".into()))]
+    );
+    assert_eq!(roundtrip(&event), event);
+}
