@@ -31,7 +31,217 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the way `TraceEvent::extra` was for 0.3.0. Reading is unaffected: every key is
   optional, and a file written before they existed carries none.
 
+- **The header's three maps carry unrecognised-key stores** —
+  `TraceHeader::extra`, `SegmentInfo::extra` and `SamplingInfo::extra`, each a
+  `Vec<(Value, Value)>` holding the keys of that map this crate could not use,
+  written back after the map's own keys.
+
+  Three stores and not one: a private key on `"segment"` and a key of the same
+  name at the top level are different keys, and re-emitting either in the
+  other's map changes what the file says. `"custom"` gets none — every key in
+  it belongs to whoever wrote the trace, so there is no such thing as an
+  unrecognised key there.
+
+  **Breaking for anyone constructing or exhaustively destructuring these three
+  structs**, the way `TraceEvent::extra` was for 0.3.0. `TraceHeader::new` and
+  `SegmentInfo::new` avoid it, and `SamplingInfo` still derives `Default`.
+  `SegmentInfo` also loses its `Eq` impl, since the store holds arbitrary CBOR
+  and a CBOR value may be a float; `TraceHeader` and `SamplingInfo` have never
+  had `Eq` for that reason.
+
 ### Fixed
+
+- **A header key this crate did not recognise is no longer deleted by reading
+  the file.** The header decoder read the keys it knew and dropped the rest on
+  the floor: an `"x-note"` was gone from the struct and absent from anything
+  written back out. This is the same data loss `extra` fixed for events and
+  strictly larger, because on the header it applied to *every* unknown key
+  rather than only to a wrong-typed one.
+
+  Nothing printed by `moqtap trace` changes — it never rewrites a file.
+  The loss landed on the tools that do: a redaction pass, a filter, a
+  re-segmentation, a download with annotations applied. Each emitted a valid
+  file that looks as though it never carried the key, so one tool's ignorance
+  became permanent for every reader downstream of it.
+
+  A key the format *does* define now goes to the same store when its value is
+  not one the field can hold — `"transport": 42`, an `"endTime"` with a
+  fractional part — on the rule SPEC.md states for events: knowing more about
+  a key must not mean preserving it less. The field reads `None`, the value is
+  ignored for meaning, and the entry is written back unchanged.
+
+  What goes to a store is decided by what the decode consumed, not by a list of
+  key names kept beside it. The two differ exactly on a defined key carrying an
+  unusable value, and that gap is where the event decoder had been deleting
+  things. Each map answers with an exhaustive destructuring of its own fields,
+  so a field added later does not compile until it is answered for.
+
+- **A `"segment"` or `"sampling"` that is not a map no longer fails the file.**
+  `MoqTraceReader::new` returned `InvalidHeader("'segment' is not a CBOR map")`
+  and the file did not open, so one unreadable metadata value cost every event
+  behind it. The CLI printed the error and exited 1 — visible, but the events
+  were unreachable all the same.
+
+  Such a value now goes to the header's store and the reader proceeds as though
+  the key were absent, which for `"segment"` means reading the trace as
+  non-segmented. `"segment.sequence"` remains the one exception: absent or
+  unusable, it is still a malformed header, because it is the sole ordering key
+  of a segmented stream and a default would invent an order the file never had.
+  So are the four required top-level keys.
+
+- **`"sampling.appliesTo"` is kept whole or not at all.** An array with one
+  element that is not an event type ID was read as the elements that were —
+  `[3, "x", 5]` became `[3, 5]`, and the entry that could not be read was gone
+  from the rewritten file too.
+
+  That is not a partial answer. The key names the event types the drop policy
+  touched, and a reader may treat every type absent from it as complete, so
+  shortening the array reports a sampled event type as fully recorded — the
+  opposite of what the file said, stated with the same confidence. The array
+  now goes to `SamplingInfo::extra` entire and `applies_to` reads `None`.
+
+  `"effectiveRate"` is bounded the same way, on the same rule for a value
+  outside the range a key's meaning allows: the key is defined as a fraction in
+  `(0.0, 1.0]`, so `1.5`, `0.0`, a negative rate and a NaN now go to the store
+  instead of being handed to a caller as a sampling rate.
+
+- **An integral `"effectiveRate"` is written as a CBOR integer, not as a
+  float.** The encoder emitted `Value::Float` for the key unconditionally,
+  because the format declares it a float — but the normative rule is about the
+  *value*: "an integral value MUST be written as a CBOR integer (major type 0
+  or 1), not as a float". `"effectiveRate"` is where the distinction bites,
+  since its commonest value is `1.0`, "no rate-based dropping". So the ordinary
+  case — a source saying it dropped nothing — wrote a float64 here while the
+  JavaScript implementation wrote the integer `1`, for the same trace, and
+  neither test suite could see it because each read only bytes it had written
+  itself. A fractional rate is still a float, there being no integer that
+  carries it, and the reader has always taken either form.
+
+- **The same two encoding rules now apply to a stored value, at any depth.** An
+  integral float in one of the three stores — or in `"custom"` — was written
+  back as a float, and a byte string wrapped in RFC 8746's tag 64 was written
+  back still wrapped. Both are shapes SPEC.md forbids a writer to emit, and
+  neither is one the JavaScript implementation *can* emit: `cbor-x` folds them
+  away on the way in, so its store never holds either. Two writers, the same
+  input file, different bytes — which is the one thing those rules exist to
+  stop. An out-of-range `"effectiveRate"` of `2.0`, kept in the sampling map's
+  store, wrote `fb4000000000000000` here and `02` there.
+
+  Normalisation happens on the way out and never on the way in, so a value
+  read into a store still compares equal to what the file carried, and it
+  recurses through arrays, maps and map keys, since a stored value may be a
+  whole tree. It changes the encoding and not the value, with the one exception
+  SPEC.md names and declines to carve out: `-0.0` written as `0` loses its
+  sign.
+
+- **A store no longer emits a CBOR map carrying the same key twice.** A store
+  is an ordered list of pairs rather than a map, so a caller could build one
+  holding `"x-a"` twice and both entries went into the file. RFC 8949 calls
+  such a map invalid and the JavaScript reader silently collapses it, keeping
+  whichever entry it likes. The first entry for a key is now the one written,
+  matching the first-match lookup every read in this crate goes through.
+
+  The reading half had the mirror of that bug. A header carrying `"transport"`
+  twice handed the first entry to the field, and the store — filtered by key
+  *name* — then dropped **both**, so the second value reached neither the field
+  nor the store and was gone from the decoded header entirely. The entry no
+  field took is now kept, where a caller can see it; the rewrite still emits
+  the key once, because that is all a conformant writer may emit.
+
+- **Those same two rules, and the same one-key-once rule, now apply to the
+  opaque values an *event* carries.** `TraceEvent::extra` is the half of this
+  that landed with the header's stores. The rest of an event's file-provided
+  CBOR was still written verbatim: a control message's `"msg"`, an
+  annotation's `"data"` and the fields of an event type this crate cannot name
+  each reach the serializer as a value nobody looked at, and each went to the
+  file exactly as the decoder handed it over — an integral float still a
+  float, a tag-64 byte string still tagged, a repeated key still repeated.
+
+  `@moqtap/trace` cannot produce any of the three. `cbor-x` hands JavaScript a
+  plain number for an integral float, strips tag 64 on decode, and has
+  collapsed a duplicate key before its caller runs — so Rust was the only side
+  that could emit them, which made it the only side that had to be told not
+  to. Nor was this a corner: two `capture-*` cases in the shared corpus are
+  nine annotations and two control messages each, and every one of those
+  eleven events is an opaque value on this path.
+
+  All four write sites now go through the one function the header's stores
+  use, rather than a second copy of the rules that would have to agree with
+  it. Reading is unchanged — a value read into `"msg"`, `"data"`, an unknown
+  event's fields or `extra` still compares equal to what the file carried, and
+  it is the serializer that applies the house style. Typed fields were never
+  affected: `"raw"`, `"pl"`, `"traceId"` and `"tn"` are `Vec<u8>` by the time
+  they reach the writer and go out as major type 2 by construction.
+
+- **A key an event repeats is no longer deleted by reading the file.** The
+  reading half of the duplicate-key bug above, one file over. Every getter in
+  the event decoder is a first-match search, so an event carrying `"sid": 4`
+  and then `"sid": 9` handed the 4 to the field — and `extra`, filtered by key
+  *name*, then dropped **both** entries, so the 9 reached neither the field nor
+  the store and was gone from the decoded event entirely. `ciborium` models a
+  map as a list of pairs and hands back both entries, so this was a value a
+  Rust reader had been shown and discarded, not one its decoder had collapsed
+  before any of this crate's code ran.
+
+  `EventData::Unknown` had the same defect in its `fields`, which is where
+  every key such an event carries lives: `{"n": 0, "n": 5, "t": 100, "e": 99}`
+  read back with no trace of the 5. That variant collects nothing into `extra`,
+  so `fields` is the only place an entry the common fields did not take can
+  land.
+
+  The entry no field took is now kept, where a caller can see it. The rewrite
+  still emits the key once — the field wins, and a map may not carry a key
+  twice — so a file that carried a duplicate comes back out with one entry,
+  which is the most a conformant writer may emit, and is a fixed point from
+  there. The store is decided by walking the entries and tracking which
+  occurrence a field consumed, the way the header's stores are, rather than by
+  filtering on key names.
+
+  One write-side hole closed with it: an unknown event type's `fields` were
+  written unfiltered, so an `"n"` among them — which a caller could always
+  attach by hand, and which a repeated `"n"` on input now leaves there — was
+  written a second time into a map that a duplicate key makes malformed. Those
+  fields now go through the same filter the store does.
+
+- **Events after a segment header the reader cannot build are no longer
+  attributed to the segment before it.** The preamble is consumed before the
+  header is constructed, and `MoqTraceReader` only replaced its held header on
+  success — so the next `read_next` decoded the *new* segment's events while
+  `header()` still described the old one. SPEC.md requires a reader to report
+  such a header and "MUST NOT present the segment as read"; handing back its
+  events under the previous header does both at once, and since `"n"` and
+  `"t"` are segment-local while global order is `(segment.sequence, n)`, every
+  event so recovered was also silently misordered.
+
+  The error is now returned once and the segment skipped whole: the next read
+  resynchronizes to the segment after it and reports it as a `ReadItem::Segment`
+  like any other, which is what `readMoqtrace`'s `recover` path does with the
+  same file. `collect::<Result<Vec<_>, _>>()` still stops at the error, and a
+  caller that filters errors out — the one this cost the most, since it saw no
+  fault at all — now gets the segments it can trust and none of the events from
+  the segment it cannot. `resync_to_next_segment` landing on such a header
+  behaves the same way.
+
+- **`"custom"` is handed back exactly, or not at all.** It is declared as a
+  string-keyed map, and a `"custom"` with a non-text key was read into one by
+  dropping that key — the caller got a map the file never carried, and the
+  rewrite made it true. A `"custom"` that was not a map was dropped whole.
+
+  Both are now unusable values: `custom` reads `None` and the whole thing goes
+  to the header's store, where the bytes survive. Losing typed access is the
+  smaller harm, since nothing in the format gives `"custom"` keys meaning. The
+  same applies to a `"custom"` carrying one key twice, which a `BTreeMap` would
+  silently collapse to one entry. **Callers that read `header.custom` on such a
+  file used to get a partial map and now get `None`**; a conformant `"custom"`
+  is unaffected.
+
+- **A malformed header names the fault instead of reporting a present key as
+  missing.** `"startTime": -5` produced `missing 'startTime'`, which sent
+  anyone trying to fix the file looking for something that was right in front
+  of them. The four required keys and `"segment.sequence"` now distinguish
+  absent (`missing 'startTime'`) from unusable (`'startTime' is not an unsigned
+  integer`, `'perspective' is not a text string`). **Anything matching on those
+  strings needs updating**; the error variant is unchanged.
 
 - **A defined key whose value has an unusable type is kept instead of deleted
   from everywhere.** An optional key read through a type-checked getter left its

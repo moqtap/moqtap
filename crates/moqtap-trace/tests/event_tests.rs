@@ -1249,3 +1249,576 @@ fn a_wrong_typed_peer_id_is_kept_rather_than_dropped() {
     assert_eq!(*fields, vec![(Value::Text("p".into()), uint(5))]);
     assert_eq!(roundtrip(&unknown), unknown);
 }
+
+// ── the encoding rules reach an event's opaque values ──────
+
+/// The bytes an event is actually written as, decoded back into a `Value`.
+///
+/// Through the encoder rather than through `Value::serialized`, because part
+/// of what these tests pin is the entry count in the definite-length map
+/// header: a writer that drops a duplicate entry without adjusting the count
+/// writes a map whose header promises more pairs than follow, and only the
+/// byte encoding says so.
+fn written(event: &TraceEvent) -> Value {
+    let mut bytes = Vec::new();
+    ciborium::ser::into_writer(event, &mut bytes).expect("serialization is infallible");
+    ciborium::de::from_reader(bytes.as_slice()).expect("the encoded map is well-formed CBOR")
+}
+
+/// A byte string under RFC 8746's typed-array tag, as `cbor-x` once wrote
+/// every one of them.
+fn tagged(bytes: &[u8]) -> Value {
+    Value::Tag(64, Box::new(Value::Bytes(bytes.to_vec())))
+}
+
+/// SPEC.md's two normative encoding rules (Interoperability) bind the bytes a
+/// writer emits, so they bind every value it emits and not only the ones it
+/// understood. `"msg"` is the largest opaque value an event carries: a reader
+/// hands it back whatever it holds, and the writer used to hand it straight
+/// back to the file.
+///
+/// The JavaScript side cannot produce either shape — `cbor-x` gives its code a
+/// plain number for an integral float and strips tag 64 on decode — so a Rust
+/// writer that re-emitted one made the two implementations write different
+/// bytes for the same trace, which is the one thing these rules exist to stop.
+#[test]
+fn an_integral_float_in_msg_is_written_as_an_integer() {
+    let event = TraceEvent::try_from(control_event_cbor(Some(cbor_map(&[
+        // Past 2^32, which is where `cbor-x` reaches for a float64.
+        ("request_id", Value::Float(4_294_967_296.0)),
+        // Integral, and small: the rule is about the value, not its size.
+        ("track_alias", Value::Float(7.0)),
+        // Not integral, so no integer carries it and it stays a float.
+        ("rate", Value::Float(0.25)),
+    ]))))
+    .expect("a float in 'msg' is not a malformed event");
+
+    assert_eq!(
+        message_of(&event),
+        cbor_map(&[
+            ("request_id", Value::Float(4_294_967_296.0)),
+            ("track_alias", Value::Float(7.0)),
+            ("rate", Value::Float(0.25)),
+        ]),
+        "the read altered 'msg' — the house style is the writer's business"
+    );
+
+    assert_eq!(
+        key_of(&written(&event), "msg"),
+        Some(cbor_map(&[
+            ("request_id", uint(4_294_967_296)),
+            ("track_alias", uint(7)),
+            ("rate", Value::Float(0.25)),
+        ]))
+    );
+}
+
+/// The second rule, in the same place. A reader must accept tag 64 and
+/// preserve it where it can see it — this one can — but a writer must not emit
+/// it.
+#[test]
+fn a_tag_64_byte_string_in_msg_is_written_as_a_plain_byte_string() {
+    let event = TraceEvent::try_from(control_event_cbor(Some(cbor_map(&[(
+        "auth_token",
+        tagged(&[0xde, 0xad]),
+    )]))))
+    .expect("a tagged byte string in 'msg' is not a malformed event");
+
+    assert_eq!(
+        message_of(&event),
+        cbor_map(&[("auth_token", tagged(&[0xde, 0xad]))]),
+        "the read stripped the tag"
+    );
+    assert_eq!(
+        key_of(&written(&event), "msg"),
+        Some(cbor_map(&[("auth_token", Value::Bytes(vec![0xde, 0xad]))]))
+    );
+}
+
+/// A `"msg"` is a whole tree — the corpus carries a nested one for exactly
+/// this reason — and both rules are about every number and every byte string
+/// in it, map keys included, since a key is encoded by the same rules as
+/// anything else.
+#[test]
+fn the_encoding_rules_reach_through_a_msg_tree() {
+    let msg = Value::Map(vec![
+        (
+            Value::Text("parameters".into()),
+            Value::Array(vec![
+                Value::Float(3.0),
+                Value::Map(vec![
+                    // A float used as a key, and a tagged byte string one
+                    // level further down again.
+                    (Value::Float(2.0), tagged(&[0x01])),
+                    (Value::Text("keep".into()), Value::Float(1.5)),
+                ]),
+            ]),
+        ),
+        (
+            Value::Text("nested".into()),
+            Value::Map(vec![(Value::Text("n".into()), tagged(&[0x02]))]),
+        ),
+    ]);
+    let event = TraceEvent::try_from(control_event_cbor(Some(msg)))
+        .expect("a nested 'msg' is not a malformed event");
+
+    assert_eq!(
+        key_of(&written(&event), "msg"),
+        Some(Value::Map(vec![
+            (
+                Value::Text("parameters".into()),
+                Value::Array(vec![
+                    uint(3),
+                    Value::Map(vec![
+                        (uint(2), Value::Bytes(vec![0x01])),
+                        (Value::Text("keep".into()), Value::Float(1.5)),
+                    ]),
+                ]),
+            ),
+            (
+                Value::Text("nested".into()),
+                Value::Map(vec![(Value::Text("n".into()), Value::Bytes(vec![0x02]))]),
+            ),
+        ]))
+    );
+}
+
+/// An event 7 map carrying whatever a writer left on `"data"`.
+fn annotation_cbor(data: Value) -> Value {
+    Value::Map(vec![
+        (Value::Text("n".into()), uint(0)),
+        (Value::Text("t".into()), uint(1000)),
+        (Value::Text("e".into()), uint(7)),
+        (Value::Text("label".into()), Value::Text("note".into())),
+        (Value::Text("data".into()), data),
+    ])
+}
+
+/// `"data"` on an annotation is the second opaque value an event carries — any
+/// CBOR type, defined by whoever wrote the trace and never looked at here —
+/// and it was missed for the same reason `"msg"` was: it reaches the
+/// serializer as a `Value` and used to be handed straight to the file.
+///
+/// Event 7 is nine of the fifteen events in two `capture-*` cases of the
+/// shared corpus, so this is not a hypothetical write site.
+#[test]
+fn both_encoding_rules_reach_an_annotations_data() {
+    let event = TraceEvent::try_from(annotation_cbor(Value::Map(vec![
+        (Value::Text("at".into()), Value::Float(1_756_800_000_000.0)),
+        (Value::Text("blob".into()), tagged(&[0x07])),
+        (Value::Float(4.0), Value::Array(vec![Value::Float(8.0)])),
+    ])))
+    .expect("an annotation with a map 'data' is not a malformed event");
+
+    let EventData::Annotation { ref data, .. } = event.data else {
+        panic!("expected an annotation");
+    };
+    assert_eq!(
+        data.clone(),
+        Value::Map(vec![
+            (Value::Text("at".into()), Value::Float(1_756_800_000_000.0)),
+            (Value::Text("blob".into()), tagged(&[0x07])),
+            (Value::Float(4.0), Value::Array(vec![Value::Float(8.0)])),
+        ]),
+        "the read altered 'data'"
+    );
+
+    assert_eq!(
+        key_of(&written(&event), "data"),
+        Some(Value::Map(vec![
+            (Value::Text("at".into()), uint(1_756_800_000_000)),
+            (Value::Text("blob".into()), Value::Bytes(vec![0x07])),
+            (uint(4), Value::Array(vec![uint(8)])),
+        ]))
+    );
+}
+
+/// A `"data"` that is not a map is opaque all the same, and a bare integral
+/// float is a shape a JavaScript writer cannot produce at all.
+#[test]
+fn a_scalar_annotation_data_is_normalised_too() {
+    let event = TraceEvent::try_from(annotation_cbor(Value::Float(12.0)))
+        .expect("a scalar 'data' is not a malformed event");
+
+    assert_eq!(key_of(&written(&event), "data"), Some(uint(12)));
+}
+
+/// An unknown event type writes every key it read straight back out of
+/// `fields`, which makes that list the widest opaque write site of the four:
+/// a whole event map this crate never looked at, keys included.
+#[test]
+fn both_encoding_rules_reach_an_unknown_events_fields() {
+    let event = TraceEvent::try_from(Value::Map(vec![
+        (Value::Text("n".into()), uint(0)),
+        (Value::Text("t".into()), uint(1000)),
+        (Value::Text("e".into()), uint(99)),
+        (Value::Text("count".into()), Value::Float(4.0)),
+        (Value::Text("blob".into()), tagged(&[0xbe, 0xef])),
+        (Value::Text("deep".into()), Value::Array(vec![Value::Float(5.0), tagged(&[0x01])])),
+        // A non-text key is unrecognised by construction, and is encoded by
+        // the same rules as any other value.
+        (Value::Float(1.0), Value::Text("keyed by a float".into())),
+    ]))
+    .expect("an unknown event type is not a malformed event");
+
+    let EventData::Unknown { ref fields, .. } = event.data else {
+        panic!("expected an unknown event");
+    };
+    assert_eq!(
+        fields[0],
+        (Value::Text("count".into()), Value::Float(4.0)),
+        "the read altered the fields"
+    );
+
+    let out = written(&event);
+    assert_eq!(key_of(&out, "count"), Some(uint(4)));
+    assert_eq!(key_of(&out, "blob"), Some(Value::Bytes(vec![0xbe, 0xef])));
+    assert_eq!(key_of(&out, "deep"), Some(Value::Array(vec![uint(5), Value::Bytes(vec![0x01])])));
+
+    let Value::Map(pairs) = &out else { panic!("event is not a CBOR map") };
+    assert_eq!(
+        pairs.iter().find(|(k, _)| *k == uint(1)).map(|(_, v)| v.clone()),
+        Some(Value::Text("keyed by a float".into())),
+        "the float key was not written as an integer: {pairs:?}"
+    );
+}
+
+/// The event's own store, which is the fourth. A key this crate could not use
+/// is kept verbatim on the way in and written in the format's own encoding on
+/// the way out — the same two halves the header's three stores have.
+#[test]
+fn both_encoding_rules_reach_an_events_store() {
+    let mut cbor = stream_opened_cbor(0, &[]);
+    let Value::Map(ref mut pairs) = cbor else { panic!("event is not a CBOR map") };
+    pairs.push((Value::Text("x-count".into()), Value::Float(9.0)));
+    pairs.push((Value::Text("x-blob".into()), tagged(&[0x05])));
+    // A known key whose value this reader cannot use lands in the store too,
+    // and leaves it by the same route.
+    pairs.push((Value::Text("ta".into()), Value::Array(vec![Value::Float(6.0)])));
+    pairs.push((Value::Float(3.0), Value::Text("keyed by a float".into())));
+
+    let event = TraceEvent::try_from(cbor).expect("unusable keys are not a malformed event");
+
+    assert_eq!(
+        event.extra,
+        vec![
+            (Value::Text("x-count".into()), Value::Float(9.0)),
+            (Value::Text("x-blob".into()), tagged(&[0x05])),
+            (Value::Text("ta".into()), Value::Array(vec![Value::Float(6.0)])),
+            (Value::Float(3.0), Value::Text("keyed by a float".into())),
+        ],
+        "the read altered the store"
+    );
+
+    let out = written(&event);
+    assert_eq!(key_of(&out, "x-count"), Some(uint(9)));
+    assert_eq!(key_of(&out, "x-blob"), Some(Value::Bytes(vec![0x05])));
+    assert_eq!(key_of(&out, "ta"), Some(Value::Array(vec![uint(6)])));
+    let Value::Map(pairs) = &out else { panic!("event is not a CBOR map") };
+    assert_eq!(
+        pairs.iter().find(|(k, _)| *k == uint(3)).map(|(_, v)| v.clone()),
+        Some(Value::Text("keyed by a float".into())),
+        "the float key was not written as an integer: {pairs:?}"
+    );
+}
+
+/// The one value the rule changes rather than merely re-encodes. SPEC.md calls
+/// it out and declines to carve it out — no field in a trace gives negative
+/// zero a meaning — so this pins the accepted loss rather than guarding
+/// against it. Pinned on the event side as well as the header's because the
+/// carve-out, were one ever added, would go in one place and show up in both.
+#[test]
+fn a_negative_zero_in_msg_loses_its_sign_on_the_way_out() {
+    let event =
+        TraceEvent::try_from(control_event_cbor(Some(cbor_map(&[("z", Value::Float(-0.0))]))))
+            .unwrap();
+
+    let Value::Map(held) = message_of(&event) else { panic!("'msg' is not a map") };
+    let Value::Float(stored) = held[0].1 else { panic!("the read did not keep the float") };
+    assert!(stored.is_sign_negative(), "the read must not be the thing that loses the sign");
+
+    assert_eq!(key_of(&written(&event), "msg"), Some(cbor_map(&[("z", uint(0))])));
+}
+
+// ── one key, never twice, inside an event ──────────────────
+
+/// `ciborium` models a map as a list of pairs and hands back both entries of a
+/// duplicate key, so a Rust reader can see this shape where the JavaScript one
+/// cannot. Seeing it means preserving it — that half is observable — and
+/// writing it means emitting one entry, since RFC 8949 calls a map with a
+/// repeated key invalid and SPEC.md forbids a conformant tool from emitting
+/// one having read one.
+///
+/// The first entry wins, matching every lookup in this crate: `"msg"` and the
+/// stores are read through a first-match search, so writing the first is what
+/// makes the value a caller is shown the value that survives a rewrite.
+#[test]
+fn a_duplicate_key_inside_msg_is_written_once() {
+    let msg = Value::Map(vec![
+        (Value::Text("request_id".into()), uint(1)),
+        (Value::Text("request_id".into()), uint(2)),
+        (Value::Text("track".into()), uint(3)),
+    ]);
+    let event = TraceEvent::try_from(control_event_cbor(Some(msg.clone())))
+        .expect("a duplicate key in 'msg' is not a malformed event");
+
+    assert_eq!(message_of(&event), msg, "the read collapsed the duplicate");
+
+    assert_eq!(
+        key_of(&written(&event), "msg"),
+        Some(Value::Map(vec![
+            (Value::Text("request_id".into()), uint(1)),
+            (Value::Text("track".into()), uint(3)),
+        ]))
+    );
+}
+
+/// The same rule in an unknown event's fields, where a duplicate key survives
+/// the decode for the same reason and reaches the writer as two entries of one
+/// list.
+#[test]
+fn a_duplicate_key_in_an_unknown_events_fields_is_written_once() {
+    let event = TraceEvent::try_from(Value::Map(vec![
+        (Value::Text("n".into()), uint(0)),
+        (Value::Text("t".into()), uint(1000)),
+        (Value::Text("e".into()), uint(99)),
+        (Value::Text("note".into()), Value::Text("first".into())),
+        (Value::Text("note".into()), Value::Text("second".into())),
+    ]))
+    .expect("a duplicate key is not a malformed event");
+
+    let out = written(&event);
+    assert_eq!(key_count(&out, "note"), 1, "'note' is written twice");
+    assert_eq!(key_of(&out, "note"), Some(Value::Text("first".into())), "the later entry won");
+}
+
+/// And in the store, which a caller can build by hand holding one key twice
+/// whether or not a file ever did.
+#[test]
+fn an_event_store_holding_one_key_twice_writes_it_once() {
+    let event = stream_opened().with_extra(vec![
+        (Value::Text("x-a".into()), uint(1)),
+        (Value::Text("x-a".into()), uint(2)),
+        (Value::Text("x-b".into()), uint(3)),
+    ]);
+
+    let out = written(&event);
+    assert_eq!(key_count(&out, "x-a"), 1, "'x-a' is written twice");
+    assert_eq!(key_of(&out, "x-a"), Some(uint(1)), "the later entry won");
+    assert_eq!(key_of(&out, "x-b"), Some(uint(3)), "an unrelated entry was dropped");
+}
+
+/// Two keys a store tells apart and a file cannot: normalising `Float(1.0)` to
+/// `Integer(1)` is what makes them one key, so the duplicate check has to run
+/// after the normalisation rather than before it.
+#[test]
+fn two_event_store_keys_that_normalise_together_are_written_once() {
+    let event =
+        stream_opened().with_extra(vec![(Value::Float(1.0), uint(10)), (uint(1), uint(20))]);
+
+    let Value::Map(out) = written(&event) else { panic!("event is not a CBOR map") };
+    let ones: Vec<&(Value, Value)> = out.iter().filter(|(k, _)| *k == uint(1)).collect();
+    assert_eq!(ones.len(), 1, "the key 1 is written twice: {out:?}");
+    assert_eq!(ones[0].1, uint(10), "the later entry won");
+}
+
+// ── a key the file repeats ─────────────────────────────────
+
+fn text(s: &str) -> Value {
+    Value::Text(s.into())
+}
+
+/// An input map carrying one key twice is invalid under RFC 8949, and SPEC.md
+/// leaves the two readers free to disagree about which entry of the pair wins
+/// — but not to lose the other one. `ciborium` models a map as a list of pairs
+/// and hands back both, so a Rust reader can see this shape (SPEC.md,
+/// Interoperability, the duplicate-key row and the Duplicate keys paragraphs
+/// that close that section), and seeing it means preserving it.
+///
+/// Every getter here is a first-match search, so the field takes the first
+/// entry. The second used to be dropped along with it, because the store was
+/// filtered by key *name*: a value the file carried reached neither the field
+/// nor the store, and reading the file deleted it.
+#[test]
+fn a_duplicate_key_on_input_keeps_the_entry_no_field_took() {
+    let event = TraceEvent::try_from(cbor_map(&[
+        ("n", uint(0)),
+        ("t", uint(100)),
+        ("e", uint(1)),
+        ("sid", uint(4)),
+        ("sid", uint(9)),
+        ("d", uint(1)),
+        ("st", uint(0)),
+    ]))
+    .expect("a duplicate key is not a malformed event");
+
+    assert!(
+        matches!(event.data, EventData::StreamOpened { stream_id: 4, .. }),
+        "the field took the wrong entry"
+    );
+    assert_eq!(
+        event.extra,
+        vec![(text("sid"), uint(9))],
+        "the entry no field took was deleted by reading the file"
+    );
+
+    // Written once all the same: keeping the loser must not produce a map that
+    // carries `"sid"` twice.
+    let out = written(&event);
+    assert_eq!(key_count(&out, "sid"), 1, "'sid' is written twice");
+    assert_eq!(key_of(&out, "sid"), Some(uint(4)));
+
+    // And a fixed point from there: one entry is the most a conformant writer
+    // may emit, and reading that back leaves nothing over.
+    assert!(roundtrip(&event).extra.is_empty());
+}
+
+/// The same on one of the three keys every event carries, where the first
+/// entry is the one the field took whatever the rest hold.
+#[test]
+fn a_duplicate_common_key_on_input_keeps_the_entry_no_field_took() {
+    let event = TraceEvent::try_from(cbor_map(&[
+        ("n", uint(0)),
+        ("n", uint(5)),
+        ("t", uint(100)),
+        ("e", uint(2)),
+        ("sid", uint(4)),
+        ("ec", uint(0)),
+    ]))
+    .expect("a duplicate key is not a malformed event");
+
+    assert_eq!(event.seq, 0, "the field took the wrong entry");
+    assert_eq!(
+        event.extra,
+        vec![(text("n"), uint(5))],
+        "the entry no field took was deleted by reading the file"
+    );
+
+    let out = written(&event);
+    assert_eq!(key_count(&out, "n"), 1, "'n' is written twice");
+    assert_eq!(key_of(&out, "n"), Some(uint(0)));
+    assert!(roundtrip(&event).extra.is_empty());
+}
+
+/// `"p"` is the one common key that is optional, so it is the one whose
+/// presence in the store means two different things: a value this reader could
+/// not use, and — here — a second entry for a key the field already took.
+#[test]
+fn a_duplicate_peer_key_keeps_the_entry_no_field_took() {
+    let event = TraceEvent::try_from(cbor_map(&[
+        ("n", uint(0)),
+        ("t", uint(100)),
+        ("e", uint(2)),
+        ("p", text("relay-a")),
+        ("p", text("relay-b")),
+        ("sid", uint(4)),
+        ("ec", uint(0)),
+    ]))
+    .expect("a duplicate key is not a malformed event");
+
+    assert_eq!(event.peer.as_deref(), Some("relay-a"), "the field took the wrong entry");
+    assert_eq!(
+        event.extra,
+        vec![(text("p"), text("relay-b"))],
+        "the entry no field took was deleted by reading the file"
+    );
+
+    let out = written(&event);
+    assert_eq!(key_count(&out, "p"), 1, "'p' is written twice");
+    assert_eq!(key_of(&out, "p"), Some(text("relay-a")));
+    assert!(roundtrip(&event).extra.is_empty());
+}
+
+/// An unknown event type builds its `fields` the same way and had the same
+/// defect. Such an event collects nothing into `extra`, so `fields` is the
+/// only place an entry no common field took can land.
+#[test]
+fn a_duplicate_common_key_on_an_unknown_event_keeps_the_entry_no_field_took() {
+    let event = TraceEvent::try_from(cbor_map(&[
+        ("n", uint(0)),
+        ("n", uint(5)),
+        ("t", uint(100)),
+        ("e", uint(99)),
+    ]))
+    .expect("a duplicate key is not a malformed event");
+
+    assert_eq!(event.seq, 0, "the field took the wrong entry");
+    let fields = match &event.data {
+        EventData::Unknown { event_type: 99, fields } => fields.clone(),
+        other => panic!("not an unknown event 99: {other:?}"),
+    };
+    assert_eq!(
+        fields,
+        vec![(text("n"), uint(5))],
+        "the entry no field took was deleted by reading the file"
+    );
+    assert!(event.extra.is_empty(), "an unknown event type does not also fill 'extra'");
+
+    let out = written(&event);
+    assert_eq!(key_count(&out, "n"), 1, "'n' is written twice");
+    assert_eq!(key_of(&out, "n"), Some(uint(0)));
+
+    let read_back = roundtrip(&event);
+    let read_back_fields = match &read_back.data {
+        EventData::Unknown { fields, .. } => fields.clone(),
+        other => panic!("not an unknown event: {other:?}"),
+    };
+    assert!(read_back_fields.is_empty(), "the rewrite is not a fixed point");
+}
+
+/// A field list is an ordered list of pairs rather than a map, so a caller can
+/// put a common key in one by hand — and a file that repeats `"n"` now leaves
+/// one there too. The event writes `"n"` from `seq`, so the entry is dropped
+/// on the way out rather than putting that key in the map twice.
+#[test]
+fn an_unknown_events_fields_never_displace_a_common_key() {
+    let event = TraceEvent::new(
+        0,
+        100,
+        EventData::Unknown {
+            event_type: 99,
+            fields: vec![(text("n"), uint(5)), (text("note"), text("kept"))],
+        },
+    );
+
+    let out = written(&event);
+    assert_eq!(key_count(&out, "n"), 1, "'n' is written twice");
+    assert_eq!(key_of(&out, "n"), Some(uint(0)));
+    assert_eq!(key_of(&out, "note"), Some(text("kept")), "an unrelated field was dropped");
+}
+
+/// A key the event type defines whose value no field could use is not a key
+/// the event *writes*, so neither entry of a repeated one is the entry a field
+/// took and both stay. This guards the walk against being written against the
+/// event type's vocabulary rather than against what it wrote.
+///
+/// Not load-bearing for the duplicate fix: filtering by key name kept both
+/// entries here too, because the name filter asked the same question.
+#[test]
+fn a_repeated_key_no_field_could_use_keeps_both_entries() {
+    let event = TraceEvent::try_from(cbor_map(&[
+        ("n", uint(0)),
+        ("t", uint(100)),
+        ("e", uint(1)),
+        ("sid", uint(4)),
+        ("d", uint(1)),
+        ("st", uint(0)),
+        ("ta", text("not an integer")),
+        ("ta", text("nor is this")),
+    ]))
+    .expect("an unusable 'ta' is not a malformed event");
+
+    assert!(
+        matches!(event.data, EventData::StreamOpened { track_alias: None, .. }),
+        "'ta' was not usable and must have stayed empty"
+    );
+    assert_eq!(
+        event.extra,
+        vec![(text("ta"), text("not an integer")), (text("ta"), text("nor is this"))]
+    );
+
+    // One of them on the way out, like any other pair of entries sharing a key.
+    let out = written(&event);
+    assert_eq!(key_count(&out, "ta"), 1, "'ta' is written twice");
+    assert_eq!(key_of(&out, "ta"), Some(text("not an integer")), "the later entry won");
+}

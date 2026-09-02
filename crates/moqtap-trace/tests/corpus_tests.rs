@@ -393,6 +393,190 @@ fn an_unrecognised_key_on_a_known_event_survives_a_round_trip() {
     assert_eq!(rewritten, segments);
 }
 
+/// The three stream-header identifiers on a `headers`-level trace, on both
+/// files of the case.
+///
+/// The case shipped with §2 and, for a session, no test named it — so its
+/// documented claims were asserted nowhere and it could have decoded to
+/// anything without a corpus test noticing. A fixture nothing names is a file,
+/// not a check.
+///
+/// `detail: "headers"` records no payload and no data-stream framing bytes, so
+/// these keys are the only thing in the file that says which track a stream
+/// carried. All three streams share one alias deliberately: that is legal and
+/// ordinary — one track delivered as a subgroup, a fetch and a datagram — and
+/// it is why the alias alone cannot key a flow.
+#[test]
+fn a_headers_level_trace_groups_three_streams_that_share_a_track_alias() {
+    let Some(root) = root() else { return };
+
+    for file in ["js.moqtrace", "rust.moqtrace"] {
+        let (segments, _) = read_segments(&case_bytes(&root, "v2-headers-level-flow", file));
+        assert_eq!(segments[0].header.detail.as_str(), "headers", "{file}");
+
+        let opened: Vec<_> = segments[0]
+            .events
+            .iter()
+            .filter_map(|e| match &e.data {
+                EventData::StreamOpened {
+                    track_alias,
+                    subgroup_id,
+                    fetch_request_id,
+                    group_id,
+                    ..
+                } => Some((*track_alias, *subgroup_id, *fetch_request_id, *group_id)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(opened.len(), 3, "{file}: three streams");
+
+        // One alias across all three, and one discriminating key each — never
+        // the other two. A reader that dropped any of them would leave three
+        // streams of one alias that nothing in the file could tell apart,
+        // which is most of what this detail level is for.
+        assert_eq!(
+            opened,
+            vec![
+                (Some(9), Some(2), None, None),
+                (Some(9), None, Some(42), None),
+                // Past 2^32, where the integer-not-float rule bites.
+                (Some(9), None, None, Some(4_294_967_296)),
+            ],
+            "{file}"
+        );
+    }
+}
+
+/// The value a store holds under a text key, or `None`.
+fn stored<'a>(store: &'a [(Value, Value)], key: &str) -> Option<&'a Value> {
+    store.iter().find(|(k, _)| k.as_text() == Some(key)).map(|(_, v)| v)
+}
+
+/// The three unrecognised-key stores in the header, on both files of the case.
+///
+/// Every other file in the corpus carries its unrecognised keys on *events*, so
+/// until `v2-header-extra` existed the header's three stores could have been
+/// deleted outright with this file's round-trip test still green: that test
+/// reads what this crate wrote, and an encoder emitting no store agrees with a
+/// decoder reading none. Reading the same claims off `js.moqtrace` — written by
+/// an implementation that shares no code with this one — is what makes them
+/// checked rather than assumed.
+///
+/// Run against both files deliberately. On `js.moqtrace` the assertions say
+/// this crate reads what the other one wrote; on `rust.moqtrace` they say this
+/// crate's *writer* put the values where SPEC.md requires, in the encoding it
+/// requires — which is the half a decode-of-my-own-encode test cannot see.
+#[test]
+fn the_headers_three_stores_stay_separate_and_survive_a_round_trip() {
+    let Some(root) = root() else { return };
+
+    for file in ["js.moqtrace", "rust.moqtrace"] {
+        let (segments, _) = read_segments(&case_bytes(&root, "v2-header-extra", file));
+        let header = &segments[0].header;
+        let segment = header.segment.as_ref().unwrap_or_else(|| panic!("{file}: no segment map"));
+        let sampling =
+            header.sampling.as_ref().unwrap_or_else(|| panic!("{file}: no sampling map"));
+
+        // One key name, three maps, three values. A reader that merged the
+        // stores into one would emit the segment's private key at the top
+        // level, and the file would then say something it never said. Nothing
+        // else in the corpus can tell the three apart.
+        let scope = |store: &[(Value, Value)]| stored(store, "x-scope").cloned();
+        assert_eq!(scope(&header.extra), Some(Value::Text("header".into())), "{file}: header");
+        assert_eq!(scope(&segment.extra), Some(Value::Text("segment".into())), "{file}: segment");
+        assert_eq!(
+            scope(&sampling.extra),
+            Some(Value::Text("sampling".into())),
+            "{file}: sampling"
+        );
+
+        // Structural, not shallow: a copy that kept only the top level passes
+        // every flat assertion here and loses this one.
+        assert_eq!(
+            stored(&header.extra, "x-tree"),
+            Some(&Value::Map(vec![
+                (
+                    Value::Text("list".into()),
+                    Value::Array(vec![Value::Integer(1.into()), Value::Text("two".into())])
+                ),
+                (Value::Text("blob".into()), Value::Bytes(vec![0x0f, 0xf0])),
+                (Value::Text("gap".into()), Value::Null),
+            ])),
+            "{file}: the nested stored value"
+        );
+
+        // A key this format defines, carrying a value no reader can use. The
+        // field reads `None` and the entry is kept — knowing more about a key
+        // must not mean preserving it less.
+        assert_eq!(header.transport, None, "{file}: 42 is not a transport");
+        assert_eq!(
+            stored(&header.extra, "transport"),
+            Some(&Value::Integer(42.into())),
+            "{file}: the wrong-typed defined key"
+        );
+
+        // SPEC.md's two encoding rules reach into a store, so both writers emit
+        // the same bytes for these two entries however each holds them. This
+        // crate's case builds `x-scale` as a `Value::Float` and `x-blob` under
+        // RFC 8746's tag 64; `cbor-x` can represent neither distinction, so a
+        // file still carrying one is a file only this crate could have written.
+        assert_eq!(
+            stored(&sampling.extra, "x-scale"),
+            Some(&Value::Integer(1.into())),
+            "{file}: an integral float in a store is written as an integer"
+        );
+        assert_eq!(
+            stored(&segment.extra, "x-blob"),
+            Some(&Value::Bytes(vec![0xca, 0xfe])),
+            "{file}: a tag-64 byte string in a store is written as major type 2"
+        );
+
+        // Every unrecognised key in this file is in the header, so a store on
+        // an event is a reader putting one where it does not belong.
+        assert!(
+            segments[0].events.iter().all(|event| event.extra.is_empty()),
+            "{file}: an event carries a store this case never wrote"
+        );
+
+        // The round trip is the redaction pass, the filter, the annotated
+        // download — and it is a fixed point, not merely lossless once.
+        let (rewritten, _) = read_segments(&write_segments(&segments));
+        assert_eq!(rewritten, segments, "{file}: round trip");
+    }
+}
+
+/// `rust.moqtrace` is what this crate's writer produces from the case today.
+///
+/// The assertions above read files, and every value in them has already been
+/// through a writer once: the committed bytes carry the CBOR integer and the
+/// bare byte string whatever the writer would do with the float and the tag it
+/// was handed. Delete the normalisation from the store serializer and every one
+/// of them stays green until somebody regenerates the corpus — which is the
+/// same decode-of-my-own-encode shape one level out, with the encode cached on
+/// disk. This is the assertion that reads the *writer*.
+///
+/// It is written for this case alone because this is the only case whose
+/// fixture and file differ: [`corpus::v2_header_extra`] holds a
+/// [`Value::Float`] and a tag-64 byte string in its stores, SPEC.md requires
+/// both to be written in another encoding, and nothing else in the corpus asks
+/// a writer to change anything on the way out. A failure here means the
+/// committed file no longer matches the case — regenerate it with
+/// `cargo run -p moqtap-trace --example generate_corpus`, and rerun
+/// `manifest.ts` — or that the store serializer stopped honouring the two
+/// encoding rules.
+#[test]
+fn the_header_extra_file_is_what_the_writer_emits_for_the_case() {
+    let Some(root) = root() else { return };
+    let case = corpus::v2_header_extra();
+    let written = write_segments(&[Segment { header: case.header, events: case.events }]);
+
+    assert_eq!(
+        written,
+        case_bytes(&root, "v2-header-extra", "rust.moqtrace"),
+        "v2-header-extra/rust.moqtrace is not what this writer emits for the case"
+    );
+}
+
 /// An unknown event type keeps every non-common key in
 /// [`EventData::Unknown::fields`]. Collecting them into `extra` as well writes
 /// each one twice and yields a CBOR map with duplicate keys — which is what

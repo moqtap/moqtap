@@ -28,10 +28,43 @@
 //! matching on one needs a wildcard arm, and gains a variant without breaking
 //! you.
 //!
-//! All three are kept rather than skipped because reading and writing a trace
+//! The header keeps its keys the same way, in three stores rather than one:
+//! [`TraceHeader::extra`](header::TraceHeader::extra),
+//! [`SegmentInfo::extra`](header::SegmentInfo::extra) and
+//! [`SamplingInfo::extra`](header::SamplingInfo::extra). Each map keeps its
+//! own, because a private key on `"segment"` and a key of the same name at the
+//! top level are different keys. `"custom"` needs no store: every key in it
+//! belongs to whoever wrote the trace, so it is handed back as it was found.
+//!
+//! All of it is kept rather than skipped because reading and writing a trace
 //! back out is a normal thing to do to one — a redaction pass, a filter, a
 //! re-segmentation — and a reader that drops what it did not recognise makes
 //! its own ignorance permanent for every reader downstream of it.
+//!
+//! ## The one shape that does not survive
+//!
+//! CBOR `undefined` (major type 7, value 23 — the byte `0xf7`) reaches this
+//! crate as `null` and is written back as `0xf6`. [`ciborium::Value`] has no
+//! variant for it: ciborium's deserializer routes both `undefined` and `null`
+//! through `visit_none`, so the two arrive identical and a store holds
+//! [`Value::Null`] for either. Nothing above the decoder can tell them apart,
+//! so nothing above it can preserve the difference or report it — seeing it
+//! at all would mean decoding at the `ciborium-ll` layer against a value
+//! model of this crate's own.
+//!
+//! SPEC.md puts that case where it belongs: where a reader cannot observe a
+//! normalisation, the reader is not non-conformant and nothing may depend on
+//! the outcome. `undefined` carries no meaning this format defines and no
+//! conformant writer emits it. The two shapes a decoder folds away that this
+//! crate *can* still act on — an integral float, and a byte string under
+//! RFC 8746's tag 64 — it acts on where the rules apply, at the writer, and
+//! in every value it emits that came out of a file rather than out of a typed
+//! field: the header's three stores and `"custom"`, and on an event
+//! [`TraceEvent::extra`](event::TraceEvent::extra), a control message's
+//! `"msg"`, an annotation's `"data"` and an unknown event type's fields. See
+//! [`TraceHeader::extra`](header::TraceHeader::extra) for what the rules are
+//! and why a reader that preserved either shape all the way out would put the
+//! two implementations back to writing different bytes for one trace.
 //!
 //! # Modules
 //!

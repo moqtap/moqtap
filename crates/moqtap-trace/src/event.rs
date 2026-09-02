@@ -1,7 +1,7 @@
 use ciborium::Value;
 
 use crate::error::MoqTraceError;
-use crate::header::{as_i64, as_u64};
+use crate::header::{as_i64, as_u64, normalised, store_entries, unrecognised};
 
 /// Direction of a message or stream relative to the recording endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +251,27 @@ pub struct TraceEvent {
     /// cannot name. This is the same guarantee one level down, for a key on a
     /// type it can.
     ///
+    /// Unchanged binds the value and not its encoding, exactly as it does for
+    /// [`TraceHeader::extra`](crate::header::TraceHeader::extra): on the way
+    /// out an integral float in a stored value is written as a CBOR integer
+    /// and a byte string under RFC 8746's tag 64 as major type 2, at any
+    /// depth. SPEC.md's two encoding rules are about every byte a writer
+    /// emits rather than only the keys it understood, and the JavaScript
+    /// implementation's decoder folds both shapes away before its own code
+    /// runs, so it could not emit either however hard it tried. Nothing a
+    /// comparison of the two values can see changes, with the single
+    /// exception SPEC.md names: `-0.0` written as `0` loses its sign.
+    ///
+    /// A CBOR map may not carry one key twice, and this list can: it is an
+    /// ordered list of pairs, not a map. So on the way out an entry naming a
+    /// key the event writes from a field is dropped, and of two entries
+    /// sharing a key the first is written — as it is for a map nested inside
+    /// a stored value, which is a map this crate emits too.
+    ///
+    /// The same two passes govern the other opaque values an event carries:
+    /// a control message's `"msg"`, an annotation's `"data"` and an
+    /// [`EventData::Unknown`]'s fields.
+    ///
     /// Empty for every event this crate constructs itself.
     pub extra: Vec<(Value, Value)>,
 }
@@ -276,6 +297,11 @@ pub enum EventData {
         /// not a reason to reject an event the format forbids dropping — and
         /// is written back unchanged, because replacing it would destroy the
         /// only record of a message nobody will see again.
+        ///
+        /// Unchanged binds what the value says and not how it is encoded.
+        /// This is a value the reader never looked at, so the two encoding
+        /// rules reach it on the way out like any other:
+        /// [`TraceEvent::extra`] has the whole of it.
         message: Value,
         /// QUIC stream the message travelled on, when the recorder knows it.
         ///
@@ -384,6 +410,10 @@ pub enum EventData {
         /// User-defined label.
         label: String,
         /// User-defined data (any CBOR type).
+        ///
+        /// Opaque: nothing here reads it, and it is written back saying what
+        /// it said. Its encoding is the writer's, though — see
+        /// [`TraceEvent::extra`].
         data: Value,
     },
     /// A new peer session was established (event type 8).
@@ -456,7 +486,9 @@ pub enum EventData {
     /// New event types may be added without a format version bump, so a
     /// reader that rejected them would turn every future addition into a
     /// breaking change. The fields are kept verbatim, which means an unknown
-    /// event survives a read-modify-write round trip intact.
+    /// event survives a read-modify-write round trip intact — intact in what
+    /// it says, since the encoding written back is this crate's own. See
+    /// [`TraceEvent::extra`].
     Unknown {
         /// The event type discriminant that was read.
         event_type: u64,
@@ -604,6 +636,45 @@ impl serde::Serialize for TraceEvent {
     fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
 
+        // Every value an event carries out of a file rather than out of a
+        // typed field goes out through `normalised`: an unknown event type's
+        // fields and the store here, a control message's `"msg"` and an
+        // annotation's `"data"` below. The two encoding rules bind the bytes a
+        // writer emits and so bind every value it emits, the ones it never
+        // looked at included — SPEC.md, Interoperability. A typed field needs
+        // none of this and gets none: `"raw"`, `"pl"`, `"traceId"`, `"tn"` and
+        // every field of `"ns"` are `Vec<u8>` by the time they reach here and
+        // go out as major type 2 by construction, and every integer field goes
+        // out as a CBOR integer for the same reason.
+        //
+        // Filtered against the common fields on the way out, the same way the
+        // store below is filtered against every field the event writes: an
+        // unknown event type writes `"n"`, `"t"`, `"e"` and `"p"` from the
+        // common fields, so an entry here naming one of those is dropped
+        // rather than putting that key in the map twice. A caller can put one
+        // in this list by hand, and a file that repeated a common key leaves
+        // one here too — that is where the entry `seq` did not take now lives.
+        let unknown_fields = match &self.data {
+            EventData::Unknown { fields, .. } => {
+                store_entries(fields, |key| writes_common_key(self.peer.as_deref(), key))
+            }
+            _ => Vec::new(),
+        };
+
+        // A key this event writes from one of its own fields is written from
+        // there, so an `extra` entry naming it is dropped rather than written
+        // twice: a CBOR map with a duplicate key is malformed, and the field
+        // is what a reader produced. A key the type merely *defines* is not
+        // one of those — an optional field holding `None` writes nothing, and
+        // the entry here is then a value the decode could not use, which has
+        // to go back out.
+        //
+        // The same pass the header's stores go through, for the same three
+        // reasons: the filter above, the encoding rules, and no key twice.
+        let extra = store_entries(&self.extra, |key| {
+            writes_common_key(self.peer.as_deref(), key) || writes_variant_key(&self.data, key)
+        });
+
         // Pre-count entries so the CBOR map is encoded with a definite length.
         let variant_entries = match &self.data {
             EventData::ControlMessage { stream_id, raw, .. } => {
@@ -652,28 +723,13 @@ impl serde::Serialize for TraceEvent {
                     + usize::from(t_upstream_ok_received.is_some())
                     + usize::from(t_downstream_ok_sent.is_some())
             }
-            EventData::Unknown { fields, .. } => fields.len(),
-        };
-        // A key this event writes from one of its own fields is written from
-        // there, so an `extra` entry naming it is dropped rather than written
-        // twice: a CBOR map with a duplicate key is malformed, and the field
-        // is what a reader produced. A key the type merely *defines* is not
-        // one of those — an optional field holding `None` writes nothing, and
-        // the entry here is then a value the decode could not use, which has
-        // to go back out.
-        let extra = || {
-            self.extra.iter().filter(move |(k, _)| {
-                !k.as_text().is_some_and(|key| {
-                    writes_common_key(self.peer.as_deref(), key)
-                        || writes_variant_key(&self.data, key)
-                })
-            })
+            EventData::Unknown { .. } => unknown_fields.len(),
         };
 
         let entries = 3 /* n, t, e */
             + usize::from(self.peer.is_some())
             + variant_entries
-            + extra().count();
+            + extra.len();
 
         let mut map = ser.serialize_map(Some(entries))?;
         map.serialize_entry("n", &self.seq)?;
@@ -687,7 +743,7 @@ impl serde::Serialize for TraceEvent {
                 map.serialize_entry("e", &EVENT_CONTROL_MESSAGE)?;
                 map.serialize_entry("d", &direction.to_u64())?;
                 map.serialize_entry("mt", message_type)?;
-                map.serialize_entry("msg", message)?;
+                map.serialize_entry("msg", &normalised(message))?;
                 if let Some(sid) = stream_id {
                     map.serialize_entry("sid", sid)?;
                 }
@@ -763,7 +819,7 @@ impl serde::Serialize for TraceEvent {
             EventData::Annotation { label, data } => {
                 map.serialize_entry("e", &EVENT_ANNOTATION)?;
                 map.serialize_entry("label", label)?;
-                map.serialize_entry("data", data)?;
+                map.serialize_entry("data", &normalised(data))?;
             }
             EventData::PeerConnected { endpoint, transport, role, side } => {
                 map.serialize_entry("e", &EVENT_PEER_CONNECTED)?;
@@ -829,9 +885,9 @@ impl serde::Serialize for TraceEvent {
                     map.serialize_entry("tdo", t)?;
                 }
             }
-            EventData::Unknown { event_type, fields } => {
+            EventData::Unknown { event_type, .. } => {
                 map.serialize_entry("e", event_type)?;
-                for (k, v) in fields {
+                for (k, v) in &unknown_fields {
                     map.serialize_entry(k, v)?;
                 }
             }
@@ -839,7 +895,7 @@ impl serde::Serialize for TraceEvent {
 
         // Last, so the event's own keys keep the positions a reader expects
         // and the file stays diffable against one written without them.
-        for (k, v) in extra() {
+        for (k, v) in &extra {
             map.serialize_entry(k, v)?;
         }
 
@@ -1104,24 +1160,24 @@ fn writes_variant_key(data: &EventData, key: &str) -> bool {
     }
 }
 
-/// Every key on `pairs` that the event decoded from it does not write back out
-/// of a field of its own: a key this crate has never heard of, and a key it
-/// knows whose value it could not use.
+/// Every entry on `pairs` that the event decoded from it does not write back
+/// out of a field of its own. See [`unrecognised`], which the header uses for
+/// the same reason.
+///
+/// One difference from the header's use of it is worth naming, because it
+/// decides *which* entry of a duplicate pair survives. A getter here searches
+/// for the first entry it can **use**, where the header's lookup returns the
+/// first entry for a key whatever it holds. So on a file repeating a key with
+/// two different types — `"sid": "x"` and then `"sid": 9` — the field takes
+/// the second and the walk drops the first. Both were lost before this walk
+/// existed, and SPEC.md leaves readers free to disagree over which of a
+/// duplicate pair wins, so nothing may depend on which one it is.
 fn unrecognised_keys(
     pairs: &[(Value, Value)],
     peer: Option<&str>,
     data: &EventData,
 ) -> Vec<(Value, Value)> {
-    pairs
-        .iter()
-        .filter(|(k, _)| match k.as_text() {
-            Some(key) => !writes_common_key(peer, key) && !writes_variant_key(data, key),
-            // A non-text map key is not one this format defines, so it is
-            // unrecognised by construction.
-            None => true,
-        })
-        .cloned()
-        .collect()
+    unrecognised(pairs, |key| writes_common_key(peer, key) || writes_variant_key(data, key))
 }
 
 impl TryFrom<Value> for TraceEvent {
@@ -1237,13 +1293,14 @@ impl TryFrom<Value> for TraceEvent {
             }
             other => EventData::Unknown {
                 event_type: other,
-                fields: pairs
-                    .iter()
-                    .filter(|(k, _)| {
-                        !k.as_text().is_some_and(|s| writes_common_key(peer.as_deref(), s))
-                    })
-                    .cloned()
-                    .collect(),
+                // The same walk `unrecognised_keys` does, with only the common
+                // fields to ask about: an unknown event type writes every
+                // other key straight back out of here. It had the same defect
+                // for the same reason — a repeated `"n"` was filtered out by
+                // name, so the entry `seq` did not take reached neither — and
+                // this variant collects nothing into `extra`, which makes
+                // `fields` the only place such an entry can land.
+                fields: unrecognised(&pairs, |key| writes_common_key(peer.as_deref(), key)),
             },
         };
 

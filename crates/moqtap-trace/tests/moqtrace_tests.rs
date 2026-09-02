@@ -150,10 +150,10 @@ fn header_with_all_optional_fields() {
     header.endpoint = Some("https://relay.example.com/moq".into());
     header.session_id = Some("abc-123".into());
     header.segment = Some(SegmentInfo {
-        sequence: 3,
         duration_ms: Some(1000),
         stream_id: Some("stream-9".into()),
         continues: Some(true),
+        ..SegmentInfo::new(3)
     });
     header.sampling = Some(SamplingInfo {
         effective_rate: Some(0.5),
@@ -164,6 +164,7 @@ fn header_with_all_optional_fields() {
         rule: Some("namespace prefix=foo/bar".into()),
         rule_lang: Some("prefix".into()),
         applies_to: Some(vec![3, 4]),
+        ..SamplingInfo::default()
     });
     header.custom = Some(custom);
 
@@ -260,10 +261,10 @@ fn segment_header(sequence: u64) -> TraceHeader {
     let mut header = sample_header();
     header.start_time = 1_700_000_000_000 + sequence * 1000;
     header.segment = Some(SegmentInfo {
-        sequence,
         duration_ms: Some(1000),
         stream_id: Some("stream-1".into()),
         continues: Some(sequence > 0),
+        ..SegmentInfo::new(sequence)
     });
     header
 }
@@ -441,6 +442,167 @@ fn resync_returns_none_when_no_segment_follows() {
     let buf = write_trace(&sample_header(), &sample_events());
     let mut reader = MoqTraceReader::new(Cursor::new(&buf)).unwrap();
     assert!(reader.resync_to_next_segment().unwrap().is_none());
+}
+
+// ── a segment header the reader cannot build ───────────────
+
+/// A header carrying a marker in its store, so the segment an event was
+/// attributed to can be named in a failure rather than inferred.
+fn marked_segment_header(sequence: u64, marker: &str) -> TraceHeader {
+    let mut header = segment_header(sequence);
+    header.extra = vec![(Value::Text("x-h".into()), Value::Text(marker.into()))];
+    header
+}
+
+fn marker_of(header: &TraceHeader) -> String {
+    header
+        .extra
+        .iter()
+        .find(|(k, _)| k.as_text() == Some("x-h"))
+        .and_then(|(_, v)| v.as_text())
+        .unwrap_or("<none>")
+        .to_string()
+}
+
+fn label_of(event: &TraceEvent) -> String {
+    match &event.data {
+        EventData::Annotation { label, .. } => label.clone(),
+        other => panic!("expected an annotation, got {other:?}"),
+    }
+}
+
+fn annotation(label: &str) -> TraceEvent {
+    TraceEvent::new(0, 0, EventData::Annotation { label: label.into(), data: Value::Null })
+}
+
+/// Three segments, of which the middle one's header has no readable
+/// `"sequence"`.
+///
+/// The key is renamed in place — one byte, `"sequence"` to `"sequencX"` — so
+/// the preamble still declares the length it has, the header is still valid
+/// CBOR, and the only thing wrong with it is the one thing SPEC.md makes fatal
+/// on a segment. That is the shape a reader meets in the wild: a header it can
+/// decode and cannot use.
+fn three_segments_with_a_malformed_middle_header() -> Vec<u8> {
+    let mut buf = Vec::new();
+    let mut writer = MoqTraceWriter::new(&mut buf, &marked_segment_header(0, "A")).unwrap();
+    writer.write_event(&annotation("seg0-ev0")).unwrap();
+    writer.start_segment(&marked_segment_header(1, "B")).unwrap();
+    writer.write_event(&annotation("seg1-ev0")).unwrap();
+    writer.start_segment(&marked_segment_header(2, "C")).unwrap();
+    writer.write_event(&annotation("seg2-ev0")).unwrap();
+    writer.flush().unwrap();
+    drop(writer);
+
+    let mut key = vec![0x68u8]; // CBOR text(8)
+    key.extend_from_slice(b"sequence");
+    let second = buf
+        .windows(key.len())
+        .enumerate()
+        .filter(|(_, window)| *window == key.as_slice())
+        .map(|(at, _)| at)
+        .nth(1)
+        .expect("three segment headers, three 'sequence' keys");
+    buf[second + 8] = b'X';
+    buf
+}
+
+/// The reader must not read on from where a bad preamble left it. The preamble
+/// is consumed before the header is built, so the stream is parked on the
+/// *next* segment's events with no header for them — and decoding them there
+/// leaves the previous segment's header standing, which presents a segment
+/// SPEC.md says must not be presented as read, under a header the file never
+/// gave it.
+///
+/// It is worse than a wrong label. `"n"` and `"t"` are segment-local and
+/// global order is `(segment.sequence, n)`, so every event recovered that way
+/// is also misordered, with nothing in the returned values to say so.
+#[test]
+fn a_malformed_segment_header_does_not_hand_its_events_to_the_previous_segment() {
+    let buf = three_segments_with_a_malformed_middle_header();
+    let mut reader = MoqTraceReader::new(Cursor::new(&buf)).unwrap();
+
+    let first = reader.read_next().unwrap().expect("segment 0's event");
+    let ReadItem::Event(event) = first else { panic!("expected an event, got {first:?}") };
+    assert_eq!(label_of(&event), "seg0-ev0");
+    assert_eq!(marker_of(reader.header()), "A");
+
+    // Reported, exactly once, and naming the fault.
+    let err = reader.read_next().unwrap_err();
+    let MoqTraceError::InvalidHeader(message) = &err else { panic!("got {err:?}") };
+    assert!(message.contains("segment.sequence"), "the error should name the key, got: {message}");
+
+    // What comes next is the segment after the fault — not segment 1's event
+    // under segment 0's header.
+    let next = reader.read_next().unwrap().expect("segment 2");
+    let ReadItem::Segment(header) = next else { panic!("expected a segment, got {next:?}") };
+    assert_eq!(marker_of(&header), "C");
+    assert_eq!(header.segment.as_ref().unwrap().sequence, 2);
+
+    let last = reader.read_next().unwrap().expect("segment 2's event");
+    let ReadItem::Event(event) = last else { panic!("expected an event, got {last:?}") };
+    assert_eq!(label_of(&event), "seg2-ev0");
+    assert_eq!(marker_of(reader.header()), "C");
+
+    assert!(reader.read_next().unwrap().is_none(), "the stream should end cleanly");
+}
+
+/// The caller this cost the most: one that keeps the `Ok`s and drops the
+/// errors sees no fault at all, so a mis-attributed event reaches it looking
+/// exactly like a good one. It gets the segments it can trust and none of the
+/// events from the segment it cannot.
+#[test]
+fn skipping_the_errors_yields_no_event_under_the_wrong_header() {
+    let buf = three_segments_with_a_malformed_middle_header();
+    let reader = MoqTraceReader::new(Cursor::new(&buf)).unwrap();
+
+    let mut iterator = reader.into_event_iter();
+    let mut attributed: Vec<(String, String)> = Vec::new();
+    loop {
+        match iterator.next() {
+            None => break,
+            Some(Ok(event)) => attributed.push((label_of(&event), marker_of(iterator.header()))),
+            Some(Err(_)) => continue,
+        }
+    }
+
+    assert_eq!(
+        attributed,
+        vec![("seg0-ev0".to_string(), "A".to_string()), ("seg2-ev0".to_string(), "C".to_string()),],
+        "an event was attributed to a segment it did not come from"
+    );
+}
+
+/// The error is not sticky, and the recovery is not silent: `collect` into a
+/// `Result` — the idiom this crate's own tests use — still stops at the fault
+/// rather than skipping it, so the segment lost is reported to the one caller
+/// that asked to be told.
+#[test]
+fn a_malformed_segment_header_still_stops_a_collect_into_a_result() {
+    let buf = three_segments_with_a_malformed_middle_header();
+    let reader = MoqTraceReader::new(Cursor::new(&buf)).unwrap();
+
+    let result: Result<Vec<TraceEvent>, MoqTraceError> = reader.into_iter().collect();
+    let err = result.unwrap_err();
+    assert!(matches!(err, MoqTraceError::InvalidHeader(_)), "got {err:?}");
+}
+
+/// The explicit recovery path has the same hole and the same fix: a resync
+/// that lands on a header it cannot build must not leave that segment's events
+/// readable under the header it was holding.
+#[test]
+fn a_resync_onto_a_malformed_header_does_not_attribute_its_events_either() {
+    let buf = three_segments_with_a_malformed_middle_header();
+    let mut reader = MoqTraceReader::new(Cursor::new(&buf)).unwrap();
+
+    // Resync from the very start: the first preamble it finds is segment 1's,
+    // the malformed one.
+    let err = reader.resync_to_next_segment().unwrap_err();
+    assert!(matches!(err, MoqTraceError::InvalidHeader(_)), "got {err:?}");
+
+    let next = reader.read_next().unwrap().expect("segment 2");
+    let ReadItem::Segment(header) = next else { panic!("expected a segment, got {next:?}") };
+    assert_eq!(marker_of(&header), "C");
 }
 
 #[test]

@@ -83,6 +83,12 @@ impl<R: Read> Read for PeekReader<R> {
 }
 
 /// One item from a `.moqtrace` stream.
+// `Segment` is the larger variant by more than clippy's threshold now that a
+// header carries three unrecognised-key stores. Boxing it is the lint's
+// suggestion and is not taken: it changes the shape of a public variant every
+// caller matches on, to save moving a couple of hundred bytes on the one item
+// per segment rather than on the one per event.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReadItem {
     /// An event in the current segment.
@@ -103,6 +109,20 @@ pub struct MoqTraceReader<R: Read> {
     inner: PeekReader<R>,
     header: TraceHeader,
     version: u32,
+    /// Set when a segment header could not be built, and the stream is
+    /// therefore parked on the events of a segment there is no header for.
+    ///
+    /// Nothing may be decoded from that position under
+    /// [`header`](MoqTraceReader::header), which still describes the segment
+    /// before it: those events belong to a segment this reader could not read,
+    /// and handing them back under the previous segment's header presents that
+    /// segment as read under a header the file never gave it. Because `"n"`
+    /// and `"t"` are segment-local and global order is `(segment.sequence,
+    /// n)`, it also misorders every event so recovered, silently.
+    ///
+    /// The next read resynchronizes to the next segment instead. See
+    /// [`read_next`](MoqTraceReader::read_next).
+    faulted: bool,
 }
 
 impl<R: Read> MoqTraceReader<R> {
@@ -111,10 +131,17 @@ impl<R: Read> MoqTraceReader<R> {
     pub fn new(reader: R) -> Result<Self, MoqTraceError> {
         let mut inner = PeekReader::new(reader);
         let (version, header) = read_preamble(&mut inner)?;
-        Ok(Self { inner, header, version })
+        Ok(Self { inner, header, version, faulted: false })
     }
 
     /// The current segment's header.
+    ///
+    /// After a segment header this reader could not build — reported once by
+    /// [`read_next`](Self::read_next) — this still names the last segment that
+    /// *was* read, until the next read reaches the segment after the fault.
+    /// No event is handed back under it in the meantime, which is the property
+    /// that matters: the header a caller holds always belongs to the events it
+    /// has been given.
     pub fn header(&self) -> &TraceHeader {
         &self.header
     }
@@ -131,7 +158,40 @@ impl<R: Read> MoqTraceReader<R> {
     /// part-way through an item yields [`MoqTraceError::Truncated`] instead,
     /// which names the offset the incomplete item began at; everything
     /// returned before it stands.
+    ///
+    /// # A segment header this reader cannot build
+    ///
+    /// The error is returned once, and the segment it names is skipped whole:
+    /// the next call resynchronizes to the segment after it, exactly as
+    /// [`resync_to_next_segment`](Self::resync_to_next_segment) would, and
+    /// reports it as a [`ReadItem::Segment`] like any other.
+    ///
+    /// Reading on from where the bad preamble left off is the one thing that
+    /// must not happen. The preamble is consumed before the header is built,
+    /// so the stream is parked on the *next* segment's events with no header
+    /// for them; decoding them leaves the previous segment's header standing,
+    /// and SPEC.md is explicit that a reader "MUST report it and MUST NOT
+    /// present the segment as read". Handing back its events under the
+    /// previous header presents it as read and gets the header wrong, and
+    /// since `"n"` and `"t"` are segment-local while global order is
+    /// `(segment.sequence, n)`, every event so recovered is also misordered —
+    /// with nothing in the returned values to say so. A caller that keeps only
+    /// the `Ok`s of the iterator sees no fault at all.
+    ///
+    /// Skipping rather than refusing to go on matches the JavaScript reader's
+    /// `recover` path over the same file, and leaves both idioms honest: a
+    /// `collect::<Result<Vec<_>, _>>()` still stops at the error, and a caller
+    /// that filters errors out gets the segments it can trust and none of the
+    /// events from the one it cannot.
     pub fn read_next(&mut self) -> Result<Option<ReadItem>, MoqTraceError> {
+        if self.faulted {
+            // Reported on the call that faulted. What is left is a run of
+            // events belonging to a segment with no readable header, which
+            // ends at the next preamble or at end of file.
+            self.faulted = false;
+            return Ok(self.resync_to_next_segment()?.map(ReadItem::Segment));
+        }
+
         let peek = self.inner.peek(MOQTRACE_MAGIC.len())?;
         if peek.is_empty() {
             return Ok(None);
@@ -140,11 +200,14 @@ impl<R: Read> MoqTraceReader<R> {
         // map, and `M` (0x4d) opens a byte string.
         if peek == MOQTRACE_MAGIC.as_slice() {
             let start_offset = self.inner.count;
-            let (version, header) = read_preamble(&mut self.inner).map_err(|e| match e {
-                MoqTraceError::Io(io) if io.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    MoqTraceError::Truncated { offset: start_offset }
+            let (version, header) = read_preamble(&mut self.inner).map_err(|e| {
+                self.faulted = true;
+                match e {
+                    MoqTraceError::Io(io) if io.kind() == std::io::ErrorKind::UnexpectedEof => {
+                        MoqTraceError::Truncated { offset: start_offset }
+                    }
+                    other => other,
                 }
-                other => other,
             })?;
             self.version = version;
             self.header = header.clone();
@@ -188,7 +251,14 @@ impl<R: Read> MoqTraceReader<R> {
     /// are intact and independently parseable. Everything skipped is
     /// discarded — the bytes between the failure and the next segment are the
     /// corrupt region.
+    ///
+    /// A header this reader cannot build is one of those failures rather than
+    /// a way out of one: if the segment found here has one, the error is
+    /// returned and the segment after it is where the next read picks up.
     pub fn resync_to_next_segment(&mut self) -> Result<Option<TraceHeader>, MoqTraceError> {
+        // Whatever brought us here, this is the recovery, and it starts from
+        // the current position rather than from the fault.
+        self.faulted = false;
         let mut window: Vec<u8> = Vec::with_capacity(MOQTRACE_MAGIC.len());
         while let Some(byte) = self.inner.next_byte()? {
             if window.len() == MOQTRACE_MAGIC.len() {
@@ -197,7 +267,12 @@ impl<R: Read> MoqTraceReader<R> {
             window.push(byte);
             if window == MOQTRACE_MAGIC.as_slice() {
                 // The magic is consumed; the rest of the preamble follows.
-                let (version, header) = read_version_and_header(&mut self.inner)?;
+                let (version, header) = read_version_and_header(&mut self.inner).inspect_err(
+                    // Same fault as in `read_next`, and the same recovery: the
+                    // events after this preamble have no header of their own,
+                    // and must not be read under the one still held here.
+                    |_| self.faulted = true,
+                )?;
                 self.version = version;
                 self.header = header.clone();
                 return Ok(Some(header));

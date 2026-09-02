@@ -20,7 +20,7 @@ use moqtap_trace::event::{
     DerivationKind, Direction, EventData, PeerRole, Side, StreamType, SubscriptionRef, TraceEvent,
     TRACE_ID_LEN,
 };
-use moqtap_trace::header::{DetailLevel, Perspective, SegmentInfo, TraceHeader};
+use moqtap_trace::header::{DetailLevel, Perspective, SamplingInfo, SegmentInfo, TraceHeader};
 use moqtap_trace::Value;
 
 /// 2026-01-01T00:00:00Z.
@@ -235,10 +235,10 @@ pub fn v2_segmented() -> Vec<Case> {
             );
             header.session_id = Some("v2-segmented".into());
             header.segment = Some(SegmentInfo {
-                sequence,
                 duration_ms: Some(1000),
                 stream_id: Some("corpus-stream".into()),
                 continues: Some(sequence > 0),
+                ..SegmentInfo::new(sequence)
             });
             Case {
                 header,
@@ -606,6 +606,132 @@ pub fn v2_headers_level_flow() -> Case {
     }
 }
 
+/// The three unrecognised-key stores in the header, and the rules that reach
+/// into them.
+///
+/// Three maps here have keys the format names — the header itself,
+/// `"segment"` and `"sampling"` — and each keeps its own store. No other file
+/// in the corpus carries an unrecognised *header* key at all, so until this one
+/// existed the whole mechanism could have been deleted with every corpus test
+/// still green: a round trip checks a reader against its own encoder, and an
+/// encoder that writes no store agrees with a decoder that reads none.
+///
+/// Five claims, each of which fails differently:
+///
+/// * `"x-scope"` sits in all three maps with three different values. A reader
+///   that merged the stores emits the segment's private key at the top level,
+///   and the file then says something it never said.
+/// * `"x-tree"` is a map holding an array, a byte string and a null, because
+///   preservation has to be structural. A shallow copy passes every flat
+///   assertion and loses exactly this.
+/// * `"transport": 42` is a key this format *defines*, carrying a value no
+///   reader can use. It reaches the store through the ordinary field path —
+///   [`TraceHeader::transport`] reads `None` — which is how the wrong-typed-key
+///   rule gets exercised by a file both generators can author.
+/// * `"x-scale"` is [`Value::Float`] `1.0` and goes out as a CBOR integer.
+///   SPEC.md's encoding rules bind every value a writer emits, stored ones
+///   included; this crate held the float and wrote a float until the rule was
+///   applied to stores, and `cbor-x` cannot represent the distinction at all.
+///   It is the one value in the corpus where the two could silently disagree.
+/// * `"x-blob"` is [`Value::Tag`] 64 over a byte string, which is written as
+///   major type 2. The JavaScript decoder folds that tag away before its own
+///   code runs, so it cannot emit one whatever its store holds; unwrapping here
+///   is what keeps the two files carrying the same bytes.
+///
+/// Every genuinely-unknown key is `x-` prefixed, the range SPEC.md reserves for
+/// private use, so no future revision can claim one and turn this fixture into
+/// a test of something else — which has happened to this corpus once.
+///
+/// The header carries `"segment"` because a store needs a map to live in, and
+/// `"sampling"` for the same reason. Neither is decoration: this is the first
+/// segment of a stream that stopped after one, filtered by a source-side rule,
+/// which is what a rotating recorder's first file looks like.
+///
+/// Key order matches the JS case, so the two encodings differ only where the
+/// encoders do.
+pub fn v2_header_extra() -> Case {
+    let mut header =
+        TraceHeader::new("moq-transport-19", Perspective::Observer, DetailLevel::Full, START_TIME);
+    header.session_id = Some("v2-header-extra".into());
+    // No `transport`: the header's `"transport"` key is in the store below
+    // carrying an integer, and a field holding it as well would write the key
+    // into the map twice.
+    header.segment = Some(SegmentInfo {
+        stream_id: Some("corpus-header-extra".into()),
+        continues: Some(false),
+        extra: vec![
+            (Value::Text("x-scope".into()), Value::Text("segment".into())),
+            // Tag 64 in a store, which SPEC.md requires a writer to unwrap.
+            (
+                Value::Text("x-blob".into()),
+                Value::Tag(64, Box::new(Value::Bytes(vec![0xca, 0xfe]))),
+            ),
+        ],
+        ..SegmentInfo::new(0)
+    });
+    header.sampling = Some(SamplingInfo {
+        // Integral, so it is written as a CBOR integer — the normative rule on
+        // the one header key the format types as a float.
+        effective_rate: Some(1.0),
+        rule: Some("example/live".into()),
+        rule_lang: Some("prefix".into()),
+        applies_to: Some(vec![3, 4]),
+        extra: vec![
+            (Value::Text("x-scope".into()), Value::Text("sampling".into())),
+            // The same rule, one level further out: a float nobody looked at.
+            (Value::Text("x-scale".into()), Value::Float(1.0)),
+        ],
+        ..SamplingInfo::default()
+    });
+    header.extra = vec![
+        (Value::Text("x-scope".into()), Value::Text("header".into())),
+        (
+            Value::Text("x-tree".into()),
+            Value::Map(vec![
+                (
+                    Value::Text("list".into()),
+                    Value::Array(vec![Value::Integer(1.into()), Value::Text("two".into())]),
+                ),
+                (Value::Text("blob".into()), Value::Bytes(vec![0x0f, 0xf0])),
+                (Value::Text("gap".into()), Value::Null),
+            ]),
+        ),
+        (Value::Text("transport".into()), Value::Integer(42.into())),
+    ];
+    Case {
+        header,
+        // Deliberately storeless: every unrecognised key in this file is in the
+        // header, so a store found on an event here is a reader putting one
+        // where it does not belong.
+        events: vec![
+            TraceEvent::new(
+                0,
+                100,
+                EventData::StreamOpened {
+                    stream_id: 4,
+                    direction: Direction::Receive,
+                    stream_type: StreamType::Subgroup,
+                    track_alias: None,
+                    subgroup_id: None,
+                    fetch_request_id: None,
+                    group_id: None,
+                },
+            ),
+            TraceEvent::new(
+                1,
+                150,
+                EventData::ObjectHeader {
+                    stream_id: 4,
+                    group: 7,
+                    object: 0,
+                    publisher_priority: 128,
+                    object_status: 0,
+                },
+            ),
+        ],
+    }
+}
+
 /// Every single-segment case both implementations author, by directory name.
 pub fn authored_cases() -> Vec<(&'static str, Case)> {
     vec![
@@ -616,6 +742,7 @@ pub fn authored_cases() -> Vec<(&'static str, Case)> {
         ("v2-extra-keys", v2_extra_keys()),
         ("v2-control-msg-map", v2_control_msg_map()),
         ("v2-headers-level-flow", v2_headers_level_flow()),
+        ("v2-header-extra", v2_header_extra()),
     ]
 }
 
