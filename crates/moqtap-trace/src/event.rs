@@ -258,7 +258,17 @@ pub enum EventData {
         direction: Direction,
         /// Wire message type ID (e.g. `0x03` for SUBSCRIBE).
         message_type: u64,
-        /// Decoded message fields as an opaque CBOR value.
+        /// Decoded message fields, and **not necessarily a map**: match on it
+        /// rather than assuming, or use [`TraceEvent::request_id`].
+        ///
+        /// A *recorder* MUST write a CBOR map keyed in snake_case here, and an
+        /// empty map when it decoded nothing. A *reader* has to take what
+        /// earlier writers produced, and every `capture-*` case in the
+        /// conformance corpus holds a text rendering of the message instead.
+        /// Such a value is handed back verbatim — unaddressable by key, but
+        /// not a reason to reject an event the format forbids dropping — and
+        /// is written back unchanged, because replacing it would destroy the
+        /// only record of a message nobody will see again.
         message: Value,
         /// QUIC stream the message travelled on, when the recorder knows it.
         ///
@@ -458,12 +468,20 @@ impl TraceEvent {
     /// Extract the `request_id` from a control message's decoded `"msg"`
     /// field, if present.
     ///
-    /// Returns `None` for non-control-message events or if the `"msg"` map
-    /// does not contain a `"requestId"` key.
+    /// Returns `None` for non-control-message events, for a `"msg"` that is
+    /// not a map, and for a map that names the field something else. Drafts 07
+    /// through 10 call it `subscribe_id`, and this does not answer for them:
+    /// the two names sit on different messages with different meanings, and a
+    /// reader that wants either can ask the map itself.
+    ///
+    /// The key is `request_id`, in the snake_case the drafts use, because that
+    /// is what every writer of these files produces. It read `requestId` until
+    /// draft-20, and matched nothing — not this crate's own corpus, and not a
+    /// trace written by any other implementation.
     pub fn request_id(&self) -> Option<u64> {
         if let EventData::ControlMessage { message: Value::Map(ref pairs), .. } = self.data {
             for (k, v) in pairs {
-                if k.as_text() == Some("requestId") {
+                if k.as_text() == Some("request_id") {
                     return v.as_integer().and_then(|i| u64::try_from(i).ok());
                 }
             }
@@ -803,6 +821,32 @@ fn get_bytes(pairs: &[(Value, Value)], key: &str) -> Option<Vec<u8>> {
     pairs.iter().find_map(|(k, v)| if k.as_text() == Some(key) { as_bytes(v) } else { None })
 }
 
+/// Read a control message's decoded `"msg"` field.
+///
+/// An absent key reads as the empty map a writer should have written, not as
+/// an error. The format requires a writer with nothing decoded — an
+/// unparseable message type, or a recorder not decoding bodies at all — to
+/// emit `{}` rather than omit the key, but requires a reader to be more
+/// tolerant still, and this is why: event 0 is one of the types sampling MUST
+/// NOT drop, so refusing it over a missing `"msg"` discards exactly the events
+/// the format promises to keep.
+///
+/// How much is lost depends on how the caller drives the reader, and the worse
+/// case is the idiomatic one. [`MoqTraceReader::read_next`] returns the error,
+/// so `collect::<Result<Vec<_>, _>>()` — what this crate's own tests use —
+/// stops at the first offending event and yields none of the ones after it. A
+/// caller that skips errors and continues loses only the offending events;
+/// `moqtap trace` does that, and prints each one, so the loss was at least
+/// visible there.
+///
+/// A value that is present is kept whatever its type. Recordings predating
+/// the rule carry a text rendering of the message here — every `capture-*`
+/// case in the conformance corpus is such a file — and they stay readable,
+/// with the field simply not addressable by key.
+fn get_message(pairs: &[(Value, Value)]) -> Value {
+    get_value(pairs, "msg").unwrap_or_else(|| Value::Map(Vec::new()))
+}
+
 fn require_uint(pairs: &[(Value, Value)], key: &str) -> Result<u64, MoqTraceError> {
     get_uint(pairs, key).ok_or_else(|| MoqTraceError::InvalidEvent(format!("missing '{key}'")))
 }
@@ -932,7 +976,7 @@ impl TryFrom<Value> for TraceEvent {
             EVENT_CONTROL_MESSAGE => EventData::ControlMessage {
                 direction: require_direction(&pairs, "d")?,
                 message_type: require_uint(&pairs, "mt")?,
-                message: require_value(&pairs, "msg")?,
+                message: get_message(&pairs),
                 stream_id: get_uint(&pairs, "sid"),
                 raw: get_bytes(&pairs, "raw"),
             },

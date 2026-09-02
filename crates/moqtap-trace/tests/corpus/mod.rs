@@ -397,6 +397,88 @@ pub fn v2_extra_keys() -> Case {
     }
 }
 
+/// The three shapes a conforming `"msg"` takes.
+///
+/// `"msg"` is the one event-0 key whose contents no version of the spec fixes,
+/// so its rules are about shape rather than content: a CBOR map, keyed in
+/// snake_case, and an empty map rather than an omission when the recorder
+/// decoded nothing. The empty-map event is the load-bearing one — omitting the
+/// key instead was this crate's own cue to discard the event, and event 0 is a
+/// type sampling MUST NOT drop.
+///
+/// The fourth shape, a `"msg"` that is not a map at all, needs no case of its
+/// own: all four `capture-*` recordings carry a Rust `Debug` string there, so
+/// the corpus already holds real files exercising the tolerance rule.
+///
+/// Key order matches the JS case, so the two encodings differ only where the
+/// encoders do.
+pub fn v2_control_msg_map() -> Case {
+    let mut header =
+        TraceHeader::new("moq-transport-19", Perspective::Client, DetailLevel::Full, START_TIME);
+    header.session_id = Some("v2-control-msg-map".into());
+    Case {
+        header,
+        events: vec![
+            // Three value types in one map — integer, integer, byte string —
+            // so an encoder that keeps only one CBOR shape verbatim is caught
+            // here rather than in whichever field happened to be tested.
+            TraceEvent::new(
+                0,
+                100,
+                EventData::ControlMessage {
+                    direction: Direction::Send,
+                    message_type: 0x03,
+                    message: Value::Map(vec![
+                        (Value::Text("request_id".into()), Value::Integer(1.into())),
+                        (Value::Text("track_alias".into()), Value::Integer(2.into())),
+                        (Value::Text("track_name".into()), Value::Bytes(b"now".to_vec())),
+                    ]),
+                    stream_id: None,
+                    raw: None,
+                },
+            ),
+            // Nothing decoded, so an empty map. A writer that omits the key
+            // instead produces a file this reader used to drop the event from.
+            TraceEvent::new(
+                1,
+                200,
+                EventData::ControlMessage {
+                    direction: Direction::Receive,
+                    message_type: 0x2F00,
+                    message: Value::Map(Vec::new()),
+                    stream_id: None,
+                    raw: None,
+                },
+            ),
+            // Nested structure, because "preserve the map" has to mean the
+            // whole tree and not just its top level.
+            TraceEvent::new(
+                2,
+                300,
+                EventData::ControlMessage {
+                    direction: Direction::Send,
+                    message_type: 0x16,
+                    message: Value::Map(vec![
+                        (Value::Text("request_id".into()), Value::Integer(3.into())),
+                        (
+                            Value::Text("parameters".into()),
+                            Value::Map(vec![(
+                                Value::Text("location_filter".into()),
+                                Value::Array(vec![
+                                    Value::Integer(1.into()),
+                                    Value::Integer(2.into()),
+                                ]),
+                            )]),
+                        ),
+                    ]),
+                    stream_id: None,
+                    raw: None,
+                },
+            ),
+        ],
+    }
+}
+
 /// Every single-segment case both implementations author, by directory name.
 pub fn authored_cases() -> Vec<(&'static str, Case)> {
     vec![
@@ -405,6 +487,7 @@ pub fn authored_cases() -> Vec<(&'static str, Case)> {
         ("v2-unknown-event", v2_unknown_event()),
         ("v2-unknown-perspective", v2_unknown_perspective()),
         ("v2-extra-keys", v2_extra_keys()),
+        ("v2-control-msg-map", v2_control_msg_map()),
     ]
 }
 

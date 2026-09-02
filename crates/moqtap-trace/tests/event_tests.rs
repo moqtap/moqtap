@@ -1,6 +1,8 @@
 use ciborium::Value;
 use moqtap_trace::event::*;
 
+mod corpus;
+
 fn sample_control_event() -> TraceEvent {
     TraceEvent::new(
         0,
@@ -8,9 +10,13 @@ fn sample_control_event() -> TraceEvent {
         EventData::ControlMessage {
             direction: Direction::Send,
             message_type: 0x03,
+            // snake_case, as the drafts name these fields and as every writer
+            // of these files spells them. This fixture said `requestId` and
+            // `trackName`, which no producer has ever written, so the accessor
+            // it gated was free to look for a key nothing carried.
             message: Value::Map(vec![
-                (Value::Text("requestId".into()), Value::Integer(42.into())),
-                (Value::Text("trackName".into()), Value::Text("video".into())),
+                (Value::Text("request_id".into()), Value::Integer(42.into())),
+                (Value::Text("track_name".into()), Value::Text("video".into())),
             ]),
             stream_id: None,
             raw: None,
@@ -195,6 +201,30 @@ fn annotation_roundtrip() {
 fn request_id_extracted_from_msg() {
     let event = sample_control_event();
     assert_eq!(event.request_id(), Some(42));
+}
+
+/// The accessor and the corpus have to agree on how the key is spelled.
+///
+/// They did not: the corpus wrote `request_id` and said in a comment that it
+/// matched the shared vectors, while the accessor looked for `requestId`, so
+/// `request_id()` answered `None` for every event in this crate's own canonical
+/// trace. A fixture of the accessor's own making cannot catch that, because it
+/// spells the key whichever way the accessor reads it. This asks the corpus.
+#[test]
+fn the_corpus_answers_its_own_accessor() {
+    let control: Vec<_> = corpus::v2_basic()
+        .events
+        .into_iter()
+        .filter(|e| matches!(e.data, EventData::ControlMessage { .. }))
+        .collect();
+    assert!(!control.is_empty(), "corpus carries no control message to ask");
+    for event in control {
+        assert!(
+            event.request_id().is_some(),
+            "corpus control event {} carries a decoded msg the accessor cannot read",
+            event.seq
+        );
+    }
 }
 
 #[test]
@@ -608,4 +638,111 @@ fn a_non_text_key_is_unrecognised_and_kept() {
         vec![(Value::Integer(1000.into()), Value::Text("keyed by integer".into()))]
     );
     assert_eq!(roundtrip(&event), event);
+}
+
+// ── the "msg" field on a control message ───────────────────
+
+/// An event 0 CBOR map carrying whatever `"msg"` a writer chose to leave, if
+/// any. Built by hand rather than by serializing a `TraceEvent`, because the
+/// case under test is a file this crate would never write itself.
+fn control_event_cbor(msg: Option<Value>) -> Value {
+    let mut pairs = vec![
+        (Value::Text("n".into()), Value::Integer(0.into())),
+        (Value::Text("t".into()), Value::Integer(1000.into())),
+        (Value::Text("e".into()), Value::Integer(0.into())),
+        (Value::Text("d".into()), Value::Integer(0.into())),
+        (Value::Text("mt".into()), Value::Integer(0x03.into())),
+    ];
+    if let Some(msg) = msg {
+        pairs.push((Value::Text("msg".into()), msg));
+    }
+    Value::Map(pairs)
+}
+
+fn message_of(event: &TraceEvent) -> Value {
+    let EventData::ControlMessage { ref message, .. } = event.data else {
+        panic!("expected a control message");
+    };
+    message.clone()
+}
+
+fn key_of(cbor: &Value, key: &str) -> Option<Value> {
+    let Value::Map(pairs) = cbor else { panic!("event is not a CBOR map") };
+    pairs.iter().find(|(k, _)| k.as_text() == Some(key)).map(|(_, v)| v.clone())
+}
+
+/// Writers must emit `{}` when they decoded nothing, but files written before
+/// that rule simply have no `"msg"`, and this used to reject them. Event 0 is
+/// one of the types sampling MUST NOT drop, so the reader that treats the key
+/// as required throws away precisely the events the format guarantees — and
+/// throws them away without saying so, since the caller drops the event on the
+/// error.
+#[test]
+fn a_control_event_missing_msg_reads_as_an_empty_map_rather_than_failing() {
+    let event = TraceEvent::try_from(control_event_cbor(None))
+        .expect("an absent 'msg' is not a malformed event");
+    assert_eq!(message_of(&event), Value::Map(vec![]));
+}
+
+/// Every `capture-*` case in the shared corpus holds a Rust `Debug` rendering
+/// of the message in `"msg"`. Those files are not addressable by key, but they
+/// are readable, and the text must reach the caller byte for byte rather than
+/// being coerced into a map or discarded.
+///
+/// This passed before the absent-`"msg"` fix as well: a *present* non-map value
+/// was always returned unchanged. It is here as a regression pin, not as
+/// evidence for that change — the obvious way to implement "`msg` is a map"
+/// would break it.
+#[test]
+fn a_msg_that_is_not_a_map_is_handed_back_verbatim() {
+    let text = "Subscribe { request_id: 42, track_alias: 7 }";
+    let event = TraceEvent::try_from(control_event_cbor(Some(Value::Text(text.into()))))
+        .expect("a non-map 'msg' is not a malformed event");
+    assert_eq!(message_of(&event), Value::Text(text.into()));
+}
+
+/// Reading is tolerant; writing is not. A trace that passes through this crate
+/// — a redaction pass, a filter, a re-segmentation — must come out conforming,
+/// so the event that arrived without `"msg"` leaves with the empty map the
+/// rule requires, and the key must be written rather than skipped as an empty
+/// value.
+#[test]
+fn an_event_read_without_msg_is_written_back_with_an_empty_map() {
+    let event = TraceEvent::try_from(control_event_cbor(None)).unwrap();
+
+    let written: Value = (&event).into();
+    assert_eq!(key_of(&written, "msg"), Some(Value::Map(vec![])));
+
+    let reread = TraceEvent::try_from(written).unwrap();
+    assert_eq!(reread, event);
+}
+
+/// The tolerance has to survive a rewrite too: a reader that preserved the
+/// text and then a writer that dropped it would lose the only record of the
+/// message the older recorder had.
+///
+/// Like the test above, this held before the absent-`"msg"` fix. Both pin the
+/// behaviour SPEC.md now requires rather than behaviour that changed.
+#[test]
+fn a_text_msg_survives_a_read_write_round_trip() {
+    let text = "Subscribe { request_id: 42, track_alias: 7 }";
+    let event = TraceEvent::try_from(control_event_cbor(Some(Value::Text(text.into())))).unwrap();
+
+    let reread = roundtrip(&event);
+    assert_eq!(message_of(&reread), Value::Text(text.into()));
+    assert_eq!(reread, event);
+}
+
+/// `"msg"` stays a key event 0 owns even on an event that did not carry one.
+/// Were it dropped from `variant_keys`, an incoming `"msg"` would be read into
+/// the field *and* collected into `extra`, and writing the event back would
+/// emit the key twice — a CBOR map with a duplicate key is malformed.
+#[test]
+fn an_absent_msg_is_not_collected_into_extra() {
+    let event = TraceEvent::try_from(control_event_cbor(None)).unwrap();
+    assert!(event.extra.is_empty());
+
+    let carried = TraceEvent::try_from(control_event_cbor(Some(Value::Text("x".into())))).unwrap();
+    assert!(carried.extra.iter().all(|(k, _)| k.as_text() != Some("msg")));
+    assert!(carried.extra.is_empty());
 }

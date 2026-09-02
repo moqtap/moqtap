@@ -5,6 +5,36 @@ All notable changes to moqtap-trace will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A control message with no `"msg"` key is read rather than refused.** The
+  decoder required the key and returned `InvalidEvent("missing 'msg'")`
+  without it. Event 0 is one of the types sampling MUST NOT drop, so requiring
+  the key rejected exactly the events the format promises to keep — every
+  control message from a recorder that decoded no bodies.
+
+  How much was lost depended on the caller, and the idiomatic path was the
+  worse one. `read_next` returns the error, so `collect::<Result<Vec<_>, _>>()`
+  — the form this crate's own tests use — stopped at the first such event and
+  yielded none of the ones after it. A caller that skips errors and keeps
+  going lost only the offending events; `moqtap trace` does that and prints
+  each one, so there the loss was at least visible.
+
+  An absent `"msg"` now reads as the empty map SPEC.md tells writers to emit,
+  and an event read that way is written back carrying `"msg": {}`. A `"msg"`
+  that is present but not a map is still handed back verbatim, and written
+  back unchanged: recordings predating the rule hold a text rendering of the
+  message there, every `capture-*` case in the conformance corpus among them.
+  That rewrite is deliberately not "normalised into conformance" — replacing
+  it would destroy the only record of a message nobody will see again.
+
+- **`request_id()` reads `request_id` rather than `requestId`.** It had matched
+  nothing since the helper was written: not this crate's corpus, not a trace
+  from any other implementation. Callers that got `None` from it on every real
+  trace now get the value.
+
 ## [0.3.0] - 2026-09-02
 
 **Breaking, which is why this is 0.3.0 and not 0.2.1.** `TraceEvent` gained a
