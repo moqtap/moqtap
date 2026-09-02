@@ -1,3 +1,6 @@
 [submodule "crates/moqtap-codec/test-vectors"]
 	path = crates/moqtap-codec/test-vectors
 	url = https://github.com/moqtap/test-vectors
+[submodule "crates/moqtap-trace/test-traces"]
+	path = crates/moqtap-trace/test-traces
+	url = https://github.com/moqtap/test-traces
