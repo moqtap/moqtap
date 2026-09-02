@@ -170,10 +170,28 @@ fn case_bytes(root: &Path, id: &str, file: &str) -> Vec<u8> {
 /// crate got wrong.
 ///
 /// It self-heals: the moment the submodule carries `trace/`, every test in
-/// this file becomes live with no change here. What it does not catch is the
-/// corpus being *removed* after that, which SPEC.md and the corpus README both
-/// forbid and which would go equally quiet in `@moqtap/trace`. That is the
-/// price of not blocking on a dependency this repository does not own.
+/// this file becomes live with no change here.
+///
+/// **That is also the hole, and as of 2026-09-02 the hole is open.** The
+/// submodule pin is `v0.12.1`, whose tree is `.github .gitignore CHANGELOG.md
+/// LICENSE README.md examples manifest.json package-lock.json package.json
+/// schema scripts transport` — no `trace/`. CI checks out submodules and has
+/// no sibling clone, so [`corpus::corpus_dir`] returns `None` there and every
+/// test in this file returns before asserting anything, on a green run. A
+/// developer with the sibling checkout sees thirteen passing tests and gets no
+/// signal that CI saw thirteen empty ones. The local pass is what hides it.
+///
+/// So the one test whose job is to report this state is written so that it
+/// cannot fail, which is the defect it exists to catch wearing the shape of a
+/// courtesy. `MOQTAP_REQUIRE_CORPUS=1` is the lever; nothing sets it yet.
+/// Flipping the default — or keying it off `CI`, which every runner sets —
+/// turns a silent pass into a red build with a message, and should happen the
+/// moment the pin can move. It cannot move today: `test-vectors` is ahead of
+/// its origin, so the commit carrying `trace/` is not fetchable yet.
+///
+/// What none of this catches is the corpus being *removed* after the pin
+/// moves, which SPEC.md and the corpus README both forbid and which would go
+/// equally quiet in `@moqtap/trace`.
 ///
 /// **Set `MOQTAP_REQUIRE_CORPUS=1` to turn the report into a failure.** The
 /// tolerance above is right for a developer's checkout and wrong for CI, where
