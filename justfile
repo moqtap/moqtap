@@ -399,8 +399,8 @@ interop:
 # the process has bound its socket, and a QUIC dial into a closed port fails as
 # a timeout that reads like a protocol fault.
 #
-# Start the interop relay and block until it has bound its socket
-interop-up:
+# Start one interop peer and block until it has bound its socket
+interop-up peer="relay16":
     #!/usr/bin/env bash
     set -euo pipefail
     dir="crates/moqtap-proxy/tests/interop"
@@ -434,30 +434,121 @@ interop-up:
     #
     # The first build of a given revision compiles the relay from source and
     # takes a few minutes.
-    ref="${MOQ_RELAY_REF:-main}"
-    docker build -t "moqtap-interop-relay:$ref" \
-        "https://github.com/cloudflare/moq-rs.git#$ref"
-    docker compose -f "$compose" up -d
+    # A peer is named, not a draft, because the two stopped being the same
+    # thing: one imquic container serves four drafts and two peers serve
+    # draft-14. The compose file carries the whole table.
+    #
+    # `ready` differs per implementation because their startup lines do --
+    # moq-rs logs "listening", imquic logs "Starting server". Grepping for
+    # either would report a peer ready on the other's message, which is the one
+    # thing this loop exists to prevent.
+    case "{{ peer }}" in
+        relay07)  kind=moq-rs; port=4407; ready=listening
+                  ref="${MOQ_RELAY_REF_07:-draft-ietf-moq-transport-07}" ;;
+        relay08)  kind=moq-rs; port=4408; ready=listening
+                  ref="${MOQ_RELAY_REF_08:-me/draft-08}" ;;
+        relay09)  kind=moq-rs; port=4409; ready=listening
+                  ref="${MOQ_RELAY_REF_09:-me/draft-09}" ;;
+        relay10)  kind=moq-rs; port=4410; ready=listening
+                  ref="${MOQ_RELAY_REF_10:-me/draft-10}" ;;
+        relay14)  kind=moq-rs; port=4414; ready=listening
+                  ref="${MOQ_RELAY_REF_14:-draft-ietf-moq-transport-14}" ;;
+        relay16)  kind=moq-rs; port=4443; ready=listening
+                  ref="${MOQ_RELAY_REF_16:-main}" ;;
+        relay18)  kind=moq-rs; port=4418; ready=listening
+                  ref="${MOQ_RELAY_REF_18:-draft-18-dev}" ;;
+        imquic)   kind=imquic; port=4500; ready="Starting server"
+                  ref="${IMQUIC_REF:-main}" ;;
+        imquic11) kind=imquic; port=4511; ready="Starting server"
+                  ref="${IMQUIC_LEGACY_REF:-f746edb6a982}" ;;
+        imquic12) kind=imquic; port=4512; ready="Starting server"
+                  ref="${IMQUIC_LEGACY_REF:-f746edb6a982}" ;;
+        imquic13) kind=imquic; port=4513; ready="Starting server"
+                  ref="${IMQUIC_LEGACY_REF:-f746edb6a982}" ;;
+        imquic14) kind=imquic; port=4514; ready="Starting server"
+                  ref="${IMQUIC_LEGACY_REF:-f746edb6a982}" ;;
+        moxygen)  kind=moxygen; port=4600; ready="Registering ALPN handlers"
+                  ref="${MOXYGEN_REF:-latest-amd64}" ;;
+        *) echo "unknown peer {{ peer }}; known: relay07 relay08 relay09 relay10 relay14 relay16 relay18 imquic imquic11 imquic12 imquic13 imquic14 moxygen" >&2
+           exit 2 ;;
+    esac
+
+    # A docker tag may not contain a slash and three of these refs do
+    # (`me/draft-08`), so the tag is the ref with slashes flattened. Only the
+    # tag is rewritten -- the build still checks out the ref as written.
+    tag="$(printf %s "$ref" | tr / -)"
+
+    # moq-rs carries its own Dockerfile, so the git URL is the whole build
+    # context. imquic carries none, so the recipe is a file beside the compose
+    # file and the ref is a build argument. moxygen is neither: they publish
+    # the relay to ghcr on every push to their main, and building it here would
+    # mean folly and proxygen through getdeps -- an hour from cold, against a
+    # pull of a few seconds.
+    if [ "$kind" = moq-rs ]; then
+        docker build -t "moqtap-interop-relay:$tag" \
+            "https://github.com/cloudflare/moq-rs.git#$ref"
+    elif [ "$kind" = imquic ]; then
+        docker build -t "moqtap-interop-imquic:$tag" \
+            -f "$dir/imquic.Dockerfile" --build-arg "IMQUIC_REF=$ref" "$dir"
+    else
+        docker pull "ghcr.io/facebookexperimental/moqrelay:$ref"
+    fi
+
+    # Flattened the same way as the tag above, and for the same reason: what
+    # compose substitutes into `image:` is a tag.
+    MOQ_RELAY_REF_07="$(printf %s "${MOQ_RELAY_REF_07:-draft-ietf-moq-transport-07}" | tr / -)" \
+    MOQ_RELAY_REF_08="$(printf %s "${MOQ_RELAY_REF_08:-me/draft-08}" | tr / -)" \
+    MOQ_RELAY_REF_09="$(printf %s "${MOQ_RELAY_REF_09:-me/draft-09}" | tr / -)" \
+    MOQ_RELAY_REF_10="$(printf %s "${MOQ_RELAY_REF_10:-me/draft-10}" | tr / -)" \
+    MOQ_RELAY_REF_14="$(printf %s "${MOQ_RELAY_REF_14:-draft-ietf-moq-transport-14}" | tr / -)" \
+    MOQ_RELAY_REF_16="$(printf %s "${MOQ_RELAY_REF_16:-main}" | tr / -)" \
+    MOQ_RELAY_REF_18="$(printf %s "${MOQ_RELAY_REF_18:-draft-18-dev}" | tr / -)" \
+    IMQUIC_REF="$(printf %s "${IMQUIC_REF:-main}" | tr / -)" \
+    IMQUIC_LEGACY_REF="$(printf %s "${IMQUIC_LEGACY_REF:-f746edb6a982}" | tr / -)" \
+    MOXYGEN_REF="${MOXYGEN_REF:-latest-amd64}" \
+        docker compose -f "$compose" up -d "{{ peer }}"
     for _ in $(seq 1 120); do
-        if docker compose -f "$compose" logs relay 2>/dev/null | grep -q listening; then
-            echo "relay ref: $ref"
+        if docker compose -f "$compose" logs "{{ peer }}" 2>/dev/null | grep -q "$ready"; then
+            echo "{{ peer }} on 127.0.0.1:$port, ref: $ref"
             exit 0
         fi
         sleep 0.5
     done
-    echo "relay did not report 'listening' within 60s; logs follow" >&2
-    docker compose -f "$compose" logs relay >&2
+    echo "{{ peer }} did not report '$ready' within 60s; logs follow" >&2
+    docker compose -f "$compose" logs "{{ peer }}" >&2
     exit 1
 
-# Stop and remove the interop relay
+# Stop and remove every interop relay
 interop-down:
     docker compose -f crates/moqtap-proxy/tests/interop/docker-compose.yml down --remove-orphans
+
+# The first build of each image takes minutes; the four legacy imquic
+# containers share one image and moxygen is a pull, so that is five builds and
+# not ten.
+#
+# relay08, relay09 and relay10 are deliberately not here. They start, and they
+# refuse every session a conformant client opens -- those branches want the
+# ROLE parameter that draft-08 removed. relay08 on 127.0.0.1:4408, ref: me/draft-08 still brings
+# one up to repeat the measurement; nothing in the suite runs against them.
+#
+# Bring up every interop peer
+interop-up-all:
+    just interop-up relay07
+    just interop-up relay14
+    just interop-up relay16
+    just interop-up relay18
+    just interop-up imquic
+    just interop-up imquic11
+    just interop-up imquic12
+    just interop-up imquic13
+    just interop-up imquic14
+    just interop-up moxygen
 
 # Tail the interop relay's log.
 #
 # The other half of the evidence when a run goes red: the test reports what the
 # proxy parsed, this reports what a foreign decoder made of the same bytes.
 #
-# Follow the interop relay's log
-interop-logs:
-    docker compose -f crates/moqtap-proxy/tests/interop/docker-compose.yml logs -f relay
+# Follow one interop peer's log
+interop-logs peer="relay16":
+    docker compose -f crates/moqtap-proxy/tests/interop/docker-compose.yml logs -f {{ peer }}

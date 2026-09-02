@@ -1,66 +1,322 @@
-# The third-party peer for `tests/interop_moq_rs.rs`: `moq-relay-ietf`, from
-# github.com/cloudflare/moq-rs. It is a separate codebase with its own MoQT
-# encoder and decoder, and it is what the public Cloudflare relays run — so a
-# green run here is the same two implementations agreeing that the directory
-# measures. Nothing in the image is built from this workspace, which is the
-# whole point; see that file's header for what the arrangement buys.
+# The third-party peers for `tests/interop_moq_rs.rs`. Three implementations,
+# none of them built from this workspace, which is the whole point: a harness
+# whose two ends share an encoder cannot see a shared misreading, and every
+# test here has a foreign encoder on one end.
 #
-# Built from source rather than pulled. That project publishes no container
-# image: its release workflow builds binaries and its own `docker-compose.yml`
-# names a `moq-dir` binary that is not a workspace member, so neither is a route
-# in. `just interop-up` builds it, taking the git URL as a Docker build context
-# so there is no clone step anywhere.
+#   moq-relay-ietf     github.com/cloudflare/moq-rs   Rust, and what the public
+#                                                     Cloudflare relays run
+#   imquic-moq-relay   github.com/meetecho/imquic     C, over picoquic
+#   moqrelayserver     github.com/facebookexperimental/moxygen
+#                                                     C++, over proxygen
 #
-# The build is a `docker build` in the recipe rather than a `build:` key here,
-# and that is not a preference. Compose resolves a `build.context` as a
-# filesystem path even when it is a URL — measured: it reports
-# `failed to evaluate path "https://github.com/cloudflare/moq-rs.git#main"`
-# against this repository's own directory. The Docker CLI handles the same
-# string, prints the commit it resolved, and tags the result, which this file
-# then names.
+# # Ports say who and which draft
 #
-# The ref is `main`, not a commit, and that is deliberate. An interop suite
-# pinned to one revision stops noticing when the other implementation changes,
-# which is the only failure it exists to catch. The cost is that a red run can
-# be either side's regression, so `just interop-up` prints the ref it resolved:
-# set MOQ_RELAY_REF to a commit SHA to re-run against the exact source a
-# previous run used and settle which side moved. Known good: main at
-# ab1cfffaf988d11c624d1b73b7e6c72e004aed04 (2026-08-29).
+#     44NN   moq-rs, speaking draft NN
+#     45NN   imquic, speaking draft NN
+#     46NN   moxygen, speaking draft NN
+#     4500   imquic, speaking whichever of 16-19 the client's ALPN names
+#     4600   moxygen, speaking whichever of 14, 15, 16, 18 the client asks for
 #
-# `main` targets draft-16, which is what the test speaks. The project keeps
-# `draft-ietf-moq-transport-14` in maintenance and does draft-18 work on
-# `draft-18-dev`; either is reachable through MOQ_RELAY_REF, but the test's
-# draft would have to move with it.
+#     draft-07   127.0.0.1:4407   moq-rs    draft-ietf-moq-transport-07
+#     draft-08   127.0.0.1:4408   moq-rs    me/draft-08    refuses, see below
+#     draft-09   127.0.0.1:4409   moq-rs    me/draft-09    refuses, see below
+#     draft-10   127.0.0.1:4410   moq-rs    me/draft-10    refuses, see below
+#     draft-11   127.0.0.1:4511   imquic    f746edb, -M 11
+#     draft-12   127.0.0.1:4512   imquic    f746edb, -M 12
+#     draft-13   127.0.0.1:4513   imquic    f746edb, -M 13
+#     draft-14   127.0.0.1:4414   moq-rs    draft-ietf-moq-transport-14
+#     draft-14   127.0.0.1:4514   imquic    f746edb, -M 14
+#     draft-16   127.0.0.1:4443   moq-rs    main
+#     draft-18   127.0.0.1:4418   moq-rs    draft-18-dev
+#     16 to 19   127.0.0.1:4500   imquic    main
+#     14,15,16,18 127.0.0.1:4600  moxygen   latest-amd64
+#
+# draft-16 on moq-rs keeps 4443 rather than 4416 because `interop_moq_rs.rs`
+# and the `MOQTAP_INTEROP_RELAY` default already name it.
+#
+# Ten of the thirteen drafts have a peer that completes a session. Three have
+# more than one implementation -- 14 and 18 have three each, 16 has two -- and
+# those are the only drafts where a claim can be checked against two foreign
+# encoders rather than one. A draft with a single peer cannot tell our defect
+# from theirs.
+#
+# # 08, 09 and 10, and why their containers refuse
+#
+# An earlier revision of this file said moq-rs carried `me/draft-08` through
+# `me/draft-12` as development branches "its author never released", and
+# treated that as making them unreachable. Release status is not reachability,
+# and that reasoning was wrong: the branches are on the same remote, build from
+# the same Dockerfile, and each pins exactly one draft. `relay08`, `relay09`
+# and `relay10` below are those branches, and they start.
+#
+# They just will not finish a handshake. Every one of them requires the ROLE
+# setup parameter in CLIENT_SETUP, and ROLE is not in the drafts they are named
+# for -- draft-08 removed it, and the word occurs nowhere in the text of 08, 09
+# or 10. A conformant client omits it and the relay answers `decode error:
+# missing parameter`. Passing would mean sending a parameter the draft deleted.
+# So the original note reached the right conclusion for the wrong reason: those
+# branches are a draft-08 that predates the removal, which is also why they
+# were never released.
+#
+# `interop-up-all` therefore skips them and no test runs against them. They are
+# defined here so `just interop-up relay08` can repeat the measurement.
+#
+# # 15, and a spelling mistaken for a property of the draft
+#
+# The same revision said draft-15 was out of reach because imquic offers it
+# under the ALPN `moq-15` where the draft says `moqt-15`. True of imquic, and
+# generalised from one implementation to the draft. moxygen registers `moqt-15`
+# and takes it, which is how draft-15 is covered here at all.
+#
+# # Why one imquic container serves four drafts and another serves one
+#
+# imquic picks its draft from the ALPN when the peer names one, and from
+# `--moq-draft-version` when the ALPN does not. Drafts 16 and up have an ALPN
+# each, so one container of a build that speaks 16-19 serves all four and the
+# client chooses. Drafts 07-14 share `moq-00`, which names no draft, so a
+# container of the older build serves exactly the draft its `-M` pins — hence
+# four of them.
+#
+# # Refs, and why they are not all branches
+#
+# The moq-rs refs are branches deliberately: an interop suite pinned to one
+# revision stops noticing when the other implementation changes, which is the
+# only failure it exists to catch. The cost is that a red run can be either
+# side's regression, so `just interop-up` prints the ref it resolved, both
+# relays log their own commit on startup, and the MOQ_RELAY_REF_* variables
+# take a SHA to re-run against the source a previous run used.
+#
+# imquic's older build is a commit and has to be. That project keeps one branch
+# and raises its floor as drafts age out — its v17 work removed every version
+# below 16 — so the newest source that speaks the 11-14 cohort is the commit
+# before that removal, and there is no branch or tag naming it.
+#
+# moxygen is a moving tag for the same reason the moq-rs refs are branches:
+# `latest-amd64` is rebuilt from their main on every push, so a run notices
+# when they change. MOXYGEN_REF takes one of the per-commit tags they also
+# publish -- `<sha>-amd64` -- to re-run against the source an earlier run used.
+#
+# Resolved when this was written (2026-09-02):
+#     moq-rs   main                          ab1cfffaf988d11c624d1b73b7e6c72e004aed04
+#     moq-rs   draft-ietf-moq-transport-14   c8e176bcf4aec6eb1a503b11783238968f431db6
+#     moq-rs   draft-ietf-moq-transport-07   ebc843de8504e37d36c3134a1181513ebdf7a34a
+#     moq-rs   draft-18-dev                  244661f6a0b1f79f31554bc77eab502d0f50404c
+#     moq-rs   me/draft-08                   445ab52445016d303433cec1b66b586bece5b9b6
+#     moq-rs   me/draft-09                   a72945735398f04578ebb915182f5c675a5e79a8
+#     moq-rs   me/draft-10                   6b9053c88dd97d1e7a3e0ec6874638dbe530d72a
+#     imquic   main                          ae643bb8780f9f8164835016bb69a09264f990d0
+#     imquic   (pre-v17)                     f746edb6a982f95b8eca7204daaae03aa7bd89ff
+#     moxygen  latest-amd64                  sha256:20d8fde7200a8a6256c762e424c3331cd47caa6e47bf82d66d153bd8cd64c508
+#
+# # Images
+#
+# moq-rs publishes no container image — its release workflow builds binaries
+# and its own compose file names a `moq-dir` binary that is not a workspace
+# member — but it does carry a Dockerfile, so `just interop-up` builds it with
+# the git URL as a build context and no clone step. imquic carries neither, so
+# `imquic.Dockerfile` beside this file is the build recipe.
+#
+# moxygen is the one peer here that is pulled rather than built, and that is
+# what makes it affordable. It builds through `getdeps.py` against folly and
+# proxygen, which is an hour from cold on a developer's machine and would be
+# the slowest thing in this file by a wide margin. They publish the relay to
+# ghcr on every push to main, so `just interop-up moxygen` is a pull.
+#
+# Neither build is a `build:` key here, and that is not a preference. Compose
+# resolves a `build.context` as a filesystem path even when it is a URL —
+# measured: it reports `failed to evaluate path
+# "https://github.com/cloudflare/moq-rs.git#main"` against this repository's
+# own directory. The Docker CLI handles the same string, prints the commit it
+# resolved, and tags the result, which this file then names.
+
+x-moq-rs: &moq-rs
+  # Restarted because one of these peers can die mid-suite: moq-rs on
+  # draft-07 panics its whole process on a SUBSCRIBE_ANNOUNCES, which its
+  # branch never implemented. Without this, one test's request takes the relay
+  # out from under every test after it and the run reads as nine failures
+  # instead of one finding.
+  restart: unless-stopped
+  # The image's own `CMD` names `moq-relay`, which is not what the binary is
+  # called — the container exits 127 on it. The relay is `moq-relay-ietf`, and
+  # that has been its name on every branch here.
+  entrypoint: /usr/local/bin/moq-relay-ietf
+  environment:
+    # The relay logs the negotiated ALPN and every control message it decodes
+    # at debug. When a run goes red this is the other half of the evidence: the
+    # test says what this workspace reported, `just interop-logs` says what a
+    # foreign decoder made of the same bytes.
+    RUST_LOG: ${MOQ_RELAY_LOG:-debug}
+  volumes:
+    # Generated by `just interop-up` and gitignored. There is no
+    # `--tls-generate` here — the relay refuses to start without a key — so the
+    # certificate is made outside and mounted in. Every client in this suite
+    # runs with certificate verification off, so nothing pins or checks it.
+    - ./certs:/etc/tls:ro
+  command:
+    - --bind
+    - "[::]:4443"
+    - --tls-cert
+    - /etc/tls/localhost.crt
+    - --tls-key
+    - /etc/tls/localhost.key
+
+# The five imquic services differ by one argument and repeat the other ten,
+# because YAML anchors substitute a whole node and have no way to append to a
+# sequence — an anchored tail inside a longer list nests rather than extends,
+# and compose refuses it with `command.2 must be a string`.
+#
+# `--raw-quic` is not the default and neither is `--webtransport`: a relay
+# started with neither offers no ALPN at all and accepts nothing. Both are on,
+# so one container answers a `quic://` client and a WebTransport one. The debug
+# level is where it logs the version it negotiated, per connection.
+x-imquic: &imquic
+  restart: unless-stopped
+  volumes:
+    - ./certs:/etc/tls:ro
 
 services:
-  relay:
-    image: moqtap-interop-relay:${MOQ_RELAY_REF:-main}
-    container_name: moqtap-interop-relay
-    # The image's own `CMD` names `moq-relay`, which is not what the binary is
-    # called — the container exits 127 on it. The relay is `moq-relay-ietf`.
-    entrypoint: /usr/local/bin/moq-relay-ietf
-    # Loopback-scoped, not 0.0.0.0. This relay has no authentication of any
-    # kind — there is no flag to add one — so it must not be reachable from the
-    # network the developer is on.
+  relay16:
+    <<: *moq-rs
+    image: moqtap-interop-relay:${MOQ_RELAY_REF_16:-main}
+    container_name: moqtap-interop-relay-16
+    # Loopback-scoped, not 0.0.0.0. These relays have no authentication of any
+    # kind — there is no flag to add one — so they must not be reachable from
+    # the network the developer is on.
     ports:
       - "127.0.0.1:4443:4443/udp"
+
+  relay14:
+    <<: *moq-rs
+    image: moqtap-interop-relay:${MOQ_RELAY_REF_14:-draft-ietf-moq-transport-14}
+    container_name: moqtap-interop-relay-14
+    ports:
+      - "127.0.0.1:4414:4443/udp"
+
+  relay07:
+    <<: *moq-rs
+    image: moqtap-interop-relay:${MOQ_RELAY_REF_07:-draft-ietf-moq-transport-07}
+    container_name: moqtap-interop-relay-07
+    ports:
+      - "127.0.0.1:4407:4443/udp"
+
+  # 08, 09 and 10 are one draft each and cannot be anything else: their session
+  # rejects a CLIENT_SETUP whose version list does not name the branch's own
+  # draft, so there is no offer that reaches two of them.
+  relay08:
+    <<: *moq-rs
+    image: moqtap-interop-relay:${MOQ_RELAY_REF_08:-me-draft-08}
+    container_name: moqtap-interop-relay-08
+    ports:
+      - "127.0.0.1:4408:4443/udp"
+
+  relay09:
+    <<: *moq-rs
+    image: moqtap-interop-relay:${MOQ_RELAY_REF_09:-me-draft-09}
+    container_name: moqtap-interop-relay-09
+    ports:
+      - "127.0.0.1:4409:4443/udp"
+
+  relay10:
+    <<: *moq-rs
+    image: moqtap-interop-relay:${MOQ_RELAY_REF_10:-me-draft-10}
+    container_name: moqtap-interop-relay-10
+    ports:
+      - "127.0.0.1:4410:4443/udp"
+
+  relay18:
+    <<: *moq-rs
+    image: moqtap-interop-relay:${MOQ_RELAY_REF_18:-draft-18-dev}
+    container_name: moqtap-interop-relay-18
+    ports:
+      - "127.0.0.1:4418:4443/udp"
+
+  # One container, four drafts: 16, 17, 18 and 19 each have an ALPN, and this
+  # build answers all four, so the draft a session runs on is the one the
+  # client asked for. `-M any` is the default and is named anyway, because the
+  # difference between this service and the four below is exactly that flag.
+  imquic:
+    <<: *imquic
+    image: moqtap-interop-imquic:${IMQUIC_REF:-main}
+    container_name: moqtap-interop-imquic
+    ports:
+      - "127.0.0.1:4500:4443/udp"
+    command: ["--moq-draft-version", "any",
+               "--port", "4443", "--raw-quic", "--webtransport",
+               "--cert-pem", "/etc/tls/localhost.crt",
+               "--cert-key", "/etc/tls/localhost.key",
+               "--debug-level", "${IMQUIC_LOG_LEVEL:-5}"]
+
+  imquic11:
+    <<: *imquic
+    image: moqtap-interop-imquic:${IMQUIC_LEGACY_REF:-f746edb6a982}
+    container_name: moqtap-interop-imquic-11
+    ports:
+      - "127.0.0.1:4511:4443/udp"
+    command: ["--moq-draft-version", "11",
+               "--port", "4443", "--raw-quic", "--webtransport",
+               "--cert-pem", "/etc/tls/localhost.crt",
+               "--cert-key", "/etc/tls/localhost.key",
+               "--debug-level", "${IMQUIC_LOG_LEVEL:-5}"]
+
+  imquic12:
+    <<: *imquic
+    image: moqtap-interop-imquic:${IMQUIC_LEGACY_REF:-f746edb6a982}
+    container_name: moqtap-interop-imquic-12
+    ports:
+      - "127.0.0.1:4512:4443/udp"
+    command: ["--moq-draft-version", "12",
+               "--port", "4443", "--raw-quic", "--webtransport",
+               "--cert-pem", "/etc/tls/localhost.crt",
+               "--cert-key", "/etc/tls/localhost.key",
+               "--debug-level", "${IMQUIC_LOG_LEVEL:-5}"]
+
+  imquic13:
+    <<: *imquic
+    image: moqtap-interop-imquic:${IMQUIC_LEGACY_REF:-f746edb6a982}
+    container_name: moqtap-interop-imquic-13
+    ports:
+      - "127.0.0.1:4513:4443/udp"
+    command: ["--moq-draft-version", "13",
+               "--port", "4443", "--raw-quic", "--webtransport",
+               "--cert-pem", "/etc/tls/localhost.crt",
+               "--cert-key", "/etc/tls/localhost.key",
+               "--debug-level", "${IMQUIC_LOG_LEVEL:-5}"]
+
+  imquic14:
+    <<: *imquic
+    image: moqtap-interop-imquic:${IMQUIC_LEGACY_REF:-f746edb6a982}
+    container_name: moqtap-interop-imquic-14
+    ports:
+      - "127.0.0.1:4514:4443/udp"
+    command: ["--moq-draft-version", "14",
+               "--port", "4443", "--raw-quic", "--webtransport",
+               "--cert-pem", "/etc/tls/localhost.crt",
+               "--cert-key", "/etc/tls/localhost.key",
+               "--debug-level", "${IMQUIC_LOG_LEVEL:-5}"]
+
+  # One container, four drafts, and no `command:` at all -- the image's own CMD
+  # reads the environment below, and the flag that would pin a draft
+  # (`-versions "14,16"`) is left at its default, which means every version the
+  # build supports. On startup it logs the set it registered:
+  #
+  #     MoQServer: Registering ALPN handlers: moqt-18, moqt-16, moqt-15, moq-00
+  #
+  # `moq-00` names no draft, so a client arriving under it gets the newest
+  # version below 15 that this build supports, which is 14. The other three are
+  # the client's choice. Draft 17 is absent from that list and refuses at the
+  # ALPN, which is correct and is asserted rather than worked around.
+  #
+  # No certificate volume: this image generates a self-signed pair at build
+  # time and its CMD already points at it. Every client in this suite runs with
+  # verification off, so mounting ours would buy nothing.
+  moxygen:
+    restart: unless-stopped
+    image: ghcr.io/facebookexperimental/moqrelay:${MOXYGEN_REF:-latest-amd64}
+    container_name: moqtap-interop-moxygen
+    ports:
+      - "127.0.0.1:4600:4443/udp"
     environment:
-      # The relay logs the negotiated ALPN and every control message it decodes
-      # at debug. When a run goes red this is the other half of the evidence:
-      # the test says what the proxy reported, `just interop-logs` says what a
-      # foreign decoder made of the same bytes.
-      RUST_LOG: ${MOQ_RELAY_LOG:-debug}
-    volumes:
-      # Generated by `just interop-up` and gitignored. There is no
-      # `--tls-generate` here — the relay refuses to start without a key — so
-      # the certificate is made outside and mounted in. The proxy's upstream leg
-      # runs with `skip_upstream_cert_verify`, which `common::session_config`
-      # already sets, so nothing pins or checks it.
-      - ./certs:/etc/tls:ro
-    command:
-      - --bind
-      - "[::]:4443"
-      - --tls-cert
-      - /etc/tls/localhost.crt
-      - --tls-key
-      - /etc/tls/localhost.key
+      MOQ_PORT: "4443"
+      # DBG is what prints the ALPN registration line the readiness wait greps
+      # for, and the per-connection decode the other peers log at debug.
+      MOQ_LOG_LEVEL: ${MOXYGEN_LOG_LEVEL:-DBG}
