@@ -1,7 +1,7 @@
 [package]
 name = "quinn-netem"
 description = "Deterministic UDP datagram impairment — loss, delay, reorder, duplication, corruption and rate shaping for QUIC"
-version = "0.1.2"
+version = "0.1.3"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

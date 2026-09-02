@@ -235,17 +235,9 @@ impl Impairer {
     /// out-of-order caller under-grants and over-reports its backlog instead of
     /// manufacturing tokens or emptying a queue that is full.
     ///
-    /// # Panics
-    ///
-    /// If the token bucket reports that it can *never* grant this datagram. That
-    /// answer means one of two things, and neither is a question about disposing
-    /// of a datagram: the configured rate is zero, or the datagram is larger than
-    /// the whole bucket depth. Both are refused when a profile is validated, so
-    /// reaching it here means validation let through a profile it should not
-    /// have. Reporting it as a queue overflow instead would say "the link was
-    /// congested" about a queue that has never held a byte — which is exactly
-    /// the mis-attribution the separate drop causes exist to prevent — and a
-    /// debug-only assertion would be silent in the build that matters.
+    /// `wire_bytes` is a number a peer chooses, so no value of it is a reason
+    /// to abort: a datagram larger than the rate model can ever emit is
+    /// dropped as [`DropCause::RateQueueFull`].
     pub fn decide(&mut self, seq: u64, wire_bytes: u32, now: Tick) -> Decision {
         // Destructured rather than accessed through `self`, so the shared borrow
         // of the profile and the mutable borrows of the generators, the bucket
@@ -313,15 +305,28 @@ impl Impairer {
                 }
             }
 
+            // `Never` is the bucket saying what `NeverFits` says about the
+            // queue: this datagram exceeds what the rate model can ever emit,
+            // so no wait produces a tick to arm it. `validate_models` cannot
+            // rule it out, because it sizes `burst_bytes` against a 1500-byte
+            // path while a UDP datagram may be 65535 bytes on the wire.
+            //
+            // `RateQueueFull` is imprecise here — the queue may hold nothing —
+            // but it is the same imprecision `NeverFits` already accepts about
+            // the same rate model, so the two answer alike. A distinct
+            // `DropCause` would cost a public enum variant, a `StatsSnapshot`
+            // field and a log discriminant.
             match charge(bucket, bytes_per_second, rate.burst_bytes, wire_bytes, now) {
                 RateGrant::Now => {}
                 RateGrant::Later(at) => release = at,
-                RateGrant::Never => panic!(
-                    "the token bucket can never grant a {wire_bytes}-byte datagram at \
-                     {} bits per second with a {}-byte burst; that is a refusal the profile \
-                     validator owed the caller, not a datagram to dispose of",
-                    rate.bps, rate.burst_bytes
-                ),
+                RateGrant::Never => {
+                    // The queue admitted it a moment ago and it is not going
+                    // to leave, so the occupancy comes back off before the
+                    // backlog is recorded.
+                    queue.withdraw(wire_bytes);
+                    return counters
+                        .finish(wire_bytes, dropped(DropCause::RateQueueFull, now, queue));
+                }
             }
         }
 

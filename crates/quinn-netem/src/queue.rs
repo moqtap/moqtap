@@ -84,14 +84,20 @@ pub enum RateGrant {
     /// larger than `burst_bytes`, so the bucket cannot hold enough for it
     /// even when completely idle.
     ///
-    /// This is a statement about the configuration, not about the link: there
-    /// is no deadline to compute and no queue to blame. A profile that can
-    /// produce it is refused when it is built, so a validated profile never
-    /// reaches this variant — it exists because [`charge`] is also driven
-    /// directly, with parameters no validator has seen.
+    /// This is a statement about the configuration *and the datagram*, not
+    /// about the link: there is no deadline to compute and no queue to blame.
+    ///
+    /// A validated profile does reach it. `validate_models` refuses a
+    /// `burst_bytes` below one on-wire datagram, but "one on-wire datagram" is
+    /// `mtu_blackhole` where one is set and 1500 where none is, while a UDP
+    /// datagram may be 65535 bytes on the wire. Several built-in presets carry
+    /// a burst between those two numbers, so an oversized datagram from a peer
+    /// lands here on a profile nothing was wrong with.
     ///
     /// A fabricated far-future tick would arm a release deadline that never
-    /// fires, and nothing downstream could tell it from a real one.
+    /// fires, and nothing downstream could tell it from a real one — which is
+    /// why this is its own variant and not a `Later`. The engine drops the
+    /// datagram; see [`crate::engine::Impairer::decide`].
     Never,
 }
 
@@ -268,6 +274,32 @@ impl QueueState {
     /// identical to "the queue holds something" instead of nearly identical.
     pub fn backlog_bytes(&self) -> u64 {
         u64::try_from(self.backlog.div_ceil(NANO)).unwrap_or(u64::MAX)
+    }
+
+    /// Take back the occupancy of a datagram this queue admitted and the
+    /// bucket behind it then refused for good.
+    ///
+    /// Not a drain: no time passes, `last` does not move, and nothing is
+    /// credited. It undoes one [`offer`] that answered [`Admission::Queued`],
+    /// which is the only way the backlog ever grew.
+    ///
+    /// # Why the queue has to be told
+    ///
+    /// The queue and the bucket are consulted in that order, so a datagram the
+    /// bucket can *never* grant — one larger than `burst_bytes` — has already
+    /// been counted into the backlog by the time that is known. Leaving it
+    /// there would report a standing backlog for a datagram that is not going
+    /// to leave, and tail-drop the datagrams behind it against occupancy that
+    /// does not exist. A real shaper drops an over-burst packet instead of
+    /// enqueuing it, and this is how that ordering is expressed against a
+    /// queue that stores occupancy rather than packets.
+    ///
+    /// `saturating_sub` because the only caller passes back the same `bytes`
+    /// it offered, so the subtraction cannot legitimately underflow — and if a
+    /// future one gets it wrong, a floor of zero is a better answer than an
+    /// occupancy of nearly 2^128 nano-bytes.
+    pub fn withdraw(&mut self, bytes: u32) {
+        self.backlog = self.backlog.saturating_sub(u128::from(bytes) * NANO);
     }
 }
 

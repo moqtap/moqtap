@@ -5,6 +5,38 @@ All notable changes to quinn-netem will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-09-02
+
+### Fixed
+
+- **A single oversized UDP datagram aborted the process.** `Impairer::decide`
+  reached a `panic!` on the token bucket's `RateGrant::Never`, on the premise
+  that `validate_models` refuses every profile that could produce it. It does
+  not: the validator sizes `burst_bytes` against the direction's
+  `mtu_blackhole`, or `ASSUMED_PATH_WIRE_BYTES` (1500) where none is set, while
+  a UDP datagram is up to 65535 bytes on the wire. `LossyEdge`, `ThreeG`, `Lte`
+  uplink and `Bufferbloat` all carry a `burst_bytes` between those numbers with
+  a larger `queue_bytes`.
+
+  The shim decides about every datagram arriving at the port, so this was
+  reachable **before the QUIC handshake, from any sender**, with no session and
+  no valid QUIC in the datagram. The profile was valid; the size was the peer's.
+
+  Such a datagram is now dropped and reported as `DropCause::RateQueueFull`.
+  That cause is imprecise — the queue may hold nothing — but it is the same
+  imprecision `Admission::NeverFits` already accepts about the same rate model.
+
+  **Present in 0.1.0, 0.1.1 and 0.1.2.** Upgrade if you expose an impaired
+  socket to traffic you do not control.
+
+### Added
+
+- **`QueueState::withdraw`**, which takes back the occupancy of a datagram the
+  queue admitted and the bucket then refused for good. The queue is consulted
+  first, so such a datagram is already in the backlog by the time it is
+  refused; leaving it there would tail-drop the datagrams behind it against
+  occupancy that does not exist.
+
 ## [0.1.2] - 2026-09-02
 
 Documentation only. No code path changes, no change to any emitted value, and

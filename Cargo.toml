@@ -38,7 +38,7 @@ moqtap-client = { path = "crates/moqtap-client", version = "0.4.1", default-feat
 moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.4.1" }
 # No `default-features = false`: this crate declares no `default` key at all, so
 # every feature it has is opt-in at the member manifest.
-quinn-netem = { path = "crates/quinn-netem", version = "0.1.2" }
+quinn-netem = { path = "crates/quinn-netem", version = "0.1.3" }
 bytes = "1"
 thiserror = "2"
 quinn = "0.11"
