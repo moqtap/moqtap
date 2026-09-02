@@ -179,6 +179,22 @@ async fn accepting_a_fetch_stream_reports_the_header_it_decoded() {
             REQUEST_ID,
             "the returned header must be the one the writer wrote"
         ),
+        // With draft14 as the only enabled draft `AnyFetchHeader` has a single
+        // variant, the arm above is exhaustive and this one unreachable.
+        #[cfg(any(
+            feature = "draft07",
+            feature = "draft08",
+            feature = "draft09",
+            feature = "draft10",
+            feature = "draft11",
+            feature = "draft12",
+            feature = "draft13",
+            feature = "draft15",
+            feature = "draft16",
+            feature = "draft17",
+            feature = "draft18",
+            feature = "draft19"
+        ))]
         other => panic!("expected a draft-14 fetch header, got {other:?}"),
     }
 
@@ -220,6 +236,21 @@ async fn accepting_a_fetch_stream_reports_the_header_it_decoded() {
             REQUEST_ID,
             "the reported header must be the one that was decoded, not a default"
         ),
+        // Unreachable for the same reason as the match above.
+        #[cfg(any(
+            feature = "draft07",
+            feature = "draft08",
+            feature = "draft09",
+            feature = "draft10",
+            feature = "draft11",
+            feature = "draft12",
+            feature = "draft13",
+            feature = "draft15",
+            feature = "draft16",
+            feature = "draft17",
+            feature = "draft18",
+            feature = "draft19"
+        ))]
         other => panic!("expected a draft-14 fetch header on the event, got {other:?}"),
     }
 
