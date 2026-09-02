@@ -7,6 +7,8 @@ pub mod quic;
 #[cfg(feature = "webtransport")]
 pub mod webtransport;
 
+pub use quic::{dial_quic, DialError, QuicDialOptions};
+
 use std::future::Future;
 
 use bytes::Bytes;

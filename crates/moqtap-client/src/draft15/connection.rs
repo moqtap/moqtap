@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use bytes::{Buf, Bytes, BytesMut};
 
 use crate::draft15::endpoint::{Endpoint, EndpointError};
@@ -10,7 +8,6 @@ use crate::draft15::session::setup;
 use crate::forwarding_preference::ObjectForwardingPreference;
 use crate::malformed_tracks::MalformedTrackCondition;
 use crate::track_locations::{ObjectLocation, ObjectRole, TrackObjects};
-use crate::transport::quic::QuicTransport;
 use crate::transport::{RecvStream, SendStream, Transport, TransportError};
 use moqtap_codec::dispatch::{
     AnyControlMessage, AnyDatagramHeader, AnyFetchHeader, AnySubgroupHeader,
@@ -103,6 +100,18 @@ pub enum ConnectionError {
         /// brings a different `ObjectStatus` into this module.
         status: moqtap_codec::draft15::types::ObjectStatus,
     },
+}
+
+impl From<crate::transport::DialError> for ConnectionError {
+    /// Preserves the variants this error had when the dial was inlined here,
+    /// so a caller matching on `InvalidAddress` or `TlsConfig` sees no change.
+    fn from(e: crate::transport::DialError) -> Self {
+        match e {
+            crate::transport::DialError::InvalidAddress(s) => ConnectionError::InvalidAddress(s),
+            crate::transport::DialError::TlsConfig(s) => ConnectionError::TlsConfig(s),
+            crate::transport::DialError::Transport(e) => ConnectionError::Transport(e),
+        }
+    }
 }
 
 /// Transport type for the connection.
@@ -585,16 +594,36 @@ impl FramedRecvStream {
     }
 
     /// Read the next draft-15 fetch header from this stream.
+    ///
+    /// The typed twin of [`read_fetch_header`](Self::read_fetch_header), and it
+    /// has to do the same two things that one does.
+    ///
+    /// It seeds the object reader, because the two consume the same bytes: a
+    /// version that left `fetch_io` unset would put the stream in a state no
+    /// caller can leave, with the next
+    /// [`read_fetch_object`](Self::read_fetch_object) refusing "fetch header
+    /// not read yet" about a header this method has just read and the bytes it
+    /// would need already spent.
+    ///
+    /// It fills before decoding, and treats a varint that ran out of buffer as
+    /// a short read rather than a malformed header. `FetchHeader::decode`
+    /// reports that as `CodecError::VarInt(VarIntError::UnexpectedEnd)` where
+    /// [`AnyFetchHeader`] reports a bare `CodecError::UnexpectedEnd`, so a loop
+    /// matching only the latter never reaches its own `fill` — and since the
+    /// buffer starts empty, that is every first call on a fresh stream.
     pub async fn read_fetch_stream_header(&mut self) -> Result<FetchHeader, ConnectionError> {
+        self.ensure(1).await?;
         loop {
             let mut cursor = &self.buf[..];
             match FetchHeader::decode(&mut cursor) {
                 Ok(hdr) => {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
+                    self.fetch_io = Some(FetchObjectReader::new());
                     return Ok(hdr);
                 }
-                Err(CodecError::UnexpectedEnd) => {
+                Err(CodecError::UnexpectedEnd)
+                | Err(CodecError::VarInt(moqtap_codec::varint::VarIntError::UnexpectedEnd)) => {
                     if !self.fill().await? {
                         return Err(ConnectionError::UnexpectedEnd);
                     }
@@ -709,7 +738,6 @@ impl Connection {
     /// performs the CLIENT_SETUP / SERVER_SETUP handshake, and returns
     /// a ready-to-use connection.
     pub async fn connect(addr: &str, config: ClientConfig) -> Result<Self, ConnectionError> {
-        let draft = config.draft;
         // PATH is for native QUIC only, and the transport is known here and
         // nowhere further in. Refusing before dialling means a session that
         // the server would close on sight is never opened.
@@ -726,6 +754,32 @@ impl Connection {
                 Self::connect_webtransport(&url, &config).await?
             }
         };
+
+        Self::adopt(transport, config).await
+    }
+
+    /// Run the MoQT setup handshake over a transport somebody else established.
+    ///
+    /// For choosing the draft from what the server selected: dial once through
+    /// [`crate::transport::dial_quic`] offering every ALPN, then bring the
+    /// connection to the module its answer names. [`Self::connect`] cannot do
+    /// this — it derives its single ALPN from the draft it was given.
+    ///
+    /// `config.draft` must match this module. The transport is adopted as
+    /// given; nothing here re-checks the ALPN it was negotiated with.
+    pub async fn adopt(
+        transport: Transport,
+        config: ClientConfig,
+    ) -> Result<Self, ConnectionError> {
+        let draft = config.draft;
+        // PATH is for native QUIC only, and the transport is known here and
+        // nowhere further in. Refusing before dialling means a session that
+        // the server would close on sight is never opened.
+        setup::validate_client_path_transport(
+            &config.setup_parameters,
+            matches!(config.transport, TransportType::WebTransport { .. }),
+        )
+        .map_err(EndpointError::from)?;
 
         // Open bidirectional control stream
         let (send, recv) = transport.open_bi().await?;
@@ -776,47 +830,20 @@ impl Connection {
     }
 
     /// Establish a raw QUIC connection.
+    ///
+    /// Offers this draft's ALPN alone; [`crate::transport::dial_quic`] holds the
+    /// TLS and endpoint setup.
     async fn connect_quic(addr: &str, config: &ClientConfig) -> Result<Transport, ConnectionError> {
-        let server_addr = addr.parse().map_err(|e: std::net::AddrParseError| {
-            ConnectionError::InvalidAddress(e.to_string())
-        })?;
-
-        // Build TLS config
-        let mut tls_config = if config.skip_cert_verification {
-            rustls::ClientConfig::builder()
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(SkipVerification))
-                .with_no_client_auth()
-        } else {
-            let mut roots = rustls::RootCertStore::empty();
-            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            for der in &config.ca_certs {
-                roots
-                    .add(rustls::pki_types::CertificateDer::from(der.clone()))
-                    .map_err(|e| ConnectionError::TlsConfig(format!("bad CA cert: {e}")))?;
-            }
-            rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth()
-        };
-
-        tls_config.alpn_protocols = config.alpn();
-
-        let quic_config: quinn::crypto::rustls::QuicClientConfig =
-            tls_config.try_into().map_err(|e| ConnectionError::TlsConfig(format!("{e}")))?;
-        let client_config = quinn::ClientConfig::new(Arc::new(quic_config));
-
-        let mut quinn_endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())
-            .map_err(|e| ConnectionError::InvalidAddress(e.to_string()))?;
-        quinn_endpoint.set_default_client_config(client_config);
-
-        let server_name = addr.split(':').next().unwrap_or("localhost").to_string();
-
-        let quic = quinn_endpoint
-            .connect(server_addr, &server_name)
-            .map_err(TransportError::from)?
-            .await
-            .map_err(TransportError::from)?;
-
-        Ok(Transport::Quic(QuicTransport::new(quic)))
+        let (transport, _negotiated) = crate::transport::dial_quic(
+            addr,
+            &crate::transport::QuicDialOptions {
+                skip_cert_verification: config.skip_cert_verification,
+                ca_certs: config.ca_certs.clone(),
+                alpn: config.alpn(),
+            },
+        )
+        .await?;
+        Ok(transport)
     }
 
     /// Establish a WebTransport connection.
@@ -1365,6 +1392,40 @@ impl Connection {
         Ok(framed)
     }
 
+    /// Accept the next unidirectional stream and read its fetch header.
+    ///
+    /// [`accept_subgroup_stream`](Self::accept_subgroup_stream)'s twin. The two
+    /// are separate because the header decides how every object after it is
+    /// framed, so a caller has to know which it is expecting before the first
+    /// byte is read.
+    ///
+    /// Objects come off the returned stream with
+    /// [`FramedRecvStream::read_fetch_object`].
+    pub async fn accept_fetch_stream(
+        &self,
+    ) -> Result<(AnyFetchHeader, FramedRecvStream), ConnectionError> {
+        let recv = self.transport.accept_uni().await?;
+        let mut framed = FramedRecvStream::new(recv, self.draft);
+        let sid = framed.stream_id();
+        let header = framed.read_fetch_header().await?;
+        self.emit(ClientEvent::StreamOpened {
+            direction: Direction::Receive,
+            stream_kind: StreamKind::Fetch,
+            stream_id: sid,
+        });
+        self.emit(ClientEvent::FetchStreamHeader {
+            stream_id: sid,
+            direction: Direction::Receive,
+            header: header.clone(),
+        });
+        // A fetch header goes out as `FetchStreamHeader`; `DataStreamHeader`
+        // carries an `AnySubgroupHeader` and cannot express one. What
+        // `accept_subgroup_stream` does beyond this - the forwarding-preference
+        // note, the object measurement - is about a subgroup and has no
+        // counterpart on a fetch stream.
+        Ok((header, framed))
+    }
+
     /// Accept an incoming unidirectional data stream and read its subgroup
     /// header.
     pub async fn accept_subgroup_stream(
@@ -1828,52 +1889,6 @@ impl Connection {
 /// Determine the encoded length of a varint from its first byte.
 fn varint_len(first_byte: u8) -> usize {
     1 << (first_byte >> 6)
-}
-
-/// TLS certificate verifier that skips all verification (for testing only).
-#[derive(Debug)]
-struct SkipVerification;
-
-impl rustls::client::danger::ServerCertVerifier for SkipVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dcs: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dcs: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-            rustls::SignatureScheme::ED25519,
-            rustls::SignatureScheme::RSA_PSS_SHA256,
-            rustls::SignatureScheme::RSA_PSS_SHA384,
-            rustls::SignatureScheme::RSA_PSS_SHA512,
-        ]
-    }
 }
 
 #[cfg(test)]

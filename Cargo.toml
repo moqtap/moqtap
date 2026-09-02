@@ -34,7 +34,7 @@ moqtap-trace = { path = "crates/moqtap-trace", version = "0.2.0" }
 # `RUSTFLAGS = "-D warnings"` never sees. Without it every reduced-draft
 # `moqtap-proxy` build silently resolves all thirteen drafts and CI's
 # single-draft rows pass by not checking anything.
-moqtap-client = { path = "crates/moqtap-client", version = "0.4.0", default-features = false }
+moqtap-client = { path = "crates/moqtap-client", version = "0.4.1", default-features = false }
 moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.4.0" }
 # No `default-features = false`: this crate declares no `default` key at all, so
 # every feature it has is opt-in at the member manifest.

@@ -5,6 +5,49 @@ All notable changes to moqtap-client will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-09-02
+
+Dialling without knowing the draft, and two fetch-stream reports that were
+declared and never delivered. Additive throughout: nothing public was removed,
+no existing signature moved, and `^0.4.0` still resolves.
+
+### Added
+
+- **`transport::dial_quic`, with `QuicDialOptions` and `DialError`.** Offers a
+  list of ALPNs and returns the connection together with the protocol the
+  server selected. `Connection::connect` cannot answer that question — it
+  derives its single ALPN from the draft it was handed — so a caller that did
+  not know a peer's draft had to dial once per candidate. From draft-15 this is
+  the whole of version negotiation: `ClientSetup` carries a parameter list and
+  nothing else, and `DraftVersion::from_alpn` names the draft. The thirteen
+  per-draft copies of the TLS and endpoint setup now delegate here.
+- **`Connection::adopt`**, on every draft. Runs the setup handshake over a
+  transport the caller already established, which is `dial_quic`'s other half:
+  dial offering every ALPN, then bring the connection to the module the answer
+  names.
+- **`Connection::accept_fetch_stream`**, on every draft. The twin of
+  `accept_subgroup_stream` for a fetch response stream, returning the decoded
+  `AnyFetchHeader` and the framed stream behind it.
+
+### Fixed
+
+- **A fetch stream now reports the header it decoded.**
+  `ClientEvent::FetchStreamHeader` has been defined on all thirteen drafts
+  since this crate's first release and was emitted by nothing, so an observer
+  learned that a fetch stream had opened and never what its header said, while
+  every subgroup stream reported both. `DataStreamHeader` cannot stand in: its
+  `header` field is an `AnySubgroupHeader`.
+- **`FramedRecvStream::read_fetch_stream_header` works.** The typed accessor on
+  drafts 15 through 19 failed on the first call against any stream whose header
+  was not already buffered — which is every fresh stream, since it neither
+  filled first nor recognised its own short read: the draft's `FetchHeader`
+  decoder reports a truncated varint as `CodecError::VarInt(UnexpectedEnd)`
+  where `AnyFetchHeader` reports the bare `CodecError::UnexpectedEnd` the loop
+  matched on. On drafts 15 and 17 it also left the object reader unseeded, so a
+  caller that got past that was refused by the next `read_fetch_object` with
+  "fetch header not read yet" — about a header it had just read, with the bytes
+  already spent and no way back.
+
 ## [0.4.0] - 2026-08-30
 
 Control-plane and conformance release. Drafts 17, 18 and 19 gain the stream
