@@ -246,10 +246,9 @@ fn a_flag_reads_its_value_and_not_merely_its_presence() {
 /// message telling them to clone a repository — while the variable they would
 /// reach for is already set to `false`.
 ///
-/// The
-/// tolerance above is right for a developer's checkout and wrong for CI, where
-/// a missing corpus means every test in this file returns before asserting
-/// anything and the run goes green having checked nothing. `cargo test`
+/// The tolerance above is right for a developer's checkout and wrong for CI,
+/// where a missing corpus means every test in this file returns before
+/// asserting anything and the run goes green having checked nothing. `cargo test`
 /// captures stdout, so without this the report reaches nobody: the print is
 /// visible under `--nocapture` and invisible in exactly the place the answer
 /// matters. One environment variable in the workflow is the whole fix, and
