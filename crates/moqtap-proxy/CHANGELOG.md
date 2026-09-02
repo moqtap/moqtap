@@ -5,6 +5,24 @@ All notable changes to moqtap-proxy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-09-02
+
+Documentation only. No behaviour change, no API change, and no value this
+crate emits is different.
+
+### Changed
+
+- Module and item prose across the crate now describes callers and runs in the
+  vocabulary of the types it documents.
+- Two doc pointers were wrong rather than merely stale. `shape::Matcher`
+  attributed the kebab-case spelling of its `side` field to a mapping in a
+  module that is not part of this crate, when it is `side_serde` a few hundred
+  lines below it. `tests/leaf_type_paths.rs` justified its exhaustive
+  `ProxySide` match by describing a particular downstream consumer rather than
+  the property it actually pins, which is that the enum is not
+  `#[non_exhaustive]` and so any downstream match without a wildcard arm breaks
+  on a fifth variant.
+
 ## [0.4.0] - 2026-08-31
 
 The release that turns an inspecting proxy into an acting one. 0.3.0 could

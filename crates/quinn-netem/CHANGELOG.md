@@ -5,6 +5,17 @@ All notable changes to quinn-netem will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-09-02
+
+Documentation only. No code path changes, no change to any emitted value, and
+the determinism gate's digest is unchanged.
+
+### Changed
+
+- Prose across `control`, `log`, `model`, `profile`, `queue` and `stats` now
+  describes callers and profiles in the vocabulary of the types it documents.
+  `Preset` is a named profile, which is what it builds.
+
 ## [0.1.1] - 2026-08-31
 
 No behaviour change. The SHA-256 used to pin the distribution tables reads its

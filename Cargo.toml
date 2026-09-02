@@ -35,10 +35,10 @@ moqtap-trace = { path = "crates/moqtap-trace", version = "0.2.0" }
 # `moqtap-proxy` build silently resolves all thirteen drafts and CI's
 # single-draft rows pass by not checking anything.
 moqtap-client = { path = "crates/moqtap-client", version = "0.4.1", default-features = false }
-moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.4.0" }
+moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.4.1" }
 # No `default-features = false`: this crate declares no `default` key at all, so
 # every feature it has is opt-in at the member manifest.
-quinn-netem = { path = "crates/quinn-netem", version = "0.1.1" }
+quinn-netem = { path = "crates/quinn-netem", version = "0.1.2" }
 bytes = "1"
 thiserror = "2"
 quinn = "0.11"
