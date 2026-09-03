@@ -847,8 +847,43 @@ impl DatagramHeader {
     ///
     /// Errors with [`CodecError::PayloadNotPermitted`] when bytes remain and
     /// the header forbids them, naming which of the two rules refused them.
+    ///
+    /// # The two Properties rules are enforced here too
+    ///
+    /// Section 10.3.1 states them of a receiving endpoint, and this is the
+    /// endpoint's read:
+    ///
+    /// * "If an endpoint receives a datagram with the PROPERTIES bit set and an
+    ///   Properties Length of 0, it MUST close the session with a
+    ///   PROTOCOL_VIOLATION." The bit and a zero length are two ways to spell
+    ///   *no properties* and a datagram may use only the first, because a
+    ///   datagram with none has a Type that says so and the block costs bytes
+    ///   the Type already saved. A subgroup stream says the opposite in
+    ///   Section 10.4.2 — there the PROPERTIES bit is fixed for the whole stream,
+    ///   so an object with no properties has nowhere else to say so and a
+    ///   zero-length block is the required spelling.
+    /// * "If an Object Datagram includes both the STATUS bit and PROPERTIES
+    ///   bit, and the Object Status is not Normal (0x0), the endpoint MUST close
+    ///   the session with a PROTOCOL_VIOLATION, because only Normal Objects can
+    ///   have Properties."
+    ///
+    /// Both errors are [`CodecError::InvalidField`].
+    ///
+    /// [`Self::decode`] does **not** apply them, and the split is deliberate.
+    /// Both describe a datagram that is well framed and non-conforming: every
+    /// field is where the layout puts it and every one of them parses, so the
+    /// header reads back exactly as it arrived and a tool reproducing a capture
+    /// can re-emit it. What it may not do is hand such a datagram to an
+    /// application as an ordinary Object, which is what this entry point would
+    /// be doing. [`Self::properties_block_well_formed`] and
+    /// [`Self::properties_permitted`] report the two for a caller that wants
+    /// the header without the judgement, and [`Self::encode_checked`] refuses
+    /// to write either shape.
     pub fn decode_object(buf: &mut impl Buf) -> Result<(Self, Vec<u8>), CodecError> {
         let header = Self::decode(buf)?;
+        if !header.properties_block_well_formed() || !header.properties_permitted() {
+            return Err(CodecError::InvalidField);
+        }
         let payload = crate::types::read_bytes(buf, buf.remaining())?;
         if !payload.is_empty() && !header.permits_payload() {
             return Err(CodecError::PayloadNotPermitted {
