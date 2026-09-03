@@ -47,8 +47,16 @@
 
 use moqtap_codec::fields::FieldValue;
 
-/// The parameters map of a rendered message, or a failure naming what was
-/// there instead.
+/// The parameters of a rendered message, collapsed to a map keyed by name.
+///
+/// The rendering is a list of entries in wire order, because a parameter block
+/// is a list on the wire and two of its types may repeat. Every message in this
+/// file carries one parameter, so a map is the convenient shape *here* — the
+/// collapse is this file's business and not the renderer's, which is the point
+/// of the list living in the corpus instead.
+///
+/// An entry the draft does not name is keyed by its type, so a test asserting
+/// that a draft gives a type no name can still find what arrived.
 ///
 /// Every test here is gated to the drafts its parameter exists on, so under a
 /// single-draft build most of this file compiles away and its helpers go
@@ -56,11 +64,31 @@ use moqtap_codec::fields::FieldValue;
 /// is an invariant nothing checks, and it silently stops being right the next
 /// time a draft is added.
 #[allow(dead_code)]
-fn parameters(fields: &moqtap_codec::fields::FieldMap) -> &moqtap_codec::fields::FieldMap {
-    match fields.get("parameters") {
-        Some(FieldValue::Map(map)) => map,
-        other => panic!("no parameter map in the rendered message: {other:?}"),
+fn parameters(fields: &moqtap_codec::fields::FieldMap) -> moqtap_codec::fields::FieldMap {
+    entries_by_name(fields.get("parameters"))
+}
+
+/// Collapse a rendered Key-Value-Pair list the same way, for a nested block.
+#[allow(dead_code)]
+fn entries_by_name(block: Option<&FieldValue>) -> moqtap_codec::fields::FieldMap {
+    let Some(FieldValue::Array(entries)) = block else {
+        panic!("no Key-Value-Pair list in the rendered message: {block:?}");
+    };
+    let mut out = moqtap_codec::fields::FieldMap::new();
+    for entry in entries {
+        let FieldValue::Map(entry) = entry else {
+            panic!("an entry renders as a map: {entry:?}");
+        };
+        let key = match (entry.get("name"), entry.get("type")) {
+            (Some(FieldValue::Text(name)), _) => name.clone(),
+            (None, Some(FieldValue::Text(ty))) => ty.clone(),
+            other => panic!("an entry carries a type and may carry a name: {other:?}"),
+        };
+        if let Some(value) = entry.get("value").or_else(|| entry.get("raw_hex")) {
+            out.insert(key, value.clone());
+        }
     }
+    out
 }
 
 // ============================================================
@@ -180,8 +208,9 @@ fn a_well_formed_draft_15_largest_object_still_renders_its_two_fields() {
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("two varints are the shape");
     let fields = moqtap_codec::draft15::fields::message_fields(&decoded);
 
-    let Some(FieldValue::Map(largest)) = parameters(&fields).get("largest_object") else {
-        panic!("a well-formed value must still render as fields: {:?}", parameters(&fields));
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(largest)) = params.get("largest_object") else {
+        panic!("a well-formed value must still render as fields: {params:?}");
     };
     assert_eq!(largest.get("group"), Some(&FieldValue::Uint(10)));
     assert_eq!(largest.get("object"), Some(&FieldValue::Uint(3)));
@@ -445,9 +474,12 @@ fn a_malformed_range_filter_nested_in_fill_parameters_renders() {
         });
 
         let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
-        let Some(FieldValue::Map(fill)) = parameters(&fields).get("fill_parameters") else {
-            panic!("no nested parameter map: {:?}", parameters(&fields));
-        };
+        let params = parameters(&fields);
+        // A nested block is a Key-Value-Pair list like the outer one, so it
+        // collapses the same way. The nesting is the whole point of the test:
+        // a value the outer block would have rendered as bytes must not become
+        // a structure one level down.
+        let fill = entries_by_name(params.get("fill_parameters"));
         assert_eq!(
             fill.get(filter_name(parameter_type)),
             Some(&FieldValue::Bytes(value.clone())),
@@ -473,8 +505,9 @@ fn a_well_formed_draft_20_range_filter_still_renders_its_ranges() {
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("a well-formed filter");
     let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
 
-    let Some(FieldValue::Map(filter)) = parameters(&fields).get("subgroup_filter") else {
-        panic!("a well-formed filter must render as fields: {:?}", parameters(&fields));
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get("subgroup_filter") else {
+        panic!("a well-formed filter must render as fields: {params:?}");
     };
     assert_eq!(filter.get("set_id"), Some(&FieldValue::Uint(0)));
 
@@ -505,8 +538,9 @@ fn a_range_filter_with_no_final_end_renders_a_start_and_no_end() {
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("a well-formed open filter");
     let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
 
-    let Some(FieldValue::Map(filter)) = parameters(&fields).get("subgroup_filter") else {
-        panic!("a well-formed filter must render as fields: {:?}", parameters(&fields));
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get("subgroup_filter") else {
+        panic!("a well-formed filter must render as fields: {params:?}");
     };
     let mut range = moqtap_codec::fields::FieldMap::new();
     range.insert("start".into(), FieldValue::Uint(7));
@@ -547,7 +581,8 @@ fn a_priority_filter_above_the_field_renders_its_fields_and_names_the_rule() {
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("the frame itself is well-formed");
     let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
 
-    let Some(FieldValue::Map(filter)) = parameters(&fields).get("priority_filter") else {
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get("priority_filter") else {
         panic!(
             "a rule-breaking filter must still render its fields, got {:?}",
             parameters(&fields).get("priority_filter")
@@ -579,8 +614,9 @@ fn a_property_filter_over_an_odd_property_type_renders_and_names_the_rule() {
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("the frame itself is well-formed");
     let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
 
-    let Some(FieldValue::Map(filter)) = parameters(&fields).get(filter_name(0x28)) else {
-        panic!("a rule-breaking filter must still render its fields: {:?}", parameters(&fields));
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get(filter_name(0x28)) else {
+        panic!("a rule-breaking filter must still render its fields: {params:?}");
     };
     assert_eq!(
         filter.get("property_type"),
@@ -610,8 +646,9 @@ fn a_well_formed_filter_is_not_reported_as_violating_anything() {
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("a well-formed priority filter");
     let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
 
-    let Some(FieldValue::Map(filter)) = parameters(&fields).get("priority_filter") else {
-        panic!("a well-formed filter must render as fields: {:?}", parameters(&fields));
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get("priority_filter") else {
+        panic!("a well-formed filter must render as fields: {params:?}");
     };
     assert_eq!(filter.get("violates"), None, "nothing is broken here: {filter:?}");
 }

@@ -34,40 +34,22 @@ fn auth_token_to_json(bytes: &[u8]) -> Value {
 }
 
 fn kvp_to_json_setup(params: &[KeyValuePair]) -> Value {
-    let mut obj = Map::new();
-    for p in params {
-        let key = p.key.into_inner();
-        match (key, &p.value) {
-            (0x01, KvpValue::Bytes(b)) => {
-                obj.insert("path".into(), Value::Text(String::from_utf8_lossy(b).into_owned()));
-            }
-            (0x02, KvpValue::Varint(v)) => {
-                obj.insert("max_request_id".into(), vi(v.into_inner()));
-            }
-            _ => {}
+    crate::fields::kvp_entries(params, |key, value| match (key, value) {
+        (0x01, KvpValue::Bytes(b)) => {
+            (Some("path"), Some(Value::Text(String::from_utf8_lossy(b).into_owned())))
         }
-    }
-    Value::Map(obj)
+        (0x02, KvpValue::Varint(v)) => (Some("max_request_id"), Some(vi(v.into_inner()))),
+        _ => (None, None),
+    })
 }
 
 fn kvp_to_json_msg(params: &[KeyValuePair]) -> Value {
-    let mut obj = Map::new();
-    for p in params {
-        let key = p.key.into_inner();
-        match (key, &p.value) {
-            (0x03, KvpValue::Bytes(b)) => {
-                obj.insert("authorization_token".into(), auth_token_to_json(b));
-            }
-            (0x02, KvpValue::Varint(v)) => {
-                obj.insert("delivery_timeout".into(), vi(v.into_inner()));
-            }
-            (0x04, KvpValue::Varint(v)) => {
-                obj.insert("max_cache_duration".into(), vi(v.into_inner()));
-            }
-            _ => {}
-        }
-    }
-    Value::Map(obj)
+    crate::fields::kvp_entries(params, |key, value| match (key, value) {
+        (0x03, KvpValue::Bytes(b)) => (Some("authorization_token"), Some(auth_token_to_json(b))),
+        (0x02, KvpValue::Varint(v)) => (Some("delivery_timeout"), Some(vi(v.into_inner()))),
+        (0x04, KvpValue::Varint(v)) => (Some("max_cache_duration"), Some(vi(v.into_inner()))),
+        _ => (None, None),
+    })
 }
 
 /// This draft's field names for a decoded control message.

@@ -125,80 +125,34 @@ fn decode_track_namespace_prefix(bytes: &[u8]) -> Value {
 }
 
 fn params_to_json(params: &[KeyValuePair]) -> Value {
-    let mut obj = Map::new();
-    let mut unknown = Vec::new();
-
-    for p in params {
-        let key = p.key.into_inner();
-        if let Some(name) = d18_param_name(key) {
-            match (&p.value, key) {
-                (KvpValue::Bytes(b), 0x21) => {
-                    obj.insert(name.to_string(), decode_subscription_filter(b));
-                }
-                (KvpValue::Bytes(b), 0x09) => {
-                    obj.insert(name.to_string(), decode_largest_object(b));
-                }
-                (KvpValue::Bytes(b), 0x34) => {
-                    obj.insert(name.to_string(), decode_track_namespace_prefix(b));
-                }
-                (KvpValue::Bytes(b), _) if name == "authorization_token" => {
-                    obj.insert(name.to_string(), auth_token_to_json_d18(b));
-                }
-                (KvpValue::Varint(v), _) => {
-                    obj.insert(name.to_string(), vi(v.into_inner()));
-                }
-                (KvpValue::Bytes(b), _) => {
-                    obj.insert(
-                        name.to_string(),
-                        Value::Text(String::from_utf8_lossy(b).into_owned()),
-                    );
-                }
-            }
-        } else {
-            let mut entry = Map::new();
-            entry.insert("id".to_string(), Value::Text(format!("0x{:x}", key)));
-            match &p.value {
-                KvpValue::Varint(v) => {
-                    entry.insert("length".to_string(), vi(v.into_inner()));
-                }
-                KvpValue::Bytes(b) => {
-                    entry.insert("length".to_string(), vi(b.len() as u64));
-                    entry.insert("raw_hex".to_string(), Value::Bytes(b.to_vec()));
-                }
-            }
-            unknown.push(Value::Map(entry));
-        }
-    }
-
-    if !unknown.is_empty() {
-        obj.insert("unknown".to_string(), Value::Array(unknown));
-    }
-
-    Value::Map(obj)
+    crate::fields::kvp_entries(params, |key, value| {
+        let Some(name) = d18_param_name(key) else {
+            return (None, None);
+        };
+        let rendered = match (value, key) {
+            (KvpValue::Bytes(b), 0x21) => decode_subscription_filter(b),
+            (KvpValue::Bytes(b), 0x09) => decode_largest_object(b),
+            (KvpValue::Bytes(b), 0x34) => decode_track_namespace_prefix(b),
+            (KvpValue::Bytes(b), _) if name == "authorization_token" => auth_token_to_json_d18(b),
+            (KvpValue::Varint(v), _) => vi(v.into_inner()),
+            (KvpValue::Bytes(b), _) => Value::Text(String::from_utf8_lossy(b).into_owned()),
+        };
+        (Some(name), Some(rendered))
+    })
 }
 
 fn options_to_json(options: &[KeyValuePair]) -> Value {
-    let mut obj = Map::new();
-    for p in options {
-        let key = p.key.into_inner();
-        if let Some(name) = d18_option_name(key) {
-            match &p.value {
-                KvpValue::Varint(v) => {
-                    obj.insert(name.to_string(), vi(v.into_inner()));
-                }
-                KvpValue::Bytes(b) if name == "authorization_token" => {
-                    obj.insert(name.to_string(), auth_token_to_json_d18(b));
-                }
-                KvpValue::Bytes(b) => {
-                    obj.insert(
-                        name.to_string(),
-                        Value::Text(String::from_utf8_lossy(b).into_owned()),
-                    );
-                }
-            }
-        }
-    }
-    Value::Map(obj)
+    crate::fields::kvp_entries(options, |key, value| {
+        let Some(name) = d18_option_name(key) else {
+            return (None, None);
+        };
+        let rendered = match value {
+            KvpValue::Varint(v) => vi(v.into_inner()),
+            KvpValue::Bytes(b) if name == "authorization_token" => auth_token_to_json_d18(b),
+            KvpValue::Bytes(b) => Value::Text(String::from_utf8_lossy(b).into_owned()),
+        };
+        (Some(name), Some(rendered))
+    })
 }
 
 fn d18_track_prop_name(key: u64) -> Option<&'static str> {
@@ -215,22 +169,17 @@ fn d18_track_prop_name(key: u64) -> Option<&'static str> {
 }
 
 fn track_props_to_json(props: &[KeyValuePair]) -> Value {
-    let mut obj = Map::new();
-    for p in props {
-        let key = p.key.into_inner();
-        let name = d18_track_prop_name(key)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("0x{:x}", key));
-        match &p.value {
-            KvpValue::Varint(v) => {
-                obj.insert(name, vi(v.into_inner()));
-            }
-            KvpValue::Bytes(b) => {
-                obj.insert(name, Value::Bytes(b.to_vec()));
-            }
-        }
-    }
-    Value::Map(obj)
+    crate::fields::kvp_entries(props, |key, value| {
+        let name = d18_track_prop_name(key);
+        let rendered = match value {
+            KvpValue::Varint(v) => Some(vi(v.into_inner())),
+            // A property this draft does not name keeps its bytes rather than
+            // a name invented from its type, which is what an entry's absent
+            // `name` already says.
+            KvpValue::Bytes(_) => None,
+        };
+        (name, rendered)
+    })
 }
 
 /// This draft's field names for a decoded control message.

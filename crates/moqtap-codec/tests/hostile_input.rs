@@ -123,13 +123,17 @@ fn a_named_integer_parameter_with_no_varint_in_it_does_not_panic() {
     });
 
     let fields = moqtap_codec::draft07::fields::message_fields(&msg);
-    let Some(FieldValue::Map(parameters)) = fields.get("parameters") else {
-        panic!("no parameter map in {fields:?}");
+    let Some(FieldValue::Array(parameters)) = fields.get("parameters") else {
+        panic!("no parameter list in {fields:?}");
     };
+    let [FieldValue::Map(entry)] = &parameters[..] else {
+        panic!("one parameter was sent: {parameters:?}");
+    };
+    assert_eq!(entry.get("name"), Some(&FieldValue::Text("max_subscribe_id".into())));
     assert_eq!(
-        parameters.get("max_subscribe_id"),
+        entry.get("raw_hex"),
         Some(&FieldValue::Bytes(Vec::new())),
-        "the value a message carried, not a judgement on it: {parameters:?}"
+        "the value a message carried, not a judgement on it: {entry:?}"
     );
 }
 
@@ -168,12 +172,15 @@ fn a_setup_parameter_type_draft_08_dropped_is_not_named_role() {
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("nor on the way back");
 
     let fields = moqtap_codec::draft08::fields::message_fields(&decoded);
-    let Some(FieldValue::Map(parameters)) = fields.get("parameters") else {
-        panic!("no parameter map in {fields:?}");
+    let Some(FieldValue::Array(parameters)) = fields.get("parameters") else {
+        panic!("no parameter list in {fields:?}");
     };
-    assert_eq!(parameters.get("role"), None, "draft-08 has no ROLE: {parameters:?}");
-    let Some(FieldValue::Array(unknown)) = parameters.get("unknown") else {
-        panic!("0x00 is not a draft-08 setup parameter and belongs in `unknown`: {parameters:?}");
+    let [FieldValue::Map(entry)] = &parameters[..] else {
+        panic!("one parameter was sent: {parameters:?}");
     };
-    assert_eq!(unknown.len(), 1, "one parameter was sent: {unknown:?}");
+    // An entry with no `name` is how the rendering says the draft assigns the
+    // type nothing. There is no second container to look in: the type is on
+    // the entry, beside the bytes that arrived under it.
+    assert_eq!(entry.get("type"), Some(&FieldValue::Text("0x0".into())));
+    assert_eq!(entry.get("name"), None, "draft-08 has no ROLE: {entry:?}");
 }

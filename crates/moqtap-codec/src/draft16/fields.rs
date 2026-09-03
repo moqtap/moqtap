@@ -146,53 +146,19 @@ fn kvp_to_json_d16_inner(
     params: &[KeyValuePair],
     name_fn: fn(u64) -> Option<&'static str>,
 ) -> Value {
-    let mut obj = Map::new();
-    let mut unknown = Vec::new();
-
-    for p in params {
-        let key = p.key.into_inner();
-        if let Some(name) = name_fn(key) {
-            match (&p.value, key) {
-                (KvpValue::Bytes(b), 0x21) => {
-                    obj.insert(name.to_string(), decode_subscription_filter(b));
-                }
-                (KvpValue::Bytes(b), 0x09) => {
-                    obj.insert(name.to_string(), decode_largest_object(b));
-                }
-                (KvpValue::Bytes(b), _) if name == "authorization_token" => {
-                    obj.insert(name.to_string(), auth_token_to_json_d16(b));
-                }
-                (KvpValue::Varint(v), _) => {
-                    obj.insert(name.to_string(), vi(v.into_inner()));
-                }
-                (KvpValue::Bytes(b), _) => {
-                    obj.insert(
-                        name.to_string(),
-                        Value::Text(String::from_utf8_lossy(b).into_owned()),
-                    );
-                }
-            }
-        } else {
-            let mut entry = Map::new();
-            entry.insert("id".to_string(), Value::Text(format!("0x{:x}", key)));
-            match &p.value {
-                KvpValue::Varint(v) => {
-                    entry.insert("length".to_string(), vi(v.into_inner()));
-                }
-                KvpValue::Bytes(b) => {
-                    entry.insert("length".to_string(), vi(b.len() as u64));
-                    entry.insert("raw_hex".to_string(), Value::Bytes(b.to_vec()));
-                }
-            }
-            unknown.push(Value::Map(entry));
-        }
-    }
-
-    if !unknown.is_empty() {
-        obj.insert("unknown".to_string(), Value::Array(unknown));
-    }
-
-    Value::Map(obj)
+    crate::fields::kvp_entries(params, |key, value| {
+        let Some(name) = name_fn(key) else {
+            return (None, None);
+        };
+        let rendered = match (value, key) {
+            (KvpValue::Bytes(b), 0x21) => decode_subscription_filter(b),
+            (KvpValue::Bytes(b), 0x09) => decode_largest_object(b),
+            (KvpValue::Bytes(b), _) if name == "authorization_token" => auth_token_to_json_d16(b),
+            (KvpValue::Varint(v), _) => vi(v.into_inner()),
+            (KvpValue::Bytes(b), _) => Value::Text(String::from_utf8_lossy(b).into_owned()),
+        };
+        (Some(name), Some(rendered))
+    })
 }
 
 fn kvp_to_json_d16(params: &[KeyValuePair]) -> Value {

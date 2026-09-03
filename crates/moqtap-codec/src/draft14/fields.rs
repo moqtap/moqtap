@@ -83,48 +83,17 @@ fn d14_msg_param_name(key: u64) -> Option<&'static str> {
 
 /// Convert KVP list to JSON Value matching test vector format.
 fn kvp_to_json(params: &[KeyValuePair], name_fn: fn(u64) -> Option<&'static str>) -> Value {
-    let mut obj = Map::new();
-    let mut unknown = Vec::new();
-
-    for p in params {
-        let key = p.key.into_inner();
-        if let Some(name) = name_fn(key) {
-            match &p.value {
-                KvpValue::Varint(v) => {
-                    obj.insert(name.to_string(), Value::Uint(v.into_inner()));
-                }
-                KvpValue::Bytes(b) => {
-                    if name == "authorization_token" {
-                        obj.insert(name.to_string(), auth_token_to_json_d14(b));
-                    } else {
-                        obj.insert(
-                            name.to_string(),
-                            Value::Text(String::from_utf8_lossy(b).into_owned()),
-                        );
-                    }
-                }
-            }
-        } else {
-            let mut entry = Map::new();
-            entry.insert("id".to_string(), Value::Text(format!("0x{:x}", key)));
-            match &p.value {
-                KvpValue::Varint(v) => {
-                    entry.insert("length".to_string(), Value::Uint(v.into_inner()));
-                }
-                KvpValue::Bytes(b) => {
-                    entry.insert("length".to_string(), Value::Uint(b.len() as u64));
-                    entry.insert("raw_hex".to_string(), Value::Bytes(b.to_vec()));
-                }
-            }
-            unknown.push(Value::Map(entry));
-        }
-    }
-
-    if !unknown.is_empty() {
-        obj.insert("unknown".to_string(), Value::Array(unknown));
-    }
-
-    Value::Map(obj)
+    crate::fields::kvp_entries(params, |key, value| {
+        let Some(name) = name_fn(key) else {
+            return (None, None);
+        };
+        let rendered = match value {
+            KvpValue::Varint(v) => Value::Uint(v.into_inner()),
+            KvpValue::Bytes(b) if name == "authorization_token" => auth_token_to_json_d14(b),
+            KvpValue::Bytes(b) => Value::Text(String::from_utf8_lossy(b).into_owned()),
+        };
+        (Some(name), Some(rendered))
+    })
 }
 
 fn kvp_to_json_d14(params: &[KeyValuePair]) -> Value {

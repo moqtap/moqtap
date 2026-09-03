@@ -113,13 +113,52 @@ fn uint8_value_in_range(key: u64, value: u8) -> bool {
     }
 }
 
-/// The one parameter type draft-19 lets a message carry more than once.
-///
-/// Section 10.2.2: "The AUTHORIZATION TOKEN parameter MAY be repeated within a
-/// message as long as the combination of Token Type and Token Value are unique
-/// after resolving any aliases." Every other type is subject to the blanket rule
-/// in Section 10.2.
 const AUTHORIZATION_TOKEN: u64 = 0x03;
+
+/// Whether a message may carry `key` more than once.
+///
+/// Section 10.2 states the default: "Senders MUST NOT repeat the same Parameter
+/// Type in a message unless the parameter definition explicitly allows multiple
+/// instances of that type to be sent in a single message." Two definitions do.
+///
+/// * `AUTHORIZATION_TOKEN` (0x03), Section 10.2.2: "The AUTHORIZATION TOKEN
+///   parameter MAY be repeated within a message as long as the combination of
+///   Token Type and Token Value are unique after resolving any aliases."
+/// * The five Range Filters (0x25 through 0x29), Section 5.1.3: "The Track
+///   Property filter parameter MAY appear multiple times in a SUBSCRIBE_TRACKS
+///   message or REQUEST_UPDATE for it. All other filter parameters MAY appear
+///   multiple times in a FETCH, SUBSCRIBE, SUBSCRIBE_TRACKS, PUBLISH_OK, or
+///   REQUEST_UPDATE (on a subscription, from the subscriber only) message."
+///
+/// # A zero `Type Delta` is "the same type again", not an error
+///
+/// The two rules interact, and **the draft does not say how**. Section 10.2 also
+/// requires that "Parameters MUST be serialized in ascending order by Type", so
+/// a second instance of a repeatable type produces a `Type Delta` of 0 — well
+/// formed only if the decoder reads a zero delta as a repeat rather than as a
+/// malformation. That reading is the one taken here; the alternative makes
+/// Section 5.1.3's permission unusable, because there is no other encoding for
+/// a second filter of the same type.
+///
+/// # Why the permission is not decoration
+///
+/// "All filter parameters with the same SetID value are combined using logical
+/// 'AND' operations, then all the resulting sets are combined using logical
+/// 'OR' operations." One filter parameter carries one SetID, so a subscriber
+/// asking for two alternatives that each constrain the same field — Subgroup 1
+/// to 3 at low priority, or Subgroup 10 to 12 at high — has to send SUBGROUP_
+/// FILTER twice, once per set. Refusing the repeat does not narrow what a peer
+/// can express; it collapses the set lattice to one filter per type and turns
+/// conforming traffic into a session close.
+///
+/// What the filters may **not** do is repeat the same (Parameter Type, SetID,
+/// Property Type) triple, and Section 5.1.3 answers that with a REQUEST_ERROR
+/// carrying INVALID_FILTER rather than with a session close. A reply an endpoint
+/// sends is not a frame a decoder refuses, so nothing here enforces it — see
+/// [`crate::range_filter`] for the reader an endpoint uses to decide.
+fn parameter_may_repeat(key: u64) -> bool {
+    matches!(key, AUTHORIZATION_TOKEN | 0x25..=0x29)
+}
 
 /// Add a delta to the previous delta-encoded key.
 ///
@@ -257,7 +296,11 @@ fn decode_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError
         // session with PROTOCOL_VIOLATION if found." Downstream code that scans
         // the list for a key takes whichever copy it meets first, so two
         // implementations reading one frame can pick opposite values.
-        if i > 0 && delta == 0 && abs_key != AUTHORIZATION_TOKEN {
+        //
+        // "Unexpected" is what `parameter_may_repeat` reads: a zero delta on a
+        // type whose own definition permits repeats is the second instance,
+        // which is the only encoding such an instance has.
+        if i > 0 && delta == 0 && !parameter_may_repeat(abs_key) {
             return Err(CodecError::DuplicateParameter(abs_key));
         }
         prev_key = abs_key;
@@ -383,7 +426,7 @@ fn encode_parameters(params: &[KeyValuePair], buf: &mut impl BufMut) -> Result<(
         let delta = abs_key
             .checked_sub(prev_key)
             .ok_or(CodecError::ParametersOutOfOrder(prev_key, abs_key))?;
-        if i > 0 && delta == 0 && abs_key != AUTHORIZATION_TOKEN {
+        if i > 0 && delta == 0 && !parameter_may_repeat(abs_key) {
             return Err(CodecError::DuplicateParameter(abs_key));
         }
         prev_key = abs_key;

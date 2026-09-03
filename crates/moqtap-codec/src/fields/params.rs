@@ -1,4 +1,4 @@
-use crate::fields::{FieldMap as Map, FieldValue as Value};
+use crate::fields::FieldValue as Value;
 use crate::kvp::{KeyValuePair, KvpValue};
 use crate::varint::VarInt;
 
@@ -63,61 +63,33 @@ fn kvp_to_json_d07_inner(
     name_fn: fn(u64) -> Option<&'static str>,
     is_varint_fn: fn(u64) -> bool,
 ) -> Value {
-    let mut obj = Map::new();
-    let mut unknown = Vec::new();
-
-    for p in params {
-        let key = p.key.into_inner();
-        if let Some(name) = name_fn(key) {
-            match &p.value {
-                KvpValue::Bytes(b) if is_varint_fn(key) => {
-                    // The bytes come off the wire and the decoder does not
-                    // always vouch for them: it refuses a value that is not one
-                    // varint only for the types the draft in question defines
-                    // as an integer, and this table is shared by four drafts
-                    // that do not define the same set. A type one of them
-                    // dropped arrives unchecked, so a value too short to be a
-                    // varint reaches here.
-                    //
-                    // Raw bytes rather than a refusal: this is what a message
-                    // carried, not a judgement on whether it was allowed to.
-                    let value = match VarInt::decode(&mut &b[..]) {
-                        Ok(v) => Value::Uint(v.into_inner()),
-                        Err(_) => Value::Bytes(b.to_vec()),
-                    };
-                    obj.insert(name.to_string(), value);
-                }
-                KvpValue::Bytes(b) => {
-                    obj.insert(
-                        name.to_string(),
-                        Value::Text(String::from_utf8_lossy(b).into_owned()),
-                    );
-                }
-                KvpValue::Varint(v) => {
-                    obj.insert(name.to_string(), Value::Uint(v.into_inner()));
+    crate::fields::kvp_entries(params, |key, value| {
+        let Some(name) = name_fn(key) else {
+            return (None, None);
+        };
+        let rendered = match value {
+            KvpValue::Bytes(b) if is_varint_fn(key) => {
+                // The bytes come off the wire and the decoder does not
+                // always vouch for them: it refuses a value that is not one
+                // varint only for the types the draft in question defines
+                // as an integer, and this table is shared by four drafts
+                // that do not define the same set. A type one of them
+                // dropped arrives unchecked, so a value too short to be a
+                // varint reaches here.
+                //
+                // `None` rather than a refusal: this is what a message
+                // carried, not a judgement on whether it was allowed to, and
+                // an entry with no `value` reports the bytes under `raw_hex`.
+                match VarInt::decode(&mut &b[..]) {
+                    Ok(v) => Some(Value::Uint(v.into_inner())),
+                    Err(_) => None,
                 }
             }
-        } else {
-            let mut entry = Map::new();
-            entry.insert("id".to_string(), Value::Text(format!("0x{:x}", key)));
-            match &p.value {
-                KvpValue::Bytes(b) => {
-                    entry.insert("length".to_string(), Value::Uint(b.len() as u64));
-                    entry.insert("raw_hex".to_string(), Value::Bytes(b.to_vec()));
-                }
-                KvpValue::Varint(v) => {
-                    entry.insert("length".to_string(), Value::Uint(v.into_inner()));
-                }
-            }
-            unknown.push(Value::Map(entry));
-        }
-    }
-
-    if !unknown.is_empty() {
-        obj.insert("unknown".to_string(), Value::Array(unknown));
-    }
-
-    Value::Map(obj)
+            KvpValue::Bytes(b) => Some(Value::Text(String::from_utf8_lossy(b).into_owned())),
+            KvpValue::Varint(v) => Some(Value::Uint(v.into_inner())),
+        };
+        (Some(name), rendered)
+    })
 }
 
 #[cfg(feature = "draft07")]
