@@ -459,8 +459,8 @@ fn an_unrecognised_key_on_a_known_event_survives_a_round_trip() {
 /// The three stream-header identifiers on a `headers`-level trace, on both
 /// files of the case.
 ///
-/// The case shipped with §2 and, for a session, no test named it — so its
-/// documented claims were asserted nowhere and it could have decoded to
+/// The case shipped with those identifiers and for a time no test named it —
+/// so its documented claims were asserted nowhere and it could have decoded to
 /// anything without a corpus test noticing. A fixture nothing names is a file,
 /// not a check.
 ///

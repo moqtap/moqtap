@@ -20,6 +20,9 @@ It writes format version 2 and reads versions 1 and 2.
 - **`.moqtrace` format**: CBOR-encoded, streamable, segmentable,
   cross-language
 - **MoqTraceWriter / MoqTraceReader**: streaming writer and reader
+- **Conformance corpus**: checked against the shared `.moqtrace` corpus, half
+  of whose files were written by the JavaScript implementation rather than by
+  this crate
 
 ## Usage
 
@@ -54,10 +57,40 @@ assert_eq!(reader.header().protocol, "moq-transport-19");
 assert_eq!(reader.into_iter().count(), 1);
 ```
 
+## Recording an error with the bytes behind it
+
+`EventData::Error` carries the stream the failure was seen on, what sort of
+failure it was, and the bytes responsible. A report saying "your SUBSCRIBE_OK
+did not parse" is an assertion; the same report carrying the bytes is evidence
+the other party can run against their own encoder.
+
+```rust
+use moqtap_trace::event::{ErrorKind, EventData, ERROR_RAW_CAP};
+
+let offending = vec![0u8; 12];
+let event = EventData::Error {
+    error_code: 0,
+    reason: "SUBSCRIBE_OK did not parse".into(),
+    stream_id: Some(4),
+    kind: Some(ErrorKind::Decode),
+    raw_len: Some(offending.len() as u64),
+    raw: Some(offending),
+};
+assert!(ERROR_RAW_CAP == 4096);
+let _ = event;
+```
+
+Whatever records the bytes caps them at `ERROR_RAW_CAP` and reports the
+untruncated length in `raw_len`. The two disagreeing is how a reader learns a
+capture is partial and by how much, so omit `raw_len` when the true length is
+not known rather than guessing at it.
+
 Reading a trace someone else wrote, nothing is rejected for being newer than
 this crate: an unrecognised event type arrives as `EventData::Unknown` with
 its fields intact, and an unrecognised perspective, detail level or drop
-policy is kept verbatim in the matching `Other` variant.
+policy is kept verbatim in the matching `Other` variant. Keys are kept on the
+same terms - one this version does not recognise, on the header or on any
+event, is preserved in the neighbouring `extra` and written back unchanged.
 
 ## License
 

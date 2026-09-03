@@ -5,7 +5,7 @@ All notable changes to moqtap-trace will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-09-03
 
 **Breaking, which is why the next release is 0.3.0 and not 0.2.1.**
 `TraceEvent`, `TraceHeader`, `SegmentInfo` and `SamplingInfo` each gained a
@@ -20,10 +20,11 @@ The fix at each site is one line, and the constructors avoid it entirely:
 `SegmentInfo::new`. A constructor does not have to be edited every time its
 struct gains a field, which is why they exist.
 
-Three breaks are not fields, and each is described in the entry it belongs to:
+Four breaks are not fields, and each is described in the entry it belongs to:
 `SegmentInfo` loses its `Eq` impl, the malformed-header error strings now
-distinguish an absent key from an unusable one, and `header.custom` reads
-`None` on a `"custom"` this crate used to hand back in part.
+distinguish an absent key from an unusable one, `header.custom` reads `None`
+on a `"custom"` this crate used to hand back in part, and `request_id()`
+answers with a value where every real trace used to give `None`.
 
 ### Added
 
@@ -146,6 +147,12 @@ distinguish an absent key from an unusable one, and `header.custom` reads
   quarter were recorded from third-party relays, so for the first time this
   crate's reader is tested on bytes it did not write. `examples/generate_corpus`
   writes this crate's half.
+
+  The files live in their own repository rather than beside the IETF wire
+  vectors they have nothing to do with: `test-traces`, wired in here as a git
+  submodule at `crates/moqtap-trace/test-traces`. A checkout without it skips
+  every corpus test, except on CI, where a missing corpus fails instead of
+  passing quietly.
 
   The corpus earned its place immediately: it caught the duplicate-key bug
   below on the first run of the new code, before either implementation had a
