@@ -1,6 +1,6 @@
 //! A GOAWAY that repeats one already received ends the session, on the wire.
 //!
-//! All thirteen drafts state it, each in its own GOAWAY section, and each with
+//! All fourteen drafts state it, each in its own GOAWAY section, and each with
 //! the verb and the code in the same sentence. Draft-07 Section 6.3: "The
 //! client MUST terminate the session with a Protocol Violation (Section 3.5) if
 //! it receives multiple GOAWAY messages." Four things move under that sentence
@@ -9,7 +9,7 @@
 //! from draft-16. The code is spelled "Protocol Violation" through draft-13
 //! and PROTOCOL_VIOLATION from draft-14. The subject is "The client" on
 //! draft-07 alone and "The endpoint" from draft-08. And the scope changes
-//! last: drafts 18 and 19 replace "multiple GOAWAY messages" with "more than
+//! last: drafts 18 through 20 replace "multiple GOAWAY messages" with "more than
 //! one GOAWAY on the control stream or on a single request stream".
 //!
 //! # Why draft-07 names the client where the others name the endpoint
@@ -667,6 +667,14 @@ uni_repeated_goaway_gates!(
     plain,
     moqtap_client::draft19::session::request_id::Role
 );
+uni_repeated_goaway_gates!(
+    draft20,
+    "draft20",
+    Draft20,
+    "10.4",
+    plain,
+    moqtap_client::draft20::session::request_id::Role
+);
 
 /// The per-stream half of the rule, on the two drafts that state it.
 ///
@@ -809,3 +817,4 @@ macro_rules! request_stream_goaway_gates {
 
 request_stream_goaway_gates!(draft18, "draft18", draft18_request_streams);
 request_stream_goaway_gates!(draft19, "draft19", draft19_request_streams);
+request_stream_goaway_gates!(draft20, "draft20", draft20_request_streams);

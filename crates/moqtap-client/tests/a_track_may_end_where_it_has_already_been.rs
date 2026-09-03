@@ -5,11 +5,12 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 //! An object that says a track ended somewhere the track has already passed,
-//! over QUIC, at the seven drafts that permit it.
+//! over QUIC, at the eight drafts that permit it.
 //!
 //! Six drafts call that a protocol error and end the session over it. Draft-13
 //! Section 9.2.1.1 is the last of them: "An object with this status that has a
@@ -20,7 +21,7 @@
 //! one of the six. Here the same traffic is asserted to be **accepted**: the
 //! object comes back to the caller, and no session ends.
 //!
-//! The seven divide into one draft that never had the rule and six that
+//! The eight divide into one draft that never had the rule and seven that
 //! withdrew it. They are in one file because what is asserted of them is
 //! identical; how they came to permit it is not.
 //!
@@ -41,7 +42,7 @@
 //! it names is one nothing has been produced in, and there is no placement
 //! either neighbouring draft would call conforming to copy.
 //!
-//! # Drafts 14 through 19: two withdrawals, and neither deleted the paragraph
+//! # Drafts 14 through 20: two withdrawals, and neither deleted the paragraph
 //!
 //! Drafts 14 and 15 keep the description and drop the consequence. Draft-14
 //! Section 10.2.1.1 still says where an end-of-track object sits — "Group ID is
@@ -53,7 +54,7 @@
 //! that come *after* the end, addressed to the publisher, and the section it
 //! points at answers it with Malformed Tracks rather than with a close.
 //!
-//! Drafts 16 through 19 drop the description too. Draft-16 Section 10.2.1.1,
+//! Drafts 16 through 20 drop the description too. Draft-16 Section 10.2.1.1,
 //! word for word on draft-19 Section 11.2.1.1: "Indicates End of Track.
 //! Indicates that no objects with the location that is equal to or greater than
 //! the one specified exist." No ordering, no receiver, no consequence.
@@ -80,7 +81,7 @@
 //! # Why the alias is bound though nothing records it
 //!
 //! Every gate takes the subscription to its answer, which is what binds the
-//! Track Alias the objects carry, even though on these six drafts nothing is
+//! Track Alias the objects carry, even though on these drafts nothing is
 //! written down about the track afterwards. A rule of this shape is reached by
 //! resolving an object's alias to the track a live subscription gave it to, so
 //! an alias no binding names settles nothing — and a gate that never bound one
@@ -90,7 +91,7 @@
 //! # Two topologies, one assertion
 //!
 //! Draft-07 and drafts 14, 15 and 16 put SETUP and every request on one
-//! bidirectional stream. Drafts 17, 18 and 19 put control on a pair of
+//! bidirectional stream. Drafts 17 through 20 put control on a pair of
 //! unidirectional streams
 //! and every request at the front of a bidirectional stream of its own. A peer
 //! that reads a SUBSCRIBE off the control stream reads nothing at all on the
@@ -213,13 +214,20 @@ impl Traffic {
 /// It decodes with `moqtap-codec` and never calls the framing helpers in
 /// `moqtap-client`: a peer assembled out of the code under test could not
 /// disagree with it.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+///
+/// `allow(dead_code)` rather than a `cfg` naming those drafts. Only the
+/// `unidirectional_control_gates!` invocations below use it, and a second list
+/// of the same drafts is one nothing checks: it was `draft17`–`draft19` when
+/// draft-20 joined them, and the build broke on the draft nobody added here.
+/// Nothing in this type is draft-specific — `AnyControlMessage::decode` takes
+/// the draft as an argument — so it compiles wherever it is left standing.
+#[allow(dead_code)]
 struct PeerStream {
     recv: quinn::RecvStream,
     buf: Vec<u8>,
 }
 
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[allow(dead_code)]
 impl PeerStream {
     fn new(recv: quinn::RecvStream) -> Self {
         Self { recv, buf: Vec::new() }
@@ -239,7 +247,7 @@ impl PeerStream {
 
     /// Decode one whole control message, type field included.
     ///
-    /// On those three drafts a control stream's leading varint *is* its first
+    /// On these drafts a control stream's leading varint *is* its first
     /// message's type field, so this reads the SETUP off the front of the
     /// stream with nothing skipped — and the SUBSCRIBE off the front of a
     /// request stream the same way.
@@ -1002,7 +1010,7 @@ macro_rules! ends_subscribe_ok_for {
     };
 }
 
-/// A conforming subgroup header, in the two shapes it takes across the six.
+/// A conforming subgroup header, in the two shapes it takes across these drafts.
 ///
 /// Every one names an explicit Subgroup ID and carries neither extensions nor
 /// properties, which is the plainest stream each draft can carry.
@@ -1111,7 +1119,7 @@ macro_rules! ends_read_back {
     };
 }
 
-/// A datagram, in the three shapes it takes across the six.
+/// A datagram, in the three shapes it takes across these drafts.
 ///
 /// One helper for both of the objects a gate sends: a status turns a payload
 /// datagram into a status one, which is a different framing on every draft
@@ -1215,3 +1223,4 @@ bidirectional_control_gates!(
 unidirectional_control_gates!(draft17, "draft17", Draft17, "10.2.1.1");
 unidirectional_control_gates!(draft18, "draft18", Draft18, "11.2.1.1");
 unidirectional_control_gates!(draft19, "draft19", Draft19, "11.2.1.1");
+unidirectional_control_gates!(draft20, "draft20", Draft20, "11.2.1.1");

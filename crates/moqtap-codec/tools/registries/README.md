@@ -1,7 +1,7 @@
 # Extracted registries
 
 One JSON file per MoQ Transport Internet-Draft, `draft-07.json` through
-`draft-19.json`, holding the code point registries transcribed into this
+`draft-20.json`, holding the code point registries transcribed into this
 crate's `draftNN::error_codes` and `draftNN::types` modules. They are produced
 by `../extract-registries.py` and committed so that every number this crate
 asserts about a draft can be re-derived and diffed without re-running the
@@ -13,7 +13,7 @@ rather than as a test that quietly starts agreeing with something new.
 Two families, counted separately and never summed.
 
 **Outcome codes** — the registries that report how a request or a session
-ended. Four of them in drafts 15-19 (Session Termination, REQUEST_ERROR,
+ended. Four of them in drafts 15-20 (Session Termination, REQUEST_ERROR,
 PUBLISH_DONE, Stream Reset); more in the earlier drafts, which had a separate
 error registry per message type before drafts 15+ merged them into
 REQUEST_ERROR. They live under `registries` and are totalled in `totals.rows`.
@@ -21,17 +21,18 @@ REQUEST_ERROR. They live under `registries` and are totalled in `totals.rows`.
 **Object Status** — the status a single Object carries (Normal, End of Group,
 End of Track). It lives under `object_status` and is totalled in
 `totals.object_status_rows`. It is kept apart from the outcome codes because
-it is a different kind of thing — draft-19 gives it its own IANA subsection,
-a sibling of rather than a part of the Error Codes section — and because it is
-identified by a different rule: only draft-19 prints it as a table at all, and
-drafts 07-18 assign the same code points as a run of bullets with no IANA
+it is a different kind of thing — drafts 19 and 20 give it its own IANA
+subsection, a sibling of rather than a part of the Error Codes section — and
+because it is identified by a different rule: only drafts 19 and 20 print it as
+a table at all, and drafts 07-18 assign the same code points as a run of bullets with no IANA
 registry anywhere. `extract-registries.py` states both rules in full in its
 module docstring, under `WHAT COUNTS AS A ROW` and `OBJECT STATUS: A SECOND
 FAMILY, COUNTED SEPARATELY`. Read that before changing what the tool matches;
 getting the definition wrong has already produced one wrong count in this
 project's history, and the docstring is where that is written down.
 
-Object Status rows carry draft-19's `Payload` column (Section 15.9, Table 16)
+Object Status rows carry the `Payload` column drafts 19 and 20 print (draft-19
+Section 15.9, Table 16)
 where the draft prints one, and where it does not, `payload_source` says so:
 `payload-column` means the draft registered that answer, `blanket-rule` means
 it follows from the pre-draft-19 sentence "any object with a status code other
@@ -41,21 +42,21 @@ will only accept a value the draft states can filter on that field.
 
 Per draft, as committed:
 
-| draft | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| outcome registries | 3 | 6 | 6 | 6 | 7 | 8 | 8 | 8 | 4 | 4 | 4 | 4 | 4 |
-| outcome rows | 21 | 40 | 40 | 40 | 65 | 71 | 71 | 73 | 47 | 49 | 59 | 62 | 64 |
-| object status rows | 5 | 5 | 5 | 5 | 4 | 4 | 4 | 4 | 4 | 3 | 3 | 3 | 3 |
-| object status form | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | table |
+| draft | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| outcome registries | 3 | 6 | 6 | 6 | 7 | 8 | 8 | 8 | 4 | 4 | 4 | 4 | 4 | 4 |
+| outcome rows | 21 | 40 | 40 | 40 | 65 | 71 | 71 | 73 | 47 | 49 | 59 | 62 | 64 | 61 |
+| object status rows | 5 | 5 | 5 | 5 | 4 | 4 | 4 | 4 | 4 | 3 | 3 | 3 | 3 | 3 |
+| object status form | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | table | table |
 
 `\*` is `prose-list`: bullets under the section that defines the field, no
-IANA registry. Draft-19 is the only draft of the thirteen with an IANA table
-for Object Status, and the only one with a `Payload` column.
+IANA registry. Drafts 19 and 20 are the only drafts of the fourteen with an
+IANA table for Object Status, and the only ones with a `Payload` column.
 
 ## Where the input comes from
 
 The rendered drafts are **not in this repository**. They are the HTML that
-xml2rfc produces for draft-ietf-moq-transport-07 through -19 — the same
+xml2rfc produces for draft-ietf-moq-transport-07 through -20 — the same
 documents published at the IETF datatracker — one file per draft, named
 `draft-NN.html`.
 
@@ -101,7 +102,7 @@ here.
 
 ## What the tests do with these files
 
-- `tests/registry_conformance.rs` compares all thirteen drafts against the
+- `tests/registry_conformance.rs` compares all fourteen drafts against the
   crate's own enums in both directions — a code point the draft assigns and the
   crate refuses, and one the crate accepts and the draft does not assign, are
   separate failures with separate messages — and compares names as well as code
@@ -116,11 +117,16 @@ here.
 - `tests/object_status_payload_rule.rs` drives draft-19's `Payload` column
   through the encoders as behaviour, and asserts draft-18 reads the same
   question off a payload length instead.
+  `tests/object_status_payload_rule_draft20.rs` does the same for draft-20.
 - `tests/registry_extraction_health.rs` gates the extractions themselves:
   no committed extraction may carry a warning, the two row definitions may not
   claim the same source table, every Object Status assignment must record a
-  payload permission, and draft-19 must be the only draft whose permissions
-  come from a column. Together those fail if a future revision moves the
+  payload permission, and drafts 19 and later must be the only drafts whose
+  permissions come from a column — the test is
+  `object_status_permissions_come_from_a_column_from_draft19_on`, keyed off each
+  draft's own `iana_registry` flag rather than a hardcoded draft number, so it
+  covers draft-20 and every draft after it without editing.
+  Together those fail if a future revision moves the
   Object Status heading and the tool falls back to reading bullets — the one
   degradation that costs the `Payload` column without changing a row count.
 

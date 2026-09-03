@@ -1,15 +1,15 @@
 //! The Full Track Name cap binds the reader, on every draft that states it.
 //!
-//! Drafts 11 through 19 all carry the same sentence: the maximum total length
+//! Drafts 11 through 20 all carry the same sentence: the maximum total length
 //! of a Full Track Name is 4,096 bytes, computed as the sum of the Track
 //! Namespace field lengths and the Track Name length, and an endpoint that
 //! receives one longer MUST close the session. Drafts 07 through 10 state no
 //! such cap, so they are deliberately absent from this file — adding the check
 //! there would refuse names those drafts permit.
 //!
-//! The gates here read SUBSCRIBE, because all nine open that message with a
+//! The gates here read SUBSCRIBE, because all ten open that message with a
 //! Request ID, a Track Namespace and a length-prefixed Track Name, in that
-//! order, and all nine assign it type 0x03. Drafts 17 through 19 write those
+//! order, and all ten assign it type 0x03. Drafts 17 through 20 write those
 //! fields in the variable-length integer encoding draft-17 introduced, so they
 //! get their own payload builder rather than a different test.
 //!
@@ -40,7 +40,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::error::CodecError;
 #[cfg(any(
@@ -52,10 +53,16 @@ use moqtap_codec::error::CodecError;
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::types::TrackNamespace;
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20"
+))]
 use moqtap_codec::varint::MoqtProfile;
 #[cfg(any(
     feature = "draft11",
@@ -66,7 +73,8 @@ use moqtap_codec::varint::MoqtProfile;
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -81,7 +89,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     let mut wire = vec![type_id];
@@ -125,7 +134,7 @@ fn subscribe_prefix(leading_varints: usize, namespace_bytes: usize, name_bytes: 
 /// name lengths are not - 4,000 needs two bytes under one scheme and three
 /// under the other - so the payload has to be written with the draft's own
 /// profile rather than reused from above.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn subscribe_prefix_moqt<P: MoqtProfile>(
     leading_varints: usize,
     namespace_bytes: usize,
@@ -255,6 +264,15 @@ full_track_name_cap_gate_moqt!(
     draft19_caps_the_full_track_name,
     "draft19",
     draft19,
+    moqtap_codec::varint::Moqt18,
+    1
+);
+// Draft-20's SUBSCRIBE is byte-identical to draft-19's, and Section 2.4.1's cap
+// is unchanged.
+full_track_name_cap_gate_moqt!(
+    draft20_caps_the_full_track_name,
+    "draft20",
+    draft20,
     moqtap_codec::varint::Moqt18,
     1
 );

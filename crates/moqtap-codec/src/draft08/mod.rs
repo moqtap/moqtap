@@ -15,11 +15,9 @@
 //!   registries at 0x4, moving `Invalid Range` to 0x5.
 //! - A server receiving a GOAWAY that carries a New Session URI must close the
 //!   session; draft-07 states no such rule.
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
-/// Session termination, error and status code registries.
 pub mod error_codes;
-/// Control message types with encode/decode.
+/// This draft's field names for a decoded control message.
+pub mod fields;
 pub mod message;
-/// Draft-08 specific types.
 pub mod types;

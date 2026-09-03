@@ -7,7 +7,7 @@
 //! namespace after receiving an ANNOUNCE_CANCEL, it SHOULD close the session
 //! as a 'Protocol Violation'."
 //!
-//! Searched across all thirteen drafts: draft-07 states it once and no other
+//! Searched across all fourteen drafts: draft-07 states it once and no other
 //! draft states it at all, so the range here is one draft wide. It is a SHOULD
 //! and this endpoint takes it — the sentence names both the action and the
 //! code, so closing is conforming, and leaving the subscription open would go

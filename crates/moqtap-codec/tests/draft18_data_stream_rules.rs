@@ -182,7 +182,7 @@ fn draft_allows_datagram_type(datagram_type: u8) -> bool {
     in_form && !STATUS_AND_END_OF_GROUP.contains(&datagram_type)
 }
 
-/// One of the three shapes a refused Type can take on drafts 16 through 19.
+/// One of the three shapes a refused Type can take on drafts 16 through 20.
 ///
 /// The sweeps below would pass on "some error", and that is what is worth not
 /// settling for: these are three different rules, and only two of them end the

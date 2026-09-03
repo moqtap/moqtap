@@ -44,7 +44,7 @@
 //! those were the only ones on record. Draft-14 advanced every one of them at
 //! once and ignored what they said about it.
 //!
-//! Drafts 17 through 19 already carry all of this, because a request there
+//! Drafts 17 through 20 already carry all of this, because a request there
 //! arrives on a stream of its own and one map holds both ends' announcements.
 //!
 //! # Why none of this ends the session

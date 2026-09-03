@@ -11,7 +11,7 @@
 //! are not part of this repository, which is why each file carries
 //! `source_sha256` instead. They are published Internet-Drafts and the tool
 //! will fetch them — `extract-registries.py --all --fetch --check` re-derives
-//! all thirteen from the IETF archive and fails if any row moved. What these tests do is make the extraction's own
+//! all fourteen from the IETF archive and fails if any row moved. What these tests do is make the extraction's own
 //! self-reporting binding: the tool records a warning whenever it passes over
 //! something it believes it should have taken, and counts the one overlap that
 //! would mean its two definitions had collided. Neither was read by anything
@@ -23,13 +23,13 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 /// The drafts with a committed extraction.
-const DRAFTS: [u64; 13] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+const DRAFTS: [u64; 14] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
 fn extraction(draft: u64) -> Value {
     let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tools/registries")
         // Zero-padded: the files are named after the draft as the IETF spells
-        // it, `draft-07` through `draft-19`.
+        // it, `draft-07` through `draft-20`.
         .join(format!("draft-{draft:02}.json"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
@@ -186,21 +186,28 @@ fn every_object_status_assignment_has_a_payload_permission() {
     }
 }
 
-/// Only draft-19 has an IANA registry for Object Status, and only draft-19
-/// reads its permissions out of a Payload column.
+/// The first draft to give Object Status an IANA registry is 19, and every
+/// draft from there on reads its permissions out of a Payload column.
 ///
 /// The distinction the extraction records between a permission the draft
 /// registered and one the tool derived from an older blanket sentence is what
-/// separates draft-19 from its predecessors — the three rows are otherwise
-/// identical in code, name and answer. A degraded draft-19 extraction reports
-/// `form: prose-list` and looks exactly like a draft-18 one, so pinning the
-/// form is what makes that visible from inside this repository.
+/// separates draft-19 and later from their predecessors — the three rows are
+/// otherwise identical in code, name and answer. A degraded draft-19 or
+/// draft-20 extraction reports `form: prose-list` and looks exactly like a
+/// draft-18 one, so pinning the form is what makes that visible from inside
+/// this repository.
+///
+/// The boundary is stated as a threshold rather than as `draft == 19`, which is
+/// what it was until draft-20 arrived. Draft-20 Section 15.9 prints the same
+/// table with the same Payload column and changes no row, so an equality test
+/// would have failed against a draft that agrees with 19 completely — and the
+/// obvious fix, deleting the test, is what would have lost the claim.
 #[test]
-fn draft19_is_the_only_draft_whose_object_status_permissions_come_from_a_column() {
+fn object_status_permissions_come_from_a_column_from_draft19_on() {
     for draft in DRAFTS {
         let doc = extraction(draft);
         let reg = &doc["object_status"];
-        let expected_iana = draft == 19;
+        let expected_iana = draft >= 19;
 
         assert_eq!(
             reg["iana_registry"].as_bool(),
@@ -223,8 +230,8 @@ fn draft19_is_the_only_draft_whose_object_status_permissions_come_from_a_column(
             if expected_iana {
                 assert_eq!(
                     source, expected_source,
-                    "draft-{draft} Object Status {code}: draft-19 registers a Payload column, \
-                     so every row's permission must come from it"
+                    "draft-{draft} Object Status {code}: draft-19 and later register a \
+                     Payload column, so every row's permission must come from it"
                 );
             } else {
                 // Drafts 07-18 have no column; 0x0 is the complement of their

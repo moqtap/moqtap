@@ -1,7 +1,8 @@
 //! Transport abstraction for QUIC and WebTransport.
 //!
 //! Uses enum dispatch (not trait objects) since the transport set is closed.
-//! WebTransport support is behind the `webtransport` feature flag.
+//! WebTransport support is behind the `webtransport` feature flag. Nothing
+//! here is per-draft; every draft's connection is carried over the same two.
 
 pub mod quic;
 #[cfg(feature = "webtransport")]

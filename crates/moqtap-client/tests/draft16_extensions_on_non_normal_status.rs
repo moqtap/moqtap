@@ -6,8 +6,8 @@
 //!
 //! # Why this draft has a gate of its own
 //!
-//! Five drafts state this rule, in two vocabularies — 15 and 16 say "extension
-//! headers", 17 through 19 say "properties" — and the client carries five
+//! Six drafts state this rule, in two vocabularies — 15 and 16 say "extension
+//! headers", 17 through 20 say "properties" — and the client carries six
 //! separate copies of the check, one per draft module. Copies drift. The rule
 //! was raised on draft-19 alone until recently, which is exactly how that drift
 //! looks from inside the process: every layer agrees, and nothing notices that

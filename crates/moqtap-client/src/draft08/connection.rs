@@ -718,24 +718,13 @@ impl Connection {
         }
         match any {
             AnyControlMessage::Draft08(msg) => Ok(msg),
-            // `AnyControlMessage` carries one variant per enabled draft feature.
-            // When draft 08 is the only one enabled the arm above is exhaustive
-            // and this rejection arm is unreachable, so it is compiled only for
-            // builds in which another draft's variant can actually turn up.
-            #[cfg(any(
-                feature = "draft07",
-                feature = "draft09",
-                feature = "draft10",
-                feature = "draft11",
-                feature = "draft12",
-                feature = "draft13",
-                feature = "draft14",
-                feature = "draft15",
-                feature = "draft16",
-                feature = "draft17",
-                feature = "draft18",
-                feature = "draft19"
-            ))]
+            // `AnyControlMessage` carries one variant per enabled draft feature. With draft 08 the
+            // only one enabled the arm above is exhaustive and this rejection arm unreachable.
+            // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
+            // naming the other thirteen drafts: that list had to be edited in every draft module
+            // whenever a draft was added, and a copy that omitted one left this match
+            // non-exhaustive.
+            #[allow(unreachable_patterns)]
             _ => Err(ConnectionError::Codec(CodecError::UnknownMessageType(0))),
         }
     }

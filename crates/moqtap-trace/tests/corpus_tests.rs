@@ -160,26 +160,33 @@ fn case_bytes(root: &Path, id: &str, file: &str) -> Vec<u8> {
     fs::read(root.join(id).join(file)).unwrap_or_else(|e| panic!("read {id}/{file}: {e}"))
 }
 
-/// Whether an environment variable is set to something meaning yes.
+/// Whether an environment variable's value means yes.
 ///
 /// Absent, empty, `0`, `false`, `no` and `off` are all no, in any case. Every
 /// other value is yes. See [`corpus_is_reachable`] for why the distinction
 /// between this and a presence test is load-bearing here.
-fn env_flag(name: &str) -> bool {
-    flag_value(std::env::var(name).ok().as_deref())
-}
-
-/// The decision [`env_flag`] makes, without the environment.
 ///
-/// Split out so it can be tested at all: setting a process-wide variable from
-/// a test races every other test in the binary, and the parsing is the half
-/// that carries the risk.
+/// Takes the value rather than reading it, so it can be tested at all: setting
+/// a process-wide variable from a test races every other test in the binary,
+/// and the parsing is the half that carries the risk.
 fn flag_value(value: Option<&str>) -> bool {
     match value {
         Some(v) => {
             !matches!(v.trim().to_ascii_lowercase().as_str(), "" | "0" | "false" | "no" | "off")
         }
         None => false,
+    }
+}
+
+/// Whether a missing corpus is a failure, given the two variables.
+///
+/// Split out from [`corpus_is_reachable`] for the same reason [`flag_value`]
+/// takes its value rather than reading it: the environment is process-wide,
+/// and the precedence is the half that carries the risk.
+fn corpus_required(explicit: Option<&str>, ci: Option<&str>) -> bool {
+    match explicit {
+        Some(value) => flag_value(Some(value)),
+        None => flag_value(ci),
     }
 }
 
@@ -200,67 +207,41 @@ fn a_flag_reads_its_value_and_not_merely_its_presence() {
     }
 }
 
-/// Reports whether the corpus is reachable, rather than requiring it.
+/// `CI` decides, and `MOQTAP_REQUIRE_CORPUS` overrides it in both directions.
 ///
-/// The corpus lives in the `test-vectors` repository, which this workspace
-/// carries as a submodule under `crates/moqtap-codec/`. Until that submodule
-/// is bumped past the commit that added `trace/`, a fresh clone has the
-/// submodule and not the corpus — a wiring gap, and failing on it would paint
-/// every build red for a missing dependency rather than for anything this
-/// crate got wrong.
+/// The last row is the one this exists for: a runner sets `CI`, and someone
+/// debugging a checkout with no submodule has to be able to switch the
+/// requirement back off without unsetting the variable their tooling set.
+#[test]
+fn ci_requires_the_corpus_and_the_override_wins_either_way() {
+    assert!(!corpus_required(None, None), "a plain developer checkout");
+    assert!(corpus_required(None, Some("true")), "a CI runner");
+    assert!(!corpus_required(None, Some("false")), "a wrapper that relaxed CI");
+    assert!(corpus_required(Some("1"), None), "asked for off CI");
+    assert!(!corpus_required(Some("0"), Some("true")), "asked for off on CI");
+}
+
+/// Requires the corpus where it must be there, and reports its absence where
+/// it need not be.
 ///
-/// It self-heals: the moment the submodule carries `trace/`, every test in
-/// this file becomes live with no change here.
+/// Every other test in this file returns early when the corpus is missing, so
+/// without this one a run without it is green having checked nothing. That
+/// tolerance is right in a developer's checkout — someone who has not run
+/// `git submodule update --init` wants a message, not a red build for a
+/// missing dependency — and wrong in CI, where `cargo test` captures stdout
+/// and the message reaches nobody, in the one place a green run is the only
+/// signal anyone reads.
 ///
-/// **That is also the hole, and as of 2026-09-02 the hole is open.** The
-/// submodule pin is `v0.12.1`, whose tree is `.github .gitignore CHANGELOG.md
-/// LICENSE README.md examples manifest.json package-lock.json package.json
-/// schema scripts transport` — no `trace/`. CI checks out submodules and has
-/// no sibling clone, so [`corpus::corpus_dir`] returns `None` there and every
-/// test in this file returns before asserting anything, on a green run. A
-/// developer with the sibling checkout sees thirteen passing tests and gets no
-/// signal that CI saw thirteen empty ones. The local pass is what hides it.
-///
-/// So the one test whose job is to report this state is written so that it
-/// cannot fail, which is the defect it exists to catch wearing the shape of a
-/// courtesy. `MOQTAP_REQUIRE_CORPUS=1` is the lever; nothing sets it yet.
-/// Flipping the default — or keying it off `CI`, which every runner sets —
-/// turns a silent pass into a red build with a message, and should happen the
-/// moment the pin can move. It cannot move today: `test-vectors` is ahead of
-/// its origin, so the commit carrying `trace/` is not fetchable yet.
-///
-/// What none of this catches is the corpus being *removed* after the pin
-/// moves, which SPEC.md and the corpus README both forbid and which would go
-/// equally quiet in `@moqtap/trace`.
-///
-/// **Set `MOQTAP_REQUIRE_CORPUS=1` to turn the report into a failure**, and
-/// `0`, `false`, `no`, `off` or empty to keep it a report. The value is read
-/// rather than merely its presence, which matters more than it looks: the
-/// obvious `var_os(..).is_some()` makes `MOQTAP_REQUIRE_CORPUS=0` mean *on*,
-/// so the doc and the code would disagree about the one thing a reader would
-/// reach for to switch it off. It also makes the `CI` keying below unsafe —
-/// `CI=false` is set deliberately, by build tools and local wrappers, to relax
-/// exactly this kind of CI-conditional behaviour, and under a presence test it
-/// would switch the requirement *on* in the checkout that asked for it off.
-/// The person hitting that has no corpus, a red build they cannot fix, and a
-/// message telling them to clone a repository — while the variable they would
-/// reach for is already set to `false`.
-///
-/// The tolerance above is right for a developer's checkout and wrong for CI,
-/// where a missing corpus means every test in this file returns before
-/// asserting anything and the run goes green having checked nothing. `cargo test`
-/// captures stdout, so without this the report reaches nobody: the print is
-/// visible under `--nocapture` and invisible in exactly the place the answer
-/// matters. One environment variable in the workflow is the whole fix, and
-/// this end of it works whether or not that ever happens.
+/// Hence `CI`, which every runner sets, with `MOQTAP_REQUIRE_CORPUS`
+/// overriding it either way.
 #[test]
 fn corpus_is_reachable() {
-    let required = env_flag("MOQTAP_REQUIRE_CORPUS");
+    let explicit = std::env::var("MOQTAP_REQUIRE_CORPUS").ok();
+    let ci = std::env::var("CI").ok();
+    let required = corpus_required(explicit.as_deref(), ci.as_deref());
     match root() {
         Some(dir) => println!("corpus: {}", dir.display()),
-        None if required => {
-            panic!("MOQTAP_REQUIRE_CORPUS is set. {}", corpus::CORPUS_MISSING_MESSAGE)
-        }
+        None if required => panic!("{}", corpus::CORPUS_MISSING_MESSAGE),
         // Printed rather than asserted, and visible under `--nocapture`.
         None => eprintln!("SKIPPING every corpus test. {}", corpus::CORPUS_MISSING_MESSAGE),
     }
@@ -345,10 +326,10 @@ fn every_file_survives_a_read_modify_write_round_trip() {
 
 /// The two encoding conventions SPEC.md makes normative, in the wrong form.
 ///
-/// Both were broken, in opposite directions, by the two implementations, and
-/// neither test suite could see it: each read only bytes it had written
-/// itself. These two files are the shapes `cbor-x` used to write, and a
-/// conformant reader takes them because files carrying them exist.
+/// A suite that reads only bytes it wrote itself cannot see either: an encoder
+/// always agrees with its own decoder. These two files are shapes `cbor-x`
+/// produces, and a conformant reader takes them because files carrying them
+/// exist.
 #[test]
 fn the_non_canonical_encodings_read_as_the_canonical_one() {
     let Some(root) = root() else { return };
@@ -421,11 +402,10 @@ fn an_unknown_event_type_keeps_its_fields_verbatim() {
 /// A key no reader knows, on an event type it does.
 ///
 /// Every key is `x-` prefixed, the range SPEC.md reserves for private use and
-/// promises never to define. The fixture borrowed keys from this proposal's own
-/// sections until §2 shipped and claimed two of them, at which point the case
-/// went on passing while measuring less — which is why the reservation exists.
-/// Reading them back off a file the other implementation wrote is what makes
-/// "an unrecognised key survives" a checked claim rather than an assumption.
+/// promises never to define. A key a later revision can claim leaves this case
+/// passing while measuring less, which is what the reservation is for. Reading
+/// the keys back off a file the other implementation wrote is what makes "an
+/// unrecognised key survives" a checked claim rather than an assumption.
 #[test]
 fn an_unrecognised_key_on_a_known_event_survives_a_round_trip() {
     let Some(root) = root() else { return };
@@ -538,12 +518,11 @@ fn stored<'a>(store: &'a [(Value, Value)], key: &str) -> Option<&'a Value> {
 /// The three unrecognised-key stores in the header, on both files of the case.
 ///
 /// Every other file in the corpus carries its unrecognised keys on *events*, so
-/// until `v2-header-extra` existed the header's three stores could have been
-/// deleted outright with this file's round-trip test still green: that test
-/// reads what this crate wrote, and an encoder emitting no store agrees with a
-/// decoder reading none. Reading the same claims off `js.moqtrace` — written by
-/// an implementation that shares no code with this one — is what makes them
-/// checked rather than assumed.
+/// without this one the header's three stores could be deleted outright with
+/// the round-trip test still green: that test reads what this crate wrote, and
+/// an encoder emitting no store agrees with a decoder reading none. Reading the
+/// same claims off `js.moqtrace` — written by an implementation that shares no
+/// code with this one — is what makes them checked rather than assumed.
 ///
 /// Run against both files deliberately. On `js.moqtrace` the assertions say
 /// this crate reads what the other one wrote; on `rust.moqtrace` they say this
@@ -683,7 +662,7 @@ fn an_unknown_event_type_does_not_collect_its_fields_twice() {
 ///
 /// Draft-18 gives each request its own bidirectional stream, so these are four
 /// distinct QUIC streams. The proxy does not see stream IDs and writes 0 for
-/// all of them, which is the gap PROPOSAL-v3 §1 closes. The assertion pins
+/// all of them, so the recorded id distinguishes nothing. The assertion pins
 /// today's behaviour so the change is visible when it lands, not because the
 /// behaviour is right.
 #[test]

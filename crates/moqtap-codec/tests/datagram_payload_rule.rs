@@ -18,7 +18,7 @@
 //! `Connection::recv_datagram` is the caller, and it refuses a datagram whose
 //! header forbids a payload and whose tail is non-empty.
 
-#![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 
 /// A status datagram reports that its trailing bytes may not exist; a Normal one
 /// reports that they may.
@@ -80,4 +80,52 @@ fn a_status_datagram_permits_no_payload_and_a_normal_one_does() {
         let h = DatagramHeader::decode(&mut cursor).expect("draft-19 normal datagram");
         assert!(h.permits_payload(), "draft-19 refused a payload on a Normal object");
     }
+
+    {
+        use moqtap_codec::draft20::data_stream::DatagramHeader;
+        let mut cursor = &status_datagram[..];
+        let h = DatagramHeader::decode(&mut cursor).expect("draft-20 status datagram");
+        assert!(!h.permits_payload(), "draft-20 says an End-of-Group datagram may carry a payload");
+
+        let mut cursor = &normal_datagram[..];
+        let h = DatagramHeader::decode(&mut cursor).expect("draft-20 normal datagram");
+        assert!(h.permits_payload(), "draft-20 refused a payload on a Normal object");
+    }
+}
+
+/// Draft-20 refuses the same datagram at the whole-datagram read, where its
+/// predecessors report it and carry on.
+///
+/// The predicate above is the same on all four drafts, and so is the rule
+/// behind it — Section 11.3.1's "When set to 1, the Object Status field is
+/// present and there is no Object Payload" is unchanged from draft-17. What
+/// differs is where draft-20 applies it: `decode_object`, the entry point that
+/// reads a whole datagram, refuses the trailing bytes rather than handing them
+/// back for the caller to judge.
+///
+/// `decode` still reports rather than refuses on every draft including this
+/// one, which is what keeps a captured violation readable. The split is between
+/// reading a header and accepting an Object.
+#[test]
+fn draft20_refuses_a_status_datagrams_payload_at_the_whole_datagram_read() {
+    use moqtap_codec::draft20::data_stream::DatagramHeader;
+    use moqtap_codec::error::CodecError;
+
+    let status_datagram = hex::decode("2001000080 03 deadbeef".replace(' ', "")).unwrap();
+
+    // The header alone still decodes: the four bytes are not part of it.
+    let mut cursor = &status_datagram[..];
+    DatagramHeader::decode(&mut cursor).expect("the header is well formed whatever follows it");
+    assert_eq!(cursor.len(), 4, "the trailing bytes are not the header's");
+
+    let result = DatagramHeader::decode_object(&mut &status_datagram[..]);
+    assert!(
+        matches!(result, Err(CodecError::PayloadNotPermitted { .. })),
+        "a status datagram's trailing bytes are not a payload the frame can hold, got {result:?}"
+    );
+
+    // Without the tail the same datagram is lawful, so the refusal is about the
+    // four bytes and not about the status field.
+    let bare = hex::decode("200100008003").unwrap();
+    DatagramHeader::decode_object(&mut &bare[..]).expect("a bare status datagram is lawful");
 }

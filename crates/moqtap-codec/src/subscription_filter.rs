@@ -1,4 +1,4 @@
-//! The subscription filter that drafts 15 and later carry inside a parameter.
+//! The subscription filter drafts 15 through 19 carry inside a parameter.
 //!
 //! Through draft-14 a subscription's filter is a group of fields on SUBSCRIBE
 //! and its relatives: a Filter Type, and the Start Location and End Group that
@@ -6,6 +6,13 @@
 //! parameter, and draft-19 renamed that parameter from SUBSCRIPTION_FILTER to
 //! LOCATION_FILTER while leaving both its type number, 0x21, and its contents
 //! alone.
+//!
+//! Draft-20 rebuilt that value — the Filter Type enum is gone and the shape
+//! comes from the field count — so it reads its own filters through
+//! `draft20::message::decode_location_filter` and does not use this module.
+//! That name is spelled rather than linked because the module it names is
+//! behind a feature flag, and a link would be broken in any build that leaves
+//! draft-20 out.
 //!
 //! The move is why this module exists. A parameter value is a run of bytes, and
 //! a codec that carries it as bytes carries the Filter Type with it — including

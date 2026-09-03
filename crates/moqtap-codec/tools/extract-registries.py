@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extract the error, status and termination code registries, and the Object
-Status registry, from the rendered MoQ Transport Internet-Drafts
-(draft-ietf-moq-transport-07 through -19).
+Status registry, from the rendered MoQ Transport Internet-Drafts, one per
+draft this crate has a `src/draftNN/` module for.
 
 Usage
 -----
@@ -33,7 +33,8 @@ same file.
 That hash identifies a file, not a document. The IETF re-renders these pages, so
 a draft downloaded today can hash differently from the same draft downloaded last
 year with no change to a single registry row: the extraction from a fresh
-download of all thirteen was compared field by field against the committed files
+download of all thirteen 07-19 renderings was compared field by field against the
+committed files
 and is identical everywhere except ``source_sha256`` and ``source_file``. So a
 hash that does not match is a prompt to diff the extraction, not evidence that
 the document changed.
@@ -121,12 +122,12 @@ the third one answers the question this tool exists to answer.
       that name has an underscore in it, and whether the code point is a literal
       or an expression.
 
-The measured spread, from ``--audit`` (drafts 07-19):
+The measured spread, from ``--audit`` (drafts 07-20):
 
-    draft   07  08  09  10  11  12  13   14   15   16   17   18   19
-    (A)     22  24  24  24  26  28  29  143  117  115  119  132  140
-    (B)      0   0   0   0   2   2   2   59   54   59   66   78   87
-    (C)     21  40  40  40  65  71  71   73   47   49   59   62   64
+    draft   07  08  09  10  11  12  13   14   15   16   17   18   19   20
+    (A)     22  24  24  24  26  28  29  143  117  115  119  132  140  148
+    (B)      0   0   0   0   2   2   2   59   54   59   66   78   87   96
+    (C)     21  40  40  40  65  71  71   73   47   49   59   62   64   61
 
 (A) and (B) as spelled here are this tool's implementations of those two
 definitions; the exact figures they produce depend on how the pattern is
@@ -143,7 +144,7 @@ tables:
   * A ``<tr>`` whose code cell is empty is a line-wrap continuation of the row
     above it: xml2rfc breaks a long description across extra ``<tr>`` elements
     with empty leading cells. It is merged into the preceding row's description
-    and not counted separately. (No in-scope table in drafts 07-19 currently
+    and not counted separately. (No in-scope table in drafts 07-20 currently
     wraps, but the auth token table two sections away does, so the rule earns
     its keep as a guard against a future edit.)
   * A row whose code cell holds a range (``0x08-0x0D``) or an arithmetic
@@ -161,7 +162,7 @@ a given draft, so the spread between them is reproducible rather than asserted.
 WHICH TABLES ARE REGISTRIES
 ================================================================================
 
-The registry set is not stable across the thirteen drafts, in two ways.
+The registry set is not stable across the fourteen drafts, in two ways.
 
 Location. Drafts 07-13 have no IANA registry for these codes at all. Draft 07's
 IANA Considerations section is literally a TODO list of registries that do not
@@ -169,9 +170,9 @@ yet exist ("Subscribe Error codes", "Announce Error codes", ...). The codes are
 defined inline, next to the message that carries them: session termination codes
 in the Termination section of the session chapter, per-message error codes under
 each ``*_ERROR`` message, status codes under ``SUBSCRIBE_DONE``, stream reset
-codes under "Closing Subgroup Streams". Drafts 14-19 collect them into an IANA
+codes under "Closing Subgroup Streams". Drafts 14-20 collect them into an IANA
 "Error Codes" section with one subsection per registry. A tool that looks under
-IANA Considerations finds nothing for seven of the thirteen drafts and reports a
+IANA Considerations finds nothing for seven of the fourteen drafts and reports a
 clean, confident, empty result for the entire early cohort.
 
 Membership. The set of registries also changes: draft 07 has three, draft 12 has
@@ -184,7 +185,7 @@ So the tool identifies registries by the two table layouts the drafts use for a
 code registry of request and session outcomes:
 
     legacy shape  ``Code | Reason``               (drafts 07-13, inline)
-    IANA shape    ``Name | Code | Specification`` (drafts 14-19, IANA section)
+    IANA shape    ``Name | Code | Specification`` (drafts 14-20, IANA section)
 
 Both shapes are used in these documents only for this family of registries. That
 is an observation about the source, not an assumption, so it is verified rather
@@ -251,7 +252,7 @@ Two things about Object Status put it outside (C):
     as a table. In drafts 07 through 18 the same code points are assigned by a
     run of bullets under an "Object Status" heading, one bullet per code
     (``0x0 := Normal object. ...``), and there is no IANA registry for them at
-    all. A ``<tr>``-anchored definition scores zero on twelve of the thirteen
+    all. A ``<tr>``-anchored definition scores zero on twelve of the fourteen
     drafts.
 
 So the extension is:
@@ -360,7 +361,7 @@ differently and the source is always recorded in ``description_source``:
     or, where the codes are listed without their values, ``<dt>NAME:</dt>``.
     Rows the section does not describe get ``null``, and are the only reason
     ``rows_described_from_section_prose`` falls short of the row count in
-    drafts 17-19. Nothing is invented.
+    drafts 17-20. Nothing is invented.
 
 ``name`` is verbatim: the Name cell in the IANA shape, ``null`` in the legacy
 shape, which has no symbolic name column. ``name_normalized`` is DERIVED -- for
@@ -384,10 +385,51 @@ import re
 import sys
 from pathlib import Path
 
-DRAFTS = list(range(7, 20))
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = SCRIPT_DIR / "registries"
+
+# The drafts to process, read off this crate's own per-draft modules rather
+# than written down.
+#
+# A hard-coded range goes stale in the silent direction. `--all` would extract
+# the drafts the range names and not the one the crate had grown; `--check`
+# would compare those same files and report nothing at all about the new
+# draft's, which is committed and read by `registry_conformance.rs`; and that
+# test would go on passing, because it compares this crate against a JSON file
+# nobody regenerated. Every count in the report would stay where it was.
+#
+# Deriving it also settles what `--fetch` may reach for, which is the question
+# a range cannot answer. The set is what this crate has a module for, and a
+# module is only ever written for a published draft - so a draft-NN that the
+# IETF's server has and this tree does not is not downloaded and not extracted.
+# Nothing here should be reaching for a draft nobody has implemented.
+DRAFT_FLOOR = frozenset(range(7, 21))
+
+DRAFT_DIR_NAME = re.compile(r"^draft(\d\d)$")
+
+
+def implemented_drafts():
+    """Every draft this crate has a module for, from the tree itself."""
+    found = set()
+    for child in sorted((SCRIPT_DIR.parent / "src").iterdir()):
+        m = DRAFT_DIR_NAME.match(child.name)
+        if m and child.is_dir():
+            found.add(int(m.group(1)))
+    # A derivation that can grow can also shrink, and shrinking is the silent
+    # direction: fewer drafts extracted, fewer compared, no count that moves.
+    # The floor is the set that existed when the range was replaced. It may be
+    # added to and not taken from.
+    missing = DRAFT_FLOOR - found
+    if missing:
+        sys.exit("no src/draftNN module for %s. This set is read off the tree, "
+                 "so a renamed or deleted module narrows every extraction below "
+                 "without moving a count. If a draft has really been dropped, "
+                 "lower DRAFT_FLOOR in the same commit."
+                 % ", ".join("draft-%02d" % n for n in sorted(missing)))
+    return sorted(found)
+
+
+DRAFTS = implemented_drafts()
 
 # This script sits at <checkout>/crates/moqtap-codec/tools, so parents[2] is the
 # checkout root and parents[3] is the directory holding it. The rendered drafts
@@ -1271,7 +1313,7 @@ def extract(draft: Draft) -> dict:
             "cover the error, status and termination code registries only, and are "
             "unchanged by its presence; totals.object_status_rows is not included in "
             "totals.rows and must not be added to it without a deliberate decision to "
-            "do so. Only draft 19 has an IANA registry for Object Status "
+            "do so. Drafts 19 and 20 have an IANA registry for Object Status "
             "(object_status.iana_registry); in drafts 07-18 the same code points are "
             "assigned in prose and object_status.form is 'prose-list'."
         ),
@@ -1383,7 +1425,12 @@ def main(argv: list[str]) -> int:
         description="Extract MoQT error, status and termination code registries."
     )
     parser.add_argument("drafts", nargs="*", type=int, help="draft numbers, e.g. 19")
-    parser.add_argument("--all", action="store_true", help="process drafts 07-19")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="process every draft with a module here (currently %02d-%02d)"
+        % (DRAFTS[0], DRAFTS[-1]),
+    )
     parser.add_argument(
         "--spec-dir",
         type=Path,
@@ -1477,7 +1524,7 @@ def main(argv: list[str]) -> int:
             if current != payload:
                 # A draft downloaded today hashes differently from the same
                 # draft downloaded last year, because the IETF re-renders these
-                # pages. Comparing whole files would report all thirteen as
+                # pages. Comparing whole files would report every draft as
                 # stale for anyone who did not save the exact bytes on disk
                 # here, which is everyone. What the check is for is whether a
                 # row moved, so the provenance is set aside and reported apart.

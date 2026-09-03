@@ -1,4 +1,4 @@
-#![cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#![cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 
 //! A track that carries on after its own final Object is given up, on the
 //! three drafts whose answer is a reset rather than a message.
@@ -123,7 +123,7 @@
 //! because none of these makes the crate refuse something it should not.
 //!
 //! The field-by-field reading of *larger* is not cut here. It lives in the
-//! shared `track_locations`, so a cut there reddens drafts 12 through 19 at
+//! shared `track_locations`, so a cut there reddens drafts 12 through 20 at
 //! once; it is recorded where it was measured, in
 //! `an_object_after_the_track_ends_is_a_malformed_track.rs`.
 
@@ -635,3 +635,4 @@ macro_rules! cancel_gates {
 cancel_gates!(draft17, "draft17", Draft17, "3.3.1");
 cancel_gates!(draft18, "draft18", Draft18, "3.3.2");
 cancel_gates!(draft19, "draft19", Draft19, "3.3.3");
+cancel_gates!(draft20, "draft20", Draft20, "3.3.3");

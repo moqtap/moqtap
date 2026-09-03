@@ -145,7 +145,8 @@
         feature = "draft16",
         feature = "draft17",
         feature = "draft18",
-        feature = "draft19"
+        feature = "draft19",
+        feature = "draft20"
     )
 ))]
 
@@ -211,6 +212,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The draft every session here is configured with: the newest one this

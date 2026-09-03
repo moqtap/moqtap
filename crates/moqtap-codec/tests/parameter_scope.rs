@@ -26,14 +26,16 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 #[cfg(any(
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -44,22 +46,34 @@ use moqtap_codec::varint::VarInt;
 /// outside all of them has no scope to be outside of, so the encoder writes it
 /// and the scope check carries it; that is what makes it usable as the stand-in
 /// a frame is built from.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 const UNDEFINED_PARAMETER: u64 = 0x0C;
 
-#[cfg(any(feature = "draft16", feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20"
+))]
 fn vi(v: u64) -> VarInt {
     VarInt::from_u64(v).expect("fixture value fits a varint")
 }
 
 /// A varint-valued Message Parameter.
-#[cfg(any(feature = "draft16", feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20"
+))]
 fn varint_parameter(key: u64, value: u64) -> KeyValuePair {
     KeyValuePair { key: vi(key), value: KvpValue::Varint(vi(value)) }
 }
 
 /// A length-prefixed Message Parameter.
-#[cfg(feature = "draft19")]
+#[cfg(any(feature = "draft19", feature = "draft20"))]
 fn bytes_parameter(key: u64, value: &[u8]) -> KeyValuePair {
     KeyValuePair { key: vi(key), value: KvpValue::Bytes(value.to_vec()) }
 }
@@ -75,7 +89,7 @@ fn bytes_parameter(key: u64, value: &[u8]) -> KeyValuePair {
 /// The count of matches is asserted rather than assumed: `01` is a common byte
 /// and a fixture that happened to repeat the pair would otherwise be patched in
 /// the wrong place and still decode.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn retyped(mut frame: Vec<u8>, from: u8, to: u8) -> Vec<u8> {
     let matches = frame.windows(2).filter(|w| *w == [0x01, from]).count();
     assert_eq!(
@@ -508,6 +522,182 @@ mod draft19 {
     /// SUBGROUP_FILTER, Section 10.2.10, scoped by Section 5.1.3.
     const SUBGROUP_FILTER: u64 = 0x25;
     /// TRACK_PROPERTY_FILTER, Section 10.2.14, scoped by Section 5.1.3 to
+    /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
+    const TRACK_PROPERTY_FILTER: u64 = 0x29;
+
+    const SUBSCRIBE_TYPE: u8 = 0x03;
+    const FETCH_OK_TYPE: u8 = 0x18;
+
+    fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: vi(2),
+            track_namespace: TrackNamespace(vec![b"live".to_vec()]),
+            track_name: b"video".to_vec(),
+            parameters,
+        })
+    }
+
+    fn subscribe_tracks(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::SubscribeTracks(SubscribeTracks {
+            request_id: vi(2),
+            namespace_prefix: TrackNamespace(vec![b"live".to_vec()]),
+            parameters,
+        })
+    }
+
+    fn encoded(message: &ControlMessage) -> Vec<u8> {
+        let mut out = Vec::new();
+        message.encode(&mut out).expect("the fixture is a frame this codec writes");
+        out
+    }
+
+    /// Section 10.2.4 names SUBSCRIBE.
+    #[test]
+    fn a_parameter_named_for_the_message_it_arrives_in_is_carried() {
+        let message = subscribe(vec![varint_parameter(OBJECT_DELIVERY_TIMEOUT, 5_000)]);
+        let frame = encoded(&message);
+
+        let decoded =
+            ControlMessage::decode(&mut &frame[..]).expect("Section 10.2.4 names SUBSCRIBE");
+        assert_eq!(decoded, message);
+    }
+
+    /// Section 10.2.15 names SUBSCRIBE_OK, PUBLISH and five response types, and
+    /// SUBSCRIBE is none of them.
+    #[test]
+    fn an_out_of_scope_parameter_ends_the_session() {
+        let carried = encoded(&subscribe(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
+        let frame = retyped(carried, UNDEFINED_PARAMETER as u8, EXPIRES as u8);
+
+        let err = ControlMessage::decode(&mut &frame[..])
+            .expect_err("EXPIRES is not named for SUBSCRIBE");
+        assert_eq!(
+            err,
+            CodecError::ParameterOutOfScope {
+                key: EXPIRES,
+                message_type: u64::from(SUBSCRIBE_TYPE)
+            }
+        );
+    }
+
+    /// The encoder refuses the same message.
+    #[test]
+    fn the_encoder_refuses_what_the_decoder_refuses() {
+        let mut out = Vec::new();
+        let err = subscribe(vec![varint_parameter(EXPIRES, 30)])
+            .encode(&mut out)
+            .expect_err("EXPIRES is not named for SUBSCRIBE");
+        assert_eq!(
+            err,
+            CodecError::ParameterOutOfScope {
+                key: EXPIRES,
+                message_type: u64::from(SUBSCRIBE_TYPE)
+            }
+        );
+    }
+
+    /// Section 10.13 gives FETCH_OK a Parameters field and no parameter
+    /// definition names FETCH_OK.
+    #[test]
+    fn a_fetch_ok_admits_no_parameter_this_draft_defines() {
+        let carried = encoded(&ControlMessage::FetchOk(FetchOk {
+            end_of_track: 0,
+            end_group: vi(10),
+            end_object: vi(3),
+            parameters: vec![varint_parameter(UNDEFINED_PARAMETER, 30)],
+            track_properties: Vec::new(),
+        }));
+        let frame = retyped(carried, UNDEFINED_PARAMETER as u8, EXPIRES as u8);
+
+        let err = ControlMessage::decode(&mut &frame[..])
+            .expect_err("no parameter definition names FETCH_OK");
+        assert_eq!(
+            err,
+            CodecError::ParameterOutOfScope {
+                key: EXPIRES,
+                message_type: u64::from(FETCH_OK_TYPE)
+            }
+        );
+    }
+
+    /// Section 10.19.1: "Any Parameter that can be specified on a Subscription
+    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
+    /// specified."
+    ///
+    /// RENDEZVOUS TIMEOUT names SUBSCRIBE and nothing else, and arrives in a
+    /// SUBSCRIBE_TRACKS unrefused because of that sentence alone. Draft-18 has no
+    /// such sentence and refuses the same parameter in the same message, which is
+    /// what its `subscribe_tracks_does_not_inherit_a_subscribes_parameters`
+    /// asserts.
+    #[test]
+    fn subscribe_tracks_inherits_a_subscribes_parameters() {
+        let message = subscribe_tracks(vec![varint_parameter(RENDEZVOUS_TIMEOUT, 30)]);
+        let frame = encoded(&message);
+
+        let decoded = ControlMessage::decode(&mut &frame[..])
+            .expect("Section 10.19.1 extends SUBSCRIBE's parameters to SUBSCRIBE_TRACKS");
+        assert_eq!(decoded, message);
+    }
+
+    /// The one Range Filter a SUBSCRIBE may not carry.
+    ///
+    /// Section 5.1.3 scopes four of the five to "a FETCH, SUBSCRIBE,
+    /// SUBSCRIBE_TRACKS, PUBLISH_OK, or REQUEST_UPDATE" and the Track Property
+    /// filter to "a SUBSCRIBE_TRACKS message or REQUEST_UPDATE for it" — it
+    /// selects tracks rather than objects, and a SUBSCRIBE has already named its
+    /// track. Both are length-prefixed and neither has a value rule, so the two
+    /// frames here differ in the Parameter Type and nothing else.
+    #[test]
+    fn a_track_property_filter_is_refused_where_the_other_filters_are_carried() {
+        let message = subscribe(vec![bytes_parameter(SUBGROUP_FILTER, &[0x00, 0x03, 0x02])]);
+        let frame = encoded(&message);
+        let decoded = ControlMessage::decode(&mut &frame[..])
+            .expect("Section 5.1.3 names SUBSCRIBE for this filter");
+        assert_eq!(decoded, message);
+
+        let moved = retyped(frame, SUBGROUP_FILTER as u8, TRACK_PROPERTY_FILTER as u8);
+        let err = ControlMessage::decode(&mut &moved[..])
+            .expect_err("Section 5.1.3 names SUBSCRIBE_TRACKS and REQUEST_UPDATE for this one");
+        assert_eq!(
+            err,
+            CodecError::ParameterOutOfScope {
+                key: TRACK_PROPERTY_FILTER,
+                message_type: u64::from(SUBSCRIBE_TYPE)
+            }
+        );
+
+        let carried =
+            subscribe_tracks(vec![bytes_parameter(TRACK_PROPERTY_FILTER, &[0x00, 0x03, 0x02])]);
+        let frame = encoded(&carried);
+        let decoded = ControlMessage::decode(&mut &frame[..])
+            .expect("a SUBSCRIBE_TRACKS is where this filter belongs");
+        assert_eq!(decoded, carried);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// draft-20
+// ─────────────────────────────────────────────────────────────
+
+#[cfg(feature = "draft20")]
+mod draft20 {
+    use moqtap_codec::draft20::message::{ControlMessage, FetchOk, Subscribe, SubscribeTracks};
+    use moqtap_codec::error::CodecError;
+    use moqtap_codec::kvp::KeyValuePair;
+    use moqtap_codec::types::TrackNamespace;
+
+    use super::{bytes_parameter, retyped, varint_parameter, vi, UNDEFINED_PARAMETER};
+
+    /// EXPIRES, Section 10.2.16 — draft-19's 10.2.15, renumbered.
+    const EXPIRES: u64 = 0x08;
+    /// OBJECT_DELIVERY_TIMEOUT, Section 10.2.4. Named for SUBSCRIBE.
+    const OBJECT_DELIVERY_TIMEOUT: u64 = 0x02;
+    /// RENDEZVOUS TIMEOUT, Section 10.2.6. Named for SUBSCRIBE.
+    const RENDEZVOUS_TIMEOUT: u64 = 0x04;
+    /// SUBGROUP_FILTER, Section 10.2.10, scoped by Section 5.1.4 —
+    /// draft-19's 5.1.3.
+    const SUBGROUP_FILTER: u64 = 0x25;
+    /// TRACK_PROPERTY_FILTER, Section 10.2.14, scoped by Section 5.1.4 to
     /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
 

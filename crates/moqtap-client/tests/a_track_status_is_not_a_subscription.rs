@@ -5,6 +5,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
 ))]
 
 //! A track status creates no subscription, so nothing about a subscription can
@@ -20,46 +22,66 @@
 //! What follows is spelled out at the end of the same paragraph. Drafts 13
 //! through 15: "the subscriber cannot send SUBSCRIBE_UPDATE or UNSUBSCRIBE".
 //! Draft-16 renames the first of the two: "the subscriber cannot send
-//! REQUEST_UPDATE or UNSUBSCRIBE". Drafts 17 through 19 drop the second half,
+//! REQUEST_UPDATE or UNSUBSCRIBE". Drafts 17 through 20 drop the second half,
 //! because there is no UNSUBSCRIBE for a request that owns a stream: "the
 //! subscriber cannot send REQUEST_UPDATE".
 //!
 //! # What was here before
 //!
-//! The opposite, in writing, on six of the seven drafts that state the rule.
+//! The opposite, in writing, on six of the eight drafts that state the rule.
 //! Drafts 12 through 16 listed the track statuses this endpoint had asked for
 //! among the requests whose identifier had already existed within the session,
 //! which is the complement of the drafts' own "has not existed" test, and an
 //! update naming one was accepted on that ground. Drafts 17 and 18 went further
 //! and named `track_statuses` in the set of request kinds an update may modify,
-//! beside the five the draft actually lists. Draft-19 alone left it out, and
-//! its comment says why.
+//! beside the five the draft actually lists. Drafts 19 and 20 left it out, and
+//! draft-19's comment says why.
 //!
 //! Draft-12 is not in this file. Its TRACK_STATUS_REQUEST is a different
 //! message with no such sentence attached, so an update naming one is answered
 //! by the rule about identifiers that never existed and by nothing else.
 //!
-//! # Why none of this ends the session
+//! # Where the consequence changes
 //!
-//! Only draft-19 names a close code for an update that may not be sent: "An
-//! endpoint that receives a REQUEST_UPDATE other than in the two cases above
-//! MUST close the session with a PROTOCOL_VIOLATION." No draft in this file
-//! carries that sentence, so the message is refused where it is handled and the
-//! session goes on running. The rule about an identifier the session never
-//! carried is a different sentence and still closes, which the last gate on
-//! each of the four control-stream drafts checks.
+//! Drafts 13 through 18 name no close code for an update that may not be sent,
+//! so the message is refused where it is handled and the session goes on
+//! running. Drafts 19 and 20 do name one: "An endpoint that receives a
+//! REQUEST_UPDATE other than in the two cases above MUST close the session with
+//! a PROTOCOL_VIOLATION." Same rule, opposite outcome, which is why those two
+//! have a macro of their own rather than an argument on the one the four
+//! before them share — three of the four assertions invert.
+//!
+//! The rule about an identifier the session never carried is a different
+//! sentence and closes on every draft here, which the last gate on each of the
+//! four control-stream drafts checks.
+//!
+//! ## What the range used to stop at 18
+//!
+//! It stopped there because that is where the outcome changes, and a gate
+//! asserting a refusal would have failed on 19 and 20. The two drafts left out
+//! on that ground were the two the rule is stated most explicitly for, and the
+//! error they raise for it — `UnexpectedRequestUpdate` — turned out to be
+//! raised in twelve places in each of their endpoints and observed by nothing
+//! anywhere in the workspace. Not one test, in either crate.
+//!
+//! That is the shape worth naming. A range that stops where the behaviour
+//! changes looks like scoping and reads like a decision, and it leaves exactly
+//! the drafts whose behaviour is most particular with no gate at all. The
+//! divergence was the reason to write more, not less.
 //!
 //! # Ablations, measured
 //!
-//! Four cuts are recorded here, each run and reverted, each on the gate it
-//! reddens. Two of them restore the earlier behaviour, on the
-//! four control-stream drafts and on the two stream-era ones; the other two
-//! are the guard cut in the withdrawal's handler and the guard widened past
-//! the one request kind the sentence is about.
+//! Four cuts are recorded on the six drafts that refuse, each run and reverted,
+//! each on the gate it reddens. Two of them restore the earlier behaviour, on
+//! the four control-stream drafts and on the two stream-era ones; the other two
+//! are the guard cut in the withdrawal's handler and the guard widened past the
+//! one request kind the sentence is about.
 //!
 //! One gate carries no cut. The rule about an identifier the session never
 //! carried is a different sentence with a close code of its own, and nothing
 //! changed here touches the path that raises it.
+//!
+//! The two closing drafts carry a cut of their own, recorded on the gate below.
 
 #![allow(clippy::items_after_test_module)]
 
@@ -708,3 +730,203 @@ control_stream_gates!(
 );
 stream_gates!(draft17, "draft17", d17, "9.16");
 stream_gates!(draft18, "draft18", d18, "10.14");
+
+/// The four gates for a draft that closes the session over this rather than
+/// refusing the message.
+///
+/// Same rule, different consequence, so a separate macro rather than a
+/// parameter on the one above: three of the four assertions invert. See the
+/// module header for why drafts 19 and 20 part company with their four
+/// predecessors here, and what that cost.
+macro_rules! closing_gates {
+    ($draft:ident, $feat:literal, $sec:literal) => {
+        #[cfg(feature = $feat)]
+        mod $draft {
+            use moqtap_client::$draft::endpoint::{Endpoint, EndpointError};
+            use moqtap_client::$draft::session::request_id::Role;
+            use moqtap_client::$draft::session::state::SessionState;
+            use moqtap_codec::$draft::error_codes::SessionErrorCode;
+            #[allow(unused_imports)]
+            use moqtap_codec::types::*;
+            use moqtap_codec::$draft::message::{self, ControlMessage, Setup};
+
+            /// The identifier the peer asks its track status under.
+            const PEERS_ID: u64 = 1;
+
+            fn active() -> Endpoint {
+                let mut ep = Endpoint::new(Role::Client);
+                ep.connect().expect("a client may open");
+                let _ = ep.send_setup(vec![]).expect("SETUP");
+                ep.receive_setup(&Setup { options: vec![] }).expect("the peer's SETUP");
+                ep
+            }
+
+            fn peers_track_status(id: u64) -> ControlMessage {
+                ControlMessage::TrackStatus(message::TrackStatus {
+                    request_id: crate::v(id),
+                    track_namespace: crate::namespace(),
+                    track_name: crate::name(),
+                    parameters: vec![],
+                })
+            }
+
+            /// An update naming `id`.
+            ///
+            /// Built against the identifier under test rather than a constant,
+            /// which the two drafts before these could get away with: from
+            /// draft-19 the message's own Request ID is compared with the
+            /// stream's, and a mismatch is the same violation by a different
+            /// route. A fixed 90 here would close the session for the wrong
+            /// reason and the gate would still pass.
+            fn update(id: u64) -> message::RequestUpdate {
+                message::RequestUpdate { request_id: crate::v(id), parameters: vec![] }
+            }
+
+            /// An endpoint holding a track status the peer asked for on a
+            /// stream of its own.
+            fn asked() -> Endpoint {
+                let mut ep = active();
+                let _ = ep
+                    .receive_request_on_stream(&peers_track_status(PEERS_ID))
+                    .expect("the peer may ask");
+                ep
+            }
+
+            /// An update on the peer's track status stream closes the session.
+            ///
+            /// Section 10.9 gives the six request kinds an update may name and
+            /// then says: "An endpoint that receives a REQUEST_UPDATE other
+            /// than in the two cases above MUST close the session with a
+            /// PROTOCOL_VIOLATION." TRACK_STATUS is not among the six, and
+            /// Section
+            #[doc = $sec]
+            /// says so directly — "the subscriber cannot send REQUEST_UPDATE".
+            ///
+            /// The close code is asserted, not just the close. A session that
+            /// ended for some other reason would satisfy a state check on its
+            /// own, and PROTOCOL_VIOLATION is the half of the sentence that
+            /// reaches the peer.
+            ///
+            /// # Ablation, measured
+            ///
+            /// `track_statuses` put back into the updatable set, which is what
+            /// drafts 17 and 18 shipped and what the four gates above them
+            /// catch there:
+            ///
+            /// ```text
+            /// thread 'draft19::an_update_naming_a_track_status_the_peer_asked_for_closes_the_session'
+            /// panicked at crates\moqtap-client\tests\a_track_status_is_not_a_subscription.rs:913:1:
+            /// a track status is not one of the six kinds an update may name: ()
+            /// ```
+            ///
+            /// It reddens two — this gate on both closing drafts — out of 40.
+            /// The other two gates below stay green under it, because both fail
+            /// at the earlier check on *whose* request it is and never reach the
+            /// check on which kind it is. That is the measurement behind the
+            /// warning on the next one.
+            #[test]
+            fn an_update_naming_a_track_status_the_peer_asked_for_closes_the_session() {
+                let mut ep = asked();
+                let err = ep
+                    .receive_on_peer_request_stream(
+                        crate::v(PEERS_ID),
+                        ControlMessage::RequestUpdate(update(PEERS_ID)),
+                    )
+                    .expect_err("a track status is not one of the six kinds an update may name");
+                assert!(
+                    matches!(err, EndpointError::UnexpectedRequestUpdate(PEERS_ID)),
+                    "the violation should name the track status; got {err:?}"
+                );
+                assert_eq!(
+                    ep.session_state(),
+                    SessionState::Closed,
+                    "this draft says the session MUST close, unlike its four predecessors"
+                );
+                assert_eq!(
+                    err.session_error_code(),
+                    Some(SessionErrorCode::ProtocolViolation),
+                    "and it closes with the code the sentence names"
+                );
+            }
+
+            /// One naming this endpoint's own track status closes it too.
+            ///
+            /// A different branch reaches the same error. The two cases in
+            /// Section 10.9 are both about a request the *peer* made, or a
+            /// subscription this endpoint established with PUBLISH; a request
+            /// of this endpoint's own is in neither, so it never reaches the
+            /// check on which kind it is.
+            ///
+            /// That makes this gate weaker than it looks on its own, and it is
+            /// here for the pair: were the kind check the only thing refusing a
+            /// track status, this would still pass.
+            #[test]
+            fn an_update_naming_this_endpoints_own_track_status_closes_the_session() {
+                let mut ep = active();
+                let (ours, _) = ep
+                    .track_status(crate::elsewhere(), crate::other_name(), vec![])
+                    .expect("this endpoint may ask");
+                let err = ep
+                    .receive_request_update(ours, &update(ours.into_inner()))
+                    .expect_err("a track status cannot be updated whichever end asked for it");
+                assert!(
+                    matches!(err, EndpointError::UnexpectedRequestUpdate(_)),
+                    "the violation should name the track status; got {err:?}"
+                );
+                assert_eq!(ep.session_state(), SessionState::Closed, "and the session closes");
+            }
+
+            /// The close reaches no further than the kinds the sentence excludes.
+            ///
+            /// The control, and it has to be built from the peer's side here.
+            /// On drafts 13 through 18 this endpoint's own advertisement was
+            /// the updatable case; from draft-19 it is not, because case one is
+            /// the peer updating a request the peer made. So the accepted
+            /// update names a PUBLISH_NAMESPACE that arrived on the peer's
+            /// stream, which is inside the sentence rather than outside it.
+            ///
+            /// Without this gate an endpoint that closed on every REQUEST_UPDATE
+            /// would pass both gates above.
+            #[test]
+            fn an_update_naming_a_request_the_peer_made_is_still_accepted() {
+                let mut ep = active();
+                let _ = ep
+                    .receive_request_on_stream(&ControlMessage::PublishNamespace(
+                        message::PublishNamespace {
+                            request_id: crate::v(PEERS_ID),
+                            track_namespace: crate::elsewhere(),
+                            parameters: vec![],
+                        },
+                    ))
+                    .expect("the peer may advertise");
+                ep.receive_request_update(crate::v(PEERS_ID), &update(PEERS_ID))
+                    .expect("an advertisement the peer made is one of the six kinds");
+                assert_eq!(ep.session_state(), SessionState::Active, "and it is not a close");
+            }
+
+            /// An update whose own Request ID disagrees with its stream's is the
+            /// same violation by the other route.
+            ///
+            /// Section 10.9 puts the update "on the same bidi stream as the
+            /// request", so the two identifiers name one request when the peer
+            /// is conforming. A disagreement is refused rather than resolved to
+            /// either of the two, which is the branch the `update` helper above
+            /// exists to stay out of.
+            #[test]
+            fn an_update_that_disagrees_with_its_own_stream_closes_the_session() {
+                let mut ep = asked();
+                let err = ep
+                    .receive_request_update(crate::v(PEERS_ID), &update(PEERS_ID + 2))
+                    .expect_err("the update names a stream that is not its request's");
+                assert!(
+                    matches!(err, EndpointError::UnexpectedRequestUpdate(id) if id == PEERS_ID + 2),
+                    "the violation should name the identifier the message carried; got {err:?}"
+                );
+                assert_eq!(ep.session_state(), SessionState::Closed, "and the session closes");
+            }
+        }
+    };
+}
+
+closing_gates!(draft19, "draft19", "10.14");
+closing_gates!(draft20, "draft20", "10.15");

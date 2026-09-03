@@ -149,9 +149,13 @@ pub enum AcceptedConn {
 /// Build the ALPN list the server advertises to clients — every MoQT
 /// QUIC ALPN we support, plus `h3` when the WebTransport feature is on.
 ///
-/// The list is derived from [`DraftVersion::quic_alpn`] so adding a new
-/// draft there automatically flows through to the proxy with no other
-/// changes required.
+/// Each ALPN string comes from [`DraftVersion::quic_alpn`], but the set of
+/// drafts is the hardcoded list below — `DraftVersion` exposes no iterator.
+/// **A new draft must be added here by hand.** An earlier revision of this
+/// comment claimed the list derived itself; draft-20 was consequently missing
+/// for a while, and a draft-20 client failed the TLS handshake outright
+/// ("peer doesn't support any known protocol") before sending a single MoQT
+/// frame. `tests/control_plane_uni.rs` has a per-draft row that catches this.
 fn advertised_alpns() -> Vec<Vec<u8>> {
     // Dedup: drafts 07–14 all map to `moq-00`, so iterate every draft
     // and keep unique ALPNs.
@@ -170,6 +174,7 @@ fn advertised_alpns() -> Vec<Vec<u8>> {
         DraftVersion::Draft17,
         DraftVersion::Draft18,
         DraftVersion::Draft19,
+        DraftVersion::Draft20,
     ] {
         let alpn = d.quic_alpn().to_vec();
         if !out.iter().any(|existing| existing == &alpn) {

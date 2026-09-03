@@ -1,10 +1,31 @@
-#![cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#![cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 
-//! Drafts 17, 18 and 19 carry control messages on a **pair of
+//! Drafts 17 through 20 carry control messages on a **pair of
 //! unidirectional streams**, and a bidirectional stream is a request stream.
 //! These tests drive `Connection::connect` and the request helpers at a peer
 //! that enforces exactly that, and assert a session is completed and requests
 //! are answered.
+//!
+//! # The one thing draft-20 does not share
+//!
+//! Draft-20's Section 3.3 is draft-19's sentence unchanged, so the 400-line
+//! enforcing peer below needed no change at all for it and neither did 23 of
+//! the 25 gates. **FETCH is the whole of the divergence.** Section 10.13
+//! deleted the Fetch Type field, both payload structures and the joining
+//! mechanism, promoted the namespace and the track name to fields of FETCH
+//! itself, and moved the range into the `LOCATION_FILTER` parameter. So the
+//! FETCH rendering and the fetch half of the request sweep are per-draft
+//! functions handed to the gate macro, exactly as SUBSCRIBE_NAMESPACE has been
+//! since draft-18 split it in two. Drafts 17, 18 and 19 share one body for
+//! both — their `Fetch` and their three helpers are identical — and draft-20
+//! has its own.
+//!
+//! Where draft-19 opens a joining FETCH, draft-20 asks for a **fill**: a
+//! `FILL_PARAMETERS` parameter on a SUBSCRIBE, answered by a unidirectional
+//! fill fetch stream (Section 5.1.3). The half of that which is a request
+//! belongs here and is swept with the rest; the stream that answers it is a
+//! data stream, and is gated in `draft20_fill_stream_objects.rs` and
+//! `draft20_fill_and_state_notify.rs` rather than repeated here.
 //!
 //! # Why the peer has to enforce it
 //!
@@ -104,11 +125,11 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 /// Session termination code `PROTOCOL_VIOLATION` (Section 14.5.1 on
-/// draft-17, Section 15.5.1 on drafts 18 and 19; the value is 0x3 on all
-/// three).
+/// draft-17, Section 15.5.1 on drafts 18 and 19, Section 15.11.1 on draft-20;
+/// the value is 0x3 on all four).
 const PROTOCOL_VIOLATION: u32 = 0x3;
 
-/// Session termination code `INVALID_REQUEST_ID`, 0x4 on all three drafts:
+/// Session termination code `INVALID_REQUEST_ID`, 0x4 on all four drafts:
 /// "The endpoint received a Request ID with an incorrect least significant bit
 /// for the sender, or a duplicate Request ID."
 ///
@@ -118,30 +139,36 @@ const INVALID_REQUEST_ID: u64 = 0x4;
 
 /// The unidirectional stream type of a control stream, which is also the
 /// SETUP message type (Sections 3.4 and 9.4 on draft-17, 3.4 and 10.3 on
-/// drafts 18 and 19).
+/// drafts 18, 19 and 20).
 ///
 /// Spelled out here rather than imported from `moqtap-client` so the peer
 /// agrees with the draft rather than with the code it is testing.
 const SETUP_STREAM_TYPE: u64 = 0x2F00;
 
-/// SUBSCRIBE's message type, 0x03 on all three drafts. The type a request
+/// SUBSCRIBE's message type, 0x03 on all four drafts. The type a request
 /// stream opened by [`Connection::subscribe`] has to lead with.
 const SUBSCRIBE_TYPE: u64 = 0x03;
 
-/// TRACK_STATUS's message type, 0x0D on all three drafts. The request the
+/// TRACK_STATUS's message type, 0x0D on all four drafts. The request the
 /// peer's own gate writes in the wrong place, and the one
 /// `every_request_helper_opens_its_own_stream` expects from
 /// `Connection::track_status`.
 const TRACK_STATUS_TYPE: u64 = 0x0D;
 
-/// FETCH's message type, 0x16 on all three drafts. All three of
-/// `Connection::fetch`, `Connection::joining_fetch` and
-/// `Connection::absolute_joining_fetch` lead with it — a joining FETCH is a
-/// FETCH and gets a request stream of its own rather than sharing the
-/// subscription's.
+/// FETCH's message type, 0x16 on all four drafts, and the codepoint that
+/// makes draft-20 dangerous: the number did not move, but the body behind it
+/// was rebuilt, so a draft-19 decoder reads a draft-20 FETCH as a
+/// well-formed request for something else.
+///
+/// On drafts 17, 18 and 19 all three of `Connection::fetch`,
+/// `Connection::joining_fetch` and `Connection::absolute_joining_fetch` lead
+/// with it — a joining FETCH is a FETCH and gets a request stream of its own
+/// rather than sharing the subscription's. Draft-20 has neither joining
+/// helper; `Connection::fetch` and `Connection::fetch_range` are the two that
+/// lead with it there.
 const FETCH_TYPE: u64 = 0x16;
 
-/// AUTHORIZATION TOKEN's parameter key, 0x03 on all three drafts. See
+/// AUTHORIZATION TOKEN's parameter key, 0x03 on all four drafts. See
 /// [`attached`].
 const AUTHORIZATION_TOKEN: u64 = 0x03;
 
@@ -162,31 +189,60 @@ const USE_ALIAS: u8 = 0x2;
 /// which no rule in this file is about.
 const TOKEN_ALIAS: u8 = 0x7;
 
-/// The Fetch Type of a standalone FETCH, 0x1 on all three drafts.
+/// The Fetch Type of a standalone FETCH, 0x1 on drafts 17, 18 and 19.
 ///
 /// The three Fetch Types are one field of one message, which is why they are
 /// numbers here rather than message types: a helper that sends the wrong one
 /// has written a well-formed FETCH asking for something else.
+///
+/// Draft-20 deleted the field and the registry behind it (Section 10.13), so
+/// this and its two siblings are gated off there rather than left to render a
+/// number no draft-20 FETCH carries.
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
 const STANDALONE_FETCH: u64 = 0x1;
 
-/// The Fetch Type of a Relative Joining Fetch, 0x2 on all three drafts. See
-/// [`STANDALONE_FETCH`].
+/// The Fetch Type of a Relative Joining Fetch, 0x2 on drafts 17, 18 and 19.
+/// See [`STANDALONE_FETCH`].
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
 const RELATIVE_JOINING_FETCH: u64 = 0x2;
 
-/// The Fetch Type of an Absolute Joining Fetch, 0x3 on all three drafts. See
-/// [`STANDALONE_FETCH`].
+/// The Fetch Type of an Absolute Joining Fetch, 0x3 on drafts 17, 18 and 19.
+/// See [`STANDALONE_FETCH`].
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
 const ABSOLUTE_JOINING_FETCH: u64 = 0x3;
 
-/// SUBSCRIBE_OK's message type, 0x04 on all three drafts. Two things use it:
+/// SUBSCRIBE_OK's message type, 0x04 on all four drafts. Two things use it:
 /// the answer the client is expected to write on a request stream the peer
 /// opened, and — because it is a *response* and so begins no request stream —
-/// the message the refusal gate opens a bidirectional stream with.
+/// the message drafts 17, 18 and 19 have the refusal gate open a bidirectional
+/// stream with. Draft-20 opens that stream with a PUBLISH_STATE_NOTIFY
+/// instead; see [`PUBLISH_STATE_NOTIFY_TYPE`].
 const SUBSCRIBE_OK_TYPE: u64 = 0x04;
 
-/// PUBLISH's message type, 0x1D on all three drafts.
+/// PUBLISH_STATE_NOTIFY's message type, 0x22, new in draft-20 (Section 10.10).
+///
+/// It is the newest thing a bidirectional stream may **not** begin with, and
+/// the one most easily mistaken for something that may: it carries no Request
+/// ID, it answers nothing, and it is not a response, so the two properties an
+/// implementation usually classifies by both point the wrong way. Section 10.10
+/// puts it "on a subscription's bidirectional stream" — a stream a SUBSCRIBE or
+/// a PUBLISH has already opened — so it opens none of its own, and the refusal
+/// gate holds draft-20 to that.
+#[cfg(feature = "draft20")]
+const PUBLISH_STATE_NOTIFY_TYPE: u64 = 0x22;
+
+/// `LARGEST_OBJECT`, Parameter Type 0x09: the parameter Section 10.10 says a
+/// publisher MUST put on a PUBLISH_STATE_NOTIFY when it knows the value.
+///
+/// The refusal gate's notify carries one, so what is refused is a message the
+/// rule recognises rather than an empty frame no publisher would send.
+#[cfg(feature = "draft20")]
+const LARGEST_OBJECT: u64 = 0x09;
+
+/// PUBLISH's message type, 0x1D on all four drafts.
 const PUBLISH_TYPE: u64 = 0x1D;
 
-/// PUBLISH_NAMESPACE's message type, 0x06 on all three drafts.
+/// PUBLISH_NAMESPACE's message type, 0x06 on all four drafts.
 const PUBLISH_NAMESPACE_TYPE: u64 = 0x06;
 
 /// SUBSCRIBE_NAMESPACE's message type on draft-17, before draft-18 split the
@@ -194,13 +250,13 @@ const PUBLISH_NAMESPACE_TYPE: u64 = 0x06;
 #[cfg(feature = "draft17")]
 const DRAFT17_SUBSCRIBE_NAMESPACE_TYPE: u64 = 0x11;
 
-/// SUBSCRIBE_NAMESPACE's message type on drafts 18 and 19.
-#[cfg(any(feature = "draft18", feature = "draft19"))]
+/// SUBSCRIBE_NAMESPACE's message type on drafts 18, 19 and 20.
+#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
 const SUBSCRIBE_NAMESPACE_TYPE: u64 = 0x50;
 
 /// SUBSCRIBE_TRACKS's message type, the seventh request type and the one
 /// draft-17 does not have at all.
-#[cfg(any(feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
 const SUBSCRIBE_TRACKS_TYPE: u64 = 0x51;
 
 /// The message types draft-17 Section 3.3 allows a bidirectional stream to
@@ -209,9 +265,13 @@ const SUBSCRIBE_TRACKS_TYPE: u64 = 0x51;
 #[cfg(feature = "draft17")]
 const DRAFT17_REQUEST_TYPES: &[u64] = &[0x0D, 0x03, 0x1D, 0x16, 0x06, 0x11];
 
-/// The same list for drafts 18 and 19, where SUBSCRIBE_NAMESPACE moved to
+/// The same list for drafts 18, 19 and 20, where SUBSCRIBE_NAMESPACE moved to
 /// 0x50 and SUBSCRIBE_TRACKS (0x51) joined it, making seven.
-#[cfg(any(feature = "draft18", feature = "draft19"))]
+///
+/// Draft-20 recites the same seven in Section 3.3 and adds nothing to them:
+/// PUBLISH_STATE_NOTIFY (0x22) is the message it added and is deliberately
+/// **not** here, which is what the refusal gate holds the client to.
+#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
 const DRAFT18_REQUEST_TYPES: &[u64] = &[0x0D, 0x03, 0x1D, 0x16, 0x06, 0x50, 0x51];
 
 /// How long a test waits on the client or the peer before calling it hung.
@@ -240,9 +300,9 @@ const TRACK_TWO: &[u8] = b"track-2";
 /// it: the alias it would have chosen anyway is the violation.
 const CLASHING_TRACK: &[u8] = b"other-1";
 
-/// The session termination code drafts 17, 18 and 19 name for two tracks
-/// under one Track Alias (Section 9.9 on draft-17, Section 11.1 on 18 and 19;
-/// the value is 0x5 on all three).
+/// The session termination code drafts 17 through 20 name for two tracks
+/// under one Track Alias (Section 9.9 on draft-17, Section 11.1 on 18, 19 and
+/// 20; the value is 0x5 on all four).
 const DUPLICATE_TRACK_ALIAS: u64 = 0x5;
 
 /// The track name on the requests the **peer** makes. Deliberately not one of
@@ -305,8 +365,8 @@ const UNANSWERED: u64 = 0x0;
 /// Request IDs the peer puts on the requests it opens streams with.
 ///
 /// The client under test is a client, so draft-17 Section 9.1 (Section 10.1 on
-/// drafts 18 and 19) has it allocate **even** ids and accept only **odd** ones
-/// from its peer. These are odd.
+/// drafts 18, 19 and 20) has it allocate **even** ids and accept only **odd**
+/// ones from its peer. These are odd.
 const PEER_REQUEST_ID: u64 = 1;
 /// See [`PEER_REQUEST_ID`]. A second odd id, for the gate that has an inbound
 /// and an outbound request open at once.
@@ -359,7 +419,7 @@ fn namespace() -> TrackNamespace {
 /// admits, and these drafts refuse a message carrying a parameter its own
 /// definition does not place there. Draft-17 Section 9.3.2: "It MAY appear in
 /// a PUBLISH, SUBSCRIBE, REQUEST_UPDATE, SUBSCRIBE_NAMESPACE,
-/// PUBLISH_NAMESPACE, TRACK_STATUS or FETCH message." Drafts 18 and 19 say
+/// PUBLISH_NAMESPACE, TRACK_STATUS or FETCH message." Drafts 18, 19 and 20 say
 /// the same in Section 10.2.2 with SUBSCRIBE_TRACKS added to the list, which
 /// is the request type they added.
 fn attached() -> KeyValuePair {
@@ -390,6 +450,10 @@ fn subscribe_request(
 
 /// A standalone FETCH, rendered. `range` is the Start and End Locations in
 /// the order the message carries them.
+///
+/// Drafts 17, 18 and 19 only: draft-20 has no Fetch Type and no inline range,
+/// and renders through [`draft20_fetch_request`] instead.
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
 fn standalone_fetch_request(
     request_id: u64,
     fetch_type: u64,
@@ -421,6 +485,11 @@ fn standalone_fetch_request(
 /// The Fetch Type is a field here rather than part of the name, because the
 /// relative form and the absolute form are one message and differ in it. It
 /// is the difference two connection helpers exist to make.
+///
+/// Drafts 17, 18 and 19 only. Draft-20 Section 10.13 deleted the joining
+/// fetch outright; what replaced it is a `FILL_PARAMETERS` parameter on a
+/// SUBSCRIBE, which renders as a SUBSCRIBE.
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
 fn joining_fetch_request(
     request_id: u64,
     fetch_type: u64,
@@ -439,6 +508,69 @@ fn joining_fetch_request(
             ("parameters", parameters.to_string()),
         ],
     )
+}
+
+/// A draft-20 FETCH, rendered.
+///
+/// The same four fields a SUBSCRIBE carries — Section 10.13 made FETCH
+/// byte-identical to SUBSCRIBE apart from the type code — plus the range,
+/// which is no longer a field of the message at all. `range` is
+/// [`draft20_range_text`] over the message's own parameters, so a helper that
+/// forgot the filter, wrote it under the wrong type, or shifted an end
+/// location by one renders differently from one that got it right.
+///
+/// Keeping the range in the rendering is what carries decision D4 into this
+/// file: draft-19 wrote "the last Object, plus 1", draft-20 Sections 5.1.2 and
+/// 10.13 make the range inclusive, and a ported `+ 1` is invisible in a
+/// parameter count.
+#[cfg(feature = "draft20")]
+fn draft20_fetch_request(
+    request_id: u64,
+    track_namespace: &TrackNamespace,
+    track_name: &[u8],
+    range: &str,
+    parameters: usize,
+) -> String {
+    render(
+        "FETCH",
+        FETCH_TYPE,
+        &[
+            ("request id", request_id.to_string()),
+            ("namespace", namespace_text(track_namespace)),
+            ("track", text(track_name)),
+            ("range", range.to_string()),
+            ("parameters", parameters.to_string()),
+        ],
+    )
+}
+
+/// The `LOCATION_FILTER` fields of a draft-20 message, rendered for
+/// [`draft20_fetch_request`].
+///
+/// `none` when the message carries no filter, which Section 10.13 defines as
+/// `{0,0}` through Largest Object. Otherwise the `vi64` fields in wire order,
+/// decoded by the codec's own decoder rather than by anything here: the shape
+/// of a filter comes from how many varints its value holds (decision D3), and
+/// a peer that guessed from the byte length would agree with a wrong encoder.
+///
+/// A value that is not a well-formed filter renders as its own complaint
+/// instead of panicking. The peer is reporting what arrived, and a filter it
+/// cannot read is a fact about the client under test rather than about this
+/// function.
+#[cfg(feature = "draft20")]
+fn draft20_range_text(parameters: &[KeyValuePair]) -> String {
+    use moqtap_codec::draft20::message::{decode_location_filter, LOCATION_FILTER};
+
+    let Some(filter) = parameters.iter().find(|p| p.key.into_inner() == LOCATION_FILTER) else {
+        return "none".to_string();
+    };
+    let KvpValue::Bytes(value) = &filter.value else {
+        return "not length-prefixed".to_string();
+    };
+    match decode_location_filter(value) {
+        Ok(fields) => fields.iter().map(u64::to_string).collect::<Vec<_>>().join(","),
+        Err(e) => format!("undecodable ({e:?})"),
+    }
 }
 
 /// A PUBLISH_NAMESPACE, rendered.
@@ -503,7 +635,7 @@ fn publish_request(
 }
 
 /// Draft-17's SUBSCRIBE_NAMESPACE, rendered: a different type number from
-/// drafts 18 and 19, and the `subscribe_options` field they dropped.
+/// drafts 18, 19 and 20, and the `subscribe_options` field they dropped.
 #[cfg(feature = "draft17")]
 fn draft17_subscribe_namespace_request(
     request_id: u64,
@@ -523,8 +655,8 @@ fn draft17_subscribe_namespace_request(
     )
 }
 
-/// SUBSCRIBE_NAMESPACE on drafts 18 and 19, rendered.
-#[cfg(any(feature = "draft18", feature = "draft19"))]
+/// SUBSCRIBE_NAMESPACE on drafts 18, 19 and 20, rendered.
+#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn subscribe_namespace_request(
     request_id: u64,
     namespace_prefix: &TrackNamespace,
@@ -544,7 +676,7 @@ fn subscribe_namespace_request(
 /// SUBSCRIBE_TRACKS, rendered. The seventh request type, and the one that
 /// carries the same two fields as the message it was split out of — which is
 /// why a helper that wrote the wrong one of the two is worth catching.
-#[cfg(any(feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn subscribe_tracks_request(
     request_id: u64,
     namespace_prefix: &TrackNamespace,
@@ -584,9 +716,10 @@ type AnswerMark = fn(&AnyControlMessage) -> Option<(u64, u64)>;
 /// Renders a request the client made, for the peer's report. See [`render`].
 ///
 /// Per draft, because the fields live in a draft's own message structs. The
-/// five request types every draft in this range spells the same way are
-/// rendered inside the gate macro; the namespace requests are not one message
-/// across the three and are rendered by a function of their own.
+/// four request types every draft in this range spells the same way are
+/// rendered inside the gate macro; the namespace requests and FETCH are not
+/// one message across the four and are rendered by functions of their own —
+/// `$describe_namespace` and `$describe_fetch`.
 type Describe = fn(&AnyControlMessage) -> String;
 
 /// Everything the peer needs to know about the draft it is speaking.
@@ -646,8 +779,8 @@ enum PeerCommand {
     /// half of its stream with `code`.
     ///
     /// The peer withdrawing a request it made. Draft-17 Section 3.3.1,
-    /// draft-18 Section 3.3.2 and draft-19 Section 3.3.3 all say "Senders
-    /// cancel requests if the response is no longer of interest"; the
+    /// draft-18 Section 3.3.2 and drafts 19 and 20 Section 3.3.3 all say
+    /// "Senders cancel requests if the response is no longer of interest"; the
     /// sentence runs on to say the same of receivers. Explicit rather than
     /// done by dropping the send half, so the code the client reads is one
     /// this test chose and not one quinn picked.
@@ -777,6 +910,33 @@ async fn saw_request(
         "{draft_label}: the {what} must arrive alone at the front of a bidirectional \
          stream of its own, and must be the request the helper was asked for"
     );
+}
+
+/// Drive one request helper to its handle, or panic naming the helper and what
+/// the peer made of the session.
+///
+/// The same three things the `request!` macro inside
+/// `every_request_helper_opens_its_own_stream` does — bound the call by
+/// [`PATIENCE`], name the helper in the timeout, and put the peer's own report
+/// in the failure — for the per-draft hooks that live outside the gate macro
+/// and so cannot reach that macro. A hook that used a bare `.expect()` would
+/// hang for the full patience and then say nothing about why.
+///
+/// Generic over the handle and its error rather than per draft: every draft's
+/// `RequestStream` and `ConnectionError` differ, and nothing here needs more
+/// of either than `Debug`.
+async fn made<S, E: std::fmt::Debug>(
+    draft_label: &str,
+    what: &str,
+    seen: &mut mpsc::UnboundedReceiver<PeerEvent>,
+    call: impl std::future::Future<Output = Result<S, E>>,
+) -> S {
+    let outcome = tokio::time::timeout(PATIENCE, call)
+        .await
+        .unwrap_or_else(|_| panic!("{draft_label}: {what} did not finish"));
+    outcome.unwrap_or_else(|e| {
+        panic!("{draft_label}: {what} failed with {e:?}; the peer reported {:?}", reported(seen))
+    })
 }
 
 /// Everything the peer has reported so far, for a panic message.
@@ -1210,13 +1370,28 @@ async fn refuse_requests_on_control_stream(
 /// [`DraftVersion`] and `$request_types` the message types that draft lets a
 /// bidirectional stream begin with. `$stray_request` is a TRACK_STATUS built
 /// for that draft — the drafts do not share a shape for it, since draft-17
-/// carries a `required_request_id_delta` that drafts 18 and 19 dropped — and
-/// is written where it does not belong by the peer's own gate.
+/// carries a `required_request_id_delta` that drafts 18, 19 and 20 dropped —
+/// and is written where it does not belong by the peer's own gate.
 ///
 /// `$peer_subscribe` builds the SUBSCRIBE the **peer** opens a request stream
 /// toward the client with, from a Request ID. It is a per-draft expression for
 /// the same reason `$stray_request` is: draft-17's SUBSCRIBE carries a
-/// `required_request_id_delta` that drafts 18 and 19 dropped.
+/// `required_request_id_delta` that drafts 18, 19 and 20 dropped.
+///
+/// `$describe_fetch` renders a FETCH and `$fetch_requests` drives the fetch
+/// helpers, both outside this macro and both for the same reason
+/// `$describe_namespace` and `$namespace_requests` are: draft-20 Section 10.13
+/// rebuilt FETCH, so there is no `FetchPayload` to match on, no Fetch Type to
+/// render and no joining helper to call. Drafts 17, 18 and 19 get one shared
+/// body for the pair from [`joining_fetch_hooks`]; draft-20 writes its own.
+///
+/// `$non_opener` is a message that begins **no** request stream, built for
+/// that draft, and `$non_opener_type` is the type number the client must name
+/// when it refuses one. Drafts 17, 18 and 19 use a SUBSCRIBE_OK — a response,
+/// which answers a request stream rather than opening one. Draft-20 uses
+/// PUBLISH_STATE_NOTIFY, the message it added: Section 10.10 puts it on a
+/// subscription's existing stream, and it is the harder case, because unlike a
+/// response it carries no Request ID and answers nothing.
 macro_rules! uni_control_plane_gates {
     (
         $draft_mod:ident,
@@ -1230,7 +1405,11 @@ macro_rules! uni_control_plane_gates {
         $respond_to_publish:ident,
         $publish_ok:expr,
         $namespace_requests:path,
-        $describe_namespace:path
+        $describe_namespace:path,
+        $describe_fetch:path,
+        $fetch_requests:path,
+        $non_opener:expr,
+        $non_opener_type:expr
     ) => {
         mod $draft_mod {
             use super::*;
@@ -1242,8 +1421,13 @@ macro_rules! uni_control_plane_gates {
             use moqtap_client::$draft_mod::session::state::SessionState;
             use moqtap_client::transport::TransportError;
             use moqtap_codec::$draft_mod::data_stream::SubgroupHeader;
+            // `FetchPayload` is deliberately absent: draft-20 has no such type,
+            // and importing it here is what stopped this macro covering
+            // draft-20 at all — an `E0432` on the first expansion, before any
+            // gate had a chance to fail on the merits. The FETCH arm went to
+            // `$describe_fetch` instead.
             use moqtap_codec::$draft_mod::message::{
-                ControlMessage, FetchPayload, PublishDone, Setup, SubscribeOk,
+                ControlMessage, PublishDone, Setup, SubscribeOk,
             };
 
             /// An encoded SETUP with no options, for this draft.
@@ -1319,7 +1503,7 @@ macro_rules! uni_control_plane_gates {
             /// PUBLISH's stream to end the subscription it established.
             ///
             /// The message has the same three fields and no Request ID on all
-            /// three drafts: the stream it arrives on is the correlation.
+            /// four drafts: the stream it arrives on is the correlation.
             fn peer_publish_done_bytes() -> Vec<u8> {
                 let msg = AnyControlMessage::$variant(ControlMessage::PublishDone(PublishDone {
                     status_code: VarInt::from_u64_moqt(0),
@@ -1331,23 +1515,21 @@ macro_rules! uni_control_plane_gates {
                 buf
             }
 
-            /// A SUBSCRIBE_OK, which is a *response* and so begins no request
-            /// stream on any of the three drafts.
+            /// A message that begins **no** request stream, encoded for this
+            /// draft, which the refusal gate opens a bidirectional stream
+            /// with. See `$non_opener`.
             ///
-            /// The refusal gate opens a bidirectional stream with it. A
-            /// response is the realistic mistake — an implementation that put
-            /// an answer on a stream of its own rather than on the request's
-            /// would produce exactly this — and it is the one message this
-            /// file already knows the client can decode.
-            fn subscribe_ok_bytes() -> Vec<u8> {
-                let msg =
-                    AnyControlMessage::$variant(ControlMessage::SubscribeOk(SubscribeOk {
-                        track_alias: VarInt::from_u64_moqt(NO_MARK),
-                        parameters: Vec::new(),
-                        track_properties: Vec::new(),
-                    }));
+            /// Drafts 17, 18 and 19 use a SUBSCRIBE_OK. A response is the
+            /// realistic mistake there — an implementation that put an answer
+            /// on a stream of its own rather than on the request's would
+            /// produce exactly this — and it is a message this file already
+            /// knows the client can decode. Draft-20 uses the
+            /// PUBLISH_STATE_NOTIFY it added instead, for the reason given at
+            /// [`PUBLISH_STATE_NOTIFY_TYPE`].
+            fn non_opener_bytes() -> Vec<u8> {
+                let msg = AnyControlMessage::$variant($non_opener);
                 let mut buf = Vec::new();
-                msg.encode(&mut buf).expect("encode SUBSCRIBE_OK");
+                msg.encode(&mut buf).expect("encode the non-opening message");
                 buf
             }
 
@@ -1386,9 +1568,9 @@ macro_rules! uni_control_plane_gates {
                 }
             }
 
-            /// See [`Describe`]. The five request types spelled the same
-            /// way on all three drafts; the namespace requests, which are
-            /// not, go to a function of this draft's own.
+            /// See [`Describe`]. The four request types spelled the same
+            /// way on all four drafts; FETCH and the namespace requests,
+            /// which are not, go to functions of this draft's own.
             ///
             /// A message that is not a request reaches here only if the type
             /// list and this match disagree, and is rendered by its own
@@ -1408,37 +1590,7 @@ macro_rules! uni_control_plane_gates {
                         &m.track_name,
                         m.parameters.len(),
                     ),
-                    ControlMessage::Fetch(m) => match &m.fetch_payload {
-                        FetchPayload::Standalone {
-                            track_namespace,
-                            track_name,
-                            start_group,
-                            start_object,
-                            end_group,
-                            end_object,
-                        } => standalone_fetch_request(
-                            m.request_id.into_inner(),
-                            m.fetch_type as u64,
-                            track_namespace,
-                            track_name,
-                            (
-                                start_group.into_inner(),
-                                start_object.into_inner(),
-                                end_group.into_inner(),
-                                end_object.into_inner(),
-                            ),
-                            m.parameters.len(),
-                        ),
-                        FetchPayload::Joining { joining_request_id, joining_start } => {
-                            joining_fetch_request(
-                                m.request_id.into_inner(),
-                                m.fetch_type as u64,
-                                joining_request_id.into_inner(),
-                                joining_start.into_inner(),
-                                m.parameters.len(),
-                            )
-                        }
-                    },
+                    ControlMessage::Fetch(m) => $describe_fetch(m),
                     ControlMessage::Publish(m) => publish_request(
                         m.request_id.into_inner(),
                         &m.track_namespace,
@@ -1725,8 +1877,9 @@ macro_rules! uni_control_plane_gates {
             ///
             /// Putting the control stream back on a bidirectional stream —
             /// `transport.open_bi()` in `Connection::connect`, with the
-            /// control plane read back off the same stream — fails all three
-            /// drafts:
+            /// control plane read back off the same stream — fails every draft
+            /// here. Recorded when the file covered three; draft-20 fails it
+            /// the same way, because its Section 3.3 is the same sentence:
             ///
             /// ```text
             /// draft-17: connect failed with Transport(Read("connection lost")); the peer reported Ok(ClosedBidiStream(12032))
@@ -1934,12 +2087,12 @@ macro_rules! uni_control_plane_gates {
             /// A second track answered with a live track's Track Alias ends
             /// the session, and the peer reads the code off the wire.
             ///
-            /// Draft-19 Section 11.1, and draft-18 in the same words: "The
-            /// same Track Alias MUST NOT be used by a publisher to refer to
-            /// two different Tracks simultaneously in the same session. If a
-            /// subscriber receives a PUBLISH or SUBSCRIBE_OK that uses the
-            /// same Track Alias as a different Track with an Established
-            /// subscription, it MUST close the session with error
+            /// Drafts 18, 19 and 20 Section 11.1, in the same words on all
+            /// three: "The same Track Alias MUST NOT be used by a publisher to
+            /// refer to two different Tracks simultaneously in the same
+            /// session. If a subscriber receives a PUBLISH or SUBSCRIBE_OK
+            /// that uses the same Track Alias as a different Track with an
+            /// Established subscription, it MUST close the session with error
             /// DUPLICATE_TRACK_ALIAS." Draft-17 Section 9.9 states the
             /// SUBSCRIBE_OK half of that on its own.
             ///
@@ -1956,7 +2109,7 @@ macro_rules! uni_control_plane_gates {
             /// # Why the code is read and not just the close
             ///
             /// PROTOCOL_VIOLATION answers most of the neighbouring rules on
-            /// these three drafts and this one answers to a number of its own.
+            /// these drafts and this one answers to a number of its own.
             /// A gate that observed only that the session ended would pass
             /// with either, and which rule was broken is the whole of what the
             /// peer is being told.
@@ -2484,9 +2637,9 @@ macro_rules! uni_control_plane_gates {
             /// that wrote its request on the control stream instead would
             /// leave the rest of this file green. So this walks the whole set
             /// the draft names — the six of draft-17 Section 3.3, and on
-            /// drafts 18 and 19 the seventh, SUBSCRIBE_TRACKS — and requires
-            /// the peer to report each one arriving alone at the front of a
-            /// bidirectional stream.
+            /// drafts 18, 19 and 20 the seventh, SUBSCRIBE_TRACKS — and
+            /// requires the peer to report each one arriving alone at the
+            /// front of a bidirectional stream.
             ///
             /// The check is on the peer's side and on the request the peer
             /// **decoded**, so three separable mistakes fail here: the wrong
@@ -2506,10 +2659,15 @@ macro_rules! uni_control_plane_gates {
             /// name the helper that caused them.
             ///
             /// The walk is over helpers rather than over messages, which is
-            /// why FETCH appears three times: a standalone fetch, a relative
-            /// joining fetch and an absolute one are three bodies that each
-            /// open a stream of their own, and a fourth written later would
-            /// be a fourth place to get it wrong.
+            /// why FETCH appears more than once: on drafts 17, 18 and 19 a
+            /// standalone fetch, a relative joining fetch and an absolute one
+            /// are three bodies that each open a stream of their own, and one
+            /// written later would be a fourth place to get it wrong. On
+            /// draft-20 those three helpers are two — `fetch` and
+            /// `fetch_range` — and the joining pair is replaced by a SUBSCRIBE
+            /// carrying `FILL_PARAMETERS`, which is what Section 5.1.3 turned
+            /// "give me what I missed" into. The set is per draft, so it lives
+            /// in `$fetch_requests` rather than here.
             ///
             /// # What it catches
             ///
@@ -2578,58 +2736,16 @@ macro_rules! uni_control_plane_gates {
                     conn.subscribe(namespace(), TRACK_ONE.to_vec(), vec![attached()]),
                     |id| subscribe_request(id, &namespace(), TRACK_ONE, 1)
                 );
-                // The subscription's request id, which the two joining
-                // FETCHes below name. Taken from the handle rather than
-                // counted, so it stays right if the endpoint changes how it
-                // allocates.
-                let subscription = held[0].request_id();
 
-                request!(
-                    "FETCH",
-                    conn.fetch(
-                        namespace(),
-                        TRACK_ONE.to_vec(),
-                        VarInt::from_u64_moqt(0),
-                        VarInt::from_u64_moqt(0),
-                        VarInt::from_u64_moqt(1),
-                        VarInt::from_u64_moqt(1),
-                        vec![attached()],
-                    ),
-                    |id| standalone_fetch_request(
-                        id,
-                        STANDALONE_FETCH,
-                        &namespace(),
-                        TRACK_ONE,
-                        (0, 0, 1, 1),
-                        1
-                    )
-                );
-                request!(
-                    "joining FETCH",
-                    conn.joining_fetch(subscription, VarInt::from_u64_moqt(2), vec![attached()]),
-                    |id| joining_fetch_request(
-                        id,
-                        RELATIVE_JOINING_FETCH,
-                        subscription.into_inner(),
-                        2,
-                        1
-                    )
-                );
-                request!(
-                    "absolute joining FETCH",
-                    conn.absolute_joining_fetch(
-                        subscription,
-                        VarInt::from_u64_moqt(9),
-                        vec![attached()],
-                    ),
-                    |id| joining_fetch_request(
-                        id,
-                        ABSOLUTE_JOINING_FETCH,
-                        subscription.into_inner(),
-                        9,
-                        1
-                    )
-                );
+                // The fetch helpers, which are not one set across the range —
+                // draft-20 Section 10.13 deleted the Fetch Type field and both
+                // joining helpers — so they are made by a per-draft function
+                // rather than here, in the position they occupied when they
+                // were. It runs immediately after the SUBSCRIBE because the
+                // joining FETCHes of drafts 17, 18 and 19 name that
+                // subscription's Request ID, which it reads off `held[0]`.
+                $fetch_requests(&mut conn, &mut held, &mut seen).await;
+
                 request!(
                     "PUBLISH_NAMESPACE",
                     conn.publish_namespace(namespace(), vec![attached()]),
@@ -2654,8 +2770,8 @@ macro_rules! uni_control_plane_gates {
 
                 // The namespace requests differ across the range — draft-17's
                 // SUBSCRIBE_NAMESPACE carries a `subscribe_options` field that
-                // drafts 18 and 19 split out into SUBSCRIBE_TRACKS — so they
-                // are made by a per-draft function rather than here.
+                // drafts 18, 19 and 20 split out into SUBSCRIBE_TRACKS — so
+                // they are made by a per-draft function rather than here.
                 $namespace_requests(&mut conn, &mut held, &mut seen).await;
 
                 drop(held);
@@ -3045,9 +3161,16 @@ macro_rules! uni_control_plane_gates {
             ///
             /// Section 3.3: "Bidirectional streams MUST NOT begin with any
             /// other message type unless negotiated. If they do, the peer MUST
-            /// close the Session with a PROTOCOL_VIOLATION." The message the
-            /// peer sends is a SUBSCRIBE_OK — a response, which answers a
-            /// request stream rather than opening one.
+            /// close the Session with a PROTOCOL_VIOLATION." What the peer
+            /// sends is `$non_opener`: a SUBSCRIBE_OK on drafts 17, 18 and 19
+            /// — a response, which answers a request stream rather than
+            /// opening one — and on draft-20 a PUBLISH_STATE_NOTIFY, the
+            /// message that draft added. The notify is the harder case and the
+            /// reason draft-20 does not simply reuse the response: it is not a
+            /// response, it carries no Request ID and it answers nothing, so
+            /// the two properties a classifier usually leans on both point at
+            /// "this opens a stream". Section 10.10 says it does not — it
+            /// travels on a subscription's existing stream.
             ///
             /// The returned `Err` is checked too, but it is the weaker half.
             /// An implementation that reported the violation to its caller and
@@ -3075,7 +3198,7 @@ macro_rules! uni_control_plane_gates {
                     &commands,
                     &mut seen,
                     PEER_REQUEST_ID,
-                    subscribe_ok_bytes(),
+                    non_opener_bytes(),
                 )
                 .await;
 
@@ -3087,12 +3210,13 @@ macro_rules! uni_control_plane_gates {
                 match outcome {
                     Err(ConnectionError::NonRequestOnRequestStream(ty)) => assert_eq!(
                         ty.id(),
-                        SUBSCRIBE_OK_TYPE,
+                        $non_opener_type,
                         "{}: the refusal should name the type it refused",
                         $draft_label
                     ),
                     other => panic!(
-                        "{}: a stream opened with a response must be refused, got {}",
+                        "{}: a stream opened with a message that begins no request stream \
+                         must be refused, got {}",
                         $draft_label,
                         match other {
                             Ok((msg, _)) => format!("an accepted {msg:?}"),
@@ -3121,8 +3245,8 @@ macro_rules! uni_control_plane_gates {
             /// A request id with **this** endpoint's parity closes the session
             /// with INVALID_REQUEST_ID.
             ///
-            /// Section 9.1 on draft-17, Section 10.1 on drafts 18 and 19: "The
-            /// client generates even numbered Request IDs, starting at 0, and
+            /// Section 9.1 on draft-17, Section 10.1 on drafts 18, 19 and 20:
+            /// "The client generates even numbered Request IDs, starting at 0, and
             /// the server generates odd numbered Request IDs, starting at 1",
             /// and "If an endpoint receives a Request ID where the least
             /// significant bit is incorrect for the sender ... it MUST close
@@ -3201,8 +3325,8 @@ macro_rules! uni_control_plane_gates {
             ///
             /// The other half of the sentence
             /// [`a_peer_request_id_with_our_own_parity_closes_the_session`]
-            /// tests: Section 9.1 on draft-17, Section 10.1 on drafts 18 and 19,
-            /// "If an endpoint receives a Request ID where the least
+            /// tests: Section 9.1 on draft-17, Section 10.1 on drafts 18, 19
+            /// and 20, "If an endpoint receives a Request ID where the least
             /// significant bit is incorrect for the sender, or a duplicate
             /// Request ID, it MUST close the session with INVALID_REQUEST_ID."
             /// **The duplicate is the half this gate is about.**
@@ -3973,9 +4097,9 @@ macro_rules! uni_control_plane_gates {
             /// the peer never closed the session: Elapsed(())
             /// ```
             ///
-            /// The line numbers are the three macro invocation sites, which
-            /// move whenever this file is edited; the message above them is
-            /// what identifies the failure.
+            /// The line numbers are the macro invocation sites, which move
+            /// whenever this file is edited; the message above them is what
+            /// identifies the failure.
             ///
             /// Which is the whole point of this gate: with the peer no longer
             /// enforcing, a client that had put its requests back on the
@@ -4035,11 +4159,315 @@ macro_rules! uni_control_plane_gates {
     };
 }
 
+/// The FETCH rendering and the fetch half of the request sweep, for a draft
+/// that still has the Fetch Type field and the joining fetch.
+///
+/// Drafts 17, 18 and 19 spell `Fetch` identically — a Request ID, a Fetch
+/// Type, a two-variant `FetchPayload` and a parameter list — and give
+/// `Connection` the same three helpers over it, so this is one body stamped
+/// three times rather than three bodies that could drift apart. Draft-20 has
+/// none of those types and writes its own pair below, which is the whole
+/// reason the gate macro takes both as parameters.
+///
+/// Gated rather than left to be unused: a draft-20-only build has no draft
+/// left to stamp it for, and an unused macro is a warning `-D warnings` turns
+/// into a failure.
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+macro_rules! joining_fetch_hooks {
+    ($draft_mod:ident, $label:literal, $describe:ident, $requests:ident) => {
+        /// This draft's FETCH, rendered. See [`Describe`].
+        ///
+        /// The Fetch Type is a rendered field rather than part of the message
+        /// name, because a helper that sent the wrong one has written a
+        /// well-formed FETCH asking for something else — the cut recorded on
+        /// `every_request_helper_opens_its_own_stream`, which reddened nothing
+        /// until the peer decoded what it was sent.
+        fn $describe(m: &moqtap_codec::$draft_mod::message::Fetch) -> String {
+            use moqtap_codec::$draft_mod::message::FetchPayload;
+            match &m.fetch_payload {
+                FetchPayload::Standalone {
+                    track_namespace,
+                    track_name,
+                    start_group,
+                    start_object,
+                    end_group,
+                    end_object,
+                } => standalone_fetch_request(
+                    m.request_id.into_inner(),
+                    m.fetch_type as u64,
+                    track_namespace,
+                    track_name,
+                    (
+                        start_group.into_inner(),
+                        start_object.into_inner(),
+                        end_group.into_inner(),
+                        end_object.into_inner(),
+                    ),
+                    m.parameters.len(),
+                ),
+                FetchPayload::Joining { joining_request_id, joining_start } => {
+                    joining_fetch_request(
+                        m.request_id.into_inner(),
+                        m.fetch_type as u64,
+                        joining_request_id.into_inner(),
+                        joining_start.into_inner(),
+                        m.parameters.len(),
+                    )
+                }
+            }
+        }
+
+        /// The three fetch helpers this draft has, each of which has to open a
+        /// bidirectional stream of its own.
+        ///
+        /// `held[0]` is the SUBSCRIBE the sweep made immediately before this,
+        /// and its Request ID is what the two joining FETCHes join to. Read
+        /// off the handle rather than counted, so it stays right if the
+        /// endpoint changes how it allocates.
+        async fn $requests(
+            conn: &mut moqtap_client::$draft_mod::connection::Connection,
+            held: &mut Vec<moqtap_client::$draft_mod::connection::RequestStream>,
+            seen: &mut mpsc::UnboundedReceiver<PeerEvent>,
+        ) {
+            let subscription = held[0].request_id();
+
+            let stream = made(
+                $label,
+                "FETCH",
+                seen,
+                conn.fetch(
+                    namespace(),
+                    TRACK_ONE.to_vec(),
+                    VarInt::from_u64_moqt(0),
+                    VarInt::from_u64_moqt(0),
+                    VarInt::from_u64_moqt(1),
+                    VarInt::from_u64_moqt(1),
+                    vec![attached()],
+                ),
+            )
+            .await;
+            saw_request(
+                seen,
+                $label,
+                "FETCH",
+                &standalone_fetch_request(
+                    stream.request_id().into_inner(),
+                    STANDALONE_FETCH,
+                    &namespace(),
+                    TRACK_ONE,
+                    (0, 0, 1, 1),
+                    1,
+                ),
+            )
+            .await;
+            held.push(stream);
+
+            let stream = made(
+                $label,
+                "joining FETCH",
+                seen,
+                conn.joining_fetch(subscription, VarInt::from_u64_moqt(2), vec![attached()]),
+            )
+            .await;
+            saw_request(
+                seen,
+                $label,
+                "joining FETCH",
+                &joining_fetch_request(
+                    stream.request_id().into_inner(),
+                    RELATIVE_JOINING_FETCH,
+                    subscription.into_inner(),
+                    2,
+                    1,
+                ),
+            )
+            .await;
+            held.push(stream);
+
+            let stream = made(
+                $label,
+                "absolute joining FETCH",
+                seen,
+                conn.absolute_joining_fetch(
+                    subscription,
+                    VarInt::from_u64_moqt(9),
+                    vec![attached()],
+                ),
+            )
+            .await;
+            saw_request(
+                seen,
+                $label,
+                "absolute joining FETCH",
+                &joining_fetch_request(
+                    stream.request_id().into_inner(),
+                    ABSOLUTE_JOINING_FETCH,
+                    subscription.into_inner(),
+                    9,
+                    1,
+                ),
+            )
+            .await;
+            held.push(stream);
+        }
+    };
+}
+
+#[cfg(feature = "draft17")]
+joining_fetch_hooks!(draft17, "draft-17", draft17_describe_fetch, draft17_fetch_requests);
+#[cfg(feature = "draft18")]
+joining_fetch_hooks!(draft18, "draft-18", draft18_describe_fetch, draft18_fetch_requests);
+#[cfg(feature = "draft19")]
+joining_fetch_hooks!(draft19, "draft-19", draft19_describe_fetch, draft19_fetch_requests);
+
+/// Draft-20's FETCH, rendered. See [`Describe`].
+///
+/// There is no Fetch Type to render and no payload to switch on: Section 10.13
+/// made FETCH byte-identical to SUBSCRIBE apart from the type code. What is
+/// left is the four fields the message now carries, plus the range read back
+/// out of the parameter list by [`draft20_range_text`].
+///
+/// The range belongs in the rendering because it is still something the
+/// *caller* chose. Rendering only `parameters=N` would let a FETCH for the
+/// wrong range — or one whose end location carried draft-19's `+ 1` — pass the
+/// sweep with the right count.
+#[cfg(feature = "draft20")]
+fn draft20_describe_fetch(m: &moqtap_codec::draft20::message::Fetch) -> String {
+    draft20_fetch_request(
+        m.request_id.into_inner(),
+        &m.track_namespace,
+        &m.track_name,
+        &draft20_range_text(&m.parameters),
+        m.parameters.len(),
+    )
+}
+
+/// Draft-20's fetch helpers, and the fill that replaced the joining fetch.
+///
+/// Three requests, and each is a separate thing to get wrong:
+///
+/// * **`fetch` with no filter** — the unfiltered FETCH Section 10.13 defines
+///   as `{0,0}` through Largest Object. Its meaning is the *absence* of a
+///   parameter, so the rendering says `range=none` and a helper that invented
+///   a filter is caught.
+/// * **`fetch_range`** — the same message with the caller's range carried as
+///   `LOCATION_FILTER`. This is where decision D4 reaches the wire: the range
+///   ends at object 1 and the filter must say 1. A draft-19 encoder ported
+///   forward would write 2 there, and with the range in the rendering that is
+///   a failure rather than a fetch of one object too many.
+/// * **a SUBSCRIBE carrying `FILL_PARAMETERS`** — what draft-20 turned the
+///   joining fetch into. Sections 5.1.3 and 10.2.15: the parameter's presence
+///   asks the publisher to open a fill fetch stream carrying the Objects
+///   behind the live edge, which is the job `joining_fetch` did on drafts 17,
+///   18 and 19. The request half of that is a request stream and so is swept
+///   here. The stream that answers it is a data stream, and its bytes — the
+///   nested block, its count prefix and its restarted delta chain — are gated
+///   in `draft20_fill_and_state_notify.rs`; what this asserts is only what
+///   this file is about, that the request went out alone at the front of a
+///   bidirectional stream of its own still carrying both parameters.
+///
+/// # What it catches, observed by making the change and running it
+///
+/// The ported `+ 1` — building the ranged FETCH's filter with `range_to(0, 0,
+/// 1, 2)`, which is what a draft-19 encoder carried forward writes for a range
+/// whose last object is 1. The message is well formed, the type is right, the
+/// parameter count is right, and the FETCH asks for one object too many:
+///
+/// ```text
+/// assertion `left == right` failed: draft-20: the ranged FETCH must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
+///   left: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=0,0,1,2 parameters=2"))
+///  right: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=0,0,1,1 parameters=2"))
+/// ```
+///
+/// A rendering that stopped at `parameters=2` would print the same on both
+/// sides, which is why the filter is decoded into it.
+#[cfg(feature = "draft20")]
+async fn draft20_fetch_requests(
+    conn: &mut moqtap_client::draft20::connection::Connection,
+    held: &mut Vec<moqtap_client::draft20::connection::RequestStream>,
+    seen: &mut mpsc::UnboundedReceiver<PeerEvent>,
+) {
+    use moqtap_client::draft20::fill::{FillParameters, LocationFilter};
+
+    let stream = made(
+        "draft-20",
+        "FETCH",
+        seen,
+        conn.fetch(namespace(), TRACK_ONE.to_vec(), vec![attached()]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-20",
+        "FETCH",
+        &draft20_fetch_request(
+            stream.request_id().into_inner(),
+            &namespace(),
+            TRACK_ONE,
+            "none",
+            1,
+        ),
+    )
+    .await;
+    held.push(stream);
+
+    // Group 0 object 0 through group 0 + 1 object 1, inclusive at both ends.
+    let range = LocationFilter::range_to(0, 0, 1, 1).expect("the end group is in range");
+    let stream = made(
+        "draft-20",
+        "ranged FETCH",
+        seen,
+        conn.fetch_range(namespace(), TRACK_ONE.to_vec(), &range, vec![attached()]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-20",
+        "ranged FETCH",
+        &draft20_fetch_request(
+            stream.request_id().into_inner(),
+            &namespace(),
+            TRACK_ONE,
+            "0,0,1,1",
+            2,
+        ),
+    )
+    .await;
+    held.push(stream);
+
+    // A fill relative to the live edge, which is the shape the joining FETCH
+    // of drafts 17, 18 and 19 had. Section 5.1.2 resolves a one-field filter
+    // to `{Largest Object.Group + 1 - StartGroup, 0}`, so 2 starts one group
+    // before the current one. The number is not draft-19's Joining Start and
+    // is not meant to be: the two drafts count from different places, which is
+    // half of why one message could not become the other.
+    let fill = FillParameters::inherited()
+        .with_range(&LocationFilter::relative(2))
+        .expect("a LOCATION_FILTER may be nested inside FILL_PARAMETERS")
+        .parameter()
+        .expect("the fill block encodes");
+    let stream = made(
+        "draft-20",
+        "SUBSCRIBE asking for a fill",
+        seen,
+        conn.subscribe(namespace(), TRACK_TWO.to_vec(), vec![attached(), fill]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-20",
+        "SUBSCRIBE asking for a fill",
+        &subscribe_request(stream.request_id().into_inner(), &namespace(), TRACK_TWO, 2),
+    )
+    .await;
+    held.push(stream);
+}
+
 /// Draft-17's namespace requests: a SUBSCRIBE_NAMESPACE that still carries
 /// the `subscribe_options` field. Draft-17 has no SUBSCRIBE_TRACKS.
 ///
 /// Written out per draft rather than inside the gate macro because the
-/// signature moved between drafts and there is no shape the three share.
+/// signature moved between drafts and there is no shape the four share.
 #[cfg(feature = "draft17")]
 async fn draft17_namespace_requests(
     conn: &mut moqtap_client::draft17::connection::Connection,
@@ -4062,7 +4490,7 @@ async fn draft17_namespace_requests(
 
 /// Draft-17's namespace request, rendered. See [`Describe`].
 ///
-/// The one request type this draft does not spell the way drafts 18 and 19
+/// The one request type this draft does not spell the way drafts 18, 19 and 20
 /// do, and the reason the rendering is not written once inside the gate
 /// macro: SUBSCRIBE_NAMESPACE is 0x11 here rather than 0x50, and carries a
 /// `subscribe_options` field the split at draft-18 took away.
@@ -4195,6 +4623,68 @@ fn draft19_describe_namespace(msg: &moqtap_codec::draft19::message::ControlMessa
     }
 }
 
+/// Draft-20's namespace requests. The split draft-18 made is untouched by
+/// draft-20 — same two messages, same numbers — and is checked rather than
+/// assumed to be.
+#[cfg(feature = "draft20")]
+async fn draft20_namespace_requests(
+    conn: &mut moqtap_client::draft20::connection::Connection,
+    held: &mut Vec<moqtap_client::draft20::connection::RequestStream>,
+    seen: &mut mpsc::UnboundedReceiver<PeerEvent>,
+) {
+    let stream = made(
+        "draft-20",
+        "SUBSCRIBE_NAMESPACE",
+        seen,
+        conn.subscribe_namespace(namespace(), vec![attached()]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-20",
+        "SUBSCRIBE_NAMESPACE",
+        &subscribe_namespace_request(stream.request_id().into_inner(), &namespace(), 1),
+    )
+    .await;
+    held.push(stream);
+
+    let stream = made(
+        "draft-20",
+        "SUBSCRIBE_TRACKS",
+        seen,
+        conn.subscribe_tracks(namespace(), vec![attached()]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-20",
+        "SUBSCRIBE_TRACKS",
+        &subscribe_tracks_request(stream.request_id().into_inner(), &namespace(), 1),
+    )
+    .await;
+    held.push(stream);
+}
+
+/// Draft-20's namespace requests, rendered. Same two as draft-18's and the
+/// same numbers. See [`draft18_describe_namespace`].
+#[cfg(feature = "draft20")]
+fn draft20_describe_namespace(msg: &moqtap_codec::draft20::message::ControlMessage) -> String {
+    use moqtap_codec::draft20::message::ControlMessage;
+    match msg {
+        ControlMessage::SubscribeNamespace(m) => subscribe_namespace_request(
+            m.request_id.into_inner(),
+            &m.namespace_prefix,
+            m.parameters.len(),
+        ),
+        ControlMessage::SubscribeTracks(m) => subscribe_tracks_request(
+            m.request_id.into_inner(),
+            &m.namespace_prefix,
+            m.parameters.len(),
+        ),
+        other => render(&format!("{:?}", other.message_type()), other.message_type().id(), &[]),
+    }
+}
+
 /// The numbers the renderings carry are the ones this draft assigns.
 ///
 /// Every other field in a rendering is a claim about one side checked against
@@ -4307,6 +4797,52 @@ fn the_numbers_the_renderings_carry_are_draft19s() {
     );
 }
 
+/// See [`the_numbers_the_renderings_carry_are_draft17s`]. Draft-20 keeps every
+/// number drafts 18 and 19 assign — FETCH included, which is the trap — and
+/// adds one.
+///
+/// The three `FetchType` assertions its siblings carry are absent, because
+/// there is no such type on this draft to assert about. Section 10.13 deleted
+/// the field and its registry while leaving FETCH on 0x16, which is why the
+/// FETCH assertion above is the one worth reading: the codepoint is the same
+/// and the body behind it is not, so a draft-19 decoder reads a draft-20 FETCH
+/// as a well-formed request for something else and nothing on the wire says
+/// otherwise.
+///
+/// PUBLISH_STATE_NOTIFY is checked against the number the refusal gate refuses,
+/// and against the request-type list it must **not** be in: Section 10.10 puts
+/// it on a subscription's existing stream, and Section 3.3 still names seven
+/// request types.
+#[cfg(feature = "draft20")]
+#[test]
+fn the_numbers_the_renderings_carry_are_draft20s() {
+    use moqtap_codec::draft20::message::MessageType;
+    assert_eq!(MessageType::Subscribe.id(), SUBSCRIBE_TYPE, "SUBSCRIBE");
+    assert_eq!(MessageType::TrackStatus.id(), TRACK_STATUS_TYPE, "TRACK_STATUS");
+    assert_eq!(MessageType::Fetch.id(), FETCH_TYPE, "FETCH");
+    assert_eq!(MessageType::SubscribeOk.id(), SUBSCRIBE_OK_TYPE, "SUBSCRIBE_OK");
+    assert_eq!(MessageType::Publish.id(), PUBLISH_TYPE, "PUBLISH");
+    assert_eq!(MessageType::PublishNamespace.id(), PUBLISH_NAMESPACE_TYPE, "PUBLISH_NAMESPACE");
+    assert_eq!(
+        MessageType::SubscribeNamespace.id(),
+        SUBSCRIBE_NAMESPACE_TYPE,
+        "SUBSCRIBE_NAMESPACE"
+    );
+    assert_eq!(MessageType::SubscribeTracks.id(), SUBSCRIBE_TRACKS_TYPE, "SUBSCRIBE_TRACKS");
+    assert_eq!(MessageType::Setup.id(), SETUP_STREAM_TYPE, "SETUP");
+    assert_eq!(
+        MessageType::PublishStateNotify.id(),
+        PUBLISH_STATE_NOTIFY_TYPE,
+        "PUBLISH_STATE_NOTIFY, which draft-20 added"
+    );
+    assert!(
+        !DRAFT18_REQUEST_TYPES.contains(&PUBLISH_STATE_NOTIFY_TYPE),
+        "Section 3.3 names seven request types and PUBLISH_STATE_NOTIFY is not one of them; \
+         a peer that allowed it on a bidirectional stream would make the refusal gate \
+         assert nothing"
+    );
+}
+
 #[cfg(feature = "draft17")]
 uni_control_plane_gates!(
     draft17,
@@ -4343,13 +4879,23 @@ uni_control_plane_gates!(
             track_properties: Vec::new(),
         }
     ),
-    // Draft-17 answers a PUBLISH with PUBLISH_OK (0x1E). Drafts 18 and 19
+    // Draft-17 answers a PUBLISH with PUBLISH_OK (0x1E). Drafts 18, 19 and 20
     // collapsed it into REQUEST_OK, so the method and the body both differ
     // and neither can be written once and copied.
     respond_publish_ok,
     moqtap_codec::draft17::message::PublishOk { parameters: Vec::new() },
     draft17_namespace_requests,
-    draft17_describe_namespace
+    draft17_describe_namespace,
+    draft17_describe_fetch,
+    draft17_fetch_requests,
+    moqtap_codec::draft17::message::ControlMessage::SubscribeOk(
+        moqtap_codec::draft17::message::SubscribeOk {
+            track_alias: VarInt::from_u64_moqt(NO_MARK),
+            parameters: Vec::new(),
+            track_properties: Vec::new(),
+        }
+    ),
+    SUBSCRIBE_OK_TYPE
 );
 #[cfg(feature = "draft18")]
 uni_control_plane_gates!(
@@ -4390,7 +4936,17 @@ uni_control_plane_gates!(
         track_properties: Vec::new(),
     },
     draft18_namespace_requests,
-    draft18_describe_namespace
+    draft18_describe_namespace,
+    draft18_describe_fetch,
+    draft18_fetch_requests,
+    moqtap_codec::draft18::message::ControlMessage::SubscribeOk(
+        moqtap_codec::draft18::message::SubscribeOk {
+            track_alias: VarInt::from_u64_moqt(NO_MARK),
+            parameters: Vec::new(),
+            track_properties: Vec::new(),
+        }
+    ),
+    SUBSCRIBE_OK_TYPE
 );
 #[cfg(feature = "draft19")]
 uni_control_plane_gates!(
@@ -4431,5 +4987,77 @@ uni_control_plane_gates!(
         track_properties: Vec::new(),
     },
     draft19_namespace_requests,
-    draft19_describe_namespace
+    draft19_describe_namespace,
+    draft19_describe_fetch,
+    draft19_fetch_requests,
+    moqtap_codec::draft19::message::ControlMessage::SubscribeOk(
+        moqtap_codec::draft19::message::SubscribeOk {
+            track_alias: VarInt::from_u64_moqt(NO_MARK),
+            parameters: Vec::new(),
+            track_properties: Vec::new(),
+        }
+    ),
+    SUBSCRIBE_OK_TYPE
+);
+// Draft-20's row. Everything above it is draft-19's, unchanged, and that is
+// the finding: draft-20 kept the whole uni-control-plane topology and rebuilt
+// only FETCH, so the four parameters that differ are the two fetch hooks and
+// the pair naming a message that opens no request stream.
+#[cfg(feature = "draft20")]
+uni_control_plane_gates!(
+    draft20,
+    Draft20,
+    DraftVersion::Draft20,
+    DRAFT18_REQUEST_TYPES,
+    "draft-20",
+    moqtap_codec::draft20::message::ControlMessage::TrackStatus(
+        moqtap_codec::draft20::message::TrackStatus {
+            request_id: VarInt::from_u64_moqt(0),
+            track_namespace: namespace(),
+            track_name: b"stray".to_vec(),
+            parameters: Vec::new(),
+        }
+    ),
+    |request_id| moqtap_codec::draft20::message::ControlMessage::Subscribe(
+        moqtap_codec::draft20::message::Subscribe {
+            request_id,
+            track_namespace: namespace(),
+            track_name: PEER_TRACK.to_vec(),
+            parameters: Vec::new(),
+        }
+    ),
+    |request_id| moqtap_codec::draft20::message::ControlMessage::Publish(
+        moqtap_codec::draft20::message::Publish {
+            request_id,
+            track_namespace: namespace(),
+            track_name: PEER_TRACK.to_vec(),
+            track_alias: VarInt::from_u64_moqt(EARLY_TRACK_ALIAS),
+            parameters: Vec::new(),
+            track_properties: Vec::new(),
+        }
+    ),
+    respond_ok,
+    moqtap_codec::draft20::message::RequestOk {
+        parameters: Vec::new(),
+        track_properties: Vec::new(),
+    },
+    draft20_namespace_requests,
+    draft20_describe_namespace,
+    draft20_describe_fetch,
+    draft20_fetch_requests,
+    // The one message here that is not draft-19's. A `LARGEST_OBJECT` rides on
+    // it because Section 10.10 says a publisher MUST send one when it knows the
+    // value, so what the refusal gate refuses is a notify a publisher would
+    // really write. Its value is a Location, which Section 10.2.17 encodes as
+    // two bare varints with no length in front of them; both of these fit one
+    // byte.
+    moqtap_codec::draft20::message::ControlMessage::PublishStateNotify(
+        moqtap_codec::draft20::message::PublishStateNotify {
+            parameters: vec![KeyValuePair {
+                key: VarInt::from_u64_moqt(LARGEST_OBJECT),
+                value: KvpValue::Bytes(vec![EARLY_GROUP_ID as u8, 0]),
+            }],
+        }
+    ),
+    PUBLISH_STATE_NOTIFY_TYPE
 );

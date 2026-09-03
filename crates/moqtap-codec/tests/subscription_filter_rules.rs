@@ -46,6 +46,17 @@
 //! _answers_it` is what fails when a range check is added on the strength of the
 //! word MUST alone.
 
+//! # Where the range stops
+//!
+//! Draft-20 is deliberately absent, and not because its filter went untested.
+//! Section 5.1.2 rebuilt the LOCATION_FILTER value: the Filter Type enum this
+//! whole file is about — `0x1` Next Group Start, `0x2` Largest Object, `0x3`
+//! AbsoluteStart, `0x4` AbsoluteRange — no longer exists, and the shape comes
+//! from how many `vi64` fields the value holds instead. There is no filter type
+//! to send an unassigned value for, so every gate below has nothing to take
+//! hold of on that draft. `moqtap_codec::draft20::message::decode_location_filter`
+//! reads the new shape, and `vectors_draft20.rs` drives the corpus's positive
+//! and negative vectors for it.
 #![cfg(all(
     feature = "draft08",
     feature = "draft09",

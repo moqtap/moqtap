@@ -1,5 +1,5 @@
-#![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19"))]
-//! Rules drafts 17, 18 and 19 state and this codec was not holding itself to.
+#![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
+//! Rules drafts 17 through 20 state and this codec was not holding itself to.
 //!
 //! Four rules, each pinned by what a caller can observe rather than by reading
 //! a field back:
@@ -31,6 +31,9 @@ use moqtap_codec::draft18::types::ObjectStatus as Status18;
 use moqtap_codec::draft19::data_stream as d19;
 use moqtap_codec::draft19::message as m19;
 use moqtap_codec::draft19::types::ObjectStatus as Status19;
+use moqtap_codec::draft20::data_stream as d20;
+use moqtap_codec::draft20::message as m20;
+use moqtap_codec::draft20::types::ObjectStatus as Status20;
 
 fn vi(v: u64) -> VarInt {
     VarInt::from_u64_moqt(v)
@@ -139,6 +142,40 @@ fn the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one() 
     );
     assert!(buf.is_empty(), "a refused draft-19 datagram left {buf:02x?} behind");
 
+    let mut buf = Vec::new();
+    let d20_header = d20::DatagramHeader {
+        datagram_type: DATAGRAM_PROPERTIES_ONLY,
+        track_alias: vi(1),
+        group_id: vi(0),
+        object_id: vi(3),
+        publisher_priority: Some(0x80),
+        properties: Vec::new(),
+        object_status: None,
+    };
+    assert!(
+        d20_header.encode_checked(&mut buf).is_err(),
+        "draft-20 wrote a datagram with the PROPERTIES bit and an empty block"
+    );
+    assert!(buf.is_empty(), "a refused draft-20 datagram left {buf:02x?} behind");
+
+    // Draft-20 goes further than its predecessors and refuses the same
+    // datagram on the way *in*, at the whole-datagram read. `decode` still
+    // reports rather than refuses on all four, which is what keeps a captured
+    // violation readable; `decode_object` is where an endpoint accepting an
+    // Object draws the line.
+    let mut wire = Vec::new();
+    d20::DatagramHeader { properties: vec![0x3c, 0x02], ..d20_header.clone() }
+        .encode_checked(&mut wire)
+        .expect("a datagram with real properties is writable");
+    // Rewrite the block's length to zero, which is the frame the rule names.
+    let empty_block: Vec<u8> = vec![DATAGRAM_PROPERTIES_ONLY, 0x01, 0x00, 0x03, 0x80, 0x00];
+    d20::DatagramHeader::decode(&mut &empty_block[..])
+        .expect("the header alone is well framed, which is why decode reports rather than refuses");
+    assert!(
+        d20::DatagramHeader::decode_object(&mut &empty_block[..]).is_err(),
+        "draft-20's whole-datagram read must refuse a PROPERTIES bit over an empty block"
+    );
+
     // The same datagram with a block in it is written, and parses back with the
     // block intact — the rule is about the empty block, not about properties.
     let mut buf = Vec::new();
@@ -199,6 +236,32 @@ fn the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one() 
         .expect("and reads it back");
     assert!(object.extension_headers.is_empty(), "the zero-length block gained bytes");
     assert_eq!(object.payload, vec![0xde, 0xad, 0xbe, 0xef], "the object lost its payload");
+
+    // Draft-20 keeps the subgroup half of the rule exactly as draft-19 has it:
+    // the datagram's opposite requirement is what makes this worth restating
+    // per draft rather than deriving one carrier's answer from the other's.
+    let d20_stream =
+        d20::SubgroupHeader::decode(&mut &[SUBGROUP_WITH_PROPERTIES, 0x01, 0x00, 0x80][..])
+            .expect("a draft-20 PROPERTIES subgroup header");
+    let mut out = Vec::new();
+    d20::SubgroupObjectReader::new(&d20_stream)
+        .write_object(
+            &d20::SubgroupObject {
+                object_id: vi(0),
+                extension_headers: Vec::new(),
+                payload_length: vi(4),
+                object_status: None,
+                payload: vec![0xde, 0xad, 0xbe, 0xef],
+            },
+            &mut out,
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "draft-20 refused a zero-length properties block on a subgroup stream, \
+                 which Section 11.4.2 requires of an object with no properties: {e:?}"
+            )
+        });
+    assert_eq!(out, vec![0x00, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef], "unexpected subgroup bytes");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -291,6 +354,46 @@ fn properties_are_not_written_beside_a_status_other_than_normal() {
     assert!(forbidden.is_err(), "draft-19 wrote properties beside End of Group");
     assert!(buf.is_empty(), "a refused draft-19 datagram left {buf:02x?} behind");
 
+    // ── draft-20 ──
+    let mut buf = Vec::new();
+    let forbidden = d20::DatagramHeader {
+        datagram_type: DATAGRAM_PROPERTIES_AND_STATUS,
+        track_alias: vi(1),
+        group_id: vi(0),
+        object_id: vi(0),
+        publisher_priority: Some(0x80),
+        properties: properties.clone(),
+        object_status: Some(Status20::EndOfGroup),
+    }
+    .encode_checked(&mut buf);
+    assert!(forbidden.is_err(), "draft-20 wrote properties beside End of Group");
+    assert!(buf.is_empty(), "a refused draft-20 datagram left {buf:02x?} behind");
+
+    // And on draft-20 the same shape is refused on the way in as well, at the
+    // whole-datagram read: Section 11.3.1 states the rule of an endpoint that
+    // *receives* one, and `decode_object` is where an endpoint accepts an
+    // Object. `decode` still hands the header back on every draft.
+    let mut wire = Vec::new();
+    d20::DatagramHeader {
+        datagram_type: DATAGRAM_PROPERTIES_AND_STATUS,
+        track_alias: vi(1),
+        group_id: vi(0),
+        object_id: vi(0),
+        publisher_priority: Some(0x80),
+        properties: properties.clone(),
+        object_status: Some(Status20::Normal),
+    }
+    .encode_checked(&mut wire)
+    .expect("Normal is the status the rule exempts");
+    // Flip the trailing status byte from Normal (0x0) to End of Group (0x3).
+    *wire.last_mut().expect("a status byte") = 0x03;
+    d20::DatagramHeader::decode(&mut &wire[..])
+        .expect("the header is well framed, which is why decode reports rather than refuses");
+    assert!(
+        d20::DatagramHeader::decode_object(&mut &wire[..]).is_err(),
+        "draft-20's whole-datagram read must refuse properties beside a non-Normal status"
+    );
+
     // Normal is the status the rule exempts, and its datagram still goes out.
     let mut buf = Vec::new();
     d19::DatagramHeader {
@@ -352,6 +455,14 @@ fn namespace_17() -> moqtap_codec::types::TrackNamespace {
 /// carry a joining pair. The encoder writes the body and the decoder believes
 /// the type, so such a message encodes to a joining request id and a joining
 /// start where a Track Namespace and a Track Name belong.
+///
+/// **Drafts 17, 18 and 19 only, and draft-20 is why that is worth saying.**
+/// Draft-20 Section 10.13 deleted the Fetch Type field, the Standalone Fetch
+/// and Joining Fetch structures and the whole joining mechanism, so its FETCH
+/// has one shape and nothing to disagree with itself about. Its
+/// `check_discriminators` is down to the REQUEST_ERROR arm, which
+/// [`a_request_error_redirect_must_match_its_error_code`] drives. A draft-20
+/// row here would have nothing to construct.
 ///
 /// # What this catches, observed by making each change and running it
 ///
@@ -468,8 +579,12 @@ fn a_fetch_type_that_disagrees_with_its_body_is_refused() {
 /// body under any other code the bytes are written and then never read, and the
 /// sender believes it redirected a peer that never saw a redirect.
 ///
-/// New in draft-18 and carried into draft-19; draft-17's REQUEST_ERROR has no
-/// Redirect field at all, which is why it is absent here.
+/// New in draft-18 and carried into drafts 19 and 20; draft-17's REQUEST_ERROR
+/// has no Redirect field at all, which is why it is absent here.
+///
+/// On draft-20 this is the *only* discriminator left in a control message —
+/// Section 10.13 deleted FETCH's Fetch Type — so the arm this drives is the
+/// whole of that draft's `check_discriminators`.
 ///
 /// # What this catches, observed by making each change and running it
 ///
@@ -535,6 +650,65 @@ fn a_request_error_redirect_must_match_its_error_code() {
         m19::ControlMessage::decode(&mut &buf[..])
     );
     assert!(buf.is_empty(), "a refused draft-19 REQUEST_ERROR left {buf:02x?} behind");
+
+    // draft-20: both directions, because this is the one discriminator the
+    // draft still has and nothing else here exercises it.
+    let mut buf = Vec::new();
+    let missing = m20::ControlMessage::RequestError(m20::RequestError {
+        error_code: vi(REDIRECT),
+        retry_interval: vi(0),
+        reason_phrase: Vec::new(),
+        redirect: None,
+    });
+    assert!(
+        missing.encode(&mut buf).is_err(),
+        "draft-20 encoded a REDIRECT error with no Redirect body; it decodes as {:?}",
+        m20::ControlMessage::decode(&mut &buf[..])
+    );
+    assert!(buf.is_empty(), "a refused draft-20 REQUEST_ERROR left {buf:02x?} behind");
+
+    let mut buf = Vec::new();
+    let stowaway = m20::ControlMessage::RequestError(m20::RequestError {
+        error_code: vi(0x1),
+        retry_interval: vi(0),
+        reason_phrase: Vec::new(),
+        redirect: Some(m20::Redirect {
+            connect_uri: b"https://example".to_vec(),
+            track_namespace: namespace_17(),
+            track_name: b"t".to_vec(),
+        }),
+    });
+    assert!(
+        stowaway.encode(&mut buf).is_err(),
+        "draft-20 encoded a Redirect body under error code 0x1; it decodes as {:?}",
+        m20::ControlMessage::decode(&mut &buf[..])
+    );
+    assert!(buf.is_empty(), "a refused draft-20 REQUEST_ERROR left {buf:02x?} behind");
+
+    // Draft-20 also changed what an empty Redirect target means, without
+    // changing a byte: draft-19 read an empty Track Namespace and Track Name
+    // as "reuse the original request's", and draft-20 deleted that sentence so
+    // the pair is the literal target. Nothing in a codec can act on the
+    // difference — the frame is identical — so this only records that the
+    // empty pair still encodes and reads back as itself.
+    let mut buf = Vec::new();
+    let empty_target = m20::ControlMessage::RequestError(m20::RequestError {
+        error_code: vi(REDIRECT),
+        retry_interval: vi(0),
+        reason_phrase: Vec::new(),
+        redirect: Some(m20::Redirect {
+            connect_uri: b"https://example".to_vec(),
+            track_namespace: moqtap_codec::types::TrackNamespace(Vec::new()),
+            track_name: Vec::new(),
+        }),
+    });
+    empty_target
+        .encode(&mut buf)
+        .expect("an empty Redirect target is a literal target, not a malformation");
+    assert_eq!(
+        m20::ControlMessage::decode(&mut &buf[..]).expect("and it parses back"),
+        empty_target
+    );
 
     // The matching pair still round-trips, in both spellings.
     for message in [
@@ -656,6 +830,19 @@ fn a_status_datagram_never_yields_a_payload() {
                 Err(CodecError::PayloadNotPermitted { .. })
             ),
             "draft-19 accepted trailing bytes on a status {status:#04x} datagram"
+        );
+
+        let header = d20::DatagramHeader::decode(&mut &whole[..]).expect("the header parses");
+        assert!(
+            !header.permits_payload(),
+            "draft-20 permitted a payload on a status datagram carrying status {status:#04x}"
+        );
+        assert!(
+            matches!(
+                d20::DatagramHeader::decode_object(&mut &whole[..]),
+                Err(CodecError::PayloadNotPermitted { .. })
+            ),
+            "draft-20 accepted trailing bytes on a status {status:#04x} datagram"
         );
     }
 

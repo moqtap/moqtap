@@ -5,6 +5,191 @@ All notable changes to moqtap-codec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-03
+
+Draft-20 support. One new draft module, and a breaking change to two public
+enums that adding it forces: `DraftVersion` and `AnyFetchEndOfRange` are not
+`#[non_exhaustive]`, so a downstream `match` that enumerates their variants
+stops compiling. That is the whole of the break — no existing draft's bytes,
+errors or API changed.
+
+Draft-20 is the newest draft this crate implements and is not a default
+anywhere. It is not the interop target: interop ran against draft-18 and the
+editors plan draft-22 next, so nothing here promotes draft-20 to a connection
+default, an advertised-preferred version or an auto-selected draft.
+
+### Added
+
+- **`draft20`**, a feature and a module, with the same five files every other
+  draft has. Included in `all-drafts`.
+- **FETCH (`0x16`) is a different message**, not a variation on draft-19's.
+  Section 10.13 deleted the `Fetch Type` field, the Standalone Fetch and Joining
+  Fetch structures, the Fetch Type registry and the whole joining mechanism;
+  Track Namespace and Track Name are inline fields of FETCH, and the range
+  travels in the `LOCATION_FILTER` parameter. The codepoint did not change, so a
+  draft-19 decoder reads the Number of Track Namespace Fields count as a Fetch
+  Type and mis-parses in silence — there is no in-band version signal that
+  catches it.
+- **`PUBLISH_STATE_NOTIFY` (`0x22`)**, new in Section 10.10. A publisher-only,
+  unilateral report that a subscription's state changed, with **no Request ID
+  field**: the message is identified by the bidirectional request stream it
+  arrives on.
+- **`FILL_PARAMETERS` (`0x23`)**, a length-prefixed parameter whose value is a
+  nested parameter block in its own scope, read by
+  `draft20::message::decode_fill_parameters`. Its presence on a SUBSCRIBE or a
+  REQUEST_UPDATE is what asks the publisher to open a fill fetch stream.
+- **`INCLUDE_PROPERTIES` (`0x35`)**, a uint8 restricted to 0 and 1, default 1.
+- **`FetchEndOfRange::TimedOut`** and `AnyFetchEndOfRange::TimedOut`, for
+  Table 7's new `0x20C` End of Timed-Out Range marker. Draft-19 reported the
+  same Objects as an Unknown range, so the two are not interchangeable across a
+  draft boundary.
+- **`DraftVersion::Draft20`**, ALPN `moqt-20`, and draft-18's variable-length
+  integer encoding unchanged.
+- `tools/registries/draft-20.json`, and `tools/extract-registries.py` extended
+  to draft-20. `--check` over all fourteen drafts confirms 07-19 are unmoved.
+
+### Changed
+
+- **Ranges are inclusive at both ends, on subscriptions and on fetches**
+  (Sections 5.1.2, 10.13, 10.14). Draft-19's fetch end was "the last Object,
+  plus 1; or 0 to indicate the entire Group"; both conventions are deleted. This
+  is absent from draft-20's own change log, the bytes are identical between the
+  two drafts, and nothing on the wire distinguishes them — a draft-19 encoder
+  ported forward with its arithmetic intact fetches one object too many, and one
+  whose end lands on object 0 fetches a single object where it used to fetch a
+  group. `FetchOk::end_object` carries the note.
+- **`LOCATION_FILTER` (`0x21`) has a new value shape.** The Filter Type enum —
+  draft-19's `0x1` Next Group Start, `0x2` Largest Object, `0x3` AbsoluteStart,
+  `0x4` AbsoluteRange — is gone, and the filter's shape comes from how many
+  `vi64` fields its value holds. `subscription_filter` reads drafts 15-19 and is
+  not used by draft-20, which has `draft20::message::decode_location_filter`.
+- **Parameter applicability moved off `PUBLISH_OK`.** Six definitions dropped it
+  and several gained `PUBLISH`; `EXPIRES` (`0x08`) is the only one that still
+  names it. A subscriber changes a subscription with a REQUEST_UPDATE after the
+  PUBLISH_OK now.
+- **A non-minimally encoded `Type Flags` is accepted on receive** and never
+  emitted, on both the subgroup header and the datagram. Draft-19 refused every
+  wide spelling. Section 11.4.2 words its third condition as "values of 128 or
+  greater (i.e., any value that requires more than a one-byte variable-length
+  integer encoding)", two clauses that come apart under Section 1.4.1's
+  allowance for non-minimal encodings; this codec reads it as a bound on the
+  value.
+- **Every invalid `Type Flags` value inside the one-byte space is now
+  `InvalidTypeValue` rather than an unknown stream or datagram type.** The set of
+  accepted values did not move — computing Section 11.4.2's three conditions and
+  Section 11.3.1's three gives back draft-19's enumerations byte for byte — but
+  the draft now names each refusal, so only a value too wide to be a flags field
+  falls back on Section 3.4's unknown-type rule.
+- **`DatagramHeader::decode_object` refuses the two Properties shapes Section
+  11.3.1 forbids**: the PROPERTIES bit over a zero-length block, and Properties
+  beside a status that is not Normal. `decode` still reports rather than refuses,
+  so a captured violation stays readable.
+- **End of Range markers resolve against the frame before them.** Section
+  11.4.4.2 says only that "the Group ID and Object ID fields are present" and
+  settles neither reading; draft-19 read them as absolute and draft-20 applies
+  Section 11.4.4.1's ordinary arithmetic, because a marker's flags are literally
+  the ordinary flags.
+- `PUBLISH_DONE.Stream Count`'s "unknown" sentinel moves from `2^62 - 1` to
+  `2^64 - 1`, and the count now includes fill fetch streams.
+  `publish_done_codes::STREAM_COUNT_UNKNOWN` names it, and notes that the
+  sentinel is no longer distinguishable from a well-formed exact count.
+- `DraftVersion::version_varint`'s doc comment now says plainly that from
+  draft-15 on there is **no** `0xff0000NN` value on the wire at all: draft-15
+  deleted the version field from CLIENT_SETUP and moved selection into the ALPN.
+  The mapping is kept for continuity and `0xff000014` is not observable.
+- Crate description and README: draft-07 through draft-20.
+
+### Removed
+
+Three code points, each a hole rather than a renumbering, and two whole
+enumerations. Nothing else in any registry moved.
+
+- `SessionErrorCode::VersionNegotiationFailed` (`0x15`).
+- `RequestErrorCode::InvalidJoiningRequestId` (`0x32`), with the Joining Fetch.
+- `PublishDoneStatusCode::SubscriptionEnded` (`0x3`), with the behaviour behind
+  it: Section 5.1.2 now says "A publisher does not end a subscription solely
+  because the Largest Object advances past the end of the current Location
+  Filter."
+- The Fetch Type registry (`0x1` Standalone / `0x2` Relative Joining / `0x3`
+  Absolute Joining) and the Location Filter Type enum. Neither was an IANA
+  registry; both were wire enums, and both are gone.
+
+A frame carrying one of the three removed codes still **decodes**. Section 14 is
+explicit: "Receipt of an unknown error code in any error context … MUST be
+treated as equivalent to INTERNAL_ERROR for that context. An endpoint MUST NOT
+close the session because it received an unknown error code in a REQUEST_ERROR
+or PUBLISH_DONE." `from_u64` answers `None`, which is the whole of what a codec
+owes the rule; refusing the frame would take the INTERNAL_ERROR reading away
+from the caller. Two committed draft-20 vectors ask for a refusal on that
+ground and are recorded as wrong in `tests/vectors_draft20.rs`.
+
+### Fixed
+
+Four peer-reachable panics in field extraction, all of one shape: a
+`draftNN/message.rs` decoder gates a parameter's **type** — known, not a
+duplicate, in scope for this message — and does not gate the parameter
+**value's shape**, and the matching `draftNN/fields.rs` then parses that value
+structurally with `unwrap`.
+
+**No published version is affected.** Not because the paths were unreachable
+there, but because they do not exist there: `codec-v0.4.1` has no `fields.rs`
+in any draft module and no `fields` module at all. Field extraction is new in
+0.5.0, and these went in with it. The local CLI builds from this tree, so they
+were live for anyone running it.
+
+- **Range Filters (`0x25`-`0x29`) on drafts 19 and 20 are read by
+  `range_filter::RangeFilter::decode_moqt`,** which is what the module was
+  written for, rather than by a second copy of the same parse inside
+  `fields.rs`. The copy read three varints with `unwrap` where
+  `Buf::has_remaining` promises one byte and a MoQT varint may need nine, and
+  resolved both delta baselines with a bare `+`. Three values a peer can send
+  reached it: a `0x28`/`0x29` with a one-byte value (thirteen bytes on the
+  wire), any `0x25`-`0x29` whose value ends mid-varint (fourteen), and a Start
+  delta of `u64::MAX` followed by an End delta of 1. **The third was the worse
+  one:** debug panicked, and release *wrapped*, rendering `start:
+  18446744073709551615, end: 0` into the trace as though a peer had asked for
+  it. `range_filter.rs` has used `checked_add` on both baselines since it was
+  written and had no caller. Draft-20's `FILL_PARAMETERS` (`0x23`) admits
+  `0x25`-`0x28`, so every trigger had a second route one level down.
+- **`LARGEST_OBJECT` (`0x09`) on drafts 15 and 16 renders a value that is not
+  two varints** instead of panicking on it. Drafts 17 and later give `0x09` the
+  Location encoding, whose decoder re-serialises the two varints it read, so
+  their extractors are handed two varints by construction; 15 and 16 store the
+  bytes that arrived and check nothing about them. The whole trigger is an
+  eight-byte SUBSCRIBE_OK, `04 00 05 01 01 01 09 00`.
+
+In both cases a value the extractor cannot read now renders as its raw bytes.
+`fields` answers for a message that has **already decoded** — the frame is
+valid and the peer is owed whatever reply the draft names — so it has no
+refusal to give, and the value a peer sent is what there is to show. This is
+the answer `fields::params` and `auth_token_to_json_d14` already gave.
+
+`RangeFilter` also enforces the two content rules Section 5.1.3 states — a
+Publisher Priority range above 255, and a property filter over an odd Property
+Type. Both are answered with REQUEST_ERROR rather than a session close, so both
+are values a peer really sends, and they are exactly the filters whose fields a
+reader most needs to see. So the reader is split by what the caller does with
+the answer rather than by how much checking it wants:
+
+- **`RangeFilter::decode_moqt`** parses and then applies both rules. A decoder
+  wants this: passing a rule-breaking filter on would let an application act on
+  a range the peer was not allowed to ask for.
+- **`RangeFilter::decode_moqt_structure`** parses only, and
+  **`check_its_own_types`** is now public so the caller can ask separately. The
+  extractors use this pair: they render the fields and name the broken rule
+  under `violates`, rather than refusing and hiding the offending value inside
+  a hex dump at the moment someone is looking for it.
+
+Both entry points refuse a value that does not parse — a truncation, a missing
+SetID, an overflowing delta — so the split costs no safety. It is strictly more
+than either reader gave alone: the unchecked copy showed the fields but never
+said the value was invalid, and the checked one says so by showing nothing.
+
+`tests/hostile_parameter_values.rs` drives each of these from
+`ControlMessage::decode` with wire bytes and then calls `message_fields`, which
+is the order that makes them reachability tests rather than tests of a private
+function.
+
 ## [0.4.1] - 2026-08-31
 
 ### Fixed

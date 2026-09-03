@@ -23,22 +23,23 @@
 //!
 //! # Why only drafts 15 and 17
 //!
-//! `read_fetch_stream_header` exists on drafts 15 through 19, but the defect
+//! `read_fetch_stream_header` exists on drafts 15 through 20, but the defect
 //! needs `read_fetch_header` to seed where the typed one does not, and that is
 //! true on exactly two of them:
 //!
 //! * **Draft-16** carries no reader state at all — its objects decode their
 //!   framing individually, `read_fetch_object` has no `fetch_io` gate, and
 //!   neither header method seeds anything.
-//! * **Drafts 18 and 19** seed from `begin_fetch_objects(group_order)` and from
+//! * **Drafts 18 through 20** seed from `begin_fetch_objects(group_order)` and from
 //!   nothing else, deliberately: their Group ID is a difference whose direction
 //!   comes off the FETCH_OK, which a data stream never sees. Neither header
 //!   method seeds there, so the two are equally unable to start a read and the
 //!   typed one is not the odd sibling.
 //!
-//! Naming the reason rather than the count, because "two drafts" is what was
-//! observed and "the drafts where one header reader seeds and the other does
-//! not" is what the gate is about.
+//! Naming the reason rather than the count, because *two drafts* is what was
+//! observed and *the drafts where one header reader seeds and the other does
+//! not* is what the gate is about. Quote marks are reserved here for a draft's
+//! own words, which neither of those is.
 //!
 //! # The second half: the method could not reach its own refill
 //!

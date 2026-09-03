@@ -36,7 +36,7 @@
 //! Request ID, dropped it outright. A peer that asked this crate about a track
 //! waited for an answer the crate had no record to build.
 //!
-//! Drafts 17 through 19 already carry all of this, because a request there
+//! Drafts 17 through 20 already carry all of this, because a request there
 //! arrives on a stream of its own and one map holds both ends' requests.
 //!
 //! # Why none of this ends the session

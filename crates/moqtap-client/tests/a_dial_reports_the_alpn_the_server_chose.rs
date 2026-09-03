@@ -67,6 +67,7 @@ const PATIENCE: Duration = Duration::from_secs(10);
 /// draft a peer speaks would offer them.
 fn every_alpn() -> Vec<Vec<u8>> {
     [
+        DraftVersion::Draft20,
         DraftVersion::Draft19,
         DraftVersion::Draft18,
         DraftVersion::Draft17,
@@ -95,8 +96,8 @@ fn client_config() -> ClientConfig {
 
 /// The protocol the server selected is the one the dial reports.
 ///
-/// The server offers exactly one and the client offers six, so a return value
-/// that merely echoed the client's first preference would be `moqt-19` and a
+/// The server offers exactly one and the client offers seven, so a return value
+/// that merely echoed the client's first preference would be `moqt-20` and a
 /// value read off the handshake is `moqt-16`. They are different on purpose:
 /// an implementation that returned its own request rather than the answer
 /// would pass a test where the two agree.

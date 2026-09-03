@@ -20,13 +20,11 @@
 //! - FETCH stream objects use delta-encoded Group ID and Object ID
 
 #[allow(missing_docs)]
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
-/// Session, request, PUBLISH_DONE and stream reset code registries.
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 #[allow(missing_docs)]
-/// Control message types with encode/decode.
 pub mod message;
 #[allow(missing_docs)]
-/// Object status values for draft-18.
 pub mod types;

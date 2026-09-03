@@ -28,7 +28,7 @@
 //!   not reach at all.
 //! - **Fetch objects**, on every draft. Drafts 07-15 put an Object Status
 //!   behind a zero Object Payload Length and are swept like the rest. Drafts
-//!   16-19 took the field off the fetch object — draft-19 Section 11.2.1.1:
+//!   16-20 took the field off the fetch object — draft-19 Section 11.2.1.1:
 //!   the status "is only present in objects that are delivered via a
 //!   SUBSCRIPTION, and is absent in Objects delivered via a FETCH" — so what
 //!   is gated there is that nothing is read in its place, whatever the next
@@ -40,16 +40,16 @@
 //! `Ok` exactly for the codes in it. A table written out here would be a
 //! second copy free to drift from the enum it is supposed to be pinning, and
 //! the sets genuinely differ: drafts 07-10 assign `0x5`, drafts 11-15 do not,
-//! and drafts 16-19 also drop `0x1`. So `0x1` and `0x5` are each accepted on
+//! and drafts 16-20 also drop `0x1`. So `0x1` and `0x5` are each accepted on
 //! some rows and refused on others, from the same sweep — which is what makes
-//! this a per-draft gate rather than thirteen copies of one assertion.
+//! this a per-draft gate rather than fourteen copies of one assertion.
 //!
 //! # Why the sweep stops at 0x3f
 //!
 //! Codes `0x00..=0x3f` encode as a single byte under RFC 9000's varint and
 //! under MoQT's (draft-17 Section 1.4.1) alike, so one builder produces valid
-//! bytes for all thirteen drafts. Above that the two disagree, and on drafts
-//! 17-19 the datagram status is a bare byte with no encoding for a code over
+//! bytes for all fourteen drafts. Above that the two disagree, and on drafts
+//! 17-20 the datagram status is a bare byte with no encoding for a code over
 //! `0xff` at all. The range still contains every code that discriminates one
 //! draft from another (`0x1`, `0x5`) and every gap inside the assigned range
 //! (`0x2`); `from_u64`'s behaviour on wider values is `object_status.rs`'s
@@ -102,7 +102,7 @@
 //! cannot hold `0x2`, so an unvalidated read cannot report the code it saw and
 //! is caught for mis-reporting before it is caught for accepting.
 //!
-//! For drafts 16-19 the fetch gate is the absence of the field. Reading a
+//! For drafts 16-20 the fetch gate is the absence of the field. Reading a
 //! status varint after a zero payload length in `fo19::read_object`, in
 //! `src/data_dispatch.rs`, fails `draft19_object_status_on_the_wire` with:
 //!
@@ -135,7 +135,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 use moqtap_codec::dispatch::{
@@ -147,7 +148,7 @@ use moqtap_codec::version::DraftVersion;
 
 /// The codes every draft is swept over: the whole assigned range and the gaps
 /// inside it, the first few values past it, and the top of the one-byte varint
-/// range. Every value is a single wire byte on all thirteen drafts.
+/// range. Every value is a single wire byte on all fourteen drafts.
 const SWEEP: &[u64] = &[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x3f];
 
 /// How a draft prefixes an object's extension/property block: absent, a count
@@ -169,7 +170,7 @@ impl ExtBlock {
     }
 }
 
-/// Subgroup objects carry no extension block on draft-07, and on drafts 11-19
+/// Subgroup objects carry no extension block on draft-07, and on drafts 11-20
 /// carry one only when the stream type says so — which the streams here never
 /// ask for. Drafts 08-10 carry it unconditionally.
 fn subgroup_ext_block(draft: DraftVersion) -> ExtBlock {
@@ -181,7 +182,7 @@ fn subgroup_ext_block(draft: DraftVersion) -> ExtBlock {
 
 /// The fetch object extension block is unconditional from draft-08 on, even on
 /// drafts 11-13 where the *subgroup* block is gated on the stream type. Drafts
-/// 15-19 gate it on a flag bit instead, and the streams here never set it.
+/// 15-20 gate it on a flag bit instead, and the streams here never set it.
 fn fetch_ext_block(draft: DraftVersion) -> ExtBlock {
     match draft {
         DraftVersion::Draft07 => ExtBlock::Absent,
@@ -193,7 +194,7 @@ fn fetch_ext_block(draft: DraftVersion) -> ExtBlock {
 /// field naming the fields that follow it.
 ///
 /// Drafts 07-14 give every fetch object the same fixed field list. Draft-15
-/// Section 10.4.4 replaced it with per-object flags, and drafts 16-19 kept that
+/// Section 10.4.4 replaced it with per-object flags, and drafts 16-20 kept that
 /// shape, so their objects are built from a different layout below.
 fn fetch_serialization_flags(draft: DraftVersion) -> bool {
     matches!(
@@ -203,6 +204,7 @@ fn fetch_serialization_flags(draft: DraftVersion) -> bool {
             | DraftVersion::Draft17
             | DraftVersion::Draft18
             | DraftVersion::Draft19
+            | DraftVersion::Draft20
     )
 }
 
@@ -210,7 +212,7 @@ fn fetch_serialization_flags(draft: DraftVersion) -> bool {
 ///
 /// Drafts 07-15 put one after a zero Object Payload Length — draft-15
 /// Section 10.4.4: "The Object Status field is only present if the Object
-/// Payload Length is zero." Drafts 16-19 dropped it: Figure 27 of draft-19
+/// Payload Length is zero." Drafts 16-20 dropped it: Figure 27 of draft-19
 /// Section 11.4.4 runs from Object Payload Length straight to Object Payload,
 /// and Section 11.2.1.1 states the field is "absent in Objects delivered via a
 /// FETCH".
@@ -221,6 +223,7 @@ fn fetch_carries_a_status(draft: DraftVersion) -> bool {
             | DraftVersion::Draft17
             | DraftVersion::Draft18
             | DraftVersion::Draft19
+            | DraftVersion::Draft20
     )
 }
 
@@ -254,7 +257,7 @@ fn subgroup_stream(draft: DraftVersion, status: u64) -> Vec<u8> {
 /// by the byte `status`.
 ///
 /// On drafts 07-15 that byte is the object's Object Status field. On drafts
-/// 16-19 the object ends at its payload length and the byte is the next thing
+/// 16-20 the object ends at its payload length and the byte is the next thing
 /// on the stream, which is exactly what makes it worth writing: a decoder that
 /// still read a status there would consume it.
 ///
@@ -264,7 +267,7 @@ fn subgroup_stream(draft: DraftVersion, status: u64) -> Vec<u8> {
 /// object may take: every other combination names a field of a prior object,
 /// which the first object does not have. It is under `0x40` on every draft, so
 /// the same byte is the whole field whether the draft spells it as a fixed
-/// octet (draft-15) or a variable-length integer (drafts 16-19). Drafts 18-19
+/// octet (draft-15) or a variable-length integer (drafts 16-20). Drafts 18-20
 /// read the two ID fields as differences, but the same section makes the first
 /// object's deltas its absolute Group ID and Object ID, so the bytes are
 /// unchanged.
@@ -345,7 +348,7 @@ fn gate_subgroup(draft: DraftVersion, assigned: &[u64]) {
 /// swept exactly as the subgroup decoders are, with the accepted code required
 /// back so that "accepted" means "decoded", not "skipped".
 ///
-/// Drafts 16-19 have no such field, so the assertion there is the other one
+/// Drafts 16-20 have no such field, so the assertion there is the other one
 /// worth making: the object ends at its payload length, and the byte after it
 /// is still on the stream. A decoder that read one anyway would swallow the
 /// next object's Serialization Flags and desynchronise everything behind it.
@@ -439,7 +442,7 @@ macro_rules! draft_row {
 //
 // Drafts 07/08 fold the status into the ordinary datagram header behind a zero
 // payload length; drafts 09-13 give it a header of its own, with an
-// extension-length field on 09/10 only; drafts 14-19 select it with a type
+// extension-length field on 09/10 only; drafts 14-20 select it with a type
 // byte.
 draft_row!(
     draft07_object_status_on_the_wire,
@@ -543,5 +546,13 @@ draft_row!(
     draft19,
     Draft19,
     moqtap_codec::draft19::data_stream::DatagramHeader::decode,
+    &[0x20, 0x01, 0x00, 0x00, 0x80]
+);
+draft_row!(
+    draft20_object_status_on_the_wire,
+    "draft20",
+    draft20,
+    Draft20,
+    moqtap_codec::draft20::data_stream::DatagramHeader::decode,
     &[0x20, 0x01, 0x00, 0x00, 0x80]
 );

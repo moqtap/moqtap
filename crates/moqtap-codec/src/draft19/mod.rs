@@ -47,11 +47,10 @@
 
 #[allow(missing_docs)]
 pub mod data_stream;
-/// Session, request, PUBLISH_DONE and stream reset error codes.
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 #[allow(missing_docs)]
-/// Control message types with encode/decode.
 pub mod message;
 #[allow(missing_docs)]
-/// Object status values for draft-19.
 pub mod types;

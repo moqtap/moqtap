@@ -126,6 +126,7 @@ fn delta_encoded(draft: DraftVersion) -> bool {
             | DraftVersion::Draft17
             | DraftVersion::Draft18
             | DraftVersion::Draft19
+            | DraftVersion::Draft20
     )
 }
 
@@ -335,6 +336,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 // ============================================================
@@ -350,7 +353,7 @@ const DRAFTS: &[DraftVersion] = &[
 /// — `framer_tests` uses objects at 1.5x and 8x the cap, where `<` and
 /// `<=` are indistinguishable. It also pins the promise that an oversized
 /// object costs addressability for itself alone: the object *after* it must
-/// still be framed with the correct ID, which on drafts 14-19 requires the
+/// still be framed with the correct ID, which on drafts 14-20 requires the
 /// framer to have advanced its delta state across an object it never
 /// framed.
 ///
@@ -457,7 +460,7 @@ fn an_oversized_object_keeps_buffering_bounded() {
 /// bytes the codec did not write.
 ///
 /// This is the framer-level guard against one specific misreading: on
-/// drafts 17-19 the property block is byte-length-prefixed, and a reader
+/// drafts 17-20 the property block is byte-length-prefixed, and a reader
 /// that took the
 /// prefix for a KVP count would consume past the payload-length field and
 /// mis-frame every following object. Because the framer forwards raw
@@ -618,7 +621,7 @@ fn omitting_fetch_stream(draft: DraftVersion) -> Vec<u8> {
 ///
 /// Exactly two tests redden — this one and
 /// [`a_fetch_frame_with_no_subgroup_of_its_own_reports_none`] — while the
-/// drafts 07-14 and 18-19 gates stay green, so the cut is attributable to
+/// drafts 07-14 and 18-20 gates stay green, so the cut is attributable to
 /// the three drafts it names. It also shows why byte identity is not on its
 /// own a measurement of anything: the byte-identity assertion above the
 /// bypass one passes under the ablation, because a bypassed stream is

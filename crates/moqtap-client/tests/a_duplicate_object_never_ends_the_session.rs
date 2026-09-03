@@ -7,11 +7,12 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 //! A duplicate Object that contradicts the one before it never ends the
-//! session, on any of the nine drafts that have a rule about it.
+//! session, on any of the ten drafts that have a rule about it.
 //!
 //! Draft-19 Section 9.1 states the rule: "An endpoint that receives a duplicate
 //! Object with a different Forwarding Preference, Subgroup ID, Priority or
@@ -34,7 +35,7 @@
 //! Track and SHOULD deliver an error to the application." Drafts 14 through 16
 //! widen it to fetches — draft-15 Section 2.4.2: "it MUST UNSUBSCRIBE any
 //! subscription and FETCH_CANCEL any fetch for that Track from that publisher,
-//! and SHOULD deliver an error to the application." Drafts 17 through 19 point
+//! and SHOULD deliver an error to the application." Drafts 17 through 20 point
 //! at the transport instead — draft-19 Section 2.4.2: "it MUST cancel any
 //! corresponding subscription or fetches for that Track from that publisher
 //! (see Section 3.3.3), and SHOULD deliver an error to the application."
@@ -101,7 +102,7 @@
 //! # Two topologies, one assertion
 //!
 //! Drafts 11 through 16 put SETUP and every request on a single bidirectional
-//! stream; drafts 17, 18 and 19 put control on a pair of unidirectional streams
+//! stream; drafts 17 through 20 put control on a pair of unidirectional streams
 //! and open a bidirectional stream per request. The three gates are written
 //! once, in `dup_common!`, and both peers call it. The split a rule with two
 //! peers forces is between the peer and the assertion, not between files.
@@ -238,13 +239,21 @@ impl Twice {
 /// It decodes with `moqtap-codec` and never calls the framing helpers in
 /// `moqtap-client`: a peer assembled out of the code under test could not
 /// disagree with it.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+///
+/// `allow(dead_code)` rather than a `cfg` naming those drafts. Only the
+/// `unidirectional_duplicate_gates!` invocations below use it, and a second
+/// list of the same drafts is one nothing checks: it was `draft17`–`draft19`
+/// when draft-20 joined them, and the build broke on the draft nobody added
+/// here. Nothing in this type is draft-specific — `AnyControlMessage::decode`
+/// takes the draft as an argument — so it compiles wherever it is left
+/// standing.
+#[allow(dead_code)]
 struct PeerStream {
     recv: quinn::RecvStream,
     buf: Vec<u8>,
 }
 
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[allow(dead_code)]
 impl PeerStream {
     fn new(recv: quinn::RecvStream) -> Self {
         Self { recv, buf: Vec::new() }
@@ -264,7 +273,7 @@ impl PeerStream {
 
     /// Decode one whole control message, type field included.
     ///
-    /// On those three drafts a control stream's leading varint *is* its first
+    /// On these drafts a control stream's leading varint *is* its first
     /// message's type field, so this reads the SETUP off the front of the
     /// stream with nothing skipped — and the SUBSCRIBE off the front of a
     /// request stream the same way.
@@ -1218,3 +1227,4 @@ bidirectional_duplicate_gates!(
 unidirectional_duplicate_gates!(draft17, "draft17", Draft17, "8.1");
 unidirectional_duplicate_gates!(draft18, "draft18", Draft18, "9.1");
 unidirectional_duplicate_gates!(draft19, "draft19", Draft19, "9.1");
+unidirectional_duplicate_gates!(draft20, "draft20", Draft20, "9.1");

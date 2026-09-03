@@ -7,13 +7,11 @@
 //! - New TrackStatusError (0x0F)
 
 #[allow(missing_docs)]
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
-/// Session, request, status and stream-reset error codes.
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 #[allow(missing_docs)]
-/// Control message types with encode/decode.
 pub mod message;
 #[allow(missing_docs)]
-/// Draft-13 types.
 pub mod types;

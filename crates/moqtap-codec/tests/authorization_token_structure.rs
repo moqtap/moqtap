@@ -1,6 +1,6 @@
 //! The AUTHORIZATION TOKEN parameter carries a structure, not opaque bytes.
 //!
-//! Drafts 11 through 19 all define it the same way:
+//! Drafts 11 through 20 all define it the same way:
 //!
 //! ```text
 //! Token {
@@ -64,7 +64,8 @@ mod frames;
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 #[cfg(any(
@@ -77,7 +78,8 @@ use moqtap_codec::kvp::{KeyValuePair, KvpValue};
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -91,7 +93,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 fn varint(v: u64) -> VarInt {
     VarInt::from_u64(v).expect("fixture value fits a varint")
@@ -107,7 +110,8 @@ fn varint(v: u64) -> VarInt {
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 fn pair(key: u64, value: Vec<u8>) -> KeyValuePair {
     KeyValuePair { key: varint(key), value: KvpValue::Bytes(value) }
@@ -126,7 +130,8 @@ fn pair(key: u64, value: Vec<u8>) -> KeyValuePair {
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 const WELL_FORMED: &[u8] = &[0x02, 0x07];
 
@@ -145,7 +150,8 @@ const WELL_FORMED: &[u8] = &[0x02, 0x07];
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 const MALFORMED: &[&[u8]] = &[
     // No Alias Type at all.
@@ -173,7 +179,8 @@ const MALFORMED: &[&[u8]] = &[
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 fn alias_only(alias_type: u8, alias: u8) -> Vec<u8> {
     vec![alias_type, alias]
@@ -192,7 +199,8 @@ fn alias_only(alias_type: u8, alias: u8) -> Vec<u8> {
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -> Vec<u8> {
     let mut out = vec![alias_type];
@@ -202,7 +210,7 @@ fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -
     out
 }
 
-/// The gates every draft from 11 to 19 states in the same structure.
+/// The gates every draft from 11 to 20 states in the same structure.
 ///
 /// Each expansion needs `subscribe`, `encode` and `decode` from the module it
 /// lands in: the fields in front of the parameters are not the same on any two
@@ -214,10 +222,10 @@ fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -
 /// carried, or a reader chasing it consults the wrong table.
 ///
 /// The ablations recorded below were run on every draft in the range and fail on
-/// all of them — nine drafts, 11 through 19, with no gaps. The structure is read
+/// all of them — ten drafts, 11 through 20, with no gaps. The structure is read
 /// by one shared parser, so an ablation of it is visible from every expansion at
 /// once: removing the Alias Type check fails
-/// `an_unassigned_alias_type_is_refused` on all nine and nothing else. The
+/// `an_unassigned_alias_type_is_refused` on all ten and nothing else. The
 /// message quoted in each is draft-13's, with the fixture's own unchanging
 /// fields elided where they are the same in every one; the parameter at the end
 /// is what the gate is about.
@@ -230,7 +238,8 @@ fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 macro_rules! token_structure_gates {
     ($draft:ident, $key:expr) => {
@@ -368,7 +377,7 @@ macro_rules! token_structure_gates {
         /// Every token the reader refuses is one the writer will not write.
         ///
         /// The five gates above read the rule from the receiver's side, which
-        /// is the side every draft states it for — drafts 15 through 19 as "If
+        /// is the side every draft states it for — drafts 15 through 20 as "If
         /// the Token structure cannot be decoded, the receiver MUST close the
         /// Session with KEY_VALUE_FORMATTING_ERROR", drafts 12, 13 and 14 in
         /// those words with the code named in prose, and draft-11 through the
@@ -882,6 +891,40 @@ mod draft19 {
     }
 
     token_structure_gates!(draft19, AUTHORIZATION_TOKEN, setup);
+}
+
+#[cfg(feature = "draft20")]
+mod draft20 {
+    use moqtap_codec::draft20::message::*;
+    use moqtap_codec::kvp::KeyValuePair;
+    use moqtap_codec::types::*;
+
+    const AUTHORIZATION_TOKEN: u64 = 0x03;
+
+    fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: super::varint(1),
+            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+            track_name: b"t".to_vec(),
+            parameters,
+        })
+    }
+
+    fn setup(options: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Setup(Setup { options })
+    }
+
+    fn encode(message: &ControlMessage) -> Vec<u8> {
+        let mut buf = Vec::new();
+        message.encode(&mut buf).expect("the encoder writes the value it is given");
+        buf
+    }
+
+    fn decode(bytes: &[u8]) -> Result<ControlMessage, moqtap_codec::error::CodecError> {
+        ControlMessage::decode(&mut &bytes[..])
+    }
+
+    token_structure_gates!(draft20, AUTHORIZATION_TOKEN, setup);
 }
 
 /// Drafts 07 through 10 have no Token, and the same bytes travel unread.

@@ -113,7 +113,14 @@ fn base_events() -> Vec<TraceEvent> {
         TraceEvent::new(
             6,
             2200,
-            EventData::Error { error_code: 0, reason: "stream reset by peer".into() },
+            EventData::Error {
+                error_code: 0,
+                reason: "stream reset by peer".into(),
+                stream_id: None,
+                kind: None,
+                raw_len: None,
+                raw: None,
+            },
         ),
         TraceEvent::new(
             7,
@@ -352,14 +359,11 @@ pub fn v2_unknown_perspective() -> Case {
 /// Known event types carrying keys no reader knows, and no reader ever will.
 ///
 /// Every key here begins `x-`, the prefix SPEC.md reserves for private use and
-/// promises never to define. That reservation exists because of this case: it
-/// was first built from the keys PROPOSAL-v3 §§1-3 propose, on the reasoning
-/// that real proposals make better evidence than invented ones. §2 then landed
-/// and claimed two of them. The dedicated assertions went red, which is the
-/// mechanism working — but a red test whose *fixture* has gone stale invites
-/// weakening the assertion rather than replacing the fixture, and that is what
-/// happened before this rebuild. A fixture for a rule about unknown keys has to
-/// be built from keys that cannot stop being unknown.
+/// promises never to define. A fixture for a rule about unknown keys has to be
+/// built from keys that cannot stop being unknown: a key a later revision
+/// claims turns this into a test of something else, and a red test whose
+/// fixture has gone stale invites weakening the assertion rather than
+/// replacing the fixture.
 ///
 /// The failure it guards is quiet: a reader may ignore an unrecognised key, but
 /// a reader that *drops* one turns any read-modify-write — a redaction pass, a
@@ -426,7 +430,14 @@ pub fn v2_extra_keys() -> Case {
             TraceEvent::new(
                 2,
                 300,
-                EventData::Error { error_code: 0, reason: "undecodable control bytes".into() },
+                EventData::Error {
+                    error_code: 0,
+                    reason: "undecodable control bytes".into(),
+                    stream_id: None,
+                    kind: None,
+                    raw_len: None,
+                    raw: None,
+                },
             )
             .with_extra(vec![
                 (Value::Text("x-ek".into()), Value::Text("decode".into())),
@@ -441,8 +452,8 @@ pub fn v2_extra_keys() -> Case {
 /// `"msg"` is the one event-0 key whose contents no version of the spec fixes,
 /// so its rules are about shape rather than content: a CBOR map, keyed in
 /// snake_case, and an empty map rather than an omission when the recorder
-/// decoded nothing. The empty-map event is the load-bearing one — omitting the
-/// key instead was this crate's own cue to discard the event, and event 0 is a
+/// decoded nothing. The empty-map event is the load-bearing one: a reader that
+/// treats the omission as a malformed event discards an event 0, which is a
 /// type sampling MUST NOT drop.
 ///
 /// The fourth shape, a `"msg"` that is not a map at all, needs no case of its
@@ -476,8 +487,8 @@ pub fn v2_control_msg_map() -> Case {
                     raw: None,
                 },
             ),
-            // Nothing decoded, so an empty map. A writer that omits the key
-            // instead produces a file this reader used to drop the event from.
+            // Nothing decoded, so an empty map rather than an omission, which
+            // a reader may take for a malformed event.
             TraceEvent::new(
                 1,
                 200,
@@ -521,16 +532,15 @@ pub fn v2_control_msg_map() -> Case {
 /// A `headers`-level trace where the stream-header identifiers are the only way
 /// to group anything.
 ///
-/// This is what §2 exists for. At `"headers"` there are no payload bytes to
-/// re-parse, so before the four keys below a recording could not answer which
-/// track a stream belonged to — the level's whole purpose. One stream per type
-/// covers all three scopes: `"sg"` on a subgroup, `"fri"` on a fetch, `"g"` on
-/// a datagram, and `"ta"` on each.
+/// At `"headers"` there are no payload bytes to re-parse, so before the four
+/// keys below a recording could not answer which track a stream belonged to —
+/// the level's whole purpose. One stream per type covers all three scopes:
+/// `"sg"` on a subgroup, `"fri"` on a fetch, `"g"` on a datagram, and `"ta"`
+/// on each.
 ///
 /// The three streams deliberately share a track alias. That is legal and
 /// ordinary — one track delivered over a subgroup stream, a fetch and a
-/// datagram — and it is why `"ta"` alone cannot key a flow, which is §1's
-/// argument sitting in a file rather than in prose.
+/// datagram — and it is why `"ta"` alone cannot key a flow.
 ///
 /// Key order matches the JS case, so the two encodings differ only where the
 /// encoders do.
@@ -587,8 +597,7 @@ pub fn v2_headers_level_flow() -> Case {
             ),
             // A datagram carries its group on the stream-opened event, because
             // there is no subgroup stream to hang it off. Note that `"sid"`
-            // here names a stream a datagram never opened — §1's subject,
-            // visible in this file.
+            // here names a stream a datagram never opened.
             TraceEvent::new(
                 3,
                 300,
@@ -610,11 +619,11 @@ pub fn v2_headers_level_flow() -> Case {
 /// into them.
 ///
 /// Three maps here have keys the format names — the header itself,
-/// `"segment"` and `"sampling"` — and each keeps its own store. No other file
-/// in the corpus carries an unrecognised *header* key at all, so until this one
-/// existed the whole mechanism could have been deleted with every corpus test
-/// still green: a round trip checks a reader against its own encoder, and an
-/// encoder that writes no store agrees with a decoder that reads none.
+/// `"segment"` and `"sampling"` — and each keeps its own store. It is the only
+/// file in the corpus carrying an unrecognised *header* key, and without one
+/// the whole mechanism could be deleted with every corpus test still green: a
+/// round trip checks a reader against its own encoder, and an encoder that
+/// writes no store agrees with a decoder that reads none.
 ///
 /// Five claims, each of which fails differently:
 ///
@@ -630,9 +639,9 @@ pub fn v2_headers_level_flow() -> Case {
 ///   rule gets exercised by a file both generators can author.
 /// * `"x-scale"` is [`Value::Float`] `1.0` and goes out as a CBOR integer.
 ///   SPEC.md's encoding rules bind every value a writer emits, stored ones
-///   included; this crate held the float and wrote a float until the rule was
-///   applied to stores, and `cbor-x` cannot represent the distinction at all.
-///   It is the one value in the corpus where the two could silently disagree.
+///   included, and `cbor-x` cannot represent the distinction at all. It is the
+///   one value in the corpus where the two implementations could silently
+///   disagree.
 /// * `"x-blob"` is [`Value::Tag`] 64 over a byte string, which is written as
 ///   major type 2. The JavaScript decoder folds that tag away before its own
 ///   code runs, so it cannot emit one whatever its store holds; unwrapping here
@@ -640,7 +649,7 @@ pub fn v2_headers_level_flow() -> Case {
 ///
 /// Every genuinely-unknown key is `x-` prefixed, the range SPEC.md reserves for
 /// private use, so no future revision can claim one and turn this fixture into
-/// a test of something else — which has happened to this corpus once.
+/// a test of something else.
 ///
 /// The header carries `"segment"` because a store needs a map to live in, and
 /// `"sampling"` for the same reason. Neither is decoration: this is the first
@@ -748,29 +757,33 @@ pub fn authored_cases() -> Vec<(&'static str, Case)> {
 
 /// Where the shared corpus lives.
 ///
-/// It is `trace/` inside the `test-vectors` repository — the same one the
-/// codec vectors come from — because the claim it backs is a cross-language
-/// one: this crate reads it as a git submodule, `@moqtap/trace` reads it as a
-/// dependency. One copy, two readers; a corpus each implementation kept its
-/// own copy of would drift, and drift is the failure it exists to catch.
+/// It is `moqtrace/` inside the `test-traces` repository, because the claim it
+/// backs is a cross-language one: this crate reads it as a git submodule,
+/// `@moqtap/trace` reads it as a dependency. One copy, two readers; a corpus
+/// each implementation kept its own copy of would drift, and drift is the
+/// failure it exists to catch.
 ///
-/// Two locations are tried, because the submodule sits under `moqtap-codec`
-/// rather than at the workspace root, and a checkout of this repo alone does
-/// not have the sibling clone that corpus development uses.
+/// It has a repository of its own rather than sitting beside the codec
+/// vectors: `test-vectors` holds wire vectors for the IETF drafts, while
+/// `.moqtrace` is a container format of this project's own, versioned by its
+/// own specification.
+///
+/// Two locations are tried, because a checkout of this repo alone does not
+/// have the sibling clone that corpus development uses.
 pub fn corpus_dir() -> Option<PathBuf> {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
 
-    let submodule = manifest.join("../moqtap-codec/test-vectors/trace");
+    let submodule = manifest.join("test-traces/moqtrace");
     if submodule.is_dir() {
         return Some(submodule);
     }
 
     // Bounded rather than unbounded: a search that walks to the filesystem
-    // root on a machine that happens to have `test-vectors` somewhere above
+    // root on a machine that happens to have `test-traces` somewhere above
     // the repo would read a corpus nobody meant to point it at.
     let mut dir = manifest;
     for _ in 0..8 {
-        let candidate = dir.join("test-vectors/trace");
+        let candidate = dir.join("test-traces/moqtrace");
         if candidate.is_dir() {
             return Some(candidate);
         }
@@ -780,6 +793,6 @@ pub fn corpus_dir() -> Option<PathBuf> {
 }
 
 /// What to tell someone whose checkout has no corpus.
-pub const CORPUS_MISSING_MESSAGE: &str = "No .moqtrace corpus found. It lives in the test-vectors \
-     repository under trace/; run `git submodule update --init`, or clone \
-     github.com/moqtap/test-vectors beside this repository.";
+pub const CORPUS_MISSING_MESSAGE: &str = "No .moqtrace corpus found. It lives in the test-traces \
+     repository under moqtrace/; run `git submodule update --init`, or clone \
+     github.com/moqtap/test-traces beside this repository.";

@@ -1,13 +1,13 @@
 //! The Full Track Name cap binds every message that carries one, not only
 //! SUBSCRIBE.
 //!
-//! Drafts 11 through 19 all state it once, of the name rather than of a message:
+//! Drafts 11 through 20 all state it once, of the name rather than of a message:
 //! the maximum total length of a Full Track Name is 4,096 bytes, computed as the
 //! sum of the Track Namespace field lengths and the Track Name length, and an
 //! endpoint that receives one longer MUST close the session. Drafts 07 through
 //! 10 state no such cap and are deliberately absent.
 //!
-//! `full_track_name_cap.rs` drives SUBSCRIBE on all nine, which is one message
+//! `full_track_name_cap.rs` drives SUBSCRIBE on all ten, which is one message
 //! reachable by one payload builder. This file is the rest of them, and there is
 //! no way to share a builder: each message puts different fields in front of the
 //! name, and three of them put fields *behind* it that are read before the check
@@ -18,7 +18,7 @@
 //! Reading them out of the decoders rather than assuming, three groups appear
 //! that a single test would have got wrong.
 //!
-//! A **PUBLISH on drafts 17, 18 and 19** reads its Track Alias between the name
+//! A **PUBLISH on drafts 17 through 20** reads its Track Alias between the name
 //! and the check, so a payload that stops after the name never reaches the cap
 //! at all. Drafts 12 through 16 check first and read the alias after.
 //!
@@ -27,11 +27,11 @@
 //! name. Drafts 11 through 16 check as soon as the name is read.
 //!
 //! **PUBLISH_BLOCKED (0x0F on drafts 17 and 18) and PUBLISH_SKIPPED (the same
-//! type on draft-19)** carry no Request ID at all: the namespace suffix is the
-//! first field of the message. They also allow an empty namespace, which no
-//! other carrier does.
+//! type on drafts 19 and 20)** carry no Request ID at all: the namespace suffix
+//! is the first field of the message. They also allow an empty namespace, which
+//! no other carrier does.
 //!
-//! And the **Redirect inside a REQUEST_ERROR on drafts 18 and 19** is reached
+//! And the **Redirect inside a REQUEST_ERROR on drafts 18 through 20** is reached
 //! only when the error code is REDIRECT (0x34), behind a retry interval, a
 //! reason phrase and a Connect URI. It is the only carrier that is not a message
 //! of its own.
@@ -40,12 +40,12 @@
 //!
 //! Every one of these arms reaches the same `check_full_track_name`. Checking
 //! that was the first thing done here, by enumerating every decode arm on every
-//! draft that reads a namespace field and a track name: forty of them across the
-//! nine drafts, and all forty call it. So what these gates hold is the *wiring* —
+//! draft that reads a namespace field and a track name: forty-six of them across
+//! the ten drafts, and all forty-six call it. So what these gates hold is the *wiring* —
 //! that the check is on the path each message takes, and stays there when a
 //! decoder is rearranged.
 //!
-//! Thirty-one gates here and nine in `full_track_name_cap.rs` is forty, one for
+//! Thirty-six gates here and ten in `full_track_name_cap.rs` is forty-six, one for
 //! each.
 
 #[cfg(any(
@@ -57,7 +57,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::error::CodecError;
 #[cfg(any(
@@ -69,10 +70,16 @@ use moqtap_codec::error::CodecError;
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::types::TrackNamespace;
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20"
+))]
 use moqtap_codec::varint::MoqtProfile;
 #[cfg(any(
     feature = "draft11",
@@ -83,7 +90,8 @@ use moqtap_codec::varint::MoqtProfile;
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -98,7 +106,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     let mut wire = vec![type_id];
@@ -124,7 +133,7 @@ fn vi(v: u64) -> Vec<u8> {
 }
 
 /// One variable-length integer in the encoding draft-17 introduced.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn vi_moqt<P: MoqtProfile>(v: u64) -> Vec<u8> {
     let mut out = Vec::new();
     VarInt::from_u64(v).expect("fixture value fits").encode_moqt::<P>(&mut out);
@@ -152,7 +161,7 @@ fn ns_name(namespace_bytes: usize, name_bytes: usize) -> Vec<u8> {
 }
 
 /// The same pair in the encoding drafts 17 and later use.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn ns_name_moqt<P: MoqtProfile>(namespace_bytes: usize, name_bytes: usize) -> Vec<u8> {
     let mut out = Vec::new();
     TrackNamespace(vec![vec![b'n'; namespace_bytes]]).encode_moqt::<P>(&mut out);
@@ -276,16 +285,16 @@ cap_gate!(draft16_caps_a_fetch, "draft16", draft16, 0x16, |ns, name| {
     [vi(1), vi(1), ns_name(ns, name)].concat()
 });
 
-// ── Drafts 17 through 19: draft-17's encoding ────────────────────────────────
+// ── Drafts 17 through 20: draft-17's encoding ────────────────────────────────
 //
 // Draft-17 carries a Required Request ID Delta after every Request ID, and
 // checks it before the name — so it is 0 against a Request ID of 0 here, which
 // is the one pair where twice the delta is no larger than the id. Drafts 18
-// and 19 dropped the field.
+// onward dropped the field.
 
 #[cfg(feature = "draft17")]
 type M17 = moqtap_codec::varint::Moqt17;
-#[cfg(any(feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
 type M18 = moqtap_codec::varint::Moqt18;
 
 cap_gate!(draft17_caps_a_track_status, "draft17", draft17, 0x0D, |ns, name| {
@@ -297,8 +306,11 @@ cap_gate!(draft18_caps_a_track_status, "draft18", draft18, 0x0D, |ns, name| {
 cap_gate!(draft19_caps_a_track_status, "draft19", draft19, 0x0D, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name)].concat()
 });
+cap_gate!(draft20_caps_a_track_status, "draft20", draft20, 0x0D, |ns, name| {
+    [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name)].concat()
+});
 
-// PUBLISH, and the Track Alias that follows the name on these three drafts. A
+// PUBLISH, and the Track Alias that follows the name on these four drafts. A
 // payload that stopped after the name would be refused for running out rather
 // than for the name, and the at-cap half of the gate would still pass — so the
 // alias is what makes this arm reachable at all.
@@ -310,6 +322,9 @@ cap_gate!(draft18_caps_a_publish, "draft18", draft18, 0x1D, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(4)].concat()
 });
 cap_gate!(draft19_caps_a_publish, "draft19", draft19, 0x1D, |ns, name| {
+    [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(4)].concat()
+});
+cap_gate!(draft20_caps_a_publish, "draft20", draft20, 0x1D, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(4)].concat()
 });
 
@@ -351,10 +366,17 @@ cap_gate!(draft19_caps_a_fetch, "draft19", draft19, 0x16, |ns, name| {
     ]
     .concat()
 });
+// Draft-20's FETCH is a Request ID, the namespace, the name and a parameter
+// count: Section 10.13 deleted the Fetch Type and the four range fields, so
+// the payload is shorter than draft-19's by six varints and the namespace
+// starts one field earlier.
+cap_gate!(draft20_caps_a_fetch, "draft20", draft20, 0x16, |ns, name| {
+    [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(0)].concat()
+});
 
-// PUBLISH_BLOCKED on drafts 17 and 18 and PUBLISH_SKIPPED on draft-19, type 0x0F
-// on all three: the same message under two names, and the only carrier whose
-// first field is the namespace.
+// PUBLISH_BLOCKED on drafts 17 and 18 and PUBLISH_SKIPPED on drafts 19 and 20,
+// type 0x0F on all four: the same message under two names, and the only
+// carrier whose first field is the namespace.
 cap_gate!(draft17_caps_a_publish_blocked, "draft17", draft17, 0x0F, |ns, name| {
     ns_name_moqt::<M17>(ns, name)
 });
@@ -364,11 +386,14 @@ cap_gate!(draft18_caps_a_publish_blocked, "draft18", draft18, 0x0F, |ns, name| {
 cap_gate!(draft19_caps_a_publish_skipped, "draft19", draft19, 0x0F, |ns, name| {
     ns_name_moqt::<M18>(ns, name)
 });
+cap_gate!(draft20_caps_a_publish_skipped, "draft20", draft20, 0x0F, |ns, name| {
+    ns_name_moqt::<M18>(ns, name)
+});
 
-// The Redirect inside a REQUEST_ERROR, type 0x05, on drafts 18 and 19. Error
-// code 0x34 is REDIRECT and is what puts the structure on the wire at all; the
-// retry interval, the empty reason phrase and the empty Connect URI are the
-// three fields in front of the namespace.
+// The Redirect inside a REQUEST_ERROR, type 0x05, on drafts 18, 19 and 20.
+// Error code 0x34 is REDIRECT and is what puts the structure on the wire at
+// all; the retry interval, the empty reason phrase and the empty Connect URI
+// are the three fields in front of the namespace.
 cap_gate!(draft18_caps_a_redirect, "draft18", draft18, 0x05, |ns, name| {
     [
         vi_moqt::<M18>(0x34),
@@ -380,6 +405,16 @@ cap_gate!(draft18_caps_a_redirect, "draft18", draft18, 0x05, |ns, name| {
     .concat()
 });
 cap_gate!(draft19_caps_a_redirect, "draft19", draft19, 0x05, |ns, name| {
+    [
+        vi_moqt::<M18>(0x34),
+        vi_moqt::<M18>(0),
+        vi_moqt::<M18>(0),
+        vi_moqt::<M18>(0),
+        ns_name_moqt::<M18>(ns, name),
+    ]
+    .concat()
+});
+cap_gate!(draft20_caps_a_redirect, "draft20", draft20, 0x05, |ns, name| {
     [
         vi_moqt::<M18>(0x34),
         vi_moqt::<M18>(0),

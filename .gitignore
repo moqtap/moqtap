@@ -5,3 +5,5 @@
 .claude/*.local.*
 /docs
 __pycache__/
+# The rendered drafts, when check-drafts.py --fetch is pointed here.
+/.drafts

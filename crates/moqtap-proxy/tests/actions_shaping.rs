@@ -206,7 +206,7 @@
 //! draft-matrix` runs `cargo check … --lib` and never compiles `tests/`, so
 //! no standing gate compiles this file under a single draft. Until that row
 //! exists, the derived fixture is the only thing standing between this file
-//! and thirteen red rows.
+//! and fourteen red rows.
 
 #![cfg(any(
     feature = "draft07",
@@ -221,7 +221,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 mod common;
@@ -278,6 +279,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The draft every fixture here is built for: the **newest** one this build
@@ -333,7 +336,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 }
 
 /// A subgroup stream header for `draft` carrying `track_alias`: group 0,
-/// subgroup 0, publisher priority `0x80`. Five bytes on every draft 07-19.
+/// subgroup 0, publisher priority `0x80`. Five bytes on every draft 07-20.
 fn subgroup_header_bytes(draft: DraftVersion, track_alias: u64) -> Vec<u8> {
     assert!(track_alias < 64, "single-byte varint only");
     vec![subgroup_stream_type(draft), track_alias as u8, 0x00, 0x00, 0x80]
@@ -346,7 +349,7 @@ fn subgroup_header_bytes(draft: DraftVersion, track_alias: u64) -> Vec<u8> {
 /// reason [`subgroup_stream_type`] gives: a shared encoder would leave these
 /// tests comparing the proxy against its own output.
 ///
-/// Three layouts cover the thirteen. Drafts 07 and 08 declare a payload
+/// Three layouts cover the fourteen. Drafts 07 and 08 declare a payload
 /// length — and hang the Object Status off it being zero, which is why
 /// `payload` may not be empty on those two. Drafts 09 and 10 replace the
 /// length with an extension-headers byte count. From draft-11 on the type
@@ -1511,7 +1514,7 @@ async fn wait_until(mut ready: impl FnMut() -> bool, what: &str) {
     }
 }
 
-/// The subgroup stream header's length, on every draft 07-19.
+/// The subgroup stream header's length, on every draft 07-20.
 fn header_len() -> usize {
     subgroup_header_bytes(DRAFT, LEAD_ALIAS).len()
 }
@@ -1561,7 +1564,7 @@ impl AdmissionRun {
 ///
 /// The whole `ADMIT_OFFERED + ADMIT_TAIL` stream is encoded **once**, by one
 /// `AnySubgroupObjectWriter`, and then split: object IDs are delta-encoded
-/// on the wire on drafts 14-19, so a second stream started at object 12
+/// on the wire on drafts 14-20, so a second stream started at object 12
 /// would encode a delta against nothing and the tail-drop fixture would be
 /// asserting on bytes no publisher could produce.
 async fn admission_run(overflow: Overflow) -> AdmissionRun {
@@ -1851,7 +1854,7 @@ async fn block_reports_backpressure_once() {
 ///
 /// # Where this discriminates
 ///
-/// On drafts 14-19, where object IDs are delta-encoded. On 07-13 the IDs are
+/// On drafts 14-20, where object IDs are delta-encoded. On 07-13 the IDs are
 /// absolute and the assertion holds whether or not `note_elided` was called
 /// — so on a build compiled for those drafts alone this row is a regression
 /// check rather than a gate. `DRAFT` is the newest compiled draft, so the
@@ -4041,13 +4044,15 @@ async fn a_shaped_session_still_reports_stranded_bytes() {
 /// [`bytes_are_conserved_across_classes`] uses one.
 ///
 /// Each element carries its own `#[cfg]`, so this is the compiled subset —
-/// empty on a build with no draft in 18-19, which is exactly when that
+/// empty on a build with no draft in 18-20, which is exactly when that
 /// row's fetch leg is skipped.
 const UNADDRESSED_FETCH_DRAFTS: &[DraftVersion] = &[
     #[cfg(feature = "draft18")]
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The drafts on which `publisher_priority` is **`Option`** and the header
@@ -4068,6 +4073,8 @@ const OPTIONAL_PRIORITY_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The drafts on which `publisher_priority` is always on the wire, so a
@@ -4716,11 +4723,11 @@ async fn a_mixed_class_stream_says_so() {
 // ── the publisher-priority partition ───────────────────────────────────
 
 /// The header-type bit that omits the Publisher Priority field on drafts
-/// 15-19 (`draft19/data_stream.rs:46`, and the same value on 15-18).
+/// 15-20 (`draft19/data_stream.rs:46`, and the same value on 15-18).
 ///
 /// This is a bit in the **stream type byte**, not a value of the priority
 /// field, which is the fact an earlier revision of this row got wrong: a
-/// priority *byte* of `0x80` decodes as `Some(128)` on every draft 07-19.
+/// priority *byte* of `0x80` decodes as `Some(128)` on every draft 07-20.
 /// `None` is only reachable by setting this bit and omitting the byte, and
 /// `None` is what the whole row is about.
 const DEFAULT_PRIORITY_BIT: u8 = 0x20;
@@ -4738,7 +4745,7 @@ const PRIORITY_VALUE: u8 = 0x80;
 /// A subgroup stream header for `draft` that **omits** the Publisher
 /// Priority field: four bytes, not five.
 ///
-/// Only meaningful on drafts 15-19 — on 07-14 the bit is not defined and
+/// Only meaningful on drafts 15-20 — on 07-14 the bit is not defined and
 /// the field is unconditional.
 fn default_priority_header_bytes(draft: DraftVersion, track_alias: u64) -> Vec<u8> {
     assert!(track_alias < 64, "single-byte varint only");
@@ -4827,7 +4834,7 @@ async fn priority_class_run(
 ///
 /// A `publisher_priority`-keyed class, run twice:
 ///
-/// - on the newest compiled draft in **15-19**, against a header that set the
+/// - on the newest compiled draft in **15-20**, against a header that set the
 ///   `0x20` DEFAULT_PRIORITY bit and omitted the field. The key is `None`, and
 ///   a rule keyed on a field the header does not carry never matches, so
 ///   the objects fall to the default row,
@@ -4842,9 +4849,9 @@ async fn priority_class_run(
 /// every rule that failed to match, which would make the report noise. The
 /// second alone would pass against one that never reported at all.
 ///
-/// # Where the partition is, and why it is not 17-19
+/// # Where the partition is, and why it is not 17-20
 ///
-/// `publisher_priority` is `Option<u8>` on Draft15 **through** Draft19 and
+/// `publisher_priority` is `Option<u8>` on Draft15 **through** Draft20 and
 /// `Some(_)` on 07-14 (`dispatch.rs:381-394`). A revision that
 /// drew the line at 17 would leave drafts 15 and 16 unexercised on both
 /// sides — and 15 and 16 are exactly where the acceptance case
@@ -4853,11 +4860,11 @@ async fn priority_class_run(
 ///
 /// The `None` is reached through a bit in the **stream type byte** and not
 /// through a value of the priority field: see [`DEFAULT_PRIORITY_BIT`]. A
-/// priority byte of `0x80` decodes as `Some(128)` on all thirteen drafts, so
+/// priority byte of `0x80` decodes as `Some(128)` on all fourteen drafts, so
 /// a fixture that tried to produce `None` by choosing a byte value would be
 /// testing nothing at all and would pass.
 ///
-/// # Two drafts, not thirteen
+/// # Two drafts, not fourteen
 ///
 /// A 13-draft QUIC sweep measures 4.7-5.0 s, eight times the 600 ms
 /// per-gate budget. The full sweep belongs in a calibration run on a quiet
@@ -4873,7 +4880,7 @@ async fn priority_class_run(
 /// `Matcher::matches`, replace the priority arm's `Some(p) if ...` /
 /// `_ => return false` pair with
 /// `if !range.contains(&meta.publisher_priority.unwrap_or(128))`. The 07-14
-/// half is unaffected — its key is present — and the 15-19 half reddens
+/// half is unaffected — its key is present — and the 15-20 half reddens
 /// twice over: the class claims every object, so the default row is empty,
 /// and the impairment never fires. It reports the second first, because the
 /// report is what an author would have read:

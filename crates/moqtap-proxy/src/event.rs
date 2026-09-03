@@ -744,7 +744,7 @@ pub enum ImpairmentKind {
     /// call for opposite conclusions. It is not a per-draft hazard: a
     /// Message Type the configured draft does not assign, a frame whose
     /// body does not match its declared length, and anything an extension
-    /// adds all take the same path on all thirteen drafts.
+    /// adds all take the same path on all fourteen drafts.
     ///
     /// # Cardinality: at most once per control stream direction
     ///

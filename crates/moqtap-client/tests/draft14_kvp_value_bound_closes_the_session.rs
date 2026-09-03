@@ -26,7 +26,7 @@
 //! where the gate belongs.
 //!
 //! The other seven are shared verbatim with drafts 11, 12 and 13 — the finditer
-//! sweep across all thirteen drafts found the same eight sentences in all four —
+//! sweep across all fourteen drafts found the same eight sentences in all four —
 //! so a gate on any one of them would say the same thing four times.
 //!
 //! # Why the frame is built by hand

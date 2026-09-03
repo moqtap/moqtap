@@ -43,10 +43,11 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
-/// The four gates each of drafts 15 to 19 gets, and the one thing that differs
+/// The four gates each of drafts 15 to 20 gets, and the one thing that differs
 /// between them: draft-17 puts a Required Request ID Delta on every request.
 ///
 /// Gated on the same five, because a build with draft-14 alone reaches the
@@ -57,10 +58,21 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 macro_rules! fetch_group_order_gates {
-    ($draft:ident, $variant:ident, $version:expr $(, $extra:ident : $extra_value:expr)?) => {
+    (
+        $draft:ident, $variant:ident, $version:expr,
+        // The fields that locate the track in this draft's FETCH, spelled by
+        // the caller. Drafts 15-19 put them inside a Standalone Fetch behind a
+        // Fetch Type; draft-20 deleted both and made them inline fields of the
+        // message (Section 10.13). The rule under test is the same either way
+        // — a FETCH's GROUP_ORDER parameter settles its Group Order — so the
+        // shape is a parameter rather than a reason for a second macro.
+        fetch { $($fetch_field:ident : $fetch_value:expr),* $(,)? }
+        $(, $extra:ident : $extra_value:expr)?
+    ) => {
         use moqtap_codec::dispatch::{AnyControlMessage, AnyFetchGroupOrder};
         use moqtap_codec::$draft::message::*;
         use moqtap_codec::kvp::{KeyValuePair, KvpValue};
@@ -89,15 +101,7 @@ macro_rules! fetch_group_order_gates {
             ControlMessage::Fetch(Fetch {
                 request_id: varint(REQUEST),
                 $($extra: $extra_value,)?
-                fetch_type: FetchType::Standalone,
-                fetch_payload: FetchPayload::Standalone {
-                    track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
-                    track_name: b"t".to_vec(),
-                    start_group: varint(0),
-                    start_object: varint(0),
-                    end_group: varint(1),
-                    end_object: varint(0),
-                },
+                $($fetch_field: $fetch_value,)*
                 parameters,
             })
         }
@@ -240,12 +244,42 @@ macro_rules! fetch_group_order_gates {
 
 #[cfg(feature = "draft15")]
 mod draft15 {
-    fetch_group_order_gates!(draft15, Draft15, moqtap_codec::version::DraftVersion::Draft15);
+    fetch_group_order_gates!(
+        draft15,
+        Draft15,
+        moqtap_codec::version::DraftVersion::Draft15,
+        fetch {
+            fetch_type: FetchType::Standalone,
+            fetch_payload: FetchPayload::Standalone {
+                track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+                track_name: b"t".to_vec(),
+                start_group: varint(0),
+                start_object: varint(0),
+                end_group: varint(1),
+                end_object: varint(0),
+            },
+        }
+    );
 }
 
 #[cfg(feature = "draft16")]
 mod draft16 {
-    fetch_group_order_gates!(draft16, Draft16, moqtap_codec::version::DraftVersion::Draft16);
+    fetch_group_order_gates!(
+        draft16,
+        Draft16,
+        moqtap_codec::version::DraftVersion::Draft16,
+        fetch {
+            fetch_type: FetchType::Standalone,
+            fetch_payload: FetchPayload::Standalone {
+                track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+                track_name: b"t".to_vec(),
+                start_group: varint(0),
+                start_object: varint(0),
+                end_group: varint(1),
+                end_object: varint(0),
+            },
+        }
+    );
 }
 
 #[cfg(feature = "draft17")]
@@ -254,18 +288,73 @@ mod draft17 {
         draft17,
         Draft17,
         moqtap_codec::version::DraftVersion::Draft17,
+    fetch {
+        fetch_type: FetchType::Standalone,
+        fetch_payload: FetchPayload::Standalone {
+            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+            track_name: b"t".to_vec(),
+            start_group: varint(0),
+            start_object: varint(0),
+            end_group: varint(1),
+            end_object: varint(0),
+        },
+    },
         required_request_id_delta: varint(0)
     );
 }
 
 #[cfg(feature = "draft18")]
 mod draft18 {
-    fetch_group_order_gates!(draft18, Draft18, moqtap_codec::version::DraftVersion::Draft18);
+    fetch_group_order_gates!(
+        draft18,
+        Draft18,
+        moqtap_codec::version::DraftVersion::Draft18,
+        fetch {
+            fetch_type: FetchType::Standalone,
+            fetch_payload: FetchPayload::Standalone {
+                track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+                track_name: b"t".to_vec(),
+                start_group: varint(0),
+                start_object: varint(0),
+                end_group: varint(1),
+                end_object: varint(0),
+            },
+        }
+    );
 }
 
 #[cfg(feature = "draft19")]
 mod draft19 {
-    fetch_group_order_gates!(draft19, Draft19, moqtap_codec::version::DraftVersion::Draft19);
+    fetch_group_order_gates!(
+        draft19,
+        Draft19,
+        moqtap_codec::version::DraftVersion::Draft19,
+        fetch {
+            fetch_type: FetchType::Standalone,
+            fetch_payload: FetchPayload::Standalone {
+                track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+                track_name: b"t".to_vec(),
+                start_group: varint(0),
+                start_object: varint(0),
+                end_group: varint(1),
+                end_object: varint(0),
+            },
+        }
+    );
+}
+
+#[cfg(feature = "draft20")]
+mod draft20 {
+    // Draft-20's FETCH names the track inline: no Fetch Type, no Standalone
+    // Fetch, and no inline range — that travels in LOCATION_FILTER now
+    // (Section 10.13). GROUP_ORDER still settles the fetch's Group Order, so
+    // every assertion the macro makes carries over unchanged.
+    fetch_group_order_gates!(
+        draft20,
+        Draft20,
+        moqtap_codec::version::DraftVersion::Draft20,
+        fetch { track_namespace: TrackNamespace(vec![b"ns".to_vec()]), track_name: b"t".to_vec() }
+    );
 }
 
 /// The cohort whose FETCH does not settle the order on its own.

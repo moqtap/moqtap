@@ -17,9 +17,9 @@
 //! value's own and the message's declared Length, and both are recomputed here
 //! rather than copied from anywhere.
 //!
-//! Every draft from 11 to 19 frames a control message the same way: a type as a
+//! Every draft from 11 to 20 frames a control message the same way: a type as a
 //! varint, a 16-bit big-endian Length, then the body. That is what makes one
-//! function enough for all nine.
+//! function enough for all ten.
 //!
 //! The value has to be the last thing in the frame, which for a parameter means
 //! the last parameter of a message whose parameters come last. That is asserted

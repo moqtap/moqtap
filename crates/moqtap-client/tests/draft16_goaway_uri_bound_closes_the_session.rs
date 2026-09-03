@@ -9,7 +9,7 @@
 //! written, a survey reported that drafts 15 and 16 stated no maximum for the
 //! field and that draft-17 introduced one, so the entry was left out
 //! deliberately and the reasoning was written down in three places. The survey
-//! was wrong: the sentence above is in every draft from 11 to 19, and only 07
+//! was wrong: the sentence above is in every draft from 11 to 20, and only 07
 //! through 10 are without it. Drafts 15 and 16 refused the frame and left the
 //! session open over a rule they state as plainly as their neighbours.
 //!

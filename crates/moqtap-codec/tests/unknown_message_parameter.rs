@@ -23,7 +23,7 @@
 //! # One namespace, not two
 //!
 //! The narrowing is what makes this a rule about Message Parameters alone. Every
-//! draft from 16 to 19 still says a receiver ignores an unrecognised Setup
+//! draft from 16 to 20 still says a receiver ignores an unrecognised Setup
 //! Option or Setup Parameter, so an unknown type in a SETUP is carried on
 //! exactly the drafts where an unknown type anywhere else ends the session. A
 //! codec that applied one rule to both namespaces would close sessions over the
@@ -39,7 +39,7 @@
 //! that says the list is the draft's and not the one this codec happened to
 //! need.
 
-#![cfg(any(feature = "draft15", feature = "draft16", feature = "draft19"))]
+#![cfg(any(feature = "draft15", feature = "draft16", feature = "draft19", feature = "draft20"))]
 
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 use moqtap_codec::varint::VarInt;
@@ -252,6 +252,76 @@ mod draft16 {
 mod draft19 {
     use super::{extension_parameter, varint, AN_EXTENSION_TYPE};
     use moqtap_codec::draft19::message::*;
+    use moqtap_codec::error::CodecError;
+    use moqtap_codec::kvp::KeyValuePair;
+    use moqtap_codec::types::*;
+
+    fn roundtrip(message: &ControlMessage) -> Result<ControlMessage, CodecError> {
+        let mut buf = Vec::new();
+        message.encode(&mut buf).expect("the encoder writes the parameters it is given");
+        ControlMessage::decode(&mut &buf[..])
+    }
+
+    fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: varint(1),
+            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+            track_name: b"t".to_vec(),
+            parameters,
+        })
+    }
+
+    /// The newest draft states the rule in the same words and answers the same
+    /// way.
+    ///
+    /// Draft-19 goes further than draft-16 about why: "Because unknown
+    /// parameters cannot be skipped, the block is bounded by a parameter count
+    /// rather than a length." The framing itself assumes every type is known, so
+    /// there is nowhere for an unknown one to go.
+    ///
+    /// Reporting this as an ordinary malformation instead — which is what it did
+    /// before it had a variant — fails with:
+    ///
+    /// ```text
+    /// a type this draft does not define was not named as unknown:
+    /// Err(InvalidField)
+    /// ```
+    #[test]
+    fn an_unknown_message_parameter_is_refused() {
+        let got = roundtrip(&subscribe(vec![extension_parameter()]));
+        assert!(
+            matches!(got, Err(CodecError::UnknownMessageParameter(AN_EXTENSION_TYPE))),
+            "a type this draft does not define was not named as unknown: {got:?}",
+        );
+    }
+
+    /// A Setup Option this draft does not name is still carried.
+    ///
+    /// Section 10.3: "Receivers MUST ignore unrecognized Setup Options." The
+    /// namespaces have not converged; only the message one closes.
+    ///
+    /// Applying the message-namespace rule to setup options fails with:
+    ///
+    /// ```text
+    /// assertion `left == right` failed: an unrecognised Setup Option must be
+    /// ignored, not refused: Err(UnknownMessageParameter(65))
+    /// ```
+    #[test]
+    fn an_unknown_setup_option_is_carried() {
+        let message = ControlMessage::Setup(Setup { options: vec![extension_parameter()] });
+        let back = roundtrip(&message);
+        assert_eq!(
+            back.as_ref().ok(),
+            Some(&message),
+            "an unrecognised Setup Option must be ignored, not refused: {back:?}",
+        );
+    }
+}
+
+#[cfg(feature = "draft20")]
+mod draft20 {
+    use super::{extension_parameter, varint, AN_EXTENSION_TYPE};
+    use moqtap_codec::draft20::message::*;
     use moqtap_codec::error::CodecError;
     use moqtap_codec::kvp::KeyValuePair;
     use moqtap_codec::types::*;

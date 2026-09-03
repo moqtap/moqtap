@@ -511,7 +511,7 @@ mod extensions_beside_a_non_normal_status {
     /// broader than the rule drafts 11 through 14 state — there it is Object
     /// Does Not Exist alone, and extensions beside End of Group stay legal.
     /// That difference is deliberate: those drafts refuse the narrow form on
-    /// decode, and drafts 15 through 19 report the broad one instead.
+    /// decode, and drafts 15 through 20 report the broad one instead.
     ///
     /// The frame is well formed: every length is honest and every field parses.
     /// What makes it a violation is what it says, not how it is framed, so the

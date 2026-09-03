@@ -1,6 +1,6 @@
 //! The Key-Value-Pair value maximum, on the side that writes.
 //!
-//! Every draft from 11 to 19 states it of the Length field, in the same words:
+//! Every draft from 11 to 20 states it of the Length field, in the same words:
 //! "The maximum length of a value is 2^16-1 bytes. If an endpoint receives a
 //! length larger than the maximum, it MUST close the session with a Protocol
 //! Violation." Drafts 16 and later spell the code `PROTOCOL_VIOLATION` and
@@ -25,14 +25,14 @@
 //! What differs is which of the two rules the error names, and the drafts name
 //! them separately. Before the writer applied the value rule, drafts 11 through
 //! 15 built the whole payload and reported the message rule, while drafts 16
-//! through 19 reported the value rule from inside their own parameter encoders —
-//! a difference in the codec, on a sentence the nine drafts share word for word.
-//! The gates below are the same defect put to all nine, and they read the error,
+//! through 20 reported the value rule from inside their own parameter encoders —
+//! a difference in the codec, on a sentence the ten drafts share word for word.
+//! The gates below are the same defect put to all ten, and they read the error,
 //! not just the refusal.
 //!
-//! # Why drafts 17, 18 and 19 are driven through both of their namespaces
+//! # Why drafts 17 through 20 are driven through both of their namespaces
 //!
-//! Those three keep two parameter encoders, and until this was gated only one of
+//! Those four keep two parameter encoders, and until this was gated only one of
 //! them applied the maximum. Setup Options take their value shape from the
 //! type's parity and have bounded the value all along; Message Parameters take
 //! theirs from a table, and that encoder wrote a value of any length at all,
@@ -61,7 +61,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 use moqtap_codec::varint::VarInt;
@@ -77,7 +78,7 @@ fn varint(v: u64) -> VarInt {
 #[allow(dead_code)]
 const AN_UNASSIGNED_ODD_TYPE: u64 = 0x0b;
 
-/// One byte past the maximum the nine drafts state.
+/// One byte past the maximum the ten drafts state.
 #[allow(dead_code)]
 const PAST_THE_MAXIMUM: usize = 65536;
 
@@ -409,4 +410,26 @@ mod draft19 {
     }
 
     kvp_value_maximum_gates!(draft19, subscribe, setup);
+}
+
+#[cfg(feature = "draft20")]
+mod draft20 {
+    use moqtap_codec::draft20::message::*;
+    use moqtap_codec::kvp::KeyValuePair;
+    use moqtap_codec::types::*;
+
+    fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: super::varint(1),
+            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+            track_name: b"t".to_vec(),
+            parameters,
+        })
+    }
+
+    fn setup(options: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Setup(Setup { options })
+    }
+
+    kvp_value_maximum_gates!(draft20, subscribe, setup);
 }

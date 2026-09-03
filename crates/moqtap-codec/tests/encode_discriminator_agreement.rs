@@ -46,6 +46,17 @@
 //! a reason to leave it unasked: two of the first eight refused it already too,
 //! and that is exactly what made the other six worth looking at.
 //!
+//! **Draft-20 ends the range, and it is worth saying why rather than leaving a
+//! gap in the numbering.** Section 10.13 deleted the Fetch Type field along
+//! with the Standalone Fetch and Joining Fetch structures it chose between, so
+//! a draft-20 FETCH has one shape and no discriminator at all — there is
+//! nothing for a suite here to move. The one discriminator draft-20 still has
+//! is REQUEST_ERROR's Error Code, which puts a Redirect body on the wire under
+//! code 0x34, and `late_draft_rule_coverage.rs` drives that on draft-20 in
+//! both directions. This file's crate gate deliberately stops at draft-19: a
+//! build enabling only draft-20 compiles it away entirely rather than leaving
+//! an empty suite behind.
+//!
 //! Draft-07 is the other end of the same asymmetry: it has no FETCH message at
 //! all, so it is the one draft here driven by two gates rather than three.
 

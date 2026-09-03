@@ -33,17 +33,14 @@
 pub mod connection;
 /// Unified endpoint state machine orchestrating all MoQT protocol flows.
 pub mod endpoint;
-/// Client event types emitted via the observer.
 pub mod event;
 /// Fetch lifecycle state machine.
 pub mod fetch;
 /// Announce / SubscribeAnnounces state machines.
 pub mod namespace;
-/// Connection observer trait for receiving client events.
 pub mod observer;
 /// Lifecycle of a subscription a peer opened with PUBLISH.
 pub mod publish;
-/// Session state, setup validation, and request ID allocation.
 pub mod session;
 /// Subscription lifecycle state machine.
 pub mod subscription;

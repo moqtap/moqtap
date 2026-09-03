@@ -6,11 +6,11 @@
 //!
 //! # Why this draft has a gate of its own
 //!
-//! Five drafts state this rule and the client carries five separate copies of
+//! Six drafts state this rule and the client carries six separate copies of
 //! the check, one per draft module. Copies drift, and the drift is invisible
 //! from inside a single draft: every layer there agrees with itself. Draft-17 is
 //! where the vocabulary changes — 15 and 16 call the block extension headers,
-//! 17 through 19 call it properties — so it is the first draft on the later side
+//! 17 through 20 call it properties — so it is the first draft on the later side
 //! of a rename that touched the variant name, the error text and the section
 //! number all at once. A gate on draft-19 alone would not notice draft-17
 //! keeping the old spelling, or losing the check entirely.

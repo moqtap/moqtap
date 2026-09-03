@@ -10,7 +10,7 @@
 //! `DataStreamHeader` cannot carry one: its `header` field is an
 //! `AnySubgroupHeader`. `ClientEvent::FetchStreamHeader` is the variant for
 //! this — typed `AnyFetchHeader`, documented "A fetch response stream header
-//! was decoded", defined on all thirteen drafts since this crate's first
+//! was decoded", defined on all fourteen drafts since this crate's first
 //! release, and emitted by nothing in any commit before this gate. A consumer
 //! writing a trace from these events recorded a header for every subgroup
 //! stream and none for a fetch stream, while recording the objects on both.
@@ -193,7 +193,8 @@ async fn accepting_a_fetch_stream_reports_the_header_it_decoded() {
             feature = "draft16",
             feature = "draft17",
             feature = "draft18",
-            feature = "draft19"
+            feature = "draft19",
+            feature = "draft20"
         ))]
         other => panic!("expected a draft-14 fetch header, got {other:?}"),
     }
@@ -249,7 +250,8 @@ async fn accepting_a_fetch_stream_reports_the_header_it_decoded() {
             feature = "draft16",
             feature = "draft17",
             feature = "draft18",
-            feature = "draft19"
+            feature = "draft19",
+            feature = "draft20"
         ))]
         other => panic!("expected a draft-14 fetch header on the event, got {other:?}"),
     }

@@ -33,7 +33,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 mod common;
@@ -85,6 +86,8 @@ const CANDIDATE_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The draft the session fixture is configured for. The file-level gate is

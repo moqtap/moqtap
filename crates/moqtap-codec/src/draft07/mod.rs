@@ -32,8 +32,9 @@
 //! - The FETCH message has no Fetch Type, so there is no Joining Fetch.
 /// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
-/// Session termination, SUBSCRIBE_ERROR and SUBSCRIBE_DONE code registries.
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 /// Control message types with encode/decode.
 pub mod message;
 /// Draft-07 specific types (Role, ObjectStatus).

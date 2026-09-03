@@ -211,19 +211,24 @@ where the rendering has `&lt;`, `&gt;` or `&amp;`. Nothing ever failed over it,
 which is the shape of the defect rather than a defence of it: what this hits are
 the drafts' most formal sentences — the comparisons, the bit masks written as
 expressions, the structure diagrams — so a round that wanted one paraphrased it
-instead and no report was ever made. 260 of the 19,078 sentences across the
-thirteen renderings carry one, and the count climbs with the draft number: 10 on
-draft-07 and 35 on each of drafts 18 and 19.
+instead and no report was ever made. 300 of the 21,287 sentences across drafts
+07-20 carry one, and the count climbs with the draft number: 10 on draft-07, 35
+on each of drafts 18 and 19, 40 on draft-20. A sentence here is the rendering
+with its stylesheet dropped, tags stripped, entities unescaped and the text split
+on `[.!?]` followed by whitespace; the method is stated because dropping the
+stylesheet is worth 5 a draft and nothing else reproduces the count.
 
 **The fix softens the comparison and not the input, and that is measured rather
 than preferred.** The obvious alternative is to unescape each rendering once at
 load, the way `toc_of` already does for a heading — but `toc_of` strips the tags
 *first*, and these rules keep them on purpose so the separator can step over
 markup. Unescape first and a literal `<` in the text is the start of a tag as
-far as the separator can tell. Doing it loses text on all thirteen drafts, 20 to
-22 characters each, and the first casualty in every one of them is the same: a
-bibliography entry whose URL the rendering wraps in `&lt;` and `&gt;`, swallowed
-whole as though it were a tag.
+far as the separator can tell. Doing it loses text on every draft — 10
+characters on draft-07, 100 on draft-11, 596 on draft-20 — and what it loses is
+the point: on drafts 07 through 10 the first span swallowed is a bibliography
+entry whose URL the rendering wraps in `&lt;` and `&gt;`, but from draft-11 on
+it is the Location ordering comparison itself, which is exactly the kind of
+sentence a quotation wants.
 
 Ablated by taking the alternation back out, with the Location ordering rule
 quoted in drafts 12 and 13: rule 3 goes from 5 unresolved to 7 and the run exits
@@ -234,11 +239,19 @@ never take one away.
 
 ## Needs the rendered drafts, and fails closed without them
 
-The thirteen renderings live in a sibling repository, `../site/spec-sources/`.
-There is no read grant for it from CI, so this runs locally rather than in a
-workflow. If the renderings are not where it looks, it says so and exits 1: an
-unverifiable citation is not a verified one. Point it elsewhere with
-`--drafts DIR`.
+One rendering per draft the tree implements, read from `../site/spec-sources/`
+by default and from anywhere else with `--drafts DIR`. Which drafts those are
+is derived rather than declared - see `implemented_drafts` - so the set grows
+with the tree and a missing rendering stops the run instead of narrowing it. If
+they are not where it looks, it says so and exits 1: an unverifiable citation is
+not a verified one.
+
+`--fetch` downloads whatever `--drafts` does not already hold, from the IETF
+archive, where these are published and where anyone can read them. Only the
+missing ones: a published draft's bytes do not change, and re-downloading one
+would replace the rendering a citation was checked against with a re-render of
+it for no gain. That is what lets this run in CI with no credential and no
+sibling checkout.
 """
 
 import argparse
@@ -251,10 +264,141 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DEFAULT_DRAFTS = os.path.join(os.path.dirname(ROOT), "site", "spec-sources")
-DRAFTS = list(range(7, 20))
 
 SKIP_DIRS = (".git", "target", "test-vectors")
+
+# Crates whose prose is not resolved against the MoQT drafts at all.
+#
+# `moqtap-trace` implements the `.moqtrace` recording format, not MoQT. Its
+# normative sentences come from that format's own specification, which we
+# control and which moves when our code moves. The drafts are the opposite
+# case, and that difference is the whole reason these rules exist: the drafts
+# are edited by other people on their own schedule, so a sentence quoted from
+# one goes stale underneath us and nothing but a machine re-reading it will
+# notice. A spec that cannot change without us changing it needs no such guard.
+#
+# Rule 5's answer for this crate was worse than no answer. It reads every long
+# normative quotation in a draft-neutral file as a draft's sentence, resolves it
+# against 07-20, and reports a true statement as "wrong whichever one was
+# meant" - five of them, from the format's own encoding rules. Attribution
+# cannot silence that, because the rule never asks who was cited; it asks only
+# whether some draft has the span.
+#
+# Measured when this was added: the crate held no draft citation of any kind -
+# no `draft-NN Section X.Y`, no bare `Section X.Y` - so nothing that was being
+# checked stopped being checked. A crate added later is scanned by default and
+# has to be named here to opt out.
+NOT_DRAFT_SCANNED = ("moqtap-trace",)
 PER_DRAFT_DIR = re.compile(r"/draft(\d\d)/")
+
+# A test file carries its draft in its own name rather than in a directory, and
+# a name that opens with two of them carries neither: `draft16_17_...` is a file
+# about the pair, so a rule that read it as draft-16's would hold draft-17's
+# half of every comparison against the wrong rendering. Those go to the neutral
+# set, where the question asked is the one they can answer - that the sentence
+# is *some* draft's.
+PER_DRAFT_FILE = re.compile(r"^draft(\d\d)_(?!\d\d_)")
+
+# The drafts to read, taken from the tree rather than written down.
+#
+# This was `list(range(7, 20))` until a fourteenth draft landed in the codec,
+# and the shape of that mistake is worth keeping in view. Every guard below
+# asks `in DRAFTS` and *drops* what it cannot place rather than reporting it,
+# so a citation naming the new draft was not an unresolved citation - it was
+# not a citation at all. Rules 1, 3, 4 and 6 went on printing the same counts
+# over a tree that had grown a draft, an open-ended range resolved to one draft
+# short of the end, and every `tests/draftNN_*.rs` for it was read by nothing.
+# The one guard that did not fail silently is what made the rest visible:
+# `rule_1_and_2` resolves a bare `Section X.Y` against `tocs[own]`, where `own`
+# comes from the directory name and never from this list, so it died with a
+# `KeyError` instead of under-reporting.
+#
+# Deriving it closes the gap by construction. The set loaded here is the set
+# `owning_draft` can name, so a per-draft file cannot exist without a rendering
+# to be read against, and a new draft module brings its citations into the
+# sweep on the day it lands rather than on the day someone remembers this line.
+# `load_drafts` is what makes the coupling hold - it exits 1 naming the
+# rendering it could not open, so a draft the tree has and `--drafts` does not
+# stops the run rather than quietly narrowing it.
+#
+# # The floor was the last written-down draft number, and it had already lapsed
+#
+# A derivation that can grow can also shrink, and shrinking is the silent
+# direction: every guard above passes more, no count moves, and the rules that
+# no longer reach a draft report nothing at all. So the derived set is held
+# against a floor - and the floor was `frozenset(range(7, 20))`, a hand-written
+# range that stopped at draft-19 while the tree had fourteen drafts. It was
+# still doing its job, because a floor only has to be a *lower* bound, but it
+# was doing it one draft behind, and the day somebody deleted `src/draft20/`
+# nothing here would have said so. That is the same defect one paragraph up,
+# written into the guard against it.
+#
+# `declared_drafts` is the fix and it is the same fix: read the floor off the
+# tree too, from a place that is not the one the set above is read from. The
+# manifests declare a `draftNN` cargo feature per draft; the modules and test
+# files are what `implemented_drafts` walks. Two independent statements of one
+# set, each of which has to account for the other, and no number to bump. A
+# module deleted while its feature stands is reported here; a feature declared
+# with no module behind it is reported here as well, which is the direction a
+# half-finished draft arrives from.
+#
+# The other direction - a module or a `DraftVersion` variant with no feature -
+# is `scripts/check-draft-parity.py` rule 1, which reads five statements of
+# this same set and requires all of them to agree.
+
+DRAFT_DIR_NAME = re.compile(r"^draft(\d\d)$")
+DRAFT_FEATURE_KEY = re.compile(r'^\s*draft(\d\d)\s*=\s*\[', re.M)
+
+
+def declared_drafts(root):
+    """Every draft the crate manifests declare a cargo feature for."""
+    found = set()
+    crates = os.path.join(root, "crates")
+    for crate in sorted(os.listdir(crates)):
+        manifest = os.path.join(crates, crate, "Cargo.toml")
+        if not os.path.isfile(manifest):
+            continue
+        text = io.open(manifest, encoding="utf-8", errors="replace").read()
+        found.update(int(m.group(1)) for m in DRAFT_FEATURE_KEY.finditer(text))
+    return found
+
+
+def implemented_drafts(root):
+    """Every draft this workspace files a module or a test file under."""
+    found = set()
+    crates = os.path.join(root, "crates")
+    for crate in sorted(os.listdir(crates)):
+        for sub in ("src", "tests"):
+            for where, dirs, files in os.walk(os.path.join(crates, crate, sub)):
+                dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+                for name in dirs:
+                    m = DRAFT_DIR_NAME.match(name)
+                    if m:
+                        found.add(int(m.group(1)))
+                for name in files:
+                    m = PER_DRAFT_FILE.match(name) if name.endswith(".rs") else None
+                    if m:
+                        found.add(int(m.group(1)))
+    declared = declared_drafts(root)
+    if not declared:
+        print("::error::no crate manifest under crates/ declares a `draftNN` "
+              "feature. The floor for the set read off the tree is read off the "
+              "manifests, and there is nothing there to read - which is a moved "
+              "layout rather than a workspace with no drafts.")
+        sys.exit(1)
+    missing = declared - found
+    if missing:
+        print("::error::no per-draft module or test file under crates/ for %s, "
+              "which the crate manifests declare a feature for. This set is read "
+              "off the tree, so a renamed or deleted directory narrows every rule "
+              "below without moving a count. If a draft has really been dropped, "
+              "drop its cargo feature in the same commit."
+              % ", ".join("draft-%02d" % n for n in sorted(missing)))
+        sys.exit(1)
+    return sorted(found)
+
+
+DRAFTS = implemented_drafts(ROOT)
 
 # ---------------------------------------------------------------------------
 # Comment text, joined
@@ -482,19 +626,34 @@ ANY_MARK = "[%s]" % QUOTE_MARK
 # being in no draft at all. The sentences this hits are the drafts' most formal
 # ones - the comparisons, the bit masks written as expressions, the structure
 # diagrams - which is to say exactly the material that leaves the least room for
-# paraphrase. 260 of the 19,078 sentences across the thirteen renderings carry
-# one, and the count climbs with the draft number: 10 on draft-07 and 35 on each
-# of drafts 18 and 19.
+# paraphrase. 300 of the 21,287 sentences across drafts 07-20 carry one, and the
+# count climbs with the draft number: 10 on draft-07, 35 on each of drafts 18 and
+# 19, 40 on draft-20.
+#
+# Re-derived on 2026-09-02 rather than extended by a draft, because the figure it
+# replaces could not be reproduced until its method was: sentences are the
+# rendering with `<style>` and `<script>` contents dropped, tags stripped,
+# entities unescaped, whitespace collapsed, split on `[.!?]` followed by
+# whitespace. Dropping the stylesheet is the part that matters — four CSS blocks
+# per draft otherwise count as sentences carrying an escape, which is 5 a draft
+# and the whole of the difference between 300 and the 365 a naive count gives.
 #
 # # Why not unescape the rendering once and be done with it
 #
 # Because the separator above skips `<...>` to step over markup, and a literal
 # `<` in the text is then the start of a tag as far as it can tell. Measured
-# rather than supposed: unescaping first and stripping tags afterwards loses
-# text on all thirteen drafts, 20 to 22 characters each, and the first casualty
-# in every one of them is a bibliography entry - a URL the rendering wraps in
-# `&lt;` and `&gt;`, which becomes a tag and is swallowed whole. Softening the
-# comparison is safe where softening the input is not.
+# rather than supposed: `len(unescape(strip(r))) - len(strip(unescape(r)))` is
+# the text the second order loses, and it is positive on every draft and grows
+# with the draft number - 10 characters on draft-07, 100 on draft-11, 596 on
+# draft-20.
+#
+# What is lost matters more than how much. On drafts 07 through 10 the first
+# span swallowed is a bibliography entry, a URL the rendering wraps in `&lt;`
+# and `&gt;`, which becomes a tag and is eaten whole. From draft-11 on it is the
+# Location ordering comparison itself - `A.Group < B.Group || (A.Group ==
+# B.Group && ...)` - and that is a sentence a quotation is far more likely to
+# want than a bibliography entry. The cost of softening the input rises exactly
+# where the drafts get more formal. Softening the comparison instead is safe.
 ESCAPED_AS = {"<": "&lt;", ">": "&gt;", "&": "&amp;"}
 
 
@@ -524,8 +683,43 @@ def phrase(t):
     return SEP.join(token_pattern(w) for w in TOKEN.findall(t))
 
 
-def load_drafts(where):
+# Where the renderings are published. These are Internet-Drafts at the IETF
+# archive, readable by anyone and immutable once published, so `--fetch` needs
+# no credential and no sibling checkout. The same URL and the same idea are in
+# `crates/moqtap-codec/tools/extract-registries.py`, which is the other tool
+# that reads these files; keeping the two spellings identical is deliberate.
+SPEC_URL = "https://www.ietf.org/archive/id/draft-ietf-moq-transport-%02d.html"
+USER_AGENT = "moqtap check-drafts"
+
+
+def fetch_missing(where, numbers):
+    """Download any draft in `numbers` that `where` does not already hold.
+
+    Only what is missing, because a published draft's bytes do not change and
+    re-downloading one would only risk replacing a rendering the tree's
+    citations were checked against with a re-render of it.
+    """
+    import urllib.request
+
+    if not os.path.isdir(where):
+        os.makedirs(where)
+    for n in numbers:
+        path = os.path.join(where, "draft-%02d.html" % n)
+        if os.path.isfile(path):
+            continue
+        url = SPEC_URL % n
+        print("fetching %s" % url, file=sys.stderr)
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            body = response.read()
+        with io.open(path, "wb") as f:
+            f.write(body)
+
+
+def load_drafts(where, fetch=False):
     """`{draft number: rendering}`, or exit 1 saying what is missing."""
+    if fetch:
+        fetch_missing(where, DRAFTS)
     out = {}
     missing = []
     for n in DRAFTS:
@@ -537,8 +731,9 @@ def load_drafts(where):
     if missing:
         print("::error::the rendered drafts are not in %s (missing %s). This "
               "cannot check a citation it cannot read, and an unverifiable "
-              "citation is not a verified one. Pass --drafts DIR to point it "
-              "somewhere else." % (where, ", ".join(missing)))
+              "citation is not a verified one. Pass --fetch to download them "
+              "from the IETF archive, or --drafts DIR to point it somewhere "
+              "else." % (where, ", ".join(missing)))
         sys.exit(1)
     return out
 
@@ -601,9 +796,16 @@ def citation_spans(text):
 
 
 def rust_and_markdown(root):
-    """Every `.rs` and `.md` under `crates/`, with the crates that are not ours skipped."""
-    for base, dirs, files in os.walk(os.path.join(root, "crates")):
+    """Every `.rs` and `.md` under `crates/`, less the crates that cite no draft.
+
+    {@link NOT_DRAFT_SCANNED} is filtered at the top level only, so it names a
+    crate rather than any directory that happens to share the name.
+    """
+    crates = os.path.join(root, "crates")
+    for base, dirs, files in os.walk(crates):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        if base == crates:
+            dirs[:] = [d for d in dirs if d not in NOT_DRAFT_SCANNED]
         for f in sorted(files):
             if f.endswith((".rs", ".md")):
                 yield os.path.join(base, f)
@@ -690,6 +892,16 @@ def rule_1_and_2(rendered, tocs, verbose):
     new_prefixed = [b for b in prefixed_bad if (b[0], b[1], b[2]) not in PREFIXED_FLOOR]
     new_bare = [b for b in bare_bad if (b[0], b[1], b[2]) not in BARE_FLOOR]
 
+    # Said on every run, because a crate quietly outside the scan is exactly
+    # the kind of gap these rules exist to make impossible. A reader comparing
+    # totals should be told what was not counted before they read a count.
+    if NOT_DRAFT_SCANNED:
+        # ASCII, like every other line printed unconditionally here. A console
+        # that cannot encode an em dash raises on the print rather than
+        # dropping the character, which would take the whole run down over a
+        # note. The verbose-only line below can afford one; this cannot.
+        print("        not scanned: %s (implements a format of ours, cites no draft)"
+              % ", ".join(NOT_DRAFT_SCANNED))
     print("rule 1  %5d prefixed citations, %d unresolved (floor %d)"
           % (prefixed_total, len(prefixed_bad), len(PREFIXED_FLOOR)))
     print("rule 2  %5d bare citations in per-draft files, %d unresolved (floor %d)"
@@ -797,15 +1009,14 @@ def quotations_in(block):
         yield q
 
 
-# A test file carries its draft in its own name rather than in a directory, and
-# a name that opens with two of them carries neither: `draft16_17_...` is a file
-# about the pair, so a rule that read it as draft-16's would hold draft-17's
-# half of every comparison against the wrong rendering. Those go to the neutral
-# set, where the question asked is the one they can answer - that the sentence
-# is *some* draft's.
-PER_DRAFT_FILE = re.compile(r"^draft(\d\d)_(?!\d\d_)")
+# `PER_DRAFT_FILE` is defined beside `PER_DRAFT_DIR` at the top, because the
+# two of them together are what `implemented_drafts` reads the draft set off.
 
-CRATES = ("moqtap-client", "moqtap-codec", "moqtap-proxy", "moqtap-trace")
+ALL_CRATES = ("moqtap-client", "moqtap-codec", "moqtap-proxy", "moqtap-trace")
+
+# Derived rather than written out, so a crate is scanned unless something says
+# otherwise and the reason it is not lives in one place.
+CRATES = tuple(c for c in ALL_CRATES if c not in NOT_DRAFT_SCANNED)
 
 
 def draft_of_test(name):
@@ -1208,8 +1419,8 @@ def rule_5(rendered, verbose):
     print("rule 5  %5d normative quotations in draft-neutral files, %d in no draft (floor 0)"
           % (checked, len(bad)))
     for where, q in bad:
-        print("::error::%s: this sentence is in none of the thirteen drafts, so "
-              "it is wrong whichever one was meant" % where)
+        print("::error::%s: this sentence is in none of drafts %02d-%02d, so it "
+              "is wrong whichever one was meant" % (where, DRAFTS[0], DRAFTS[-1]))
         print("          %s" % q[:150])
     return bool(bad)
 
@@ -1302,11 +1513,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--drafts", default=DEFAULT_DRAFTS,
                     help="directory holding draft-NN.html (default: %(default)s)")
+    ap.add_argument("--fetch", action="store_true",
+                    help="download any draft --drafts does not hold, from the "
+                         "IETF archive")
     ap.add_argument("--verbose", action="store_true",
                     help="also print why each floor member is a floor member")
     args = ap.parse_args()
 
-    rendered = load_drafts(args.drafts)
+    rendered = load_drafts(args.drafts, args.fetch)
     tocs = {n: toc_of(rendered[n]) for n in rendered}
 
     failed = rule_1_and_2(rendered, tocs, args.verbose)

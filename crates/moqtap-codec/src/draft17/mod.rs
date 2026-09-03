@@ -15,11 +15,10 @@
 
 #[allow(missing_docs)]
 pub mod data_stream;
-/// Session, request, publish-done and data-stream-reset code registries.
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 #[allow(missing_docs)]
-/// Control message types with encode/decode.
 pub mod message;
 #[allow(missing_docs)]
-/// Object status values for draft-17.
 pub mod types;

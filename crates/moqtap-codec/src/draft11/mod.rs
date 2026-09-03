@@ -7,11 +7,9 @@
 //! - Fetch gains 3 types (Standalone, RelativeJoining, AbsoluteJoining)
 //! - Framing: type_id(vi) + payload_length(16) + payload
 
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
-/// Session termination, per-message error and status codes.
 pub mod error_codes;
-/// Control message types with encode/decode.
+/// This draft's field names for a decoded control message.
+pub mod fields;
 pub mod message;
-/// Draft-11 types.
 pub mod types;

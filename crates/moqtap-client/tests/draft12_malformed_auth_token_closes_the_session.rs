@@ -13,7 +13,7 @@
 //! "If a receiver understands a Type, and the following Value or Length/Value
 //! does not match the serialization defined by that Type, the receiver MUST
 //! terminate the session with error code 'Key-Value Formatting Error'." Every
-//! draft from 11 to 19 carries that sentence, and every one of them numbers the
+//! draft from 11 to 20 carries that sentence, and every one of them numbers the
 //! code 0x6.
 //!
 //! # Why this is the one rule in the table with its own code

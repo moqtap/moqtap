@@ -7,5 +7,7 @@
 //! - `filter_type=1` (LatestGroup/NextGroupStart) removed from SUBSCRIBE
 pub mod data_stream;
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 pub mod message;
 pub mod types;

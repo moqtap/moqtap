@@ -30,7 +30,7 @@
 //! exactly for the codes in it. A table written out here would be a second
 //! copy free to drift from the enum it is meant to be pinning, and the sets
 //! genuinely differ: drafts 07-10 assign `0x5`, drafts 11-15 do not, and
-//! drafts 16-19 also drop `0x1`. So the same sweep accepts `0x1` on draft-15
+//! drafts 16-20 also drop `0x1`. So the same sweep accepts `0x1` on draft-15
 //! and refuses it on draft-16, from one body of code.
 //!
 //! # Accepting is not enough — the bytes are checked too
@@ -40,7 +40,7 @@
 //! encoder's own output through [`AnySubgroupObjectReader`] and requires the
 //! status to come back unchanged. Reading back through the draft-neutral
 //! reader rather than comparing hand-built bytes keeps one body of code
-//! correct for all thirteen drafts, whose object layouts differ; the exact
+//! correct for all fourteen drafts, whose object layouts differ; the exact
 //! byte layouts are pinned per draft by the inline tests in each
 //! `draftNN/data_stream.rs` and by the test vectors.
 //!
@@ -115,7 +115,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 use moqtap_codec::dispatch::{
@@ -245,3 +246,4 @@ draft_row!(draft16_object_status_through_the_encoder, "draft16", draft16, Draft1
 draft_row!(draft17_object_status_through_the_encoder, "draft17", draft17, Draft17);
 draft_row!(draft18_object_status_through_the_encoder, "draft18", draft18, Draft18);
 draft_row!(draft19_object_status_through_the_encoder, "draft19", draft19, Draft19);
+draft_row!(draft20_object_status_through_the_encoder, "draft20", draft20, Draft20);

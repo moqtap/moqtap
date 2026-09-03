@@ -1,18 +1,18 @@
-//! One datagram's identity, read the same way on all thirteen drafts.
+//! One datagram's identity, read the same way on all fourteen drafts.
 //!
 //! `AnyDatagramHeader::meta` is the draft-neutral answer to "what does this
 //! datagram say it is". The per-draft shapes behind it disagree about more
 //! than field order: drafts 07 through 13 carry a payload datagram and a
 //! status datagram as two different structs behind one enum, draft-14 merges
-//! them behind an optional field, and drafts 15 through 19 hang both the
+//! them behind an optional field, and drafts 15 through 20 hang both the
 //! status and the priority off bits in a type byte. A caller that wants a
 //! track alias off a datagram had otherwise to know which of those it was
 //! holding.
 //!
 //! # Why these run on the corpus
 //!
-//! The claim is that **one** call answers on thirteen shapes, and a fixture
-//! built here thirteen times is thirteen chances to build it in the shape the
+//! The claim is that **one** call answers on fourteen shapes, and a fixture
+//! built here fourteen times is fourteen chances to build it in the shape the
 //! code already has. The corpus's datagrams are bytes nothing in this crate
 //! produced, and each states its own decoded fields, so the comparison is
 //! against something written before this function existed.
@@ -23,7 +23,7 @@
 //! Drafts 07 and 08 declare a payload length and put the status field on the
 //! wire exactly when that length is zero, so a vector of theirs carries both
 //! `payload_length` and `object_status` and the length is what decides.
-//! Drafts 09 through 19 split the two, and there the corpus writes
+//! Drafts 09 through 20 split the two, and there the corpus writes
 //! `payload_hex` on a datagram that carries a payload and leaves the key out
 //! of one that states a status. Both rules are read below and neither is
 //! per-draft: a vector states a status when it names an `object_status` and
@@ -42,7 +42,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 mod test_vectors;
@@ -80,6 +81,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The drafts whose datagram may leave the Publisher Priority off the wire.
@@ -113,7 +116,7 @@ enum MissingCase {
 /// would turn the body above it into a vacuous pass. Under
 /// `--no-default-features --features draftNN` the total is **one draft's
 /// slice**, so a slice without the case fires the guard as though the codec
-/// were wrong. CI runs exactly that command in all thirteen cells, which is
+/// were wrong. CI runs exactly that command in all fourteen cells, which is
 /// where a thin slice shows up as a red cell rather than as a question nobody
 /// asked.
 ///
@@ -178,6 +181,7 @@ fn corpus_dir(draft: DraftVersion) -> &'static str {
         DraftVersion::Draft17 => "draft17",
         DraftVersion::Draft18 => "draft18",
         DraftVersion::Draft19 => "draft19",
+        DraftVersion::Draft20 => "draft20",
     }
 }
 
@@ -336,7 +340,7 @@ fn every_datagram_field_matches_the_corpus() {
 /// and was really a hole in this claim: draft-15 had no such vector, so the
 /// per-draft assertion was never made for it, and the cohort count below was
 /// satisfied by drafts 16 through 19 without it. The table is empty now and
-/// the assertion is made for all five.
+/// the assertion is made for all six.
 ///
 /// *Second ablation (measured):* report a priority on every draft-15 datagram,
 /// by giving the draft-15 arm of `AnyDatagramHeader::meta` a

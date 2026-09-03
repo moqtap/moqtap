@@ -17,10 +17,10 @@
 //!
 //! # Which drafts are here, and why not the ones next to them
 //!
-//! Checked with `re.finditer` over the raw HTML of all thirteen drafts, the
+//! Checked with `re.finditer` over the raw HTML of all fourteen drafts, the
 //! section carries three answers and no draft carries two of them: drafts 12
 //! and 13 have the UNSUBSCRIBE above; drafts 14, 15 and 16 add the
-//! FETCH_CANCEL; and drafts 17, 18 and 19 replace the messages with a
+//! FETCH_CANCEL; and drafts 17 through 20 replace the messages with a
 //! cross-reference — "it MUST cancel any corresponding subscription or fetches
 //! for that Track from that publisher" — where cancelling a request is a
 //! transport operation on the request's own stream. Drafts 07 through 11 have

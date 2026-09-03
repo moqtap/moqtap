@@ -1,4 +1,4 @@
-//! Object Status: on drafts 15 through 19, the encode path can put a code on
+//! Object Status: on drafts 15 through 20, the encode path can put a code on
 //! the wire exactly when the decode path accepts that code.
 //!
 //! The asymmetry this gates against is a real one: every draft's decoder
@@ -10,7 +10,7 @@
 //!
 //! # The shapes covered
 //!
-//! Drafts 15-19 carry an Object Status in exactly three places, and all three
+//! Drafts 15-20 carry an Object Status in exactly three places, and all three
 //! are here:
 //!
 //! - the subgroup object (`SubgroupObject`), written by
@@ -21,8 +21,8 @@
 //!   `decode`.
 //!
 //! There is no fourth. Drafts 07-14 also have fetch objects with a status of
-//! their own (`FetchObject`, `FetchObjectHeader`), but drafts 15-19 have no
-//! such type at all — searching those five modules for `ObjectStatus` finds
+//! their own (`FetchObject`, `FetchObjectHeader`), but drafts 15-20 have no
+//! such type at all — searching those six modules for `ObjectStatus` finds
 //! only the two typed fields above plus the raw code on the metadata — so a
 //! fetch row here would gate nothing.
 //!
@@ -44,7 +44,7 @@
 //! nothing.
 //!
 //! The sets really do differ across this range: draft-15 assigns `0x1` (Object
-//! Does Not Exist) and drafts 16-19 do not. So the same sweep body requires
+//! Does Not Exist) and drafts 16-20 do not. So the same sweep body requires
 //! `0x1` to be accepted on draft-15 and refused on draft-16.
 //!
 //! # How the wire is reached
@@ -60,14 +60,14 @@
 //!
 //! Every code `0x00..=0xff`, plus values no single byte can hold: `0x100`,
 //! `0x3fff`, `0x4000`, `0xffff`, `2^32`, RFC 9000's varint ceiling of `2^62-1`
-//! and `u64::MAX`. The subgroup status field is a varint on all five drafts and
+//! and `u64::MAX`. The subgroup status field is a varint on all six drafts and
 //! the datagram status field is a varint on drafts 15-16, so those shapes are
-//! swept over the wide values too; the drafts 17-19 datagram status is a single
+//! swept over the wide values too; the drafts 17-20 datagram status is a single
 //! octet, which cannot express them, and those codes are skipped there rather
 //! than pretended about.
 //!
 //! Drafts 15 and 16 frame the status with the RFC 9000 Section 16 varint,
-//! draft-17 with the MoQT varint of draft-17 Section 1.4.1, and drafts 18-19
+//! draft-17 with the MoQT varint of draft-17 Section 1.4.1, and drafts 18-20
 //! with the revision of it that restored the 7-byte length.
 //!
 //! # What this gate catches, observed by making each change and running it
@@ -76,7 +76,7 @@
 //! `DatagramHeader::object_status` hold an `ObjectStatus`, not a raw code, so
 //! the encoders cannot be handed a code their own decoder would refuse. The two
 //! draft groups reached that from different starting points — drafts 15-16 held
-//! the datagram status as a varint, drafts 17-19 as a single byte — so both are
+//! the datagram status as a varint, drafts 17-20 as a single byte — so both are
 //! ablated below.
 //!
 //! Taking the check away on draft-16 — its datagram status put back to the raw
@@ -154,7 +154,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 use moqtap_codec::error::CodecError;
@@ -209,28 +210,28 @@ fn take_moqt17(bytes: &[u8]) -> Option<u64> {
 
 /// Frame `code` as the MoQT varint as revised in draft-18, which restored the
 /// 7-byte length.
-#[cfg(any(feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn put_moqt18(code: u64) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     VarInt::from_u64_moqt(code).encode_moqt::<moqtap_codec::varint::Moqt18>(&mut out);
     Some(out)
 }
 
-#[cfg(any(feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn take_moqt18(bytes: &[u8]) -> Option<u64> {
     let mut cursor = bytes;
     let value = VarInt::decode_moqt::<moqtap_codec::varint::Moqt18>(&mut cursor).ok()?;
     cursor.is_empty().then(|| value.into_inner())
 }
 
-/// Frame `code` as the single octet the drafts 17-19 datagram status is, or
+/// Frame `code` as the single octet the drafts 17-20 datagram status is, or
 /// `None` for the codes an octet cannot express.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn put_byte(code: u64) -> Option<Vec<u8>> {
     (code <= u64::from(u8::MAX)).then(|| vec![code as u8])
 }
 
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 fn take_byte(bytes: &[u8]) -> Option<u64> {
     (bytes.len() == 1).then(|| u64::from(bytes[0]))
 }
@@ -457,11 +458,12 @@ subgroup_row!(draft16_subgroup_status, "draft16", draft16, put_rfc9000, take_rfc
 subgroup_row!(draft17_subgroup_status, "draft17", draft17, put_moqt17, take_moqt17);
 subgroup_row!(draft18_subgroup_status, "draft18", draft18, put_moqt18, take_moqt18);
 subgroup_row!(draft19_subgroup_status, "draft19", draft19, put_moqt18, take_moqt18);
+subgroup_row!(draft20_subgroup_status, "draft20", draft20, put_moqt18, take_moqt18);
 
 /// Generates one draft's datagram row. The leading keyword selects the header's
 /// shape, which differs across the range: draft-15 always carries a publisher
 /// priority and a property block, draft-16 made the priority optional, and
-/// drafts 17-19 dropped the property field from the type and hold the status in
+/// drafts 17-20 dropped the property field from the type and hold the status in
 /// a single octet rather than a varint.
 macro_rules! datagram_row {
     (varint_status $name:ident, $feat:literal, $draft:ident, $priority:expr) => {
@@ -559,3 +561,4 @@ datagram_row!(varint_status draft16_datagram_status, "draft16", draft16, Some(0x
 datagram_row!(byte_status draft17_datagram_status, "draft17", draft17);
 datagram_row!(byte_status draft18_datagram_status, "draft18", draft18);
 datagram_row!(byte_status draft19_datagram_status, "draft19", draft19);
+datagram_row!(byte_status draft20_datagram_status, "draft20", draft20);

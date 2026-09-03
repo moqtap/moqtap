@@ -172,7 +172,8 @@ async fn passthrough_forwards_setup_and_subscribe_unchanged() {
             feature = "draft16",
             feature = "draft17",
             feature = "draft18",
-            feature = "draft19"
+            feature = "draft19",
+            feature = "draft20"
         ))]
         other => panic!("expected SUBSCRIBE on upstream, got {other:?}"),
     }

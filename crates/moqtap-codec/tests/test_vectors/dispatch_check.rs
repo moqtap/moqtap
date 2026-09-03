@@ -5,7 +5,7 @@
 //! `AnySubgroupObjectWriter` through this helper, so the corpus measures the
 //! same parser the proxy uses rather than a hand-rolled loop.
 //!
-//! The negative path goes through [`drain_subgroup_objects`], and all thirteen
+//! The negative path goes through [`drain_subgroup_objects`], and all fourteen
 //! runners now read a malformed subgroup stream the same way: decode the header
 //! through the entry point that reads the stream type off the wire, then read
 //! objects until the bytes run out, and hand the first failure to

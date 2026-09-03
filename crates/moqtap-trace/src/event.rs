@@ -1,7 +1,7 @@
 use ciborium::Value;
 
 use crate::error::MoqTraceError;
-use crate::header::{as_i64, as_u64, normalised, store_entries, unrecognised};
+use crate::header::{as_i64, as_u64, normalised, store_entries, unrecognised, DetailLevel};
 
 /// Direction of a message or stream relative to the recording endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +40,54 @@ impl StreamType {
             Some(1) => Ok(StreamType::Datagram),
             Some(2) => Ok(StreamType::Fetch),
             _ => Err(MoqTraceError::InvalidEvent("invalid stream type value".into())),
+        }
+    }
+}
+
+/// What sort of failure an [`Error`](EventData::Error) event records.
+///
+/// An open vocabulary. SPEC.md's Event 6 section names three kinds and says
+/// others may be added without a format version bump, so a spelling this crate
+/// does not know is kept verbatim in [`Other`](ErrorKind::Other) rather than
+/// refused. That is the treatment [`Perspective`](crate::header::Perspective)
+/// gets, and it is the rule SPEC.md points at for this key.
+///
+/// An enum and not a bare `String` because these three are the recorder's own
+/// classification of what it just saw, chosen at the point the event is built:
+/// a misspelling is a value no reader can group by, and the compiler is the
+/// only thing that catches it before the trace is written. The wire spellings
+/// live in [`as_str`](ErrorKind::as_str) alone, so a reader and a writer cannot
+/// disagree about them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    /// The peer violated the protocol.
+    Protocol,
+    /// The QUIC or WebTransport layer failed.
+    Transport,
+    /// Bytes that would not parse as any message this recorder knows.
+    Decode,
+    /// A kind this version of the crate does not know, kept verbatim.
+    Other(String),
+}
+
+impl ErrorKind {
+    /// The wire spelling of this kind.
+    pub fn as_str(&self) -> &str {
+        match self {
+            ErrorKind::Protocol => "protocol",
+            ErrorKind::Transport => "transport",
+            ErrorKind::Decode => "decode",
+            ErrorKind::Other(s) => s,
+        }
+    }
+
+    fn parse(s: &str) -> Self {
+        match s {
+            "protocol" => ErrorKind::Protocol,
+            "transport" => ErrorKind::Transport,
+            "decode" => ErrorKind::Decode,
+            other => ErrorKind::Other(other.to_string()),
         }
     }
 }
@@ -196,6 +244,29 @@ impl SubscriptionRef {
 
 /// Length of a trace ID, in bytes. Fixed by the format.
 pub const TRACE_ID_LEN: usize = 16;
+
+/// The most bytes a recorder may put in an [`Error`](EventData::Error) event's
+/// `"raw"`. Fixed by the format — SPEC.md, Event 6, under the heading about
+/// the cap and `"rawlen"`.
+///
+/// The cap binds the party building an event out of bytes it has just
+/// observed, and nothing else. It is deliberately **not** enforced when an
+/// event is serialized, and this crate does not enforce it there: a serializer
+/// cannot tell a freshly recorded event from one that arrived by being read,
+/// so a cap applied at that point either shortens evidence on a rewrite or
+/// refuses a file the reader was required to accept — whichever it does, it
+/// does to the wrong events. A `"raw"` longer than this reads back at its full
+/// length and is written back at its full length.
+///
+/// [`EventData::error_observed`] is where the cap belongs and where this crate
+/// applies it. A recorder assembling the variant by hand applies it here.
+///
+/// One obligation stays with the recorder and cannot live in a constructor at
+/// all: SPEC.md allows `"raw"` once per flow — per stream where the error names
+/// one, per peer where it does not. Later errors on that flow are still
+/// recorded and simply carry no bytes. That is state across events, so it
+/// belongs to whatever is holding the flow.
+pub const ERROR_RAW_CAP: usize = 4096;
 
 /// Event type discriminants, matching the specification's `"e"` values.
 const EVENT_CONTROL_MESSAGE: u64 = 0;
@@ -399,11 +470,63 @@ pub enum EventData {
         to: String,
     },
     /// Protocol or transport error (event type 6).
+    ///
+    /// The four optional fields are what makes the event evidence rather than
+    /// an assertion. A peer that sends something malformed is one of the few
+    /// things a shared trace is uniquely good for — the recording party can
+    /// see it and the sending party cannot — and until these existed the only
+    /// field in the format able to hold bytes was a control message's `"raw"`,
+    /// so a recorder wanting to keep the offending bytes had to record the
+    /// violation as a decodable message in order to have somewhere to put
+    /// them.
+    ///
+    /// Each is `None` when the recorder did not write it — and also when the
+    /// file carried the key with a value the field cannot hold, in which case
+    /// the entry stays verbatim in [`TraceEvent::extra`] instead of being read
+    /// here.
+    ///
+    /// [`error_observed`](EventData::error_observed) builds one of these from
+    /// bytes a recorder has just seen, which is where the cap on `raw` and the
+    /// detail levels the two byte-bearing fields sit at are applied.
     Error {
         /// Error code.
         error_code: u64,
         /// Human-readable reason.
         reason: String,
+        /// QUIC stream the error was observed on, when there was one and the
+        /// recorder knows it.
+        ///
+        /// Optional on the same terms as a control message's `"sid"`: `None`
+        /// means there was no stream or none is known, which a reader must not
+        /// confuse with stream 0.
+        stream_id: Option<u64>,
+        /// What sort of failure this was.
+        kind: Option<ErrorKind>,
+        /// Byte length of the input the recorder held for this error, before
+        /// any truncation.
+        ///
+        /// Recorded from `headers+sizes` upwards, one level below the bytes
+        /// themselves: how large a malformed message was is often enough on
+        /// its own to tell a truncated message from a mistyped one, and it
+        /// carries no content. It is still a size, and this format gates sizes
+        /// deliberately, so it does not reach a `control`-level trace.
+        ///
+        /// Where both are present, a value larger than `raw`'s length is how a
+        /// reader learns the capture is partial and by how much. Where this is
+        /// absent, a `raw` of exactly [`ERROR_RAW_CAP`] bytes is the one length
+        /// the cap makes ambiguous and must be taken as possibly truncated.
+        raw_len: Option<u64>,
+        /// The offending bytes, at `full` detail only.
+        ///
+        /// Payload-bearing, and gated a level above the event's own
+        /// `control`+: an error naming a *data* stream has subgroup framing
+        /// and object payload behind it, so inheriting the event's level would
+        /// have put media into traces whose declared level excludes payloads
+        /// outright.
+        ///
+        /// A recorder caps this at [`ERROR_RAW_CAP`] bytes. A reader does not:
+        /// a longer one read from a file is neither shortened nor refused.
+        raw: Option<Vec<u8>>,
     },
     /// User-defined annotation (event type 7).
     Annotation {
@@ -498,6 +621,80 @@ pub enum EventData {
         /// could not use.
         fields: Vec<(Value, Value)>,
     },
+}
+
+/// Where `detail` sits in the levels' ordering, or `None` for a level this
+/// crate cannot place.
+///
+/// The levels are a chain — each records everything the one before it does —
+/// so one rank answers every question about which of two a recorder is at.
+/// A level this crate has never heard of has no place in the chain, which is
+/// why this is an `Option` rather than a number with a default: a default
+/// would guess, and the two ways of guessing wrong are not symmetric.
+fn detail_rank(detail: &DetailLevel) -> Option<u8> {
+    match detail {
+        DetailLevel::Control => Some(0),
+        DetailLevel::Headers => Some(1),
+        DetailLevel::HeadersSizes => Some(2),
+        DetailLevel::HeadersData => Some(3),
+        DetailLevel::Full => Some(4),
+        DetailLevel::Other(_) => None,
+    }
+}
+
+/// Whether a recorder at `detail` records everything a recorder at `floor`
+/// does.
+///
+/// `false` when either level is one this crate cannot place. A future level
+/// might sit above `floor` or below it, and answering `true` on a guess would
+/// put payload bytes into a trace whose declared level excludes them — a loss
+/// of one diagnostic against a leak that cannot be taken back.
+fn detail_reaches(detail: &DetailLevel, floor: &DetailLevel) -> bool {
+    match (detail_rank(detail), detail_rank(floor)) {
+        (Some(level), Some(floor)) => level >= floor,
+        _ => false,
+    }
+}
+
+impl EventData {
+    /// An [`Error`](EventData::Error) built from the bytes a recorder has just
+    /// observed, for a trace recorded at `detail`.
+    ///
+    /// This is where the cap on `"raw"` belongs and the only place this crate
+    /// applies it: the party constructing an event out of traffic it just saw
+    /// is the one SPEC.md addresses, and it is the only party that can tell a
+    /// fresh event from one that arrived by being read. Serializing does not
+    /// cap, and reading does not refuse — see [`ERROR_RAW_CAP`].
+    ///
+    /// `observed` is the whole input the recorder held, uncapped. What comes
+    /// back depends on `detail`, because the two byte-bearing fields sit at
+    /// different levels and that is deliberate:
+    ///
+    /// - `raw_len` is the full length of `observed`, from `headers+sizes`
+    ///   upwards. It is a size, and sizes are gated; it is not gated *with*
+    ///   the bytes, so it is available in every trace where the bytes must not
+    ///   appear, which is the point of having it.
+    /// - `raw` is the first [`ERROR_RAW_CAP`] bytes of `observed`, at `full`
+    ///   only. Below that level nothing is copied.
+    ///
+    /// A level this crate cannot place yields neither.
+    ///
+    /// Where both come back, comparing them is how a reader learns the capture
+    /// was truncated: `raw_len` is the length before the cap bit, not after.
+    pub fn error_observed(
+        error_code: u64,
+        reason: impl Into<String>,
+        kind: Option<ErrorKind>,
+        stream_id: Option<u64>,
+        observed: &[u8],
+        detail: &DetailLevel,
+    ) -> Self {
+        let raw_len = detail_reaches(detail, &DetailLevel::HeadersSizes)
+            .then(|| u64::try_from(observed.len()).unwrap_or(u64::MAX));
+        let raw = detail_reaches(detail, &DetailLevel::Full)
+            .then(|| observed[..observed.len().min(ERROR_RAW_CAP)].to_vec());
+        EventData::Error { error_code, reason: reason.into(), stream_id, kind, raw_len, raw }
+    }
 }
 
 impl TraceEvent {
@@ -696,7 +893,12 @@ impl serde::Serialize for TraceEvent {
             EventData::ObjectHeader { .. } => 5,
             EventData::ObjectPayload { payload, .. } => 4 + usize::from(payload.is_some()),
             EventData::StateChange { .. } => 2,
-            EventData::Error { .. } => 2,
+            EventData::Error { stream_id, kind, raw_len, raw, .. } => {
+                2 + usize::from(stream_id.is_some())
+                    + usize::from(kind.is_some())
+                    + usize::from(raw_len.is_some())
+                    + usize::from(raw.is_some())
+            }
             EventData::Annotation { .. } => 2,
             EventData::PeerConnected { endpoint, transport, role, side } => {
                 usize::from(endpoint.is_some())
@@ -811,10 +1013,25 @@ impl serde::Serialize for TraceEvent {
                 map.serialize_entry("from", from)?;
                 map.serialize_entry("to", to)?;
             }
-            EventData::Error { error_code, reason } => {
+            EventData::Error { error_code, reason, stream_id, kind, raw_len, raw } => {
                 map.serialize_entry("e", &EVENT_ERROR)?;
                 map.serialize_entry("ec", error_code)?;
                 map.serialize_entry("reason", reason)?;
+                if let Some(sid) = stream_id {
+                    map.serialize_entry("sid", sid)?;
+                }
+                if let Some(kind) = kind {
+                    map.serialize_entry("ek", kind.as_str())?;
+                }
+                if let Some(raw_len) = raw_len {
+                    map.serialize_entry("rawlen", raw_len)?;
+                }
+                // At whatever length it arrived. The cap is the recorder's,
+                // and re-applying it here would shorten evidence read out of
+                // somebody else's file — see [`ERROR_RAW_CAP`].
+                if let Some(raw) = raw {
+                    map.serialize_entry("raw", &ByteStr(raw))?;
+                }
             }
             EventData::Annotation { label, data } => {
                 map.serialize_entry("e", &EVENT_ANNOTATION)?;
@@ -1115,7 +1332,16 @@ fn writes_variant_key(data: &EventData, key: &str) -> bool {
             among(key, &["sid", "g", "o", "sz"], &[("pl", payload.is_some())])
         }
         EventData::StateChange { .. } => among(key, &["from", "to"], &[]),
-        EventData::Error { .. } => among(key, &["ec", "reason"], &[]),
+        EventData::Error { stream_id, kind, raw_len, raw, .. } => among(
+            key,
+            &["ec", "reason"],
+            &[
+                ("sid", stream_id.is_some()),
+                ("ek", kind.is_some()),
+                ("rawlen", raw_len.is_some()),
+                ("raw", raw.is_some()),
+            ],
+        ),
         EventData::Annotation { .. } => among(key, &["label", "data"], &[]),
         EventData::PeerConnected { endpoint, transport, role, side } => among(
             key,
@@ -1249,6 +1475,18 @@ impl TryFrom<Value> for TraceEvent {
             EVENT_ERROR => EventData::Error {
                 error_code: require_uint(&pairs, "ec")?,
                 reason: require_text(&pairs, "reason")?,
+                // All four optional, and every recording made before they
+                // existed carries none of them. A `"raw"` longer than the cap
+                // is read at the length the file gave it: the cap is addressed
+                // to a recorder building an event from what it observed, and
+                // re-truncating here would destroy evidence to make somebody
+                // else's file conform to a rule it was never handed. Report
+                // the non-conformance if it is worth reporting; do not repair
+                // it. SPEC.md, Event 6.
+                stream_id: get_uint(&pairs, "sid"),
+                kind: get_text(&pairs, "ek").as_deref().map(ErrorKind::parse),
+                raw_len: get_uint(&pairs, "rawlen"),
+                raw: get_bytes(&pairs, "raw"),
             },
             EVENT_ANNOTATION => EventData::Annotation {
                 label: require_text(&pairs, "label")?,

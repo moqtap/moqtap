@@ -601,14 +601,14 @@ impl ProxySession {
         let object_hook = interest.contains(Interest::OBJECTS);
         let control_mutation = interest.contains(Interest::CONTROL);
         // A fourth reason to decode control frames, and the only one that is
-        // not about telling somebody. Drafts 18 and 19 write a fetch Object's
-        // Group ID as a difference whose sign the fetch's Group Order decides,
-        // and the order is on the FETCH — so on those two a session that
-        // frames data has to read its own control plane or it cannot read its
-        // own fetch streams. See `capability::fetch_group_order_is_needed`.
+        // not about telling somebody. Drafts 18, 19 and 20 write a fetch
+        // Object's Group ID as a difference whose sign the fetch's Group Order
+        // decides, and the order is on the FETCH — so on those three a session
+        // that frames data has to read its own control plane or it cannot read
+        // its own fetch streams. See `capability::fetch_group_order_is_needed`.
         //
         // The initial draft is exact here for the same reason it is in
-        // `bidi_streams_carry_requests`: drafts 18 and 19 have an ALPN each,
+        // `bidi_streams_carry_requests`: drafts 18, 19 and 20 have an ALPN each,
         // and the one cohort that is a guess, `moq-00`, spans drafts 07 to 14
         // and answers `false` for every member.
         let fetch_orders_wanted = objects_enabled && fetch_group_order_is_needed(initial_draft);
@@ -1456,7 +1456,7 @@ struct ForwardCtx {
     /// [`ForwardCtx::control_frames_are_decoded`] rather than either alone.
     control_parse: bool,
     /// Whether this session has to decode control frames to read its own
-    /// fetch streams — drafts 18 and 19, framing data.
+    /// fetch streams — drafts 18, 19 and 20, framing data.
     ///
     /// Unlike `control_parse` this arms no report and calls no hook. It is
     /// the one case where the proxy parses the control plane for itself, and
@@ -1736,14 +1736,27 @@ fn is_mirrored_teardown(err: &ProxyError) -> bool {
 /// choice there rather than a claim. `exec` makes the same judgement for
 /// the actions it executes; this copy exists because the two callers are
 /// in different modules and neither owns the other's privacy.
+///
+/// Exhaustive rather than `!matches!(..)`, matching its twin in `exec`: the
+/// negated form would hand a draft nobody had read the answer `true` and
+/// publish `code_defined` about a vocabulary that may not exist.
 const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
-    !matches!(
-        draft,
+    match draft {
         DraftVersion::Draft07
-            | DraftVersion::Draft08
-            | DraftVersion::Draft09
-            | DraftVersion::Draft10
-    )
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10 => false,
+        DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13
+        | DraftVersion::Draft14
+        | DraftVersion::Draft15
+        | DraftVersion::Draft16
+        | DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20 => true,
+    }
 }
 
 /// The application error code to reset a forwarded data stream with when
@@ -2475,7 +2488,7 @@ async fn request_streams_beside_the_control_stream(
 /// unidirectional streams**, making a bidirectional stream a *request*
 /// stream rather than the control stream.
 ///
-/// True on drafts 17, 18 and 19; false on 07 through 16.
+/// True on drafts 17 through 20; false on 07 through 16.
 ///
 /// # What the drafts say
 ///
@@ -2507,20 +2520,44 @@ async fn request_streams_beside_the_control_stream(
 /// "All unidirectional MOQT streams start with a variable-length integer
 /// indicating the type of the stream", and the table gives 0x05 for
 /// FETCH_HEADER, 0x10-0x1D for SUBGROUP_HEADER and **0x2F00 for SETUP**.
-/// Draft-18 and draft-19 keep the same table and add PADDING (0x132B3E28).
+/// Drafts 18, 19 and 20 keep the same table and add PADDING (0x132B3E28).
 /// That 0x2F00 is also the SETUP *message* type (draft-17 Section 9.4), so
 /// the control stream's type varint is the first field of its first message
 /// and nothing has to be stripped before forwarding: see
 /// [`CONTROL_STREAM_TYPE`].
+///
+/// # Why the match is exhaustive
+///
+/// Because `false` is a whole session topology, not a conservative default.
+/// A draft that answered `false` by not being listed would have this proxy
+/// look for its control plane on the first bidirectional stream, treat every
+/// SETUP stream as a data stream, and show the control site nothing — a
+/// session that forwards bytes and reports almost none of them. The topology
+/// has already moved once, at draft-17; nothing says it cannot move back.
 const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
-    matches!(draft, DraftVersion::Draft17 | DraftVersion::Draft18 | DraftVersion::Draft19)
+    match draft {
+        DraftVersion::Draft07
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10
+        | DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13
+        | DraftVersion::Draft14
+        | DraftVersion::Draft15
+        | DraftVersion::Draft16 => false,
+        DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20 => true,
+    }
 }
 
 /// Whether this draft puts **requests** on bidirectional streams of their
 /// own, so that a bidirectional stream beyond the control stream is a stream
 /// this proxy has to forward.
 ///
-/// True on drafts 16 through 19; false on 07 through 15.
+/// True on drafts 16 through 20; false on 07 through 15.
 ///
 /// # Why this is not [`control_plane_is_unidirectional`]
 ///
@@ -2545,7 +2582,7 @@ const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
 ///
 /// Drafts 07 through 15 have no second use to forward: none of them puts any
 /// message on a bidirectional stream other than the control stream. Drafts 17
-/// through 19 moved the control plane off bidirectional streams entirely, so
+/// through 20 moved the control plane off bidirectional streams entirely, so
 /// there every bidirectional stream is a request stream and the first one is
 /// no different from the rest.
 ///
@@ -2567,14 +2604,33 @@ const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
 /// a forwarded stream ending looks like. Which of the two arrived is the
 /// endpoints' business; this proxy holds neither end's request state and must
 /// not start reading a cancellation into one.
+///
+/// # Why the match is exhaustive
+///
+/// Because `false` here means "this draft has no bidirectional stream worth
+/// accepting", and a draft that answered it by omission would have the proxy
+/// simply never open the accept loop: request streams would be left hanging
+/// on both sides, with no error anywhere to say the proxy had declined to
+/// forward them. This boundary is one draft off
+/// [`control_plane_is_unidirectional`]'s and has to be read separately, which
+/// is the whole reason the two functions exist.
 const fn bidi_streams_carry_requests(draft: DraftVersion) -> bool {
-    matches!(
-        draft,
+    match draft {
+        DraftVersion::Draft07
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10
+        | DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13
+        | DraftVersion::Draft14
+        | DraftVersion::Draft15 => false,
         DraftVersion::Draft16
-            | DraftVersion::Draft17
-            | DraftVersion::Draft18
-            | DraftVersion::Draft19
-    )
+        | DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20 => true,
+    }
 }
 
 /// The unidirectional stream type that marks a control stream on the drafts
@@ -4255,7 +4311,8 @@ fn report_refused_frames(
         feature = "draft16",
         feature = "draft17",
         feature = "draft18",
-        feature = "draft19"
+        feature = "draft19",
+        feature = "draft20"
     )),
     allow(unreachable_code)
 )]
@@ -5442,7 +5499,7 @@ async fn pipe_data_framed(
                                     });
                                     // `FramerBypass` is the whole report, and
                                     // that is a change. A fetch stream on
-                                    // drafts 18 and 19 used to bypass on
+                                    // drafts 18, 19 and 20 used to bypass on
                                     // every session, so a `Fetch`-aimed class
                                     // there could never fire and was told so
                                     // once per session as
@@ -5781,6 +5838,8 @@ fn datagram_is_status(header: &AnyDatagramHeader) -> bool {
         AnyDatagramHeader::Draft18(h) => h.object_status.is_some(),
         #[cfg(feature = "draft19")]
         AnyDatagramHeader::Draft19(h) => h.object_status.is_some(),
+        #[cfg(feature = "draft20")]
+        AnyDatagramHeader::Draft20(h) => h.object_status.is_some(),
         #[allow(unreachable_patterns)]
         _ => false,
     }

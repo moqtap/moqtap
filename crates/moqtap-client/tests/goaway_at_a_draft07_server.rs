@@ -8,11 +8,11 @@
 //!
 //! Draft-08 replaced the first sentence with a narrower one - "If a server
 //! receives a GOAWAY with a non-zero New Session URI Length it MUST terminate
-//! the session with a Protocol Violation" - which every draft from 08 to 19
+//! the session with a Protocol Violation" - which every draft from 08 to 20
 //! carries and which is gated in `goaway_uri_at_a_server.rs`. Enumerated over
-//! the raw text of all thirteen drafts, "if it receives a GOAWAY message"
+//! the raw text of all fourteen drafts, "if it receives a GOAWAY message"
 //! appears once, on draft-07, and "non-zero New Session URI Length" appears
-//! once on each of the other twelve and not on draft-07.
+//! once on each of the other thirteen and not on draft-07.
 //!
 //! So the two rules are not the same rule differently worded, and they do not
 //! agree about the same message: an empty GOAWAY arriving at a server is legal

@@ -25,7 +25,7 @@
 //! Mismatch'."
 //!
 //! That is code `0x5`, named by the sentence itself. A mapping table written by
-//! analogy with drafts 15 through 19 — where every entry is Protocol Violation —
+//! analogy with drafts 15 through 20 — where every entry is Protocol Violation —
 //! would close this session with `0x3` and satisfy any test that only asked
 //! whether a close happened. The gate is the code.
 //!

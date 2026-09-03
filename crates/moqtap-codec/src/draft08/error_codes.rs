@@ -19,7 +19,7 @@
 //! Codes that share a spelling across registries do not always share a meaning,
 //! and draft-08 spellings do not always carry over to later drafts.
 //! `Unauthorized` is the clearest case: in
-//! [`SessionErrorCode`](crate::draft08::error_codes::SessionErrorCode) it
+//! [`SessionErrorCode`] it
 //! reports a breach of a pre-negotiated agreement, which is not what the
 //! identically named code means in the request-scoped registries or in later
 //! drafts.

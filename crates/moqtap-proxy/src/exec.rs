@@ -40,7 +40,7 @@
 //! Everything else is propagated from `classify`. The **table-only**
 //! refusal [`Refusal::StreamNotFramed`] is never emitted from here —
 //! `every_refusal_this_module_emits_is_classifys_or_one_of_its_own_three`
-//! below is the falsifiable form of that claim: it sweeps thirteen drafts ×
+//! below is the falsifiable form of that claim: it sweeps fourteen drafts ×
 //! five sites × thirteen action shapes and asserts that neither variant ever
 //! reaches an `ActionRefused`, and that all three executor-owned refusals do.
 //!
@@ -197,7 +197,7 @@ impl Target<'_> {
     /// Whether a payload-preserving splice has a locatable boundary.
     ///
     /// At the object site, always: the payload is the trailing field in
-    /// every layout on all thirteen drafts and both stream kinds.
+    /// every layout on all fourteen drafts and both stream kinds.
     ///
     /// At the datagram site this is where the three exceptions live, and
     /// they live *here* rather than at the call site because getting one
@@ -1465,14 +1465,29 @@ fn queue_config(engine: &Engine<'_>) -> crate::action::EgressConfig {
 /// Drafts 07-10 do not, so the reset still executes with the code the
 /// action named and [`Effect::StreamReset`] / [`Effect::Truncated`] report
 /// `code_defined: false` — the code is a choice there, not a claim.
+///
+/// Exhaustive rather than `!matches!(..)`. The negated form leans the other
+/// way from the rest of these predicates — a draft nobody listed would be
+/// *granted* a vocabulary rather than refused one, and the proxy would then
+/// publish `code_defined: true` about a draft no one has read. Either default
+/// is a guess; this one has to be written down.
 const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
-    !matches!(
-        draft,
+    match draft {
         DraftVersion::Draft07
-            | DraftVersion::Draft08
-            | DraftVersion::Draft09
-            | DraftVersion::Draft10
-    )
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10 => false,
+        DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13
+        | DraftVersion::Draft14
+        | DraftVersion::Draft15
+        | DraftVersion::Draft16
+        | DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20 => true,
+    }
 }
 
 /// Whether eliding this object leaves the framer owing a successor fix-up.
@@ -1494,28 +1509,50 @@ const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
 /// `elide_renumbering_names_the_drafts_that_owe_a_fixup` restates the table
 /// explicitly; see its comment for why it cannot ask the framer directly,
 /// and what covers the gap.
+///
+/// Both arms are exhaustive matches rather than `matches!`. `false` here means
+/// *eliding this object costs the next one nothing*, which is the answer that
+/// forwards a stream whose remaining Locations no longer decode — so a draft
+/// that arrives without an answer must stop the build rather than take that
+/// one. The two boundaries differ (subgroup from 14, fetch from 15), which is
+/// exactly why neither can be extrapolated from the other.
 fn elide_renumbers_successor(unit: &Unit<'_>) -> bool {
     let Target::Object { meta, .. } = &unit.target else {
         return false;
     };
     match meta.stream_kind {
-        DataStreamType::Subgroup => matches!(
-            unit.draft,
+        DataStreamType::Subgroup => match unit.draft {
+            DraftVersion::Draft07
+            | DraftVersion::Draft08
+            | DraftVersion::Draft09
+            | DraftVersion::Draft10
+            | DraftVersion::Draft11
+            | DraftVersion::Draft12
+            | DraftVersion::Draft13 => false,
             DraftVersion::Draft14
-                | DraftVersion::Draft15
-                | DraftVersion::Draft16
-                | DraftVersion::Draft17
-                | DraftVersion::Draft18
-                | DraftVersion::Draft19
-        ),
-        DataStreamType::Fetch => matches!(
-            unit.draft,
+            | DraftVersion::Draft15
+            | DraftVersion::Draft16
+            | DraftVersion::Draft17
+            | DraftVersion::Draft18
+            | DraftVersion::Draft19
+            | DraftVersion::Draft20 => true,
+        },
+        DataStreamType::Fetch => match unit.draft {
+            DraftVersion::Draft07
+            | DraftVersion::Draft08
+            | DraftVersion::Draft09
+            | DraftVersion::Draft10
+            | DraftVersion::Draft11
+            | DraftVersion::Draft12
+            | DraftVersion::Draft13
+            | DraftVersion::Draft14 => false,
             DraftVersion::Draft15
-                | DraftVersion::Draft16
-                | DraftVersion::Draft17
-                | DraftVersion::Draft18
-                | DraftVersion::Draft19
-        ),
+            | DraftVersion::Draft16
+            | DraftVersion::Draft17
+            | DraftVersion::Draft18
+            | DraftVersion::Draft19
+            | DraftVersion::Draft20 => true,
+        },
     }
 }
 
@@ -1797,7 +1834,7 @@ mod tests {
     /// site sweeps [`COMPILED_DRAFTS`] instead: both are behind a decoder
     /// this build may not carry, and on a draft it does not carry the hook
     /// is never invoked at either.
-    const ALL_DRAFTS: [DraftVersion; 13] = [
+    const ALL_DRAFTS: [DraftVersion; 14] = [
         DraftVersion::Draft07,
         DraftVersion::Draft08,
         DraftVersion::Draft09,
@@ -1811,12 +1848,13 @@ mod tests {
         DraftVersion::Draft17,
         DraftVersion::Draft18,
         DraftVersion::Draft19,
+        DraftVersion::Draft20,
     ];
 
     /// The drafts this build actually compiled, in publication order.
     ///
     /// Each element carries its own `#[cfg]`, so the axis is the enabled set
-    /// and not a hardcoded thirteen — the shape `tests/action_matrix.rs` and
+    /// and not a hardcoded fourteen — the shape `tests/action_matrix.rs` and
     /// the test module of `framer.rs` already use. It is the **only** honest
     /// axis for the object site: with no decoder for a draft the framer
     /// never addresses its data streams, the hook is never invoked on an
@@ -1832,7 +1870,7 @@ mod tests {
     /// uncompiled draft, so `ControlStreamParser::feed` refuses every frame
     /// and `ProxyHook::on_control_message` is never offered one.
     ///
-    /// Under the default (all-drafts) build this is all thirteen and every
+    /// Under the default (all-drafts) build this is all fourteen and every
     /// object test below runs on all of them. Under `--no-default-features`
     /// it is empty: that build has no object site at all, so the object
     /// sweeps run zero times rather than asserting the framer's verdict is
@@ -1865,6 +1903,8 @@ mod tests {
         DraftVersion::Draft18,
         #[cfg(feature = "draft19")]
         DraftVersion::Draft19,
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20,
     ];
 
     // ── how many events one action produces ─────────────────────────
@@ -3014,7 +3054,7 @@ mod tests {
     /// framer itself, and that is a limitation worth stating: `note_elided`
     /// `debug_assert`s that the object it is handed is the one the framer
     /// most recently emitted, so a standalone probe cannot ask the framer
-    /// this question without driving thirteen drafts of real wire bytes
+    /// this question without driving fourteen drafts of real wire bytes
     /// through it. The compensating cover is
     /// `tests/actions_objects.rs`, which asserts the *bytes* of an elided
     /// run against an independent encoder — a wrong answer here shows up
@@ -3024,7 +3064,7 @@ mod tests {
     /// Swept over [`ALL_DRAFTS`] and not [`COMPILED_DRAFTS`] on purpose:
     /// `elide_renumbers_successor` reads the [`DraftVersion`] value and
     /// nothing else, so every row of the table is answerable in every
-    /// build, and restating all thirteen is the whole point of the test.
+    /// build, and restating all fourteen is the whole point of the test.
     #[test]
     fn elide_renumbering_names_the_drafts_that_owe_a_fixup() {
         for draft in ALL_DRAFTS {
@@ -3094,13 +3134,27 @@ mod tests {
     #[test]
     fn drafts_07_to_10_report_the_reset_code_as_undefined() {
         for &draft in COMPILED_DRAFTS {
-            let expected = !matches!(
-                draft,
+            // Restated here rather than read from `stream_reset_code_defined`,
+            // which is the thing under test, and exhaustive for the reason
+            // `capability.rs`'s `a_first_object_carrier_exists` gives: a
+            // fifteenth draft must not join either side of the partition
+            // without an answer being written down twice.
+            let expected = match draft {
                 DraftVersion::Draft07
-                    | DraftVersion::Draft08
-                    | DraftVersion::Draft09
-                    | DraftVersion::Draft10
-            );
+                | DraftVersion::Draft08
+                | DraftVersion::Draft09
+                | DraftVersion::Draft10 => false,
+                DraftVersion::Draft11
+                | DraftVersion::Draft12
+                | DraftVersion::Draft13
+                | DraftVersion::Draft14
+                | DraftVersion::Draft15
+                | DraftVersion::Draft16
+                | DraftVersion::Draft17
+                | DraftVersion::Draft18
+                | DraftVersion::Draft19
+                | DraftVersion::Draft20 => true,
+            };
             let mut h = Harness::new();
             let m = meta(draft);
             let out = h.run(&object_unit(&m, Instant::now()), Action::ResetStream { code: 5 });
@@ -3165,19 +3219,24 @@ mod tests {
     }
 
     #[test]
-    fn drafts_17_to_19_execute_a_control_action_like_every_other_draft() {
-        // These three carry the control plane on a pair of unidirectional
+    fn drafts_17_to_20_execute_a_control_action_like_every_other_draft() {
+        // These four carry the control plane on a pair of unidirectional
         // streams and requests on bidirectional ones. Both shapes reach this
         // site, so the column is `Yes` here exactly as it is on 07-16 and a
         // draft-conditional refusal would be wrong.
         //
         // Filtered to the compiled set, like every other control row: a
-        // build without one of the three has no decoder for it and no hook
+        // build without one of the four has no decoder for it and no hook
         // is reached, which is a claim about the build rather than about
         // the control plane's shape.
-        for draft in [DraftVersion::Draft17, DraftVersion::Draft18, DraftVersion::Draft19]
-            .into_iter()
-            .filter(|d| COMPILED_DRAFTS.contains(d))
+        for draft in [
+            DraftVersion::Draft17,
+            DraftVersion::Draft18,
+            DraftVersion::Draft19,
+            DraftVersion::Draft20,
+        ]
+        .into_iter()
+        .filter(|d| COMPILED_DRAFTS.contains(d))
         {
             let mut h = Harness::new();
             let out = h.run(

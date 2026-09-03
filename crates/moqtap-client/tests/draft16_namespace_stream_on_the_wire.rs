@@ -346,7 +346,7 @@ async fn the_peers_reset_withdraws_the_subscription() {
 ///
 /// # What it catches
 ///
-/// Giving `NamespaceStream` the `Drop` impl drafts 17 to 19 carry, resetting
+/// Giving `NamespaceStream` the `Drop` impl drafts 17 to 20 carry, resetting
 /// both halves, fails with
 ///
 /// ```text

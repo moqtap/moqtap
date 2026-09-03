@@ -11,7 +11,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 //! Every code point this crate assigns, on every draft it implements, is
 //! checked against the registries extracted from the rendered Internet-Drafts.
@@ -80,8 +81,8 @@
 //!
 //! A gate that only ever sees one draft cannot tell that draft's registry from
 //! its neighbour's, and a row copied forward from the previous draft is the
-//! most likely way a wrong value gets in. Checking thirteen adjacent drafts
-//! against thirteen separate extractions makes each of them answer for itself.
+//! most likely way a wrong value gets in. Checking fourteen adjacent drafts
+//! against fourteen separate extractions makes each of them answer for itself.
 //!
 //! That argument needs the extractions to differ, so it is checked in
 //! [`the_extracted_drafts_are_distinguishable_from_each_other`], which states
@@ -142,10 +143,12 @@ use moqtap_codec::draft17;
 use moqtap_codec::draft18;
 #[cfg(feature = "draft19")]
 use moqtap_codec::draft19;
+#[cfg(feature = "draft20")]
+use moqtap_codec::draft20;
 
 /// Every draft with a committed extraction, which is every draft this crate
 /// implements.
-const DRAFTS: [u64; 13] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+const DRAFTS: [u64; 14] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
 /// Highest code point swept when reading a registry back out of the crate.
 ///
@@ -170,7 +173,7 @@ fn extracted(draft: u64) -> Value {
     let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tools/registries")
         // Zero-padded: the files are named after the draft as the IETF spells
-        // it, `draft-07` through `draft-19`.
+        // it, `draft-07` through `draft-20`.
         .join(format!("draft-{draft:02}.json"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
@@ -886,6 +889,38 @@ fn draft19_error_registries_match_the_extracted_draft() {
     });
 }
 
+/// Draft-20 keeps all four registries and takes one row out of three of them.
+///
+/// The removals are what this comparison is for, and they are the direction a
+/// spec-driven iteration cannot see: `VERSION_NEGOTIATION_FAILED` (session
+/// `0x15`), `INVALID_JOINING_REQUEST_ID` (REQUEST_ERROR `0x32`) and
+/// `SUBSCRIPTION_ENDED` (PUBLISH_DONE `0x3`) are each still assigned by
+/// draft-19, so a registry copied forward keeps decoding them and every
+/// "implement what the draft assigns" test still passes. Only comparing as a
+/// set in both directions reports it.
+///
+/// # Ablation
+///
+/// Copying draft-19's `PublishDoneStatusCode` forward whole — the row and its
+/// `from_u64` arm together, which is what a `cp -r draft19 draft20` produces:
+///
+/// ```text
+/// draft-20 PUBLISH_DONE Codes: accepted by PublishDoneStatusCode, not assigned
+/// by the draft: 0x3 SUBSCRIPTION_ENDED
+/// ```
+#[cfg(feature = "draft20")]
+#[test]
+fn draft20_error_registries_match_the_extracted_draft() {
+    use draft20::error_codes as ec;
+
+    registries!(20, {
+        "session_termination" => SessionErrorCode,
+        "request_error" => RequestErrorCode,
+        "publish_done" => PublishDoneStatusCode,
+        "stream_reset" => StreamResetErrorCode,
+    });
+}
+
 // ── Object Status registry ────────────────────────────────────
 
 /// Compare one draft's Object Status set with the extraction's.
@@ -1011,6 +1046,12 @@ fn object_status_registries_match_the_extracted_drafts() {
         &extracted(19),
         &codec_registry!(draft19::types::ObjectStatus, "draft19 ObjectStatus"),
     );
+    #[cfg(feature = "draft20")]
+    same_object_status(
+        20,
+        &extracted(20),
+        &codec_registry!(draft20::types::ObjectStatus, "draft20 ObjectStatus"),
+    );
 }
 
 // ── The extractions have to be able to disagree ───────────────
@@ -1020,22 +1061,23 @@ fn object_status_registries_match_the_extracted_drafts() {
 ///
 /// Drafts 08, 09 and 10 changed nothing in any of their six registries; every
 /// other draft in the range changed something. The runs are a partition of
-/// [`DRAFTS`], so every one of the seventy-eight pairs is claimed one way or
+/// [`DRAFTS`], so every one of the ninety-one pairs is claimed one way or
 /// the other rather than merely not being claimed to differ.
 const ERROR_REGISTRY_ERAS: &[&[u64]] =
-    &[&[7], &[8, 9, 10], &[11], &[12], &[13], &[14], &[15], &[16], &[17], &[18], &[19]];
+    &[&[7], &[8, 9, 10], &[11], &[12], &[13], &[14], &[15], &[16], &[17], &[18], &[19], &[20]];
 
 /// The same, for Object Status.
 ///
-/// This registry moves three times in thirteen drafts and then holds: draft-08
+/// This registry moves three times in fourteen drafts and then holds: draft-08
 /// renamed `0x5` from END_OF_SUBGROUP to END_OF_TRACK, draft-11 dropped `0x5`
 /// and renamed `0x4` from END_OF_TRACK_AND_GROUP to END_OF_TRACK, and draft-16
 /// dropped OBJECT_DOES_NOT_EXIST. Draft-19 changed how the registry is printed,
-/// not what it assigns, which is why it shares a run with 16.
+/// not what it assigns, and draft-20 changed nothing at all, which is why both
+/// share a run with 16.
 const OBJECT_STATUS_ERAS: &[&[u64]] =
-    &[&[7], &[8, 9, 10], &[11, 12, 13, 14, 15], &[16, 17, 18, 19]];
+    &[&[7], &[8, 9, 10], &[11, 12, 13, 14, 15], &[16, 17, 18, 19, 20]];
 
-/// Thirteen drafts checked against thirteen files only proves something if the
+/// Fourteen drafts checked against fourteen files only proves something if the
 /// files differ.
 ///
 /// If an extraction were re-run in a way that gave every draft the same rows,
@@ -1157,7 +1199,9 @@ fn the_extracted_drafts_are_distinguishable_from_each_other() {
 /// The two boundaries are four drafts apart, because they are different
 /// documents' decisions: draft-14 is the first to name its error codes, and
 /// draft-19 is the first to give Object Status an IANA table with a Name
-/// column.
+/// column. Both are thresholds rather than equalities — draft-20 prints the
+/// same Object Status table draft-19 does, so a `draft == 19` test would have
+/// failed against a draft that agrees with it completely.
 ///
 /// # Ablation
 ///
@@ -1224,9 +1268,9 @@ fn symbolic_names_appear_in_the_drafts_that_print_them() {
             let code = row["code"].as_str().unwrap_or("<no code>");
             assert_eq!(
                 row["name"].is_string(),
-                draft == 19,
-                "draft-{draft} Object Status {code}: draft-19 alone prints this registry as a \
-                 table with a Name column"
+                draft >= 19,
+                "draft-{draft} Object Status {code}: draft-19 is the first to print this \
+                 registry as a table with a Name column, and draft-20 keeps it"
             );
             assert!(
                 row["name_normalized"].is_string(),

@@ -41,7 +41,7 @@
 //! merely that draft-19 works.
 //!
 //! That makes this file the place a change to draft-18 has to argue with. The
-//! conversion helpers this crate shares across drafts 07-19 make it easy to
+//! conversion helpers this crate shares across drafts 07-20 make it easy to
 //! give every draft one rule; doing so would move draft-19's registry into
 //! drafts that have no registry, and would fail here.
 
@@ -578,7 +578,7 @@ fn draft18_reads_the_same_rule_off_the_payload_length_and_draft19_off_the_regist
 /// refused by the layer above.
 ///
 /// Stating Normal is not a request for different bytes. Every draft from 07 to
-/// 19 assigns `0x0` to Normal and every one of them elides the status field on
+/// 20 assigns `0x0` to Normal and every one of them elides the status field on
 /// an object that carries a payload, so `Some(0)` and `None` describe the same
 /// frame — which is what the byte comparison below checks, rather than trusting
 /// that they do.
@@ -597,7 +597,7 @@ fn the_shared_writer_lets_a_normal_object_carry_a_payload() {
     use moqtap_codec::dispatch::AnySubgroupHeader;
     use moqtap_codec::version::DraftVersion;
 
-    // A subgroup header the three drafts share byte for byte.
+    // A subgroup header these drafts share byte for byte.
     let header_bytes = [0x10u8, 0x01, 0x07, 0x80];
 
     // Only the drafts actually compiled in: `AnySubgroupHeader::decode` answers
@@ -610,6 +610,8 @@ fn the_shared_writer_lets_a_normal_object_carry_a_payload() {
         DraftVersion::Draft18,
         #[cfg(feature = "draft19")]
         DraftVersion::Draft19,
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20,
     ];
 
     for &draft in drafts {

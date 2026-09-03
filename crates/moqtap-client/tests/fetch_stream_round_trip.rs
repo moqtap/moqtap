@@ -18,11 +18,11 @@
 //! out through `FramedSendStream` and come back through `FramedRecvStream` -
 //! the two halves of this crate meeting on a real QUIC stream.
 //!
-//! Drafts 15 through 19 now have one too, and it took five shapes because the
-//! drafts do. Draft-15 and draft-18 resolve an Object against the Object before
-//! it, so their readers carry state and the stream has to hold it; drafts 16, 17
-//! and 19 decode each Object's framing on its own and hand back the elisions
-//! unresolved.
+//! Drafts 15 through 20 now have one too, and it took six shapes because the
+//! drafts do. Draft-15, draft-18 and draft-20 resolve an Object against the
+//! Object before it, so their readers carry state and the stream has to hold
+//! it; drafts 16, 17 and 19 decode each Object's framing on its own and hand
+//! back the elisions unresolved.
 //!
 //! Draft-18 is the one that cannot be started from the stream. Section 11.4.4.1
 //! makes a Group ID Delta count upward under Ascending and downward under
@@ -293,7 +293,7 @@ mod draft14 {
     }
 }
 
-// -- drafts 15 through 19, whose writer is new -------------------------------
+// -- drafts 15 through 20, whose writer is new -------------------------------
 //
 // Their Serialization Flags share a layout: the low two bits carry the Subgroup
 // ID mode and `0b11` puts it on the wire, 0x04 the Object ID, 0x08 the Group ID,
@@ -963,6 +963,160 @@ mod draft19 {
         let mut framed = FramedSendStream::new(SendStream::Quic(send), DraftVersion::Draft19);
         framed
             .write_fetch_header(&AnyFetchHeader::Draft19(FetchHeader { request_id: varint(1) }))
+            .await
+            .expect("write fetch header");
+        framed.write_fetch_object(&object(0), &PAYLOAD).await.expect("write first object");
+        framed.finish().await.expect("finish");
+
+        assert!(reader.await.expect("reader task"), "the reader was never given a Group Order");
+    }
+}
+
+#[cfg(feature = "draft20")]
+mod draft20 {
+    use super::{common, varint, EVERYTHING_EXPLICIT, PAYLOAD};
+    use moqtap_client::draft20::connection::{FramedRecvStream, FramedSendStream};
+    use moqtap_client::transport::{RecvStream, SendStream};
+    use moqtap_codec::dispatch::AnyFetchHeader;
+    use moqtap_codec::draft20::data_stream::{FetchHeader, FetchObjectHeader, GroupOrder};
+    use moqtap_codec::version::DraftVersion;
+
+    /// Both fields explicit. On the first Object of a stream the two deltas are
+    /// the absolute Group ID and Object ID; on the ones after it a Group ID
+    /// Delta is counted from the prior Group in the stream's Group Order, which
+    /// is what the second gate below turns on.
+    fn object(object_delta: u64) -> FetchObjectHeader {
+        FetchObjectHeader {
+            serialization_flags: varint(EVERYTHING_EXPLICIT),
+            group_id_delta: Some(varint(0)),
+            subgroup_id: Some(varint(0)),
+            object_id_delta: Some(varint(object_delta)),
+            publisher_priority: Some(128),
+            properties: None,
+            payload_length: varint(PAYLOAD.len() as u64),
+        }
+    }
+
+    /// A fetch stream this client wrote is one it can read.
+    ///
+    /// The resolved Location is what comes back, not the deltas: the second
+    /// Object's Group ID Delta of 0 resolves to Group 1 under Ascending, because
+    /// Section 11.4.4.1 counts a new Group as the prior one plus the delta plus
+    /// one.
+    #[tokio::test]
+    async fn a_fetch_stream_this_client_wrote_is_one_it_can_read() {
+        common::init_crypto();
+        let alpn = DraftVersion::Draft20.quic_alpn();
+        let (server, addr) = common::spawn_server(&[alpn]);
+
+        let reader = tokio::spawn(async move {
+            let conn = server.accept().await.expect("accept").await.expect("handshake");
+            let recv = conn.accept_uni().await.expect("accept_uni");
+            let mut framed = FramedRecvStream::new(RecvStream::Quic(recv), DraftVersion::Draft20);
+            framed.read_fetch_header().await.expect("the fetch header");
+            framed.begin_fetch_objects(GroupOrder::Ascending);
+            let first = framed.read_fetch_object().await.expect("the first object");
+            let second = framed.read_fetch_object().await.expect("the second object");
+            (first, second)
+        });
+
+        let client = common::client_endpoint(&[alpn]);
+        let conn = client.connect(addr, "localhost").expect("connect").await.expect("handshake");
+        let send = conn.open_uni().await.expect("open_uni");
+        let mut framed = FramedSendStream::new(SendStream::Quic(send), DraftVersion::Draft20);
+        framed
+            .write_fetch_header(&AnyFetchHeader::Draft20(FetchHeader { request_id: varint(1) }))
+            .await
+            .expect("write fetch header");
+        framed.write_fetch_object(&object(0), &PAYLOAD).await.expect("write first object");
+        framed.write_fetch_object(&object(1), &PAYLOAD).await.expect("write second object");
+        framed.finish().await.expect("finish");
+
+        let ((first, first_payload), (second, second_payload)) = reader.await.expect("reader task");
+        assert_eq!(first.group_id, 0);
+        assert_eq!(first.object_id, 0);
+        assert_eq!(second.group_id, 1, "a Group ID Delta of 0 is the next Group, not this one");
+        assert_eq!(second.object_id, 1);
+        assert_eq!(first_payload, PAYLOAD, "the payload comes back with the object it followed");
+        assert_eq!(second_payload, PAYLOAD);
+    }
+
+    /// The Group Order the reader was started in is the one it reads in.
+    ///
+    /// The same bytes, read as Descending, ask for the Group before Group 0.
+    /// There is none, so the second Object does not decode — which is the
+    /// consequence that says `begin_fetch_objects` carries its argument through
+    /// rather than taking it and defaulting.
+    ///
+    /// It is also why draft-20 has this method at all, as draft-18 does: nothing
+    /// on a fetch stream says which order its Groups are in, and an endpoint
+    /// that guessed would mis-locate every Object after the first.
+    ///
+    /// Ablation: `FetchObjectReader::new` takes the order and stores Ascending
+    /// regardless — `counting down from Group 0 reaches no Group at all`.
+    #[tokio::test]
+    async fn the_group_order_the_reader_was_started_in_is_the_one_it_reads_in() {
+        common::init_crypto();
+        let alpn = DraftVersion::Draft20.quic_alpn();
+        let (server, addr) = common::spawn_server(&[alpn]);
+
+        let reader = tokio::spawn(async move {
+            let conn = server.accept().await.expect("accept").await.expect("handshake");
+            let recv = conn.accept_uni().await.expect("accept_uni");
+            let mut framed = FramedRecvStream::new(RecvStream::Quic(recv), DraftVersion::Draft20);
+            framed.read_fetch_header().await.expect("the fetch header");
+            framed.begin_fetch_objects(GroupOrder::Descending);
+            let first = framed.read_fetch_object().await;
+            let second = framed.read_fetch_object().await;
+            (first.is_ok(), second.is_err())
+        });
+
+        let client = common::client_endpoint(&[alpn]);
+        let conn = client.connect(addr, "localhost").expect("connect").await.expect("handshake");
+        let send = conn.open_uni().await.expect("open_uni");
+        let mut framed = FramedSendStream::new(SendStream::Quic(send), DraftVersion::Draft20);
+        framed
+            .write_fetch_header(&AnyFetchHeader::Draft20(FetchHeader { request_id: varint(1) }))
+            .await
+            .expect("write fetch header");
+        framed.write_fetch_object(&object(0), &PAYLOAD).await.expect("write first object");
+        framed.write_fetch_object(&object(1), &PAYLOAD).await.expect("write second object");
+        framed.finish().await.expect("finish");
+
+        let (first_read, second_refused) = reader.await.expect("reader task");
+        assert!(first_read, "the first Object states its Location outright and reads either way");
+        assert!(second_refused, "counting down from Group 0 reaches no Group at all");
+    }
+
+    /// Reading fetch objects without starting the reader is refused.
+    ///
+    /// Draft-20's reader cannot be seeded from the fetch header, because the
+    /// header does not carry the Group Order. Defaulting to Ascending would
+    /// decode a Descending stream into Locations that walk the wrong way and
+    /// report success, so the absence is an error rather than an assumption.
+    ///
+    /// Ablation: an unstarted reader is started as Ascending instead of refused
+    /// — `the reader was never given a Group Order`.
+    #[tokio::test]
+    async fn reading_before_the_reader_is_started_is_refused() {
+        common::init_crypto();
+        let alpn = DraftVersion::Draft20.quic_alpn();
+        let (server, addr) = common::spawn_server(&[alpn]);
+
+        let reader = tokio::spawn(async move {
+            let conn = server.accept().await.expect("accept").await.expect("handshake");
+            let recv = conn.accept_uni().await.expect("accept_uni");
+            let mut framed = FramedRecvStream::new(RecvStream::Quic(recv), DraftVersion::Draft20);
+            framed.read_fetch_header().await.expect("the fetch header");
+            framed.read_fetch_object().await.is_err()
+        });
+
+        let client = common::client_endpoint(&[alpn]);
+        let conn = client.connect(addr, "localhost").expect("connect").await.expect("handshake");
+        let send = conn.open_uni().await.expect("open_uni");
+        let mut framed = FramedSendStream::new(SendStream::Quic(send), DraftVersion::Draft20);
+        framed
+            .write_fetch_header(&AnyFetchHeader::Draft20(FetchHeader { request_id: varint(1) }))
             .await
             .expect("write fetch header");
         framed.write_fetch_object(&object(0), &PAYLOAD).await.expect("write first object");

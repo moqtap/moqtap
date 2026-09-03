@@ -16,7 +16,7 @@
 //! The observed output for each is in the docstring of the test that catches
 //! it; they are not predictions.
 
-#![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 
 use moqtap_codec::error::{
     CodecError, MAX_FULL_TRACK_NAME_LENGTH, MAX_GOAWAY_URI_LENGTH, MAX_REASON_PHRASE_LENGTH,
@@ -96,8 +96,9 @@ fn setup_option_key_may_not_wrap_past_the_end_of_the_range() {
     let d17 = moqtap_codec::draft17::message::ControlMessage::decode(&mut &wire[..]).err();
     let d18 = moqtap_codec::draft18::message::ControlMessage::decode(&mut &wire[..]).err();
     let d19 = moqtap_codec::draft19::message::ControlMessage::decode(&mut &wire[..]).err();
+    let d20 = moqtap_codec::draft20::message::ControlMessage::decode(&mut &wire[..]).err();
 
-    for (draft, got) in [("17", d17), ("18", d18), ("19", d19)] {
+    for (draft, got) in [("17", d17), ("18", d18), ("19", d19), ("20", d20)] {
         assert!(
             matches!(got, Some(CodecError::KeyDeltaOverflow(..))),
             "draft-{draft} accepted a wrapping setup option key: {got:?}"
@@ -129,7 +130,8 @@ fn parameter_key_may_not_wrap_past_the_end_of_the_range() {
 
     let d18 = moqtap_codec::draft18::message::ControlMessage::decode(&mut &wire[..]).err();
     let d19 = moqtap_codec::draft19::message::ControlMessage::decode(&mut &wire[..]).err();
-    for (draft, got) in [("18", d18), ("19", d19)] {
+    let d20 = moqtap_codec::draft20::message::ControlMessage::decode(&mut &wire[..]).err();
+    for (draft, got) in [("18", d18), ("19", d19), ("20", d20)] {
         assert!(
             matches!(got, Some(CodecError::KeyDeltaOverflow(..))),
             "draft-{draft} accepted a wrapping parameter key: {got:?}"
@@ -268,6 +270,32 @@ fn out_of_range_uint8_parameters_are_refused_on_every_draft_that_defines_them() 
         let d18_good = subscribe_with_param_d18(key, good);
         let got = moqtap_codec::draft18::message::ControlMessage::decode(&mut &d18_good[..]);
         assert!(got.is_ok(), "draft-18 refused the legal parameter {key:#x} = {good}: {got:?}");
+
+        // Drafts 19 and 20 frame a SUBSCRIBE exactly as draft-18 does, so the
+        // same bytes serve all three.
+        let got = moqtap_codec::draft19::message::ControlMessage::decode(&mut &d18_bad[..]);
+        assert!(got.is_err(), "draft-19 accepted parameter {key:#x} = {bad}: {got:?}");
+        let got = moqtap_codec::draft19::message::ControlMessage::decode(&mut &d18_good[..]);
+        assert!(got.is_ok(), "draft-19 refused the legal parameter {key:#x} = {good}: {got:?}");
+
+        let got = moqtap_codec::draft20::message::ControlMessage::decode(&mut &d18_bad[..]);
+        assert!(got.is_err(), "draft-20 accepted parameter {key:#x} = {bad}: {got:?}");
+        let got = moqtap_codec::draft20::message::ControlMessage::decode(&mut &d18_good[..]);
+        assert!(got.is_ok(), "draft-20 refused the legal parameter {key:#x} = {good}: {got:?}");
+    }
+
+    // Draft-20 adds a third uint8 with a restricted range. Section 10.2.21:
+    // "The allowed values are 0 (do not send Properties) or 1 (send
+    // Properties), and the default is 1. If an endpoint receives a value
+    // outside this range, it MUST close the session with PROTOCOL_VIOLATION."
+    for (bad, good) in [(2u8, 0u8), (0xFF, 1)] {
+        let wire = subscribe_with_param_d18(0x35, bad);
+        let got = moqtap_codec::draft20::message::ControlMessage::decode(&mut &wire[..]);
+        assert!(got.is_err(), "draft-20 accepted INCLUDE_PROPERTIES = {bad}: {got:?}");
+
+        let wire = subscribe_with_param_d18(0x35, good);
+        let got = moqtap_codec::draft20::message::ControlMessage::decode(&mut &wire[..]);
+        assert!(got.is_ok(), "draft-20 refused the legal INCLUDE_PROPERTIES = {good}: {got:?}");
     }
 }
 
@@ -440,6 +468,11 @@ fn a_zero_length_namespace_field_is_refused() {
     assert!(
         matches!(got, Err(CodecError::EmptyNamespaceField)),
         "draft-19 accepted a zero-length namespace field: {got:?}"
+    );
+    let got = moqtap_codec::draft20::message::ControlMessage::decode(&mut &d18[..]);
+    assert!(
+        matches!(got, Err(CodecError::EmptyNamespaceField)),
+        "draft-20 accepted a zero-length namespace field: {got:?}"
     );
 }
 

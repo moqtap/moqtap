@@ -28,7 +28,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 use bytes::Bytes;
@@ -75,6 +76,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// Drafts whose object headers the codec decodes by copying the extension
@@ -112,9 +115,11 @@ const SKIPPING_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
-/// Drafts 17-19, which are the drafts whose subgroup header type carries a
+/// Drafts 17-20, which are the drafts whose subgroup header type carries a
 /// two-bit subgroup-ID *mode* field rather than a present/absent flag.
 const MODE_FIELD_DRAFTS: &[DraftVersion] = &[
     #[cfg(feature = "draft17")]
@@ -123,6 +128,71 @@ const MODE_FIELD_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
+];
+
+/// Drafts whose subgroup stream table has a type meaning "the Subgroup ID is
+/// the Object ID of the first object on the stream, and is not transmitted",
+/// paired with the type value that says so.
+///
+/// The pairing is why this is a list of tuples rather than of drafts: draft-11
+/// spells it `0x0A` and every draft after it spells it `0x12`.
+///
+/// # It lives up here for a reason
+///
+/// This was an array written inline in the one test that reads it, eight
+/// hundred lines down, and it was the only per-draft enumeration in this file
+/// that was not a named constant beside its siblings. It was also the only one
+/// with holes in it. Draft-15 was missing, though draft-15 Section 10.4.2 Table
+/// 6 assigns `0x12` to a first-object stream exactly as its neighbours do, and
+/// draft-20 was missing because the port that added `DraftVersion::Draft20` to
+/// the four constants above never reached a literal that far from them.
+///
+/// Neither omission could fail. A draft left out of a sweep is a draft the
+/// sweep says nothing about, and a test that says nothing passes.
+///
+/// # Ablations, measured
+///
+/// Both new members were cut separately, because a sweep stops at its first
+/// failed assertion and one cut covering both would only ever prove the
+/// earlier one. Draft-15's `subgroup_id_from_first_object` forced to `false`:
+///
+/// ```text
+/// assertion `left == right` failed: [draft-15] first-object subgroup ID
+/// ```
+///
+/// Then reverted, and draft-20's `subgroup_id_mode` made to report mode 1 as
+/// mode 0:
+///
+/// ```text
+/// assertion `left == right` failed: [draft-20] first-object subgroup ID
+/// ```
+///
+/// Each reddens one test — 16 passed, 1 failed. The mode-0 sweep above stays
+/// green under the draft-20 cut, which is what says the two modes are being
+/// told apart rather than both read off one branch.
+const FIRST_OBJECT_SUBGROUP_STREAMS: &[(DraftVersion, u8)] = &[
+    #[cfg(feature = "draft11")]
+    (DraftVersion::Draft11, 0x0A),
+    #[cfg(feature = "draft12")]
+    (DraftVersion::Draft12, 0x12),
+    #[cfg(feature = "draft13")]
+    (DraftVersion::Draft13, 0x12),
+    #[cfg(feature = "draft14")]
+    (DraftVersion::Draft14, 0x12),
+    #[cfg(feature = "draft15")]
+    (DraftVersion::Draft15, 0x12),
+    #[cfg(feature = "draft16")]
+    (DraftVersion::Draft16, 0x12),
+    #[cfg(feature = "draft17")]
+    (DraftVersion::Draft17, 0x12),
+    #[cfg(feature = "draft18")]
+    (DraftVersion::Draft18, 0x12),
+    #[cfg(feature = "draft19")]
+    (DraftVersion::Draft19, 0x12),
+    #[cfg(feature = "draft20")]
+    (DraftVersion::Draft20, 0x12),
 ];
 
 /// A draft this build compiled, for the handful of claims below that are
@@ -158,7 +228,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 /// `draft`'s — the leading byte of a stream `draft`'s framer cannot open.
 ///
 /// The three type spaces are disjoint: 07-10 open at `0x04`, draft-11 at
-/// `0x0C`, and 12-19 at `0x14`. Any draft therefore has another space to
+/// `0x0C`, and 12-20 at `0x14`. Any draft therefore has another space to
 /// borrow from, which is what lets the wrong-draft case be put to a build
 /// that compiled only one draft — the alternative, encoding a real stream
 /// on a second draft, needs a second codec and so cannot be asked there at
@@ -396,7 +466,7 @@ fn corrupt_object_stream(draft: DraftVersion) -> Vec<u8> {
     // A zero-length payload is what makes a status field present at all,
     // and the status is the object's final field, so the last byte is the
     // status and nothing else. `0x3F` is a one-byte code under both the
-    // RFC 9000 varint drafts 07-16 use and the MoQT varint of 17-19, and
+    // RFC 9000 varint drafts 07-16 use and the MoQT varint of 17-20, and
     // no draft assigns it — a hard parse failure rather than a short read.
     // Building it this way rather than by hand is what makes the fixture
     // hold on every draft instead of only on the one whose object layout
@@ -520,7 +590,7 @@ fn oversized_object_passes_through_and_framing_resumes() {
 fn an_object_many_times_the_cap_still_lets_framing_resume() {
     const CAP: usize = 64 * 1024;
 
-    // Drafts 14-19 measure an object without copying anything out of the
+    // Drafts 14-20 measure an object without copying anything out of the
     // buffer, so no declared size puts one out of measuring reach.
     for &draft in SKIPPING_DRAFTS {
         let objects = [
@@ -555,7 +625,7 @@ fn an_object_many_times_the_cap_still_lets_framing_resume() {
 /// error to say so: one oversized object degraded the whole stream instead
 /// of only itself.
 ///
-/// One draft rather than a sweep — ten mebibytes per draft is thirteen
+/// One draft rather than a sweep — ten mebibytes per draft is fourteen
 /// times the cost for one claim — and it has to come from
 /// [`SKIPPING_DRAFTS`], because ten mebibytes is past the measuring reach
 /// of 07-13 and resuming is exactly what those drafts cannot do. The case
@@ -751,14 +821,14 @@ fn stream_without_a_subgroup_id_field(
 
 #[test]
 fn subgroup_id_mode_zero_is_reported_as_zero() {
-    // Header type 0x10 on drafts 17-19: subgroup-ID mode 0, which *defines*
+    // Header type 0x10 on drafts 17-20: subgroup-ID mode 0, which *defines*
     // the ID as zero rather than leaving it unresolved. It is the commonest
     // header shape in the vector corpus, so reporting `None` here would
     // hide the majority of live traffic from any subgroup matcher.
     //
-    // Swept over the compiled members of that trio rather than named, for
+    // Swept over the compiled members of those four rather than named, for
     // the same reason its sibling below is: no other draft has a mode
-    // field to report, and a build without 17-19 has no decoder to ask.
+    // field to report, and a build without 17-20 has no decoder to ask.
     for &draft in MODE_FIELD_DRAFTS {
         let stream = stream_without_a_subgroup_id_field(draft, 0x10, 7);
 
@@ -783,32 +853,17 @@ fn implicit_subgroup_id_is_reported_as_unresolved() {
     // stream store a zero the framer must not pass off as a real subgroup
     // ID.
     //
-    // Drafts 17-19's reserved mode 3 (header type 0x16) stores that same
-    // zero and is deliberately not swept here: draft-19 Section 11.4.2 and
-    // its two predecessors list every mode-3 type value as invalid, so no
+    // Drafts 17-20's reserved mode 3 (header type 0x16) stores that same
+    // zero and is deliberately not swept here: draft-20 Section 11.4.2 and
+    // its three predecessors list every mode-3 type value as invalid, so no
     // such header decodes and the framer has nothing to report a subgroup
     // ID for. What it does with one instead is
     // [`a_reserved_mode_header_is_refused_and_every_byte_still_forwarded`].
-    let cases: &[(DraftVersion, u8)] = &[
-        #[cfg(feature = "draft11")]
-        (DraftVersion::Draft11, 0x0A),
-        #[cfg(feature = "draft12")]
-        (DraftVersion::Draft12, 0x12),
-        #[cfg(feature = "draft13")]
-        (DraftVersion::Draft13, 0x12),
-        #[cfg(feature = "draft14")]
-        (DraftVersion::Draft14, 0x12),
-        #[cfg(feature = "draft16")]
-        (DraftVersion::Draft16, 0x12),
-        #[cfg(feature = "draft17")]
-        (DraftVersion::Draft17, 0x12),
-        #[cfg(feature = "draft18")]
-        (DraftVersion::Draft18, 0x12),
-        #[cfg(feature = "draft19")]
-        (DraftVersion::Draft19, 0x12),
-    ];
-
-    for &(draft, stream_type) in cases {
+    //
+    // The list is [`FIRST_OBJECT_SUBGROUP_STREAMS`], up with the other
+    // per-draft sweeps rather than written out here, because written out here
+    // is how it came to be missing two of them.
+    for &(draft, stream_type) in FIRST_OBJECT_SUBGROUP_STREAMS {
         let stream = stream_without_a_subgroup_id_field(draft, stream_type, 4);
 
         let mut framer =
@@ -826,10 +881,10 @@ fn implicit_subgroup_id_is_reported_as_unresolved() {
     }
 }
 
-/// A header carrying drafts 17-19's reserved subgroup-ID mode costs
+/// A header carrying drafts 17-20's reserved subgroup-ID mode costs
 /// addressability and not one byte.
 ///
-/// Draft-19 Section 11.4.2, and the same list in 18 and 17, gives eight
+/// Draft-20 Section 11.4.2, and the same list in 19, 18 and 17, gives eight
 /// type values — `0x16`, `0x17`, `0x1E`, `0x1F`, `0x36`, `0x37`, `0x3E`,
 /// `0x3F` — as invalid, and tells the endpoint receiving one to close the
 /// session with a PROTOCOL_VIOLATION. This proxy is not that endpoint. It

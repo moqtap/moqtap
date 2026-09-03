@@ -166,7 +166,7 @@ impl From<RangeSet> for Vec<RangeInclusive<u64>> {
 /// `Datagram` matcher never matches a unit. The report is the scheduler's
 /// job once this module is wired.
 ///
-/// `Fetch` is live on all thirteen. It was not always: drafts 18 and 19
+/// `Fetch` is live on all fourteen. It was not always: drafts 18, 19 and 20
 /// write a fetch object's Group ID as a difference whose sign the fetch's
 /// Group Order settles, and while nothing carried that order to the framer a
 /// fetch stream there was bypassed at its header and produced no
@@ -572,7 +572,7 @@ struct Keys {
 
 /// Which [`MatchKind`] a framed object's stream is.
 ///
-/// The `Fetch` arm is **live**, on all thirteen drafts:
+/// The `Fetch` arm is **live**, on all fourteen drafts:
 /// `detect_stream_type` maps stream type `0x05` to
 /// [`DataStreamType::Fetch`] and the framer produces ordinary [`ObjectMeta`]
 /// for it. On drafts 18 and 19 that needs the fetch's Group Order, which the
@@ -655,10 +655,17 @@ mod tests {
     use super::*;
     use moqtap_codec::version::DraftVersion;
 
-    /// All thirteen, so a claim about "every draft" is one rather than a
+    /// All fourteen, so a claim about "every draft" is one rather than a
     /// sample. Nothing here decodes, so an uncompiled draft is as
     /// answerable as a compiled one.
-    const DRAFTS: [DraftVersion; 13] = [
+    ///
+    /// The length is written out for the same reason the other draft sweeps
+    /// in this crate write theirs out — `capability.rs` and `exec.rs` both
+    /// hold a `[DraftVersion; 14]`. This one said `13` while claiming
+    /// fourteen, and ending at `Draft19` is how every sweep below silently
+    /// stopped testing draft-20: a short array is not a failing test, it is a
+    /// smaller one.
+    const DRAFTS: [DraftVersion; 14] = [
         DraftVersion::Draft07,
         DraftVersion::Draft08,
         DraftVersion::Draft09,
@@ -672,6 +679,7 @@ mod tests {
         DraftVersion::Draft17,
         DraftVersion::Draft18,
         DraftVersion::Draft19,
+        DraftVersion::Draft20,
     ];
 
     /// A framed subgroup object with every optional key present, so a test

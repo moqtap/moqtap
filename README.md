@@ -20,11 +20,11 @@ Add the crates you need to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-moqtap-codec = "0.4"
-moqtap-client = "0.4"
+moqtap-codec = "0.5"
+moqtap-client = "0.5"
 ```
 
-Each draft is a separate feature flag on both crates (`draft07`..`draft19`), and both default to `all-drafts`. Turn default features off and name only the drafts you need to build a smaller subset; a draft that is not enabled cannot be negotiated at runtime.
+Each draft is a separate feature flag on both crates (`draft07`..`draft20`), and both default to `all-drafts`. Turn default features off and name only the drafts you need to build a smaller subset; a draft that is not enabled cannot be negotiated at runtime.
 
 ### Connect and subscribe (draft-14)
 
@@ -126,10 +126,24 @@ quinn-netem           Standalone UDP impairment engine, no MoQT dependency.
                       Used by moqtap-proxy behind its `impair` feature.
 ```
 
+Three crates span fourteen drafts and they do it three different ways —
+`moqtap-codec` and `moqtap-client` with per-draft modules behind cargo features,
+`moqtap-proxy` with no draft modules at all and a runtime `match DraftVersion`.
+[`ARCHITECTURE.md`](ARCHITECTURE.md) states which applies where, what may be
+shared across drafts and what may not, and what to run when adding a draft.
+**Read it before sharing code across drafts.**
+
 ## Spec Compliance
 
-This implementation covers MoQT drafts 07 through 19. Each draft is a
-separate module in both `moqtap-codec` and `moqtap-client`.
+This implementation covers MoQT drafts 07 through 20. Each draft is a
+separate module in both `moqtap-codec` and `moqtap-client`; `moqtap-proxy` has
+none and spans them at runtime instead. See
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+Draft-20 is the newest and is not a default anywhere. It is not the interop
+target — interop ran against draft-18 and the editors plan draft-22 next — so
+no crate here promotes it to a connection default, an advertised-preferred
+version or an auto-selected draft.
 
 ## License
 

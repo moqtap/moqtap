@@ -34,7 +34,7 @@ pub use crate::types::{BypassReason, ObjectMeta};
 ///
 /// # Why a fetch stream needs something from outside itself
 ///
-/// Drafts 18 and 19 write a fetch Object's Group ID as a difference from the
+/// Drafts 18, 19 and 20 write a fetch Object's Group ID as a difference from the
 /// Object before it, and the fetch's Group Order decides whether the
 /// difference counts up or down — draft-19 Section 11.4.4.1. Nothing on the
 /// data stream states the order, so a framer handed only the stream cannot
@@ -358,7 +358,7 @@ impl ObjectFramer {
 
     /// Read this stream's fetch Objects against the order its FETCH asked for.
     ///
-    /// Only drafts 18 and 19 need it — see [`FetchGroupOrders`] — and only a
+    /// Only drafts 18, 19 and 20 need it — see [`FetchGroupOrders`] — and only a
     /// fetch stream consults it; a subgroup framer given one ignores it. A
     /// framer built without it on a draft that needs one reports
     /// [`BypassReason::FetchGroupOrderUnknown`] and forwards the stream
@@ -404,8 +404,8 @@ impl ObjectFramer {
     /// this only suppresses the cursor advance — those Object IDs are
     /// absolute, so the bytes of every later object already say the truth.
     /// Elsewhere it also arms a fix-up: the leading Object ID varint on a
-    /// drafts 14-19 subgroup stream, and the whole framing of the next frame
-    /// on a drafts 15-19 fetch stream, where it additionally puts the fetch
+    /// drafts 14-20 subgroup stream, and the whole framing of the next frame
+    /// on a drafts 15-20 fetch stream, where it additionally puts the fetch
     /// writer back to where the last forwarded frame left it.
     pub fn note_elided(&mut self, meta: &ObjectMeta) {
         let pending = self.pending_disposition.take();
@@ -586,7 +586,7 @@ impl ObjectFramer {
                     // session's own record of what each FETCH asked for,
                     // rather than inferred from the reader refusing. A codec
                     // able to decode a layout is not on its own enough: on
-                    // drafts 18 and 19 it decodes under a Group Order nothing
+                    // drafts 18, 19 and 20 it decodes under a Group Order nothing
                     // on this stream states, and the wrong one decodes as
                     // willingly as the right one.
                     DataStreamHeaderKind::Fetch(h) => match self.fetch_stage(h) {
@@ -849,21 +849,35 @@ impl ObjectFramer {
     /// `true` when this stream's Object IDs are written as `id - prev - 1`
     /// rather than absolutely, so eliding one renumbers every later object.
     ///
-    /// Subgroup streams on drafts 14-19, and no fetch stream on any draft:
+    /// Subgroup streams on drafts 14-20, and no fetch stream on any draft:
     /// this is the predicate for the *varint rewrite*, and a fetch frame is
     /// paid for by [`Self::reemit_fetch_frame`] instead. Drafts 07-13 write
     /// subgroup Object IDs absolutely and need neither.
+    ///
+    /// The draft half is an exhaustive match rather than a `matches!`: a draft
+    /// left off the list answers "written absolutely", the framer then forwards
+    /// the object after an elide without rewriting its leading varint, and
+    /// every later Object ID on the stream is off by one with nothing to say
+    /// so. The stream-kind half stays a `matches!` — `DataStreamType` is not a
+    /// draft list and its two variants are both named here.
     fn delta_encodes_object_ids(&self) -> bool {
         matches!(self.stream_type, DataStreamType::Subgroup)
-            && matches!(
-                self.draft,
+            && match self.draft {
+                DraftVersion::Draft07
+                | DraftVersion::Draft08
+                | DraftVersion::Draft09
+                | DraftVersion::Draft10
+                | DraftVersion::Draft11
+                | DraftVersion::Draft12
+                | DraftVersion::Draft13 => false,
                 DraftVersion::Draft14
-                    | DraftVersion::Draft15
-                    | DraftVersion::Draft16
-                    | DraftVersion::Draft17
-                    | DraftVersion::Draft18
-                    | DraftVersion::Draft19
-            )
+                | DraftVersion::Draft15
+                | DraftVersion::Draft16
+                | DraftVersion::Draft17
+                | DraftVersion::Draft18
+                | DraftVersion::Draft19
+                | DraftVersion::Draft20 => true,
+            }
     }
 
     /// `true` when eliding an object from this stream leaves the next one
@@ -876,22 +890,36 @@ impl ObjectFramer {
     /// Locations nobody sent. `fixup_owed` on a `Bypassed` is what a session
     /// resets its destination over, and it reads this.
     ///
-    /// Fetch streams on drafts 15-19, where a Serialization Flags field lets
+    /// Fetch streams on drafts 15-20, where a Serialization Flags field lets
     /// a frame take any of its Group ID, Subgroup ID, Object ID and Priority
     /// from the frame before it — draft-17 Section 10.4.4.1, Table 7: "Object
     /// ID is the prior Object's ID plus one". Not drafts 07-14, whose fetch
     /// objects state all four outright.
+    ///
+    /// Exhaustive rather than a `matches!` for the same reason as
+    /// [`Self::delta_encodes_object_ids`], and the consequence is larger here:
+    /// `false` means no fix-up is owed, so the session never resets the
+    /// destination and the receiver keeps a stream whose frames decode to
+    /// Locations nobody sent.
     fn elide_owes_a_fixup(&self) -> bool {
         match self.stream_type {
             DataStreamType::Subgroup => self.delta_encodes_object_ids(),
-            DataStreamType::Fetch => matches!(
-                self.draft,
+            DataStreamType::Fetch => match self.draft {
+                DraftVersion::Draft07
+                | DraftVersion::Draft08
+                | DraftVersion::Draft09
+                | DraftVersion::Draft10
+                | DraftVersion::Draft11
+                | DraftVersion::Draft12
+                | DraftVersion::Draft13
+                | DraftVersion::Draft14 => false,
                 DraftVersion::Draft15
-                    | DraftVersion::Draft16
-                    | DraftVersion::Draft17
-                    | DraftVersion::Draft18
-                    | DraftVersion::Draft19
-            ),
+                | DraftVersion::Draft16
+                | DraftVersion::Draft17
+                | DraftVersion::Draft18
+                | DraftVersion::Draft19
+                | DraftVersion::Draft20 => true,
+            },
         }
     }
 
@@ -1004,13 +1032,13 @@ impl ObjectFramer {
     /// hostile length field can provoke. That makes the choice per layout
     /// rather than global:
     ///
-    /// * Subgroup objects on drafts 14-19, and fetch objects on draft-14,
+    /// * Subgroup objects on drafts 14-20, and fetch objects on draft-14,
     ///   are measured without a single copy — their `read_object_meta`
     ///   advances past the extension block and the payload rather than
     ///   reading them. Nothing can be talked into allocating, so the pad is
     ///   effectively unbounded and an object of *any* declared size stays
     ///   measurable: it streams through and framing resumes after it.
-    /// * Every older object layout decodes its extension block by copying
+    /// * Every other object layout decodes its extension block by copying
     ///   it out of the buffer. Those keep a pad of one cap, which bounds
     ///   the copy at the price of reach: an object whose wire length
     ///   exceeds `buffered + cap` cannot be measured and the stream falls
@@ -1019,18 +1047,52 @@ impl ObjectFramer {
     /// Widening the second case needs the codec to reject an extension
     /// length larger than the bytes actually present, which is not this
     /// crate's to change.
+    ///
+    /// **"Every other" includes the newest fetch layouts, and that is not an
+    /// omission.** Drafts 15 through 20 all read a fetch frame through
+    /// `FetchObjectReader::read_object_header`, which materialises the frame's
+    /// properties — `data_dispatch.rs` `fo15`..`fo20` each carry the block out
+    /// of the buffer before `read_object_frame` skips the payload — so a
+    /// declared extension length is still an allocation those drafts can be
+    /// talked into. Only draft-14's `FetchObject::decode_meta` advances past
+    /// the block instead. Both arms are exhaustive matches rather than
+    /// `matches!` so that this stays a decision: a new draft answering `false`
+    /// by omission would be *safe* here, which is precisely why nothing would
+    /// ever notice that no one had looked at its fetch layout.
     fn measuring_pad(&self) -> usize {
         let copy_free = match self.stage {
-            Stage::Subgroup(_) => matches!(
-                self.draft,
+            Stage::Subgroup(_) => match self.draft {
+                DraftVersion::Draft07
+                | DraftVersion::Draft08
+                | DraftVersion::Draft09
+                | DraftVersion::Draft10
+                | DraftVersion::Draft11
+                | DraftVersion::Draft12
+                | DraftVersion::Draft13 => false,
                 DraftVersion::Draft14
-                    | DraftVersion::Draft15
-                    | DraftVersion::Draft16
-                    | DraftVersion::Draft17
-                    | DraftVersion::Draft18
-                    | DraftVersion::Draft19
-            ),
-            Stage::Fetch { .. } => matches!(self.draft, DraftVersion::Draft14),
+                | DraftVersion::Draft15
+                | DraftVersion::Draft16
+                | DraftVersion::Draft17
+                | DraftVersion::Draft18
+                | DraftVersion::Draft19
+                | DraftVersion::Draft20 => true,
+            },
+            Stage::Fetch { .. } => match self.draft {
+                DraftVersion::Draft14 => true,
+                DraftVersion::Draft07
+                | DraftVersion::Draft08
+                | DraftVersion::Draft09
+                | DraftVersion::Draft10
+                | DraftVersion::Draft11
+                | DraftVersion::Draft12
+                | DraftVersion::Draft13
+                | DraftVersion::Draft15
+                | DraftVersion::Draft16
+                | DraftVersion::Draft17
+                | DraftVersion::Draft18
+                | DraftVersion::Draft19
+                | DraftVersion::Draft20 => false,
+            },
             Stage::AwaitingHeader => false,
         };
         if copy_free {
@@ -1199,7 +1261,8 @@ impl Buf for PaddedBuf<'_> {
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 mod tests {
     //! The elide cursor, on the wire.
@@ -1219,8 +1282,8 @@ mod tests {
     /// The drafts this build actually compiled.
     ///
     /// Each element carries its own `#[cfg]`, so the sweep is the enabled
-    /// set rather than a hardcoded thirteen: a `--features draft14` build
-    /// sweeps one draft and does not try to decode twelve headers whose
+    /// set rather than a hardcoded fourteen: a `--features draft14` build
+    /// sweeps one draft and does not try to decode thirteen headers whose
     /// decoders were not compiled.
     const DRAFTS: &[DraftVersion] = &[
         #[cfg(feature = "draft07")]
@@ -1249,6 +1312,8 @@ mod tests {
         DraftVersion::Draft18,
         #[cfg(feature = "draft19")]
         DraftVersion::Draft19,
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20,
     ];
 
     /// The drafts that write an Object ID as `id - prev - 1`, and so are
@@ -1267,6 +1332,8 @@ mod tests {
         DraftVersion::Draft18,
         #[cfg(feature = "draft19")]
         DraftVersion::Draft19,
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20,
     ];
 
     /// The stream-type field opening a subgroup stream that carries an

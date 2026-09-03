@@ -558,7 +558,7 @@ fn a_fetch_aimed_track_alias_rule_is_refused() {
 /// the same key is admitted for the other two kinds.
 ///
 /// This is the one refusal in the table that is about the *carrier* rather
-/// than the draft. No datagram of any of the thirteen belongs to a subgroup
+/// than the draft. No datagram of any of the fourteen belongs to a subgroup
 /// — there is no header shape anywhere in the family that puts the field on
 /// one — so the answer is knowable the moment a class names both, which is
 /// what makes it a refusal here and not an

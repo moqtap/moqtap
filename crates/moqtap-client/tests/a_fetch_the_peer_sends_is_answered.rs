@@ -36,7 +36,7 @@
 //! peer that fetched from this crate waited for an answer the crate had no
 //! record to build.
 //!
-//! Drafts 17 through 19 already carry this, because a request there arrives on
+//! Drafts 17 through 20 already carry this, because a request there arrives on
 //! a stream of its own and the same map holds both ends' fetches.
 //!
 //! # Why none of this ends the session

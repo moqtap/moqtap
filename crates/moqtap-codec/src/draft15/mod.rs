@@ -12,13 +12,11 @@
 //! - Data streams: delta-encoded object IDs, priority bit flag, serialization flags
 
 #[allow(missing_docs)]
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
-/// Error and status code registries (Section 13.3).
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 #[allow(missing_docs)]
-/// Control message types with encode/decode.
 pub mod message;
 #[allow(missing_docs)]
-/// Draft-15 types.
 pub mod types;

@@ -522,7 +522,7 @@ macro_rules! duplicate_track_alias_gates {
             /// once is a different rule with a different range: drafts 07
             /// through 14 say "A subscriber MUST NOT make multiple active
             /// subscriptions for a track within a single session", and drafts
-            /// 15 through 19 do not say it at all. Nothing in this crate
+            /// 15 through 20 do not say it at all. Nothing in this crate
             /// enforces it either way, so the pair of subscriptions this gate
             /// builds is a state three of these eight drafts would call a
             /// violation - of that rule, and not of this one. What is being

@@ -208,7 +208,7 @@ fn any_subgroup_header_draft07_round_trip() {
 /// answers `None` when the header does not determine a Subgroup ID. Both
 /// drafts used to answer `Some(0)`, which hands a caller subgroup zero for a
 /// stream no draft defines — and a caller believing an ID is pinned is a
-/// caller that will elide the first object of it. Drafts 17-19 already
+/// caller that will elide the first object of it. Drafts 17-20 already
 /// answered `None` for the same combination, so the old behaviour also split
 /// the answer across drafts that agree on the bytes.
 ///
@@ -482,9 +482,10 @@ fn put_varint_moqt(v: u64, out: &mut Vec<u8>) {
 #[allow(dead_code)]
 fn put_varint_for(version: DraftVersion, v: u64, out: &mut Vec<u8>) {
     match version {
-        DraftVersion::Draft17 | DraftVersion::Draft18 | DraftVersion::Draft19 => {
-            put_varint_moqt(v, out)
-        }
+        DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20 => put_varint_moqt(v, out),
         _ => put_varint(v, out),
     }
 }
@@ -1097,7 +1098,7 @@ mod subgroup_accessors_draft16 {
     }
 }
 
-/// Drafts 17-19 carry the same two-bit SUBGROUP_ID_MODE field draft-16 named,
+/// Drafts 17-20 carry the same two-bit SUBGROUP_ID_MODE field draft-16 named,
 /// taking three defined values: 0 puts no field on the wire and the ID is
 /// zero, 1 takes it from the first object, and 2 carries an explicit varint
 /// after the Group ID. Only mode 1 leaves the decoder without an ID, so
@@ -1215,6 +1216,15 @@ modal_accessor_tests!(
     subgroup_accessors_draft19,
     "draft19",
     Draft19,
+    [
+        0x16, 0x17, 0x1E, 0x1F, 0x36, 0x37, 0x3E, 0x3F, 0x56, 0x57, 0x5E, 0x5F, 0x76, 0x77, 0x7E,
+        0x7F
+    ]
+);
+modal_accessor_tests!(
+    subgroup_accessors_draft20,
+    "draft20",
+    Draft20,
     [
         0x16, 0x17, 0x1E, 0x1F, 0x36, 0x37, 0x3E, 0x3F, 0x56, 0x57, 0x5E, 0x5F, 0x76, 0x77, 0x7E,
         0x7F

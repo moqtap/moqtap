@@ -7,13 +7,11 @@
 //! - Subgroup stream type IDs shift from 0x08-0x0D to 0x10-0x15
 
 #[allow(missing_docs)]
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
-/// Error, status and termination code registries.
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 #[allow(missing_docs)]
-/// Control message types with encode/decode.
 pub mod message;
 #[allow(missing_docs)]
-/// Draft-12 types.
 pub mod types;

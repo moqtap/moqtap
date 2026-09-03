@@ -80,6 +80,59 @@ fn write_and_read_multiple_events() {
     assert_eq!(read_events, events);
 }
 
+/// A whole file's worth of the rule that the cap is the recorder's alone: an
+/// error event carrying more than [`ERROR_RAW_CAP`] bytes is written at that
+/// length, read back at that length, and written out again at that length.
+///
+/// Through the file writer and the file reader rather than through one event,
+/// because a cap dropped into `write_event` would pass every event-level test
+/// built from short fixtures and would then quietly shorten the evidence in
+/// every over-long capture a redaction pass, a filter or a re-segmentation
+/// touched. Re-truncating someone else's file destroys the record to make it
+/// conform to a rule it was never handed.
+#[test]
+fn an_over_long_raw_survives_a_write_a_read_and_a_rewrite() {
+    let long: Vec<u8> = (0..ERROR_RAW_CAP + 904).map(|i| (i % 251) as u8).collect();
+    assert_eq!(long.len(), 5000, "the fixture is meant to sit well past the cap");
+
+    let event = TraceEvent::new(
+        0,
+        700,
+        EventData::Error {
+            error_code: 5,
+            reason: "SUBSCRIBE_OK did not parse".into(),
+            stream_id: Some(6),
+            kind: Some(ErrorKind::Decode),
+            raw_len: Some(5000),
+            raw: Some(long.clone()),
+        },
+    );
+
+    let buf = write_trace(&sample_header(), std::slice::from_ref(&event));
+    let reader = MoqTraceReader::new(Cursor::new(&buf)).unwrap();
+    let read: Vec<TraceEvent> = reader.into_iter().collect::<Result<_, _>>().unwrap();
+    assert_eq!(read.len(), 1, "an over-long 'raw' cost the file its event");
+
+    let EventData::Error { raw, raw_len, kind, stream_id, .. } = &read[0].data else {
+        panic!("expected an error event");
+    };
+    assert_eq!(raw.as_deref(), Some(long.as_slice()), "the read shortened the bytes");
+    assert_eq!(*raw_len, Some(5000));
+    assert_eq!(*kind, Some(ErrorKind::Decode));
+    assert_eq!(*stream_id, Some(6));
+
+    // And out again, from the event the reader built rather than the one the
+    // test did: a rewrite is where a serializer-side cap would bite.
+    let rewritten = write_trace(&sample_header(), &read);
+    let reader = MoqTraceReader::new(Cursor::new(&rewritten)).unwrap();
+    let reread: Vec<TraceEvent> = reader.into_iter().collect::<Result<_, _>>().unwrap();
+    let EventData::Error { raw, raw_len, .. } = &reread[0].data else {
+        panic!("expected an error event");
+    };
+    assert_eq!(raw.as_deref(), Some(long.as_slice()), "the rewrite shortened the bytes");
+    assert_eq!(*raw_len, Some(5000));
+}
+
 #[test]
 fn magic_bytes_are_correct() {
     let buf = write_trace(&sample_header(), &[]);

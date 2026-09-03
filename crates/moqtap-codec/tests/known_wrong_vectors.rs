@@ -3,7 +3,7 @@
 //!
 //! Every draft's whole data-stream corpus is swept against that draft's own
 //! `ObjectStatus::ALL`, and the set of disagreements must be exactly what
-//! [`KNOWN_WRONG`] records. That table is empty, so all thirteen sweeps assert
+//! [`KNOWN_WRONG`] records. That table is empty, so all fourteen sweeps assert
 //! the same thing: no committed vector claims a status its draft does not
 //! assign.
 //!
@@ -35,9 +35,9 @@
 //! happened — a draft whose whole corpus yielded no status field at all.
 //!
 //! That last one is why [`test_vectors::statuses_in`] names two JSON keys. The
-//! corpus spells the field `object_status` in drafts 07-14 and on drafts 15-19's
-//! datagram headers, but `status` inside drafts 15-19's subgroup objects. A walk
-//! that knew only the first name read none of those five drafts' subgroup
+//! corpus spells the field `object_status` in drafts 07-14 and on drafts 15-20's
+//! datagram headers, but `status` inside drafts 15-20's subgroup objects. A walk
+//! that knew only the first name read none of those six drafts' subgroup
 //! objects and reported a clean sweep over vectors it had never opened.
 //!
 //! # What these tests catch, observed by making each change and running them
@@ -91,7 +91,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 mod test_vectors;
@@ -232,6 +233,7 @@ corpus_sweep!(draft16_corpus_object_statuses, "draft16", draft16, "draft16");
 corpus_sweep!(draft17_corpus_object_statuses, "draft17", draft17, "draft17");
 corpus_sweep!(draft18_corpus_object_statuses, "draft18", draft18, "draft18");
 corpus_sweep!(draft19_corpus_object_statuses, "draft19", draft19, "draft19");
+corpus_sweep!(draft20_corpus_object_statuses, "draft20", draft20, "draft20");
 
 // ─────────────────────────────────────────────────────────────
 // Message vectors carrying a parameter their draft does not admit there
@@ -243,7 +245,7 @@ corpus_sweep!(draft19_corpus_object_statuses, "draft19", draft19, "draft19");
 // silent.
 //
 // `test_vectors::KNOWN_WRONG_MESSAGE_VECTORS` carries the list and the reason.
-// The sweep below is the other half: for each of drafts 17, 18 and 19 it
+// The sweep below is the other half: for each of drafts 17 through 20 it
 // decodes every committed message vector that claims a successful decode, and
 // the set that fails must be exactly the rows recorded for that draft.
 //
@@ -384,3 +386,4 @@ macro_rules! message_sweep {
 message_sweep!(draft17_message_vectors_decode, "draft17", draft17, "draft17");
 message_sweep!(draft18_message_vectors_decode, "draft18", draft18, "draft18");
 message_sweep!(draft19_message_vectors_decode, "draft19", draft19, "draft19");
+message_sweep!(draft20_message_vectors_decode, "draft20", draft20, "draft20");

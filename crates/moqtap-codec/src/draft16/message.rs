@@ -323,6 +323,37 @@ impl MessageType {
     pub fn id(&self) -> u64 {
         *self as u64
     }
+
+    /// This type's name in the shared vector corpus: the `message_type` its
+    /// draft's `codec/messages/*.json` files carry, in `snake_case`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            MessageType::RequestUpdate => "request_update",
+            MessageType::Subscribe => "subscribe",
+            MessageType::SubscribeOk => "subscribe_ok",
+            MessageType::RequestError => "request_error",
+            MessageType::PublishNamespace => "publish_namespace",
+            MessageType::RequestOk => "request_ok",
+            MessageType::Namespace => "namespace",
+            MessageType::PublishNamespaceDone => "publish_namespace_done",
+            MessageType::Unsubscribe => "unsubscribe",
+            MessageType::PublishDone => "publish_done",
+            MessageType::PublishNamespaceCancel => "publish_namespace_cancel",
+            MessageType::TrackStatus => "track_status",
+            MessageType::NamespaceDone => "namespace_done",
+            MessageType::GoAway => "goaway",
+            MessageType::SubscribeNamespace => "subscribe_namespace",
+            MessageType::MaxRequestId => "max_request_id",
+            MessageType::Fetch => "fetch",
+            MessageType::FetchCancel => "fetch_cancel",
+            MessageType::FetchOk => "fetch_ok",
+            MessageType::RequestsBlocked => "requests_blocked",
+            MessageType::Publish => "publish",
+            MessageType::PublishOk => "publish_ok",
+            MessageType::ClientSetup => "client_setup",
+            MessageType::ServerSetup => "server_setup",
+        }
+    }
 }
 
 // ============================================================

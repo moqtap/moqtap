@@ -1,18 +1,21 @@
 //! An update that arrives before the subscription's own answer, on all
-//! thirteen drafts.
+//! fourteen drafts.
 //!
 //! No draft orders a subscription update against the SUBSCRIBE_OK. Every one of
 //! them orders it against the SUBSCRIBE: drafts 07 through 10 ask only that the
 //! identifier "MUST match an existing Subscribe ID", drafts 11 through 15 say
-//! the same of a Request ID, and drafts 16 through 19 put the update on the
+//! the same of a Request ID, and drafts 16 through 20 put the update on the
 //! request's own stream "later" than the request. An identifier exists, and a
 //! stream is open, from the moment the SUBSCRIBE is sent.
 //!
 //! So a subscriber that sends SUBSCRIBE and its update back to back is
-//! conforming, and this crate used to refuse it — on all thirteen drafts, with
-//! the same line in the same place in each. That is the shape this file exists
-//! for: the state machines are thirteen copies of one graph, so a fix applied to
-//! one of them and not the rest reads exactly like a fix applied to all of them.
+//! conforming, and this crate used to refuse it — on thirteen of these
+//! fourteen drafts, with the same line in the same place in each. That is the
+//! shape this file exists for: the state machines are fourteen copies of one
+//! graph, so a fix applied to one of them and not the rest reads exactly like a
+//! fix applied to all of them. Draft-20 was ported after the fix and inherited
+//! it, which is the other way the same shape goes wrong — a copy made from a
+//! corrected original is indistinguishable from one nobody checked.
 //!
 //! The rest of the edge is asserted too. `Idle` and `Done` still refuse an
 //! update, because in neither does the subscription an update names exist.
@@ -37,13 +40,19 @@ macro_rules! update_before_the_answer_gates {
             /// # Ablation
             ///
             /// The `Subscribing` arm removed from `on_subscribe_update`, which
-            /// is what all thirteen drafts shipped, measured on draft-19:
+            /// is what thirteen of the fourteen shipped, measured on draft-19:
             ///
             /// ```text
             /// thread 'draft19::an_update_may_precede_the_subscriptions_own_answer'
             /// panicked at crates\moqtap-client\tests\update_before_the_answer.rs:110:1:
             /// a REQUEST_UPDATE may precede the subscription's own answer: InvalidTransition { from: Subscribing, event: "on_subscribe_update" }
             /// ```
+            ///
+            /// The same cut was made again in draft-20's `on_subscribe_update`
+            /// when this file gained its arm. It reddens this gate on draft-20
+            /// and nothing else — 41 passed, 1 failed — the two gates below
+            /// staying green because `Idle` and `Done` refuse an update either
+            /// way, which is what makes them controls rather than repetitions.
             #[test]
             fn an_update_may_precede_the_subscriptions_own_answer() {
                 let mut sm = SubscriptionStateMachine::new();
@@ -108,3 +117,4 @@ update_before_the_answer_gates!(draft16, "draft16", draft16, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft17, "draft17", draft17, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft18, "draft18", draft18, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft19, "draft19", draft19, "REQUEST_UPDATE");
+update_before_the_answer_gates!(draft20, "draft20", draft20, "REQUEST_UPDATE");

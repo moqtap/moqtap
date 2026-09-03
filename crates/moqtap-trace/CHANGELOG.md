@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`EventData::Error` carries the bytes behind the error** — `stream_id`
+  (`"sid"`), `kind` (`"ek"`), `raw_len` (`"rawlen"`) and `raw` (`"raw"`), each
+  optional and each written only when set, alongside a public `ERROR_RAW_CAP`
+  and `EventData::error_observed`, which builds the variant from bytes a
+  recorder has just observed.
+
+  The error event held a code and a sentence and nothing else. A peer that
+  sends something malformed is one of the few things a shared trace is uniquely
+  good for — the recording party can see it and the sending party cannot — but
+  the only field in the format able to hold bytes was a control message's
+  `"raw"`, so a recorder that wanted to keep the evidence had to record the
+  violation as a decodable control message in order to have somewhere to put
+  it. That is a worse record than none: it asserts a message where there was a
+  protocol violation, and no reader can tell the two apart. The alternative was
+  to drop the bytes, and a report saying a peer's SUBSCRIBE_OK did not parse is
+  an assertion where the same report carrying the bytes is evidence the other
+  party can run against its own encoder.
+
+  `"sid"` is optional on the same terms as event 0's: absent means there was no
+  stream or none is known, and a reader must not read it as stream 0. `"ek"` is
+  an open vocabulary — `ErrorKind` names `protocol`, `transport` and `decode`
+  and keeps any other spelling in `Other`, the way `Perspective` does, because
+  values may be added without a format version bump.
+
+  The two byte-bearing keys sit at different detail levels deliberately, and
+  `error_observed` is what applies that: `"rawlen"` from `headers+sizes`
+  upwards, because it is a size and this format gates sizes, and `"raw"` at
+  `full` alone — one level above the event's own `control`+, since an error
+  naming a data stream has subgroup framing and object payload behind it, and
+  inheriting the event's level would have put media into traces whose declared
+  level excludes payloads outright. A level this crate cannot place yields
+  neither: a guess the other way is one no later read can undo.
+
+  **The 4096-byte cap is applied there and nowhere else.** `write_event` does
+  not enforce it, and that is the point rather than an omission — a serializer
+  cannot tell a freshly recorded event from one that arrived by being read, so
+  a cap applied there either shortens evidence on a rewrite or refuses a file
+  the reader was required to accept, and whichever it does, it does to the
+  wrong events. A `"raw"` past the cap reads back at its full length and is
+  written back at its full length. The one-`"raw"`-per-flow latch belongs to
+  the recorder too and is not here: it is state across events, so it lives with
+  whatever holds the flow. See SPEC.md, Event 6.
+
+  **Breaking for anyone constructing or exhaustively destructuring the
+  variant**, the way `TraceEvent::extra` was for 0.3.0. Reading is unaffected:
+  every key is optional, and a file written before they existed carries none.
+
 - **`EventData::StreamOpened` carries the stream's identifiers** — `track_alias`
   (`"ta"`), `subgroup_id` (`"sg"`), `fetch_request_id` (`"fri"`) and `group_id`
   (`"g"`), each `Option<u64>` and each written only when set.

@@ -26,14 +26,69 @@
 
 #![allow(clippy::items_after_test_module)]
 
+// Every draft with a range this file can move — the cfg list repeated below.
+//
+// Draft-20 is absent and cannot be added: Section 10.13 deleted FETCH's inline
+// `Start Location` and `End Location` along with the Standalone Fetch that
+// held them, and the range travels in the `LOCATION_FILTER` parameter now.
+// That parameter states its end as an unsigned `EndGroupDelta` added to
+// `StartGroup`, so an end group before the start group has no encoding at all
+// — there is no backwards range for a gate here to build. What is left of the
+// question on draft-20 is the filter's own shape, which `vectors_draft20.rs`
+// and `draft20_data_stream_rules.rs` drive.
+#[cfg(any(
+    feature = "draft07",
+    feature = "draft08",
+    feature = "draft09",
+    feature = "draft10",
+    feature = "draft11",
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19"
+))]
 use moqtap_codec::varint::VarInt;
 
+#[cfg(any(
+    feature = "draft07",
+    feature = "draft08",
+    feature = "draft09",
+    feature = "draft10",
+    feature = "draft11",
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19"
+))]
 fn varint(v: u64) -> VarInt {
     VarInt::from_u64(v).unwrap()
 }
 
 /// The group both ends of a legal range sit in, chosen so that it appears
 /// exactly once in an encoded frame and can be found again by value.
+#[cfg(any(
+    feature = "draft07",
+    feature = "draft08",
+    feature = "draft09",
+    feature = "draft10",
+    feature = "draft11",
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19"
+))]
 const GROUP: u64 = 42;
 
 #[cfg(feature = "draft07")]

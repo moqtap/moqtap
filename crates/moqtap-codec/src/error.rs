@@ -15,9 +15,9 @@ pub const MAX_NAMESPACE_TUPLE_SIZE: usize = 32;
 ///
 /// This enum is deliberately **not** `#[non_exhaustive]`, so that a session-close
 /// table matching it exhaustively fails to compile until a new variant has been
-/// placed on each of the thirteen drafts — either among the rules that draft
+/// placed on each of the fourteen drafts — either among the rules that draft
 /// answers with a close or among the ones it names and does not. A wildcard arm
-/// would make those thirteen decisions silently, all in the direction of "no
+/// would make those fourteen decisions silently, all in the direction of "no
 /// rule", and a missing arm and a deliberate exclusion look identical from
 /// inside such a table.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
@@ -164,7 +164,7 @@ pub enum CodecError {
     /// not name.
     ///
     /// Drafts 17, 18 and 19 only, and the split is the whole reason this is a
-    /// variant rather than a shared rule. All thirteen drafts state the first
+    /// variant rather than a shared rule. All fourteen drafts state the first
     /// half the same way and ten of them state the opposite consequence.
     /// Draft-19 Section 10.2.1, draft-18 Section 10.2.1 and draft-17 Section
     /// 9.3.1: "Each Message Parameter definition indicates the message types in
@@ -317,7 +317,7 @@ pub enum CodecError {
     InvalidForward(u8),
     /// A subscription filter names a Filter Type no draft in its range assigns.
     ///
-    /// All thirteen drafts state the rule and they do not state the same
+    /// All fourteen drafts state the rule and they do not state the same
     /// consequence. Drafts 07 through 13: "A filter type other than the above
     /// MUST be treated as error", which names no code and no close. Draft-14:
     /// "An endpoint that receives a filter type other than the above MUST be
@@ -449,7 +449,7 @@ pub enum CodecError {
     /// The same parameter type appears twice in one message, and its definition
     /// does not allow that.
     ///
-    /// Every draft from 07 to 19 states the sender's half: "Senders MUST NOT
+    /// Every draft from 07 to 20 states the sender's half: "Senders MUST NOT
     /// repeat the same Parameter Type in a message" — drafts 11 and later
     /// adding "unless the parameter definition explicitly allows multiple
     /// instances of that type to be sent in a single message." The receiver's
@@ -520,16 +520,16 @@ pub enum CodecError {
     ExtensionsOnNonExistentObject(usize),
     /// An object arrived carrying a payload the draft gives it no room for.
     ///
-    /// All thirteen drafts state the rule, in two phrasings. Drafts 07 through
+    /// All fourteen drafts state the rule, in two phrasings. Drafts 07 through
     /// 18 say it of the status code — draft-07 Section 7.1.1.1, drafts 08 and
     /// 09 Section 8.1.1.1, drafts 10 and 11 Section 9.1.1.1, drafts 12 and 13
     /// Section 9.2.1.1, drafts 14 through 17 Section 10.2.1.1, draft-18 Section
     /// 11.2.1.1: "Any object with a status code other than zero MUST have an
-    /// empty payload." Draft-19 Section 11.2.1.1 states it of a registry
-    /// instead: "An Object MUST have an empty payload unless its Object Status
-    /// value is registered as permitting a payload in the Object Status
-    /// registry (Section 15.9). Of the values defined in this document, only
-    /// Normal (0x0) permits a payload." The two agree on every status those
+    /// empty payload." Drafts 19 and 20 state it of a registry instead, both in
+    /// their Section 11.2.1.1: "An Object MUST have an empty payload unless its
+    /// Object Status value is registered as permitting a payload in the Object
+    /// Status registry (Section 15.9). Of the values defined in this document,
+    /// only Normal (0x0) permits a payload." The two agree on every status those
     /// documents define and differ in what a later one may add.
     ///
     /// `detail` separates the two ways an object can break it, because they are
@@ -549,7 +549,7 @@ pub enum CodecError {
     /// **No draft turns this into a close.** The sentence is a MUST on the
     /// sender with no receiver action named, and the "SHOULD be treated as a
     /// protocol error" beside it belongs to the neighbouring rule about
-    /// unassigned status values. So all thirteen session-close tables place it
+    /// unassigned status values. So all fourteen session-close tables place it
     /// among the rules they state and do not end a session over — which is a
     /// decision this variant makes visible, and one
     /// [`CodecError::InvalidField`] was making by accident.
@@ -577,7 +577,7 @@ pub enum CodecError {
     /// A unidirectional stream announced a type its draft's stream table does
     /// not assign.
     ///
-    /// Every draft from 07 to 19 requires the session to end for this, in one
+    /// Every draft from 07 to 20 requires the session to end for this, in one
     /// of two phrasings. Draft-07 and drafts 17 through 19 say "An endpoint
     /// that receives an unknown stream type MUST close the session"; drafts 08
     /// through 16 fold the streams and the datagrams into one sentence, "an
@@ -603,7 +603,7 @@ pub enum CodecError {
     UnknownStreamType(u64),
     /// A datagram announced a type its draft's datagram table does not assign.
     ///
-    /// The datagram half of the rule above, and stated by all thirteen drafts
+    /// The datagram half of the rule above, and stated by all fourteen drafts
     /// for the same reason: drafts 08 through 16 name streams and datagrams in
     /// one sentence, and drafts 17, 18 and 19 give the datagrams their own —
     /// "An endpoint that receives an unknown datagram type MUST close the
@@ -660,7 +660,7 @@ pub enum CodecError {
     /// A control message's declared Length disagrees with the fields it
     /// carries.
     ///
-    /// All thirteen drafts state it in the same paragraph that gives the
+    /// All fourteen drafts state it in the same paragraph that gives the
     /// message type registry, and only the code changes: drafts 07 through 10
     /// say "If the length does not match the length of the message content, the
     /// receiver MUST close the session", naming no code; drafts 11 through 18

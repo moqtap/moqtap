@@ -70,14 +70,14 @@
 //! ever fed by one framing**, on every draft that has a record at all, and the
 //! crossing is unreachable rather than untested.
 //!
-//! # Drafts 07 and 14 through 19
+//! # Drafts 07 and 14 through 20
 //!
 //! Not here, and not by omission. Draft-07's 0x4 has no ordering condition at
 //! all and its 0x5 is end of Subgroup, a different status. Draft-14 replaced the
 //! condition with a forward-looking prohibition on the publisher — "Publishers
 //! MUST NOT publish an Object with a Location larger than this Location" —
 //! answered through Malformed Tracks rather than by ending the session, and
-//! drafts 16 through 19 rewrote the entry as a bare statement of absence with no
+//! drafts 16 through 20 rewrote the entry as a bare statement of absence with no
 //! condition in it.
 //!
 //! # Ablations, measured

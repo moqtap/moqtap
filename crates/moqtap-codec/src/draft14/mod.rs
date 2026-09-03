@@ -19,11 +19,10 @@
 //!   immutable extensions.
 //! - TRACK_STATUS joins the request types a GOAWAY affects.
 
-/// Data stream headers (subgroup, datagram, fetch, object).
 pub mod data_stream;
-/// Error, status and stream-reset code registries.
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 /// Control message types with encode/decode.
 pub mod message;
-/// Draft-14 specific types (object status, etc.).
 pub mod types;

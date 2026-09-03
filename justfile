@@ -18,8 +18,22 @@
 # other implementation moved, which is a thing to read and act on rather than a
 # gate to fail a commit on. See the recipe at the foot of this file.
 #
+# `drafts` also reaches the network, and is in this list rather than beside
+# `versions` anyway. The rule above is "separate if it needs something a
+# contributor may not have", and this needs the network **once**: `--fetch`
+# downloads only what `.drafts` does not already hold, a published
+# Internet-Draft's bytes do not change, and `.gitignore` already reserves the
+# directory. So the second run and every run after it is offline, where
+# `versions` reaches crates.io on every one.
+#
+# The reason to insist on it being here rather than optional: this gate existed,
+# fully written, wired into nothing, for as long as it took somebody to remember
+# to run it — and the defect it finds is the one that gets *more* expensive with
+# age, because a misquoted sentence filed under a section it is not in reads as
+# though somebody had checked it.
+#
 # Run all checks (except msrv, deny and versions — see the comment above)
-check: fmt-check clippy test test-features optional-features draft-matrix draft-targets doc-check determinism
+check: fmt-check clippy test test-features optional-features draft-cfg draft-parity drafts draft-matrix draft-pairs draft-targets doc-check determinism
 
 # Run tests
 test:
@@ -118,7 +132,7 @@ determinism:
 # The other half comes from `bun run corpus` in moqtap-js/packages/trace, and
 # both belong to one commit: `tests/corpus_tests.rs` compares the two files of
 # each case, so regenerating one alone fails rather than drifts. The corpus
-# lives in the test-vectors repository, which is a submodule here.
+# lives in the test-traces repository, which is a submodule here.
 corpus:
     cargo run -p moqtap-trace --example generate_corpus
 
@@ -126,14 +140,21 @@ corpus:
 test-features:
     #!/usr/bin/env bash
     set -euo pipefail
-    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19; do
+    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20; do
         echo "=== $d ==="
         cargo test -p moqtap-codec --no-default-features --features "$d"
     done
+    # `--all-targets`, not `--lib`. Every gate in the codec's test tree sits
+    # behind a `#[cfg(feature = "draftNN")]`, so a zero-draft build compiles
+    # those files with every module cfg'd out — and a shared helper above them
+    # is then dead code. `--lib` cannot see that: it does not build the tests.
+    # Measured on 2026-09-02 by adding the flag: four test targets failed with
+    # eight dead-code and unused-import errors, in a row that had been exiting
+    # 0 since it was written.
     echo "=== no drafts ==="
-    cargo check -p moqtap-codec --no-default-features
-    echo "=== draft07 + draft19 ==="
-    cargo test -p moqtap-codec --no-default-features --features draft07,draft19
+    RUSTFLAGS="-D warnings" cargo clippy -p moqtap-codec --no-default-features --all-targets -- -D warnings
+    echo "=== draft07 + draft20 ==="
+    cargo test -p moqtap-codec --no-default-features --features draft07,draft20
     echo "=== draft13 + draft14 ==="
     cargo test -p moqtap-codec --no-default-features --features draft13,draft14
 
@@ -141,17 +162,108 @@ test-features:
 # build: if `default-features = false` is dropped from the root manifest's
 # `[workspace.dependencies]` entries, cargo silently resolves every draft and
 # warns only at the manifest level, where `RUSTFLAGS` cannot reach it. Measured:
-# in that state all fourteen rows compiled all thirteen drafts and exited 0.
+# in that state all fifteen rows compiled all fourteen drafts and exited 0.
 # So assert the resolved feature LIST, and assert the whole list.
 #
 # `quinn-netem` is deliberately not a row here. It has no draft features —
 # impairment happens below the message layer, on datagram bytes, so a draft axis
 # would multiply the matrix without changing a decision — and every row asserts a
 # resolved draft string, so a crate with no drafts to resolve would report a
-# mismatch on all thirteen and mean nothing by it. Its feature axes are covered
+# mismatch on all fourteen and mean nothing by it. Its feature axes are covered
 # by `optional-features`.
 #
-# Client + proxy libs under each single draft and zero drafts
+# Every per-draft rejection `cfg(any(feature = "draftNN", ...))` names all
+# thirteen other drafts.
+#
+# `draft-matrix` below compiles one draft at a time, which is the one
+# configuration in which this defect cannot appear: with a single draft every
+# `Any*` enum has one variant, the wildcard arm is compiled out, and a list that
+# is short by one draft is a list nothing reads. It takes two drafts to see it,
+# and there are 91 pairs — so this reads the lists rather than compiling them.
+# `draft-pairs` is the compile-side half; see the script for what went wrong.
+#
+# No cfg list may omit a sibling draft
+draft-cfg:
+    python3 scripts/check-draft-cfg.py
+
+# The rest of the per-draft constructs, and the one gate that reads the draft
+# set off the tree on five axes at once and requires them to agree.
+#
+# `draft-cfg` above answers one question about one construct. This answers the
+# others: that a `draft21/` directory, a `mod draft21`, a `draft21` feature, the
+# `all-drafts` list and a `DraftVersion::Draft21` variant either all exist or
+# none do; that no list of drafts anywhere names draft N-1 and stops there; and
+# that no draft-enumerating `match` closes with a catch-all returning a
+# plausible value, which is how a draft nobody added gets a wrong answer instead
+# of an error. It compiles nothing and needs no toolchain. Its own docstring
+# carries the list of what it does *not* check.
+#
+# Every per-draft construct names every draft
+draft-parity:
+    python3 scripts/check-draft-parity.py
+
+# Both halves of the `drafts` job in CI, over one cache of the renderings.
+#
+# Reaches the network on a cold cache: `--fetch` downloads what `.drafts` does
+# not already hold from the IETF archive, one file per draft the tree
+# implements, and never re-downloads one — a published Internet-Draft's bytes do
+# not change. Both fail closed. A citation nothing could read is not a citation
+# anything has checked. If you already keep the renderings somewhere, point them
+# there with `--drafts` / `--spec-dir` and drop `--fetch`.
+#
+# `check-drafts.py` holds every citation and every quotation under `crates/` to
+# the draft it names. `extract-registries.py --check` re-runs the registry
+# extraction and fails when a committed `tools/registries/draft-NN.json` no
+# longer matches the draft it came from — the one link in draft -> JSON -> test
+# that nothing else covers, since `registry_conformance.rs` compares this
+# crate's code points against the JSON and a hand-edited row would move the
+# expectation with every gate still green.
+#
+# Every citation, quotation and registry row, against the drafts themselves
+drafts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 scripts/check-drafts.py --drafts .drafts --fetch
+    python3 crates/moqtap-codec/tools/extract-registries.py --all --check --fetch --spec-dir .drafts
+
+# The two-draft rows. `--all-targets`, because a non-exhaustive match in a test
+# helper is as much a broken build as one in the library, and because the
+# `--lib` of `draft-matrix` would not have seen the arms this pair is here for.
+#
+# Oldest+newest exercises the runtime dispatch path; newest-two is the pair a
+# copied rejection `cfg` breaks first, and is the one to move when a draft is
+# added. Both, not either: they fail on different things.
+#
+# Two drafts at once, for the dispatch paths one draft cannot reach
+draft-pairs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export RUSTFLAGS="-D warnings"
+    for pair in draft07,draft20 draft19,draft20; do
+        for crate in moqtap-codec moqtap-client moqtap-proxy; do
+            echo "=== $crate --features $pair ==="
+            cargo check -q -p "$crate" --no-default-features --features "$pair" --all-targets
+        done
+    done
+
+# `--all-targets` on the single-draft rows, `--lib` on the zero-draft ones, and
+# the split is the whole of what this recipe compiles.
+#
+# It was `--lib` everywhere, which made `just check` weaker than CI: the
+# `features` job in `.github/workflows/ci.yml` has run
+# `cargo clippy -p moqtap-{client,proxy} --features draftNN --all-targets
+# -- -D warnings` per draft since 2026-08-25, and its comment records why —
+# under a single draft the client's ~200 test targets and the proxy's ~37 were
+# compiled by no job at all, and when the flag was first added thirteen of the
+# fourteen drafts failed at the first line of `tests/common/mod.rs`. A local
+# recipe that checks less than CI is a local recipe that sends a red build.
+#
+# The zero-draft rows stay `--lib` because that is what CI asserts there too,
+# and because the proxy's zero-draft row is asserting a *refusal* at
+# const-evaluation: `--all-targets` would report that refusal once per test
+# target rather than once.
+#
+# Client + proxy under each single draft (all targets) and zero drafts (lib)
 draft-matrix:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -164,15 +276,15 @@ draft-matrix:
     # would name a draft the build does not have. Asserting the refusal beats
     # skipping the row — an exit 0 there would mean that constant had quietly
     # acquired a fallback.
-    run_row() {   # $1 = crate, $2 = feature args, $3 = expected resolution, $4 = expected exit
-        local crate="$1" feat="$2" want="$3" want_rc="${4:-0}" got rc
+    run_row() {   # $1 = crate, $2 = feature args, $3 = expected resolution, $4 = expected exit, $5 = target scope
+        local crate="$1" feat="$2" want="$3" want_rc="${4:-0}" scope="${5:---lib}" got rc
         got=$(cargo tree -p "$crate" --no-default-features $feat \
                 --edges normal --depth 1 --prefix none -f '{lib}={f}' 2>/dev/null \
               | grep -E '^moqtap_(client|codec)=' \
               | LC_ALL=C sort | paste -sd' ' -) || true
-        cargo check -q -p "$crate" --no-default-features $feat --lib >/dev/null 2>&1
+        cargo check -q -p "$crate" --no-default-features $feat $scope >/dev/null 2>&1
         rc=$?
-        printf '%-14s %-20s exit=%-4d %s\n' "$crate" "${feat:-<zero drafts>}" "$rc" "$got"
+        printf '%-14s %-20s %-13s exit=%-4d %s\n' "$crate" "${feat:-<zero drafts>}" "$scope" "$rc" "$got"
         if [ "$rc" -ne "$want_rc" ]; then
             printf '  EXIT MISMATCH: expected %s\n' "$want_rc"
             fail=$((fail + 1))
@@ -184,14 +296,14 @@ draft-matrix:
     }
     for crate in moqtap-client moqtap-proxy; do
         echo "=== $crate ==="
-        for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19; do
-            run_row "$crate" "--features $d" "moqtap_client=$d moqtap_codec=$d"
+        for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20; do
+            run_row "$crate" "--features $d" "moqtap_client=$d moqtap_codec=$d" 0 --all-targets
         done
         # The proxy is the one crate that must refuse a zero-draft build.
         if [ "$crate" = "moqtap-proxy" ]; then
-            run_row "$crate" "" "moqtap_client= moqtap_codec=" 101
+            run_row "$crate" "" "moqtap_client= moqtap_codec=" 101 --lib
         else
-            run_row "$crate" "" "moqtap_client= moqtap_codec="
+            run_row "$crate" "" "moqtap_client= moqtap_codec=" 0 --lib
         fi
     done
     echo "failures=$fail"
@@ -273,8 +385,18 @@ fmt:
     cargo fmt --all
 
 # Check documentation builds
+#
+# Both feature sets: the default one documents no optional feature, so draft-20,
+# webtransport, impair, qlog and cert-gen went unread. The narrow one stays
+# because a link from ungated prose into a `#[cfg]`-gated item resolves only
+# when the feature is on, and nothing but the narrow build can see that.
+#
+# `check-module-docs.py` catches the shape that makes rustdoc's own diagnostic
+# unreadable: a module documented both at its declaration and in its own file.
 doc-check:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+    python3 scripts/check-module-docs.py
 
 # Build documentation and open in browser
 doc:
@@ -537,7 +659,7 @@ interop-down:
 #
 # relay08, relay09 and relay10 are deliberately not here. They start, and they
 # refuse every session a conformant client opens -- those branches want the
-# ROLE parameter that draft-08 removed. relay08 on 127.0.0.1:4408, ref: me/draft-08 still brings
+# ROLE parameter that draft-08 removed. `just interop-up relay08` still brings
 # one up to repeat the measurement; nothing in the suite runs against them.
 #
 # Bring up every interop peer

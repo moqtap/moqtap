@@ -2,11 +2,11 @@
 
 Transparent MoQT intercepting proxy — sits between a client and relay, forwarding all bytes bidirectionally while parsing MoQT frames inline to produce structured events.
 
-The proxy does **not** participate in MoQT state management. It observes and optionally mutates, but never acts as an endpoint. Supports every MoQT wire format from **draft-07 through draft-19** at runtime via `moqtap-codec`'s dispatch layer — the draft is selected from the observed setup exchange.
+The proxy does **not** participate in MoQT state management. It observes and optionally mutates, but never acts as an endpoint. Supports every MoQT wire format from **draft-07 through draft-20** at runtime via `moqtap-codec`'s dispatch layer — the draft is selected from the observed setup exchange.
 
 ## What it does
 
-1. **Listen** on a single UDP port that accepts raw-QUIC MoQT and WebTransport clients simultaneously. The client-facing transport is chosen by ALPN: every supported MoQT draft (`moq-00` for drafts 07-14, then `moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`, `moqt-19`) plus `h3` for WebTransport is advertised.
+1. **Listen** on a single UDP port that accepts raw-QUIC MoQT and WebTransport clients simultaneously. The client-facing transport is chosen by ALPN: every supported MoQT draft (`moq-00` for drafts 07-14, then `moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`, `moqt-19`, `moqt-20`) plus `h3` for WebTransport is advertised.
 2. **Connect** upstream to a MoQT relay (QUIC or WebTransport)
 3. **Forward** all streams (bidirectional, unidirectional) and datagrams between the two
 4. **Parse** MoQT frames inline — control messages, data stream headers, individually addressable objects, datagrams
@@ -16,7 +16,7 @@ The proxy does **not** participate in MoQT state management. It observes and opt
 ```
 Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
                        │
-                       ├─ parses frames inline (draft-07..19)
+                       ├─ parses frames inline (draft-07..20)
                        ├─ emits ProxyEvents
                        ├─ executes ProxyHook actions
                        └─ paces objects through a ShapeProfile
@@ -38,7 +38,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 | `Capabilities` | What is expressible at a site, on a draft, on a kind of stream. Ask before acting; the engine asks again and reports a `Refusal` |
 | `ShapeProfile` | Named token buckets and class rules that pace media egress with no hook code — configuration rather than callbacks |
 | `TransportProfile` | One leg's QUIC transport parameters as a value that can be written down, checked and stored |
-| `ObjectFramer` | Frames a unidirectional data stream into individually addressable objects on every draft 07-19, preserving the exact wire bytes |
+| `ObjectFramer` | Frames a unidirectional data stream into individually addressable objects on every draft 07-20, preserving the exact wire bytes |
 | `ControlStreamParser` | Stateful inline parser for control stream messages (draft-aware framing) |
 | `GeneratedCert` | Self-signed certificate for development/testing (behind `cert-gen` feature) |
 
@@ -79,7 +79,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 - Self-signed certificate generation (behind `cert-gen` feature)
 - Connecting to upstream relays (QUIC or WebTransport)
 - Stream-level forwarding (bidirectional, unidirectional, datagrams). On drafts
-  17 through 19, where every request opens a bidirectional stream of its own,
+  17 through 20, where every request opens a bidirectional stream of its own,
   each direction has an accept loop and all of them are forwarded. On drafts 07
   through 15 a session opens exactly one bidirectional stream, the control
   stream, and that is what is forwarded. Draft-16 is between the two and is
@@ -88,10 +88,10 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
   bidirectional stream of its own, so every stream after the control stream is
   forwarded as a request stream — in both directions, because draft-16 Section 6.1 lets
   either endpoint be the subscriber.
-- Inline MoQT frame parsing for observation (drafts 07 through 19, via
+- Inline MoQT frame parsing for observation (drafts 07 through 20, via
   `moqtap-codec`'s dispatch enums)
-- Automatic stream type detection on unidirectional streams — subgroup, fetch, and on drafts 17-19 the control stream, which those drafts carry as a pair of unidirectional streams rather than a bidirectional one
-- Reading a fetch response against the Group Order its FETCH asked for, on drafts 18 and 19, where an object's Group ID is a difference and the order decides whether it counts up or down. The order is on the control plane and never on the data stream, so the session files it under the FETCH's Request ID and hands it to the framer when the response opens. A response naming a request the session never carried is forwarded untouched and reported, rather than read against a guess — the wrong guess decodes every object under Group IDs walking the wrong way
+- Automatic stream type detection on unidirectional streams — subgroup, fetch, and on drafts 17-20 the control stream, which those drafts carry as a pair of unidirectional streams rather than a bidirectional one
+- Reading a fetch response against the Group Order its FETCH asked for, on drafts 18, 19 and 20, where an object's Group ID is a difference and the order decides whether it counts up or down. The order is on the control plane and never on the data stream, so the session files it under the FETCH's Request ID and hands it to the framer when the response opens. A response naming a request the session never carried is forwarded untouched and reported, rather than read against a guess — the wrong guess decodes every object under Group IDs walking the wrong way
 - Setup message detection (CLIENT_SETUP / SERVER_SETUP emitted as distinct events), which is also what settles the session's draft on drafts 07-14, where one ALPN covers all eight
 - Event emission via `ProxyObserver`
 - Executing a `ProxyHook`'s actions, and refusing the ones a draft or a site cannot express
@@ -99,7 +99,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 - Graceful shutdown via `CancellationToken`
 
 **moqtap-proxy is NOT responsible for:**
-- MoQT protocol state management (no subscribe/fetch/publish state machines). The one thing it does remember across messages is what Group Order each FETCH asked for, because on drafts 18 and 19 a fetch response cannot be read without it
+- MoQT protocol state management (no subscribe/fetch/publish state machines). The one thing it does remember across messages is what Group Order each FETCH asked for, because on drafts 18, 19 and 20 a fetch response cannot be read without it
 - Deciding what to forward, filter or modify — the caller supplies a `ProxyHook` and a `ShapeProfile`
 - Interpreting a run. Nothing here reads a file, schedules a change or decides what a failure is; the crate offers a pipeline and an extension point, and a consumer written against them decides the rest
 - Trace file I/O (caller wires events to `moqtap-trace`)
@@ -129,13 +129,21 @@ would otherwise parse, arm, report shaping and shape nothing.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `all-drafts` | **yes** | Every draft 07-19. Reduced sets are opt-in with `--no-default-features --features draftNN` |
-| `draft07` … `draft19` | no | One draft each, in both `moqtap-codec` and `moqtap-client` |
+| `all-drafts` | **yes** | Every draft 07-20. Reduced sets are opt-in with `--no-default-features --features draftNN` |
+| `draft07` … `draft20` | no | One draft each, in both `moqtap-codec` and `moqtap-client` |
 | `cert-gen` | no | Self-signed certificate generation via `rcgen` |
 | `webtransport` | no | Enables the `h3` ALPN on the unified listener plus WebTransport upstream support via `wtransport` |
 | `impair` | no | Arm and clear a datagram impairment on a leg's socket at runtime, below QUIC, through `quinn-netem` |
 | `serde` | no | `Serialize` and `Deserialize` on the configuration types, so a caller can read a shaping or transport profile from a file. No parser and no format: those are the caller's |
 | `qlog` | no | A QUIC-level capture per connection, written by quinn. Each leg config carries its own `QlogSpec` |
+
+**This crate has no `src/draftNN/` module and should not grow one.** It spans
+every draft at runtime, on `DraftVersion`, because it observes the protocol
+rather than implementing it — where `moqtap-codec` and `moqtap-client` use
+per-draft modules behind those feature flags. A behaviour that differs by draft
+is a predicate on `DraftVersion` here, and
+[`ARCHITECTURE.md`](../../ARCHITECTURE.md) says how to write one that cannot
+silently answer for a draft it has never met.
 
 ## License
 

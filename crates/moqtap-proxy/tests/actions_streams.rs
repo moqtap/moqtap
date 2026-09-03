@@ -33,6 +33,17 @@ mod common;
 // whole point is that the two drafts disagree. Everything a group needs —
 // its fixtures, its hook, its imports — carries that group's gate, so a
 // single-draft row keeps whichever group it compiled and drops the rest.
+//
+// The named drafts here are representatives, not a range, and this is the
+// one file in the workspace where that is deliberate. `draft19` stands for
+// every draft whose control plane is a pair of unidirectional streams and
+// `draft16` for every draft whose control plane is one bidirectional
+// stream; `session::control_plane_is_unidirectional` is where the line
+// actually sits, it answers `true` for 17 through 20 and `false` for 07
+// through 16, and it matches exhaustively so a new draft cannot join
+// either side by default. Adding draft-20 alongside draft-19 would compile
+// and pass and assert a fourth copy of one side of a two-sided contrast.
+// A sweep that widens per-draft enumerations should skip this block.
 #[cfg(any(feature = "draft14", feature = "draft16", feature = "draft19"))]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "draft14")]
@@ -111,7 +122,7 @@ fn subgroup_head(track_alias: u64) -> Vec<u8> {
 /// A whole draft-14 subgroup stream: the hand-written header plus three
 /// objects.
 ///
-/// The objects go through `AnySubgroupObjectWriter` because drafts 14-19
+/// The objects go through `AnySubgroupObjectWriter` because drafts 14-20
 /// delta-encode Object IDs and a hand-rolled object body would be
 /// asserting the codec's arithmetic rather than the proxy's routing. No
 /// assertion in this file reads object *content*: the stream is either
@@ -600,13 +611,13 @@ async fn streams_alone_frames_the_stream_and_fires_the_header_hook() {
     proxy.shutdown().await;
 }
 
-// ── drafts 17-19: the control plane is the unidirectional pair ─────────
+// ── drafts 17-20: the control plane is the unidirectional pair ─────────
 
 /// A draft-19 unified SETUP driven down a **unidirectional** stream is
 /// shown to `on_control_message`, the session reports nothing, and the
 /// bytes are forwarded intact.
 ///
-/// Drafts 17, 18 and 19 carry the control plane on a pair of unidirectional
+/// Drafts 17, 18, 19 and 20 carry the control plane on a pair of unidirectional
 /// streams — each peer opens one and begins it with SETUP — and carry
 /// requests on bidirectional streams. `session.rs` reads the stream type
 /// varint (0x2F00, which is SETUP's own message type, so nothing is

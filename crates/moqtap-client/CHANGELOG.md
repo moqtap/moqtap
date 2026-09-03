@@ -5,6 +5,162 @@ All notable changes to moqtap-client will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-02
+
+Draft-20 support. One new draft module, and two breaking changes that adding it
+forces. `dispatch::AnyConnection` and `dispatch::AnyRequest` are not
+`#[non_exhaustive]`, so a downstream `match` enumerating their variants stops
+compiling; `AnyClientEvent` is `#[non_exhaustive]` and is unaffected. And
+`AnyConnection::fetch` now takes a `FetchRange` in place of four location
+varints, because the drafts stopped agreeing about what the fourth one means —
+see **Changed**. No existing draft's module changed.
+
+Draft-20 is not a default anywhere. It is not the interop target: interop ran
+against draft-18 and the editors plan draft-22 next, so nothing here promotes
+it to a connection default, an advertised-preferred version or an
+auto-selected draft.
+
+### Added
+
+- **`draft20`**, a feature and a module, with the same files every other draft
+  has plus one. Included in `all-drafts`. The ALPN is `moqt-20`; as on every
+  draft from 15, there is no version on the wire and the ALPN is the whole of
+  version negotiation.
+- **`draft20::fill`**, the module draft-20 needs and no earlier draft does.
+  `LocationFilter` builds the `LOCATION_FILTER` parameter (Section 5.1.2) in
+  each of the five shapes the draft defines, and `FillParameters` builds the
+  `FILL_PARAMETERS` block (Section 10.2.15) whose presence on a SUBSCRIBE or a
+  REQUEST_UPDATE asks the publisher for a fill fetch stream. Every value is
+  handed to the codec's own decoder before it is returned, so an encoder that
+  drifted from the decoder errors here rather than putting a frame on the wire.
+- **`Connection::accept_fill_stream`** and the endpoint's fill accounting —
+  `fill_requested`, `open_fill_streams`, `fill_streams_opened`,
+  `on_fill_stream_opened`, `on_fill_stream_ended`. A fill fetch stream is
+  framed exactly as a fetch response and differs only in what its Request ID
+  names: the SUBSCRIBE that asked for the fill, not a FETCH. A client that knew
+  only about fetches would answer that header with "unknown request".
+- **`ClientEvent::PublishStateNotify`** and `StreamKind::Fill`. The notify is
+  the decoded form of the new PUBLISH_STATE_NOTIFY (Section 10.10); the stream
+  kind is what keeps a subscription's fill from being counted as a fetch the
+  application never made.
+- **`Endpoint::receive_publish_state_notify`**, with the two refusals Section
+  10.10 answers with a session close: a notify for a request that is not a
+  subscription, and one from the subscriber rather than the publisher. It is
+  unilateral, so it spends no `MAX_REQUEST_UPDATES` credit and leaves nothing
+  owed in reply.
+- **`Endpoint::fetch_range`** and `Connection::fetch_range`, which put a
+  `LocationFilter` into a FETCH's parameter list at the position ascending
+  Parameter Type order requires.
+- **`dispatch::FetchRange` and `dispatch::FetchEnd`**, the draft-agnostic shape
+  of a fetch's range. See **Changed** for what they replaced and why.
+- **`draft20::fill::group_order`** and **`FillParameters::with_group_order`**.
+  Section 10.2.8: a `GROUP_ORDER` inside `FILL_PARAMETERS` "governs the fill
+  fetch stream and its ordering". Nothing on the data stream carries it, so a
+  subscriber has to resolve it from what it sent — the nested value, else the
+  subscription's own, else Ascending, which is the Section 10.2.8 FETCH default
+  and a choice the draft does not make for a fill. `Endpoint::fill_group_order`
+  reports the resolved value.
+
+### Changed
+
+- **`draft20`'s FETCH takes a parameter list where draft-19's took four
+  location varints.** Section 10.13 deleted the `Fetch Type` field, both
+  variant structures and the whole joining mechanism; the Track Namespace and
+  Track Name are inline and the range travels in `LOCATION_FILTER`. So
+  `Endpoint::fetch` and `Connection::fetch` have the same three arguments
+  `subscribe` does, and `joining_fetch` / `absolute_joining_fetch` do not exist
+  on this draft. This is a difference between `draft19` and `draft20`, not a
+  change to `draft19`.
+- **Ranges are inclusive at both ends** (Sections 5.1.2, 10.13, 10.14).
+  Draft-19's fetch end was "the last Object, plus 1; or 0 to indicate the entire
+  Group"; both conventions are deleted, the bytes are identical between the two
+  drafts and nothing on the wire distinguishes them. A call ported from
+  draft-19 with its `+ 1` intact fetches one object too many. `LocationFilter`
+  carries the warning at each constructor.
+- **`AnyConnection::fetch` takes a `FetchRange` and is wired for draft-20.**
+  Its four location varints could not be carried forward: draft-19's
+  `end_object` is "the last Object, plus 1; or 0 to indicate the entire Group"
+  and draft-20's is the last Object itself, so one number at a draft-agnostic
+  boundary would have meant one of the two with nothing to say which.
+  `FetchRange` says it instead — `FetchEnd::Object(n)` is inclusive, `n` is
+  fetched; `FetchEnd::EntireGroup` is draft-19's `0` spelled out; `end_group` is
+  absolute. `FetchRange::inline_end_object` converts for drafts 14 through 19
+  and is **the only place the `+ 1` lives**; `FetchRange::location_filter`
+  converts for draft-20 and adds nothing. Drafts 14 through 19 send exactly the
+  bytes they sent before, which
+  `tests/a_fetch_range_means_one_thing_on_every_draft.rs` pins per draft.
+  Porting: `end_object` of `N` becomes `FetchEnd::Object(N - 1)`, and `0`
+  becomes `FetchEnd::EntireGroup`.
+- **`Connection::accept_fill_stream` starts the returned stream's object
+  reader**, so fill objects can be read without a `begin_fetch_objects` call.
+  It can do what `accept_fetch_stream` cannot because the endpoint kept the
+  fill's Group Order when the subscription asked for it. A reader started in
+  the wrong direction does not fail — it reports Group IDs that walk the wrong
+  way — so this is the difference between an error and a wrong answer.
+- **The 41 cross-draft rejection arms in `draft07`..`draft20`'s `connection`
+  modules are no longer gated on a `cfg` naming the other thirteen drafts.**
+  Each is now `#[allow(unreachable_patterns)] _ =>`, the form
+  `moqtap-proxy/src/session.rs` and `moqtap-codec/src/dispatch.rs` already use.
+  Behaviour is unchanged under every feature set — the arms match a value the
+  same function has just decoded through its own `DraftVersion`, so 34 of the
+  41 cannot be reached at run time at all — but the list that had to be edited
+  in 13 files whenever a draft was added, and was wrong in 8 places when it
+  was not, is gone. **This removes a compile-time signal as well as a chore**:
+  the `cfg` form errored when a draft was omitted from the list, though only
+  under feature sets that enable no listed draft, which is not a combination
+  CI or anyone else builds. `scripts/check-draft-cfg.py` replaces it with a
+  check that reads the tree: a draft module holding fewer of these arms than
+  its predecessor is a dropped arm and fails the gate.
+
+### Fixed
+
+- **The per-draft rejection `cfg(any(feature = "draftNN", ...))` lists were
+  short by one draft in eight places**, so `--features draft19,draft20` did not
+  compile: five wildcard arms in `draft20::connection` named `draft07` through
+  `draft18` and never gained `draft19`, and three in `draft11` through
+  `draft13` never gained `draft20`. A single-draft build cannot see this — the
+  arm is compiled out — and the only two-draft row CI ran was
+  `draft07,draft20`, which every short list happens to name.
+  `scripts/check-draft-cfg.py` reads every such list in the workspace and
+  refuses a short one; CI gained a `draft19,draft20` row beside the existing
+  `draft07,draft20`. This crate's 41 lists have since been replaced outright —
+  see **Changed** — so six remain for that rule to read. The
+  same sweep found a ninth site in `moqtap-proxy`'s test suite, recorded in
+  that crate's changelog.
+- The `AnySubgroupHeader` binding in the `draft18`, `draft19` and `draft20`
+  modules was named `d17`, copied forward three times.
+
+### Notes
+
+- **`tests/uni_control_plane.rs` covers draft-20.** It stopped at draft-19,
+  because its shared macro imported `FetchPayload`, matched on it, and drove
+  both joining fetches — none of which exists on this draft. FETCH is now two
+  per-draft functions handed to the gate macro, the treatment
+  SUBSCRIBE_NAMESPACE has had since draft-18 split it; the enforcing peer and
+  23 of the 25 gates are unchanged, and drafts 17, 18 and 19 generate the same
+  26 tests they did before. Draft-20's row sweeps `fetch`, `fetch_range` —
+  whose rendering carries the decoded `LOCATION_FILTER`, so a range ported from
+  draft-19 with its `+ 1` fails rather than fetching one object too many — and
+  a SUBSCRIBE carrying `FILL_PARAMETERS`, which is what replaced the joining
+  fetch. Its refusal gate opens a bidirectional stream with a
+  PUBLISH_STATE_NOTIFY rather than the SUBSCRIBE_OK the other three use:
+  Section 10.10 puts the notify on a subscription's existing stream, and it
+  carries no Request ID and answers nothing, so it is the message most easily
+  mistaken for one that opens a stream.
+- `tests/draft20_fill_and_state_notify.rs` and
+  `tests/draft20_fill_stream_objects.rs` remain the loopbacks for what the new
+  draft added at the object level — the fill stream's own bytes, the
+  `FILL_PARAMETERS` block, and the notify arriving on a live subscription. The
+  second one delivers Objects on fill fetch streams and holds the Section
+  11.4.4.1 delta rules, including the `0x08` case where the Object ID runs on
+  across a Group boundary rather than restarting.
+- `INCLUDE_PROPERTIES` (0x35) does not reach a fill fetch stream's Objects.
+  Section 10.2.21 makes it govern the **Track Properties** in an OK message,
+  a fill fetch stream has no OK message, and the parameter is absent from the
+  Section 10.2.15 Table 6 list so it cannot be nested in `FILL_PARAMETERS`.
+  Object Properties on a fill Object answer to Serialization Flags bit 0x20
+  alone.
+
 ## [0.4.1] - 2026-09-02
 
 Dialling without knowing the draft, and two fetch-stream reports that were

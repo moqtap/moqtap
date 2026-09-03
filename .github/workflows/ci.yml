@@ -73,7 +73,7 @@ jobs:
       #
       # This is the half of that question that does not depend on which drafts
       # are enabled, so it is asked once here. The per-draft matrix asks the
-      # other half, thirteen times, against a reduced feature set.
+      # other half, fourteen times, against a reduced feature set.
       #
       # The clippy row above has already compiled all of this, and a cached
       # unit still emits `compiler-artifact`, so the enumeration is nearly free.
@@ -187,6 +187,7 @@ jobs:
           - draft17
           - draft18
           - draft19
+          - draft20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -201,7 +202,7 @@ jobs:
       # entry carries it too; the only diagnostic is a cargo *manifest*
       # warning, and the `RUSTFLAGS: "-D warnings"` above reaches rustc, not
       # cargo. Measured: with the root entry unfixed, every row below compiled
-      # all thirteen drafts and exited 0. So assert the resolved feature list
+      # all fourteen drafts and exited 0. So assert the resolved feature list
       # itself, and assert the whole list — a `grep -c draft` style check is
       # satisfied by the all-drafts build as well.
       #
@@ -253,7 +254,7 @@ jobs:
       #
       # The client sat in that gap longer and with far more behind it. Its
       # shared loopback harness imported one draft's framed streams with no
-      # `cfg` at all, so on twelve of the thirteen drafts every one of its ~200
+      # `cfg` at all, so on thirteen of the fourteen drafts every one of its ~200
       # test targets failed at the first line of `tests/common/mod.rs`, and
       # four more test files named a draft they never gated. Measured on
       # 2026-08-25 by running this row by hand for each draft.
@@ -281,7 +282,7 @@ jobs:
       # The default-features half of that comparison does not depend on the
       # draft this cell enables, and it is the expensive half now that the
       # client is in it: it builds every draft's code and ~200 test targets. It
-      # runs once, in the `clippy` job, rather than identically in all thirteen
+      # runs once, in the `clippy` job, rather than identically in all fourteen
       # cells.
       - name: Assert the reduced-draft build compiled every test target
         run: |
@@ -480,13 +481,54 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Oldest + newest together — exercises the runtime dispatch path.
       # Keep the second draft pinned to the newest draft the crate supports.
-      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft19
+      #
+      # All three crates, not just the codec. The per-draft matrix above
+      # compiles the client and the proxy under one draft at a time, and one
+      # draft is the configuration in which every `Any*` enum has a single
+      # variant and every "this arm is unreachable with only one draft" `cfg`
+      # is taken. A two-draft build is the smallest one where the runtime
+      # dispatch those crates are built around actually has something to
+      # dispatch between, and no other row builds one.
+      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft20
+      - run: cargo test -p moqtap-client --no-default-features --features draft07,draft20
+      - run: cargo test -p moqtap-proxy --no-default-features --features draft07,draft20
+      # The newest two together. Not redundant with the row above, and the
+      # reason is worth stating: a per-draft module rejects the other drafts
+      # with a wildcard arm under a `cfg(any(feature = "draftNN", ...))` that
+      # has to name **every** other draft. A list copied from the previous
+      # draft's module names one draft too few — its own predecessor — and the
+      # match goes non-exhaustive only in a build that enables that predecessor
+      # and not the draft whose name took its place. `draft07,draft20` cannot
+      # see it, because draft07 is in every such list; `draft19,draft20` is the
+      # smallest build that can, and it found five sites in `draft20` and three
+      # more in `draft11` through `draft13`. Move this row with the newest
+      # draft, and keep it beside the oldest+newest one rather than instead of
+      # it — the two rows fail on different things.
+      #
+      # `scripts/check-draft-cfg.py` (the `draft-cfg` job) checks the same
+      # class over all 91 pairs without compiling any of them; this row is what
+      # proves the compiler agrees.
+      - run: cargo test -p moqtap-client --no-default-features --features draft19,draft20
+      - run: cargo test -p moqtap-codec --no-default-features --features draft19,draft20
+      - run: cargo test -p moqtap-proxy --no-default-features --features draft19,draft20
       # Two adjacent drafts.
       - run: cargo test -p moqtap-codec --no-default-features --features draft13,draft14
       # Default (all-drafts) is already covered by the `test` job, but verify
       # the crate still builds with no draft features enabled at all.
-      - run: cargo check -p moqtap-codec --no-default-features
-      # The fourteenth row of the draft sweep: zero drafts, for the client and
+      #
+      # `--all-targets`, not `--lib`, and the difference is not cosmetic. Every
+      # gate in the codec's test tree sits behind a `#[cfg(feature =
+      # "draftNN")]`, so a zero-draft build compiles those files with every
+      # module cfg'd out — and the shared helpers above them are then dead code
+      # that nothing calls. A `--lib` row does not build the tests and cannot
+      # see it. Measured on 2026-09-02 by adding the flag: four test targets
+      # (`declared_length_rule`, `duplicate_parameter_rule`,
+      # `fetch_stream_type_field`, `namespace_bounds_on_encode`) failed with
+      # eight dead-code and unused-import errors, in a row that had been exiting
+      # 0 since it was written. The fix is an `allow` on each shared helper
+      # whose reach is exactly this row.
+      - run: cargo clippy -p moqtap-codec --no-default-features --all-targets -- -D warnings
+      # The fifteenth row of the draft sweep: zero drafts, for the client and
       # the proxy library. Same reasoning as the matrix job — resolution is
       # asserted, not inferred from an exit code.
       - name: Assert zero-draft feature resolution
@@ -528,7 +570,7 @@ jobs:
       # `quinn-netem` has no draft features, so it is deliberately absent from
       # the per-draft matrix above: every row there asserts a resolved draft
       # string, and a crate with no drafts to resolve would report a mismatch on
-      # all thirteen for no reason. Its feature axes are the rows below instead.
+      # all fourteen for no reason. Its feature axes are the rows below instead.
       #
       # The featureless build is not reachable from any other job. `--workspace`
       # unifies features, and the proxy's dev-dependency asks for
@@ -588,7 +630,118 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Both feature sets, because they document different code and only one of
+      # them was ever read. The default set leaves out every optional feature,
+      # so `draft20`, `webtransport`, `impair`, `qlog` and `cert-gen` carried
+      # no documentation this job could fail on. Measured on 2026-09-02: the
+      # default build reported 8 broken links and the all-features build 15,
+      # and the extra 7 were all in the draft-20 client — a module the doc job
+      # had never once looked at.
+      #
+      # The default run stays because it is not a subset in the way that
+      # matters: a `#[cfg]`-gated item can be linked from ungated prose, and
+      # that link resolves when the feature is on and dangles when it is off.
+      # Only the narrow build can see those.
       - run: cargo doc --workspace --no-deps
+      - run: cargo doc --workspace --all-features --no-deps
+      # A module documented at its declaration *and* in its own file has one
+      # doc string that rustdoc resolves in the parent's scope, so relative
+      # links in the file silently look one level up. The two runs above catch
+      # it only when a link happens to break; this catches the shape itself.
+      # See the script's header for why the diagnostic is so hard to read.
+      - run: python3 scripts/check-module-docs.py
+
+  draft-cfg:
+    name: Draft rejection cfg lists
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      # No toolchain and no compile: this reads the `cfg(any(feature =
+      # "draftNN", ...))` lists that every per-draft module rejects the other
+      # drafts with, and fails when one of them is short.
+      #
+      # The compiler cannot be asked this cheaply. A short list only breaks a
+      # build that enables the omitted draft alongside the module's own, and
+      # fourteen drafts make 91 such pairs; the sweep above compiles one draft
+      # at a time, where the arm is compiled out and a short list is
+      # unreadable. `features-combos` compiles the two pairs worth compiling —
+      # this covers the other 89 without building anything.
+      - run: python3 scripts/check-draft-cfg.py
+
+  draft-parity:
+    name: Per-draft construct parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      # No toolchain and no compile, for the same reason as the job above: the
+      # question is about the text of the tree rather than about one build of
+      # it, and the answers this wants are the ones a green build is compatible
+      # with.
+      #
+      # Three rules, and none of them writes a draft number down. The draft set
+      # is read off five independent statements of it — the per-draft
+      # directories, the `mod draftNN` declarations, each manifest's `draftNN`
+      # features, each manifest's `all-drafts` list, and the `DraftVersion`
+      # variants — and they are required to agree, so a `draft21/` directory
+      # that arrived without its feature is a failure rather than a silence.
+      # Then: no list of drafts anywhere may name draft N-1 and stop there
+      # (`matches!` patterns, match arm sets, `DraftVersion` list literals,
+      # `cfg(any(...))` conditions), and no draft-enumerating `match` may close
+      # with a catch-all returning a plausible value rather than refusing —
+      # which is how a draft nobody added gets a wrong answer instead of an
+      # error.
+      #
+      # Where the compiler can see something, it sees it better, and the script
+      # says so in its own docstring rather than claiming the ground: what is
+      # *inside* a per-draft module is the `features` matrix above, and
+      # rejection `cfg` completeness is `check-draft-cfg.py`.
+      - run: python3 scripts/check-draft-parity.py
+
+  drafts:
+    name: Draft citations and registries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The renderings, cached because a published Internet-Draft is immutable.
+      # `--fetch` below downloads whatever the directory does not already hold,
+      # so a cold, partial or dropped cache costs a download and never a wrong
+      # answer. Bump the key by hand when a draft is added; a stale key is a
+      # slower job, not a weaker one.
+      - uses: actions/cache@v4
+        with:
+          path: .drafts
+          key: moqt-drafts-07-20
+      # Two checks over the same renderings, neither of which compiles
+      # anything, and both of which reach the IETF archive where these drafts
+      # are published. No credential and no sibling checkout: the reason this
+      # could not run here before was that both tools read a directory that
+      # only exists on a maintainer's disk.
+      #
+      # `check-drafts.py` holds every `draft-NN Section X.Y` under `crates/` to
+      # that draft's own table of contents, and every quotation to the draft it
+      # is filed under. Which drafts it reads is derived from the per-draft
+      # modules in the tree, so a new draft is swept from the commit that adds
+      # it rather than from the commit that remembers to widen a range.
+      #
+      # `extract-registries.py --check` re-runs the extraction and fails when a
+      # committed `tools/registries/draft-NN.json` no longer matches the draft
+      # it was produced from. That is the one link in draft -> JSON -> test
+      # nothing else covers: `registry_conformance.rs` compares this crate's
+      # code points against the JSON, so a hand-edited row moves the
+      # expectation and every gate stays green. A draft the IETF has re-rendered
+      # with no row moved is reported and passes, because the check compares
+      # extractions rather than bytes.
+      #
+      # Both fail closed if the archive cannot be reached. An unverifiable
+      # citation is not a verified one.
+      - run: python3 scripts/check-drafts.py --drafts .drafts --fetch
+      - run: >-
+          python3 crates/moqtap-codec/tools/extract-registries.py
+          --all --check --fetch --spec-dir .drafts
 
   versions:
     name: Release numbering

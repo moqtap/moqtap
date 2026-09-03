@@ -1,46 +1,7 @@
 #[allow(dead_code)]
 pub mod dispatch_check;
-#[cfg(feature = "draft07")]
 #[allow(dead_code)]
-pub mod draft07_json;
-#[cfg(feature = "draft08")]
-#[allow(dead_code)]
-pub mod draft08_json;
-#[cfg(feature = "draft09")]
-#[allow(dead_code)]
-pub mod draft09_json;
-#[cfg(feature = "draft10")]
-#[allow(dead_code)]
-pub mod draft10_json;
-#[cfg(feature = "draft11")]
-#[allow(dead_code)]
-pub mod draft11_json;
-#[cfg(feature = "draft12")]
-#[allow(dead_code)]
-pub mod draft12_json;
-#[cfg(feature = "draft13")]
-#[allow(dead_code)]
-pub mod draft13_json;
-#[cfg(feature = "draft14")]
-#[allow(dead_code)]
-pub mod draft14_json;
-#[cfg(feature = "draft15")]
-#[allow(dead_code)]
-pub mod draft15_json;
-#[cfg(feature = "draft16")]
-#[allow(dead_code)]
-pub mod draft16_json;
-#[cfg(feature = "draft17")]
-#[allow(dead_code)]
-pub mod draft17_json;
-#[cfg(feature = "draft18")]
-#[allow(dead_code)]
-pub mod draft18_json;
-#[cfg(feature = "draft19")]
-#[allow(dead_code)]
-pub mod draft19_json;
-#[allow(dead_code)]
-pub mod params;
+pub mod fields_json;
 
 use moqtap_codec::error::CodecError;
 use moqtap_codec::varint::VarIntError;
@@ -140,11 +101,12 @@ impl TestVector {
 /// - `unknown_message` — a type code this draft does not assign, on a control
 ///   message, a data stream or a datagram.
 /// - `invalid_type` — a type code inside the form its draft defines, which the
-///   draft separately names as invalid. Drafts 16 through 19 describe their
+///   draft separately names as invalid. Drafts 16 through 20 describe their
 ///   data-plane types as bit fields and then rule out particular combinations
 ///   within the form, so the enclosing form is assigned and the value is not.
 /// - `invalid_parameter` — a parameter or property is wrong in itself: its
 ///   type, its length, its value's range, or its position in a delta-coded run.
+///   A malformed filter value belongs here too, on both counts.
 /// - `parameter_out_of_scope` — a parameter is well formed and appears in a
 ///   message its own definition does not name. Drafts 17, 18 and 19 require the
 ///   receiver to close over it; every draft before them says such a parameter
@@ -174,8 +136,8 @@ pub fn error_category(err: &CodecError) -> &'static str {
         // the direction in prose because the useful number differs between
         // them, so this reads the prose.
         //
-        // Reword either string in the codec and 196 negative vectors across the
-        // thirteen drafts stop being `incomplete` and start being
+        // Reword either string in the codec and every truncated-frame vector
+        // across the fourteen drafts stops being `incomplete` and starts being
         // `invalid_value`, which every one of them will say so about. The
         // coupling is real and it is loud, which is the pair of properties that
         // makes it safe to leave.
@@ -209,6 +171,16 @@ pub fn error_category(err: &CodecError) -> &'static str {
         | CodecError::ParametersOutOfOrder(_, _)
         | CodecError::KeyDeltaOverflow(_, _)
         | CodecError::KeyValueFormatting { .. }
+        // A filter parameter whose value is not the structure its type names,
+        // and one whose End Group Delta carries the range out of the number
+        // space, are both a parameter wrong in itself — its length in the first
+        // case and its value's range in the second — which is what
+        // `invalid_parameter` covers. They sat under the catch-all until
+        // draft-20 gave the corpus vectors that claim the category: draft-20
+        // rebuilt the LOCATION_FILTER value (Section 5.1.2) and the negative
+        // vectors for its new shape are the first to reach either variant.
+        | CodecError::SubscriptionFilterMalformed { .. }
+        | CodecError::FilterEndGroupOverflow { .. }
         | CodecError::Kvp(_) => "invalid_parameter",
 
         _ => "invalid_value",
@@ -371,11 +343,11 @@ pub fn unassigned_statuses(vector: &TestVector, assigned: &[u64]) -> Vec<u64> {
 ///
 /// # Which JSON keys count
 ///
-/// `object_status`, which drafts 07-14 use everywhere and drafts 15-19 keep on
-/// the datagram header, and `status`, which is what drafts 15-19 call the same
-/// field inside a subgroup object. Drafts 15-19's `subgroup.json` and
+/// `object_status`, which drafts 07-14 use everywhere and drafts 15-20 keep on
+/// the datagram header, and `status`, which is what drafts 15-20 call the same
+/// field inside a subgroup object. Drafts 15-20's `subgroup.json` and
 /// `fetch-header.json` carry no `object_status` key at all, so a walk that knew
-/// only the first name read none of those five drafts' subgroup objects — and
+/// only the first name read none of those six drafts' subgroup objects — and
 /// reported a clean sweep over a corpus it had not opened.
 ///
 /// A wire value is read whether the corpus writes it as a decimal string, which

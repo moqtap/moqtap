@@ -1,4 +1,4 @@
-//! The Range Filters draft-19 carries in five parameters.
+//! The Range Filters drafts 19 and 20 carry in five parameters.
 //!
 //! Section 5.1.3: "Range Filters are parameters in SUBSCRIBE, FETCH, or
 //! SUBSCRIBE_TRACKS that tell a publisher to filter tracks (via TRACK PROPERTY
@@ -7,7 +7,8 @@
 //! other Object header fields (Subgroup ID, Object ID, and Publisher Priority).
 //! There are five Range Filter parameter types, 0x25-0x29, as shown below."
 //!
-//! Draft-19 is the only draft with them, and the five share one value shape:
+//! Drafts 19 and 20 are the only drafts with them, and the five share one
+//! value shape:
 //!
 //! ```text
 //! SUBGROUP_FILTER        { Type=0x25, Length, [SetID], Range... }
@@ -26,7 +27,7 @@
 //! MAX_FILTER_RANGES allows. A reply is something an endpoint sends, and sending
 //! it needs the request decoded — including the Request ID the reply names.
 //!
-//! So nothing here is wired into `decode_parameters`, and [`RangeFilterError`](crate::range_filter::RangeFilterError)
+//! So nothing here is wired into `decode_parameters`, and [`RangeFilterError`]
 //! deliberately does not convert into [`CodecError`](crate::error::CodecError).
 //! A refusal at decode time would turn a frame the endpoint owes an answer to
 //! into a frame it never saw, and the subscriber would wait for a REQUEST_ERROR
@@ -210,6 +211,39 @@ impl RangeFilter {
         parameter_type: u64,
         bytes: &[u8],
     ) -> Result<Self, RangeFilterError> {
+        let filter = Self::decode_moqt_structure::<P>(parameter_type, bytes)?;
+        filter.check_its_own_types()?;
+        Ok(filter)
+    }
+
+    /// Read a Range Filter without holding it to the two rules about its own
+    /// contents that [`check_its_own_types`](Self::check_its_own_types) states.
+    ///
+    /// The bytes still have to be a Range Filter and still have to parse: a
+    /// truncated value, a missing SetID and a delta that overflows are all
+    /// refused here exactly as they are by [`decode_moqt`](Self::decode_moqt).
+    /// What is not refused is a filter that decoded cleanly and then names a
+    /// Publisher Priority above 255 or an odd Property Type.
+    ///
+    /// # When to reach for this instead
+    ///
+    /// A decoder must refuse those two, because they are answered with
+    /// REQUEST_ERROR and passing them on would let an application act on a
+    /// range the peer is not allowed to have asked for. A **renderer** must
+    /// not: it is describing a message that has already been decoded, and a
+    /// filter that broke a content rule is exactly the one whose fields a
+    /// reader most needs to see. Refusing there degrades the rendering to
+    /// opaque bytes and hides the offending value inside them.
+    ///
+    /// So the split is by what the caller does with the answer, not by how
+    /// much checking it wants: decode with [`decode_moqt`](Self::decode_moqt),
+    /// render with this and then call
+    /// [`check_its_own_types`](Self::check_its_own_types) to say what is wrong
+    /// alongside the fields rather than instead of them.
+    pub fn decode_moqt_structure<P: MoqtProfile>(
+        parameter_type: u64,
+        bytes: &[u8],
+    ) -> Result<Self, RangeFilterError> {
         if !is_range_filter(parameter_type) {
             return Err(RangeFilterError::NotARangeFilter(parameter_type));
         }
@@ -268,20 +302,23 @@ impl RangeFilter {
             previous_end = end;
         }
 
-        let filter = RangeFilter { parameter_type, set_id, property_type, ranges };
-        filter.check_its_own_types()?;
-        Ok(filter)
+        Ok(RangeFilter { parameter_type, set_id, property_type, ranges })
     }
 
     /// The two rules a Range Filter can break once it has decoded cleanly.
     ///
-    /// Both are answered with the same REQUEST_ERROR as the delta rule, so they
-    /// belong beside it rather than in a separate query a caller has to know to
-    /// make. A filter that reaches an application from here has already been
-    /// held to everything Section 5.1.3 and Sections 10.2.12 through 10.2.14
-    /// state about its own contents; what is left for the session to decide is
-    /// the ceiling and the repeats, which need more than one parameter to see.
-    fn check_its_own_types(&self) -> Result<(), RangeFilterError> {
+    /// Both are answered with the same REQUEST_ERROR as the delta rule, so
+    /// [`decode_moqt`](Self::decode_moqt) applies them for you and a filter
+    /// that reaches an application through it has already been held to
+    /// everything Section 5.1.3 and Sections 10.2.12 through 10.2.14 state
+    /// about its own contents. What is left for the session to decide is the
+    /// ceiling and the repeats, which need more than one parameter to see.
+    ///
+    /// It is public so that a caller which decoded with
+    /// [`decode_moqt_structure`](Self::decode_moqt_structure) can still ask the
+    /// question — and, having the filter in hand, report the answer beside the
+    /// fields rather than in place of them.
+    pub fn check_its_own_types(&self) -> Result<(), RangeFilterError> {
         if let Some(property_type) = self.property_type {
             if !property_type.is_multiple_of(2) {
                 return Err(RangeFilterError::PropertyTypeIsNotAnInteger(property_type));

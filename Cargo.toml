@@ -25,17 +25,17 @@ categories = ["network-programming"]
 # `0.1.0` crate for the whole of the project's history without one gate
 # noticing, because nothing consumed the pin.
 [workspace.dependencies]
-moqtap-codec = { path = "crates/moqtap-codec", version = "0.4.1", default-features = false }
+moqtap-codec = { path = "crates/moqtap-codec", version = "0.5.0", default-features = false }
 wtransport = { version = "0.7", features = ["dangerous-configuration", "quinn"] }
 moqtap-trace = { path = "crates/moqtap-trace", version = "0.3.0" }
 # `default-features = false` is load-bearing: cargo IGNORES a member manifest's
 # `default-features = false` on a `workspace = true` dependency unless the
 # workspace entry carries it too, warning only at the manifest level — which
 # `RUSTFLAGS = "-D warnings"` never sees. Without it every reduced-draft
-# `moqtap-proxy` build silently resolves all thirteen drafts and CI's
+# `moqtap-proxy` build silently resolves all fourteen drafts and CI's
 # single-draft rows pass by not checking anything.
-moqtap-client = { path = "crates/moqtap-client", version = "0.4.1", default-features = false }
-moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.4.1" }
+moqtap-client = { path = "crates/moqtap-client", version = "0.5.0", default-features = false }
+moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.5.0" }
 # No `default-features = false`: this crate declares no `default` key at all, so
 # every feature it has is opt-in at the member manifest.
 quinn-netem = { path = "crates/quinn-netem", version = "0.1.3" }

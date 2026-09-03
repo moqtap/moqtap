@@ -11,11 +11,11 @@
 //! closing sessions the draft says nothing about. A rule that cannot be
 //! expressed looks exactly like a rule that does not exist.
 //!
-//! Every draft from 07 to 19 states the rule, in one of two phrasings. This one
+//! Every draft from 07 to 20 states the rule, in one of two phrasings. This one
 //! names streams alone because draft-07 numbers its datagrams in the very same
 //! table; drafts 08 through 16 split the table in two and say "an unknown stream
-//! or datagram type"; drafts 17, 18 and 19 give each table a sentence of its
-//! own. A search for either phrasing alone finds four drafts and misses nine.
+//! or datagram type"; drafts 17 through 20 give each table a sentence of its
+//! own. A search for either phrasing alone finds five drafts and misses nine.
 //!
 //! # Why a data-stream gate and not another control-stream one
 //!

@@ -1,5 +1,6 @@
 use ciborium::Value;
 use moqtap_trace::event::*;
+use moqtap_trace::header::DetailLevel;
 
 mod corpus;
 
@@ -183,7 +184,14 @@ fn error_event_roundtrip() {
     let event = TraceEvent::new(
         8,
         9000,
-        EventData::Error { error_code: 0x01, reason: "protocol violation".into() },
+        EventData::Error {
+            error_code: 0x01,
+            reason: "protocol violation".into(),
+            stream_id: None,
+            kind: None,
+            raw_len: None,
+            raw: None,
+        },
     );
     assert_eq!(roundtrip(&event), event);
 }
@@ -440,6 +448,370 @@ fn a_stream_identifier_outside_its_scope_is_kept_rather_than_rejected() {
     assert_eq!(stream_type, StreamType::Fetch);
     assert_eq!(subgroup_id, Some(2));
     assert_eq!(fetch_request_id, Some(19));
+}
+
+// ── the bytes behind an error, on event 6 ──────────────────
+
+/// An event 6 CBOR map carrying whatever a writer put on it, built by hand
+/// rather than by serializing a `TraceEvent`: most of these cases are files
+/// this crate would not write itself, and the ones it would are worth pinning
+/// against a value written out here rather than against its own encoder.
+fn error_cbor(extra: &[(&str, Value)]) -> Value {
+    let mut pairs = vec![
+        (Value::Text("n".into()), Value::Integer(3.into())),
+        (Value::Text("t".into()), Value::Integer(700.into())),
+        (Value::Text("e".into()), Value::Integer(6.into())),
+        (Value::Text("ec".into()), Value::Integer(5.into())),
+        (Value::Text("reason".into()), Value::Text("SUBSCRIBE_OK did not parse".into())),
+    ];
+    for (key, value) in extra {
+        pairs.push((Value::Text((*key).into()), value.clone()));
+    }
+    Value::Map(pairs)
+}
+
+/// The bytes an event is written as, decoded back into a `Value`.
+///
+/// Through the encoder rather than through `Value::serialized`, so the
+/// definite-length map header is exercised too: a variant that gained a field
+/// without gaining an entry in the count writes a header promising a different
+/// number of pairs than follow, and only the byte stream can show it.
+fn encoded(event: &TraceEvent) -> Value {
+    let mut bytes = Vec::new();
+    ciborium::ser::into_writer(event, &mut bytes).expect("serialization is infallible");
+    ciborium::de::from_reader(bytes.as_slice()).expect("the encoded map is well-formed CBOR")
+}
+
+/// All four keys, written and read against values spelled out here rather than
+/// against a decode of this crate's own encode.
+///
+/// The pairing of `rawlen` with a shorter `raw` is the ordinary case rather
+/// than a corner: the length is the input the recorder held, before the cap
+/// bit, so a reader comparing the two is how it learns the capture is partial
+/// and by how much.
+#[test]
+fn an_error_writes_its_stream_kind_length_and_bytes() {
+    let event = TraceEvent::new(
+        3,
+        700,
+        EventData::Error {
+            error_code: 5,
+            reason: "SUBSCRIBE_OK did not parse".into(),
+            stream_id: Some(6),
+            kind: Some(ErrorKind::Decode),
+            raw_len: Some(9),
+            raw: Some(vec![0x04, 0xff, 0x03]),
+        },
+    );
+
+    let written = encoded(&event);
+    for (key, value) in [
+        ("n", Value::Integer(3.into())),
+        ("t", Value::Integer(700.into())),
+        ("e", Value::Integer(6.into())),
+        ("ec", Value::Integer(5.into())),
+        ("reason", Value::Text("SUBSCRIBE_OK did not parse".into())),
+        ("sid", Value::Integer(6.into())),
+        ("ek", Value::Text("decode".into())),
+        ("rawlen", Value::Integer(9.into())),
+        ("raw", Value::Bytes(vec![0x04, 0xff, 0x03])),
+    ] {
+        assert_eq!(key_count(&written, key), 1, "'{key}' is not written exactly once");
+        assert_eq!(key_of(&written, key), Some(value), "'{key}' was not written as expected");
+    }
+    let Value::Map(pairs) = &written else { panic!("event is not a CBOR map") };
+    assert_eq!(pairs.len(), 9, "the map carries entries beyond the nine keys: {pairs:?}");
+
+    // And back, against the same literals rather than against the event above.
+    let decoded = TraceEvent::try_from(written).expect("the written event reads back");
+    let EventData::Error { error_code, reason, stream_id, kind, raw_len, raw } = decoded.data
+    else {
+        panic!("expected an error event");
+    };
+    assert_eq!(error_code, 5);
+    assert_eq!(reason, "SUBSCRIBE_OK did not parse");
+    assert_eq!(stream_id, Some(6));
+    assert_eq!(kind, Some(ErrorKind::Decode));
+    assert_eq!(raw_len, Some(9));
+    assert_eq!(raw, Some(vec![0x04, 0xff, 0x03]));
+}
+
+/// Every one of the four is optional, and every recording made before they
+/// existed carries none of them — so a writer that emitted a key for an empty
+/// field would put a `"raw"` of nothing into a `control`-level trace.
+#[test]
+fn an_error_carrying_none_of_them_writes_none_of_the_keys() {
+    let event = TraceEvent::new(
+        3,
+        700,
+        EventData::Error {
+            error_code: 5,
+            reason: "peer closed".into(),
+            stream_id: None,
+            kind: None,
+            raw_len: None,
+            raw: None,
+        },
+    );
+
+    let written = encoded(&event);
+    for key in ["sid", "ek", "rawlen", "raw"] {
+        assert_eq!(key_count(&written, key), 0, "'{key}' was written for a field that is None");
+    }
+    let Value::Map(pairs) = &written else { panic!("event is not a CBOR map") };
+    assert_eq!(pairs.len(), 5, "the map carries entries beyond n, t, e, ec and reason: {pairs:?}");
+}
+
+/// Absent is not zero. A recorder sitting at the session level has no stream to
+/// report and says so by omitting the key, and an error that names stream 0 is
+/// a different statement — the same rule event 0's `"sid"` carries.
+#[test]
+fn an_absent_error_stream_id_is_not_stream_zero() {
+    let absent = TraceEvent::try_from(error_cbor(&[])).expect("no 'sid' is not a malformed event");
+    let EventData::Error { stream_id, .. } = absent.data else { panic!("expected an error") };
+    assert_eq!(stream_id, None, "an omitted 'sid' must not read as a stream");
+
+    let zero = TraceEvent::try_from(error_cbor(&[("sid", Value::Integer(0.into()))]))
+        .expect("stream 0 is a stream");
+    let EventData::Error { stream_id, .. } = zero.data else { panic!("expected an error") };
+    assert_eq!(stream_id, Some(0), "'sid': 0 must read as stream 0");
+}
+
+/// `"ek"` is an open vocabulary: this revision names three kinds and others may
+/// be added without a version bump, so a spelling this crate has never seen is
+/// kept as it was found rather than refused or renamed.
+#[test]
+fn an_unrecognised_error_kind_is_kept_verbatim() {
+    for (spelling, kind) in [
+        ("protocol", ErrorKind::Protocol),
+        ("transport", ErrorKind::Transport),
+        ("decode", ErrorKind::Decode),
+        ("starvation", ErrorKind::Other("starvation".into())),
+    ] {
+        let event = TraceEvent::try_from(error_cbor(&[("ek", Value::Text(spelling.into()))]))
+            .unwrap_or_else(|e| panic!("'{spelling}' is not a malformed event: {e}"));
+
+        let EventData::Error { kind: read, .. } = &event.data else {
+            panic!("expected an error event");
+        };
+        assert_eq!(read.as_ref(), Some(&kind), "'{spelling}' did not read as the kind it names");
+        assert!(event.extra.is_empty(), "'{spelling}' was collected as an unrecognised key");
+        assert_eq!(
+            key_of(&encoded(&event), "ek"),
+            Some(Value::Text(spelling.into())),
+            "'{spelling}' was not written back as it was found"
+        );
+    }
+}
+
+/// The failure this guards is silent. A key read into a named field but left
+/// out of the event type's key list is collected into `extra` as well, so the
+/// event decodes correctly, compares equal to itself, and serializes to a CBOR
+/// map with a duplicate key.
+#[test]
+fn the_error_keys_never_land_in_extra() {
+    let event = TraceEvent::try_from(error_cbor(&[
+        ("sid", Value::Integer(6.into())),
+        ("ek", Value::Text("protocol".into())),
+        ("rawlen", Value::Integer(9.into())),
+        ("raw", Value::Bytes(vec![0x04])),
+        ("zz", Value::Text("from the future".into())),
+    ]))
+    .expect("an event 6 carrying all four keys reads");
+
+    assert_eq!(
+        event.extra,
+        vec![(Value::Text("zz".into()), Value::Text("from the future".into()))],
+        "a key event 6 owns was collected as an unrecognised one"
+    );
+    for key in ["ec", "reason", "sid", "ek", "rawlen", "raw", "zz"] {
+        assert_eq!(key_count(&encoded(&event), key), 1, "'{key}' is not written exactly once");
+    }
+}
+
+/// A defined key whose value the reader cannot use is unrecognised, not
+/// deletable: the field stays empty, the entry is kept, and it is written back
+/// as it was found. Knowing more about a key must not mean preserving it less
+/// — which is the trap every one of these four walked into the moment the crate
+/// learned their names, since before that they survived as unknown keys.
+#[test]
+fn a_wrong_typed_error_key_is_kept_as_an_unrecognised_key() {
+    let unusable_bytes = vec![
+        ("text", Value::Text("0x04".into())),
+        ("an integer", Value::Integer(4.into())),
+        ("an array of byte values", Value::Array(vec![uint(4), uint(255)])),
+        ("null", Value::Null),
+    ];
+    let unusable_text = vec![
+        ("an integer", Value::Integer(1.into())),
+        ("a byte string", Value::Bytes(vec![0x64])),
+        ("a boolean", Value::Bool(false)),
+        ("null", Value::Null),
+    ];
+
+    let cases: Vec<(&str, Vec<(&str, Value)>)> = vec![
+        ("sid", unusable_uints()),
+        ("rawlen", unusable_uints()),
+        ("ek", unusable_text),
+        ("raw", unusable_bytes),
+    ];
+
+    for (key, values) in cases {
+        for (what, value) in values {
+            let event = TraceEvent::try_from(error_cbor(&[(key, value.clone())]))
+                .unwrap_or_else(|e| panic!("{what} for '{key}' is not a malformed event: {e}"));
+
+            let EventData::Error { stream_id, kind, raw_len, raw, .. } = &event.data else {
+                panic!("expected an error event");
+            };
+            assert_eq!(*stream_id, None, "{what} was read into a field of event 6");
+            assert_eq!(kind.as_ref(), None, "{what} was read into a field of event 6");
+            assert_eq!(*raw_len, None, "{what} was read into a field of event 6");
+            assert_eq!(raw.as_ref(), None, "{what} was read into a field of event 6");
+
+            assert_eq!(
+                event.extra,
+                vec![(Value::Text(key.into()), value.clone())],
+                "{what} for '{key}' was not kept verbatim"
+            );
+
+            // The value through `Value` and the count through the bytes. A
+            // tag 2 bignum goes out as it came in and comes back as the
+            // integer it carries, which is ciborium folding a shape away
+            // below this test rather than the writer altering anything —
+            // the count is what the byte stream is here for.
+            assert_eq!(
+                key_of(&Value::from(&event), key),
+                Some(value.clone()),
+                "{what} for '{key}' was altered on the way out"
+            );
+            assert_eq!(key_count(&encoded(&event), key), 1, "'{key}' is not written exactly once");
+        }
+    }
+}
+
+/// The cap binds a recorder building an event out of bytes it just observed,
+/// and nothing else. A reader meeting a longer `"raw"` must not refuse it and a
+/// rewrite must not shorten it: re-truncating destroys evidence to make someone
+/// else's file conform to a rule it was never handed.
+///
+/// The failure this catches is silent in exactly the wrong direction — a cap in
+/// the serializer passes every test built from short fixtures and quietly
+/// discards the bytes of every over-long capture that passes through.
+#[test]
+fn a_raw_longer_than_the_cap_survives_a_read_and_a_rewrite_unshortened() {
+    let long: Vec<u8> = (0..ERROR_RAW_CAP + 904).map(|i| (i % 251) as u8).collect();
+    assert_eq!(long.len(), 5000, "the fixture is meant to sit well past the cap");
+
+    let event = TraceEvent::try_from(error_cbor(&[
+        ("rawlen", Value::Integer(5000.into())),
+        ("raw", Value::Bytes(long.clone())),
+    ]))
+    .expect("a 'raw' past the cap is not a malformed event");
+
+    let EventData::Error { raw, raw_len, .. } = &event.data else {
+        panic!("expected an error event");
+    };
+    assert_eq!(raw.as_deref(), Some(long.as_slice()), "the read shortened the bytes");
+    assert_eq!(*raw_len, Some(5000));
+    assert!(event.extra.is_empty(), "an over-long 'raw' was treated as unusable");
+
+    let written = encoded(&event);
+    assert_eq!(
+        key_of(&written, "raw"),
+        Some(Value::Bytes(long.clone())),
+        "the rewrite shortened the bytes"
+    );
+    assert_eq!(key_of(&written, "rawlen"), Some(Value::Integer(5000.into())));
+}
+
+/// The cap the recorder does apply, at the one level the bytes are recorded at.
+/// `rawlen` is the length of the input the recorder held, not the length of
+/// what it kept — a `rawlen` recomputed after the truncation would say the
+/// capture was complete.
+#[test]
+fn a_recorder_caps_the_bytes_and_records_the_length_it_had() {
+    let observed: Vec<u8> = (0..ERROR_RAW_CAP + 904).map(|i| (i % 251) as u8).collect();
+    let data = EventData::error_observed(
+        5,
+        "SUBSCRIBE_OK did not parse",
+        Some(ErrorKind::Decode),
+        Some(6),
+        &observed,
+        &DetailLevel::Full,
+    );
+
+    let EventData::Error { error_code, reason, stream_id, kind, raw_len, raw } = data else {
+        panic!("expected an error event");
+    };
+    assert_eq!(error_code, 5);
+    assert_eq!(reason, "SUBSCRIBE_OK did not parse");
+    assert_eq!(stream_id, Some(6));
+    assert_eq!(kind, Some(ErrorKind::Decode));
+    assert_eq!(raw_len, Some(5000), "the length must be the input, not what survived the cap");
+    assert_eq!(raw.as_ref().map(Vec::len), Some(4096), "the bytes were not capped at 4096");
+    assert_eq!(
+        raw.as_deref(),
+        Some(&observed[..ERROR_RAW_CAP]),
+        "the kept bytes are the first 4096, not some other 4096"
+    );
+}
+
+/// An input shorter than the cap is kept whole, and the two lengths then agree
+/// — which is how a reader tells a complete capture from a partial one.
+#[test]
+fn a_recorder_leaves_a_short_input_whole() {
+    let observed = vec![0x04, 0xff, 0x03];
+    let data = EventData::error_observed(5, "bad", None, None, &observed, &DetailLevel::Full);
+
+    let EventData::Error { raw_len, raw, kind, stream_id, .. } = data else {
+        panic!("expected an error event");
+    };
+    assert_eq!(raw_len, Some(3));
+    assert_eq!(raw, Some(vec![0x04, 0xff, 0x03]));
+    assert_eq!(kind, None, "nothing invented a kind the caller did not give");
+    assert_eq!(stream_id, None);
+}
+
+/// The two byte-bearing keys sit at different levels on purpose. `"rawlen"` is
+/// a size and this format gates sizes, so it stops at `headers+sizes`; `"raw"`
+/// is payload-bearing and stops at `full`, one level above the event's own
+/// `control`+, because an error naming a data stream has media framing behind
+/// it.
+///
+/// A level this crate cannot place yields neither. A guess in the other
+/// direction would put payload bytes into a trace whose declared level excludes
+/// them, and that is not a mistake a later read can undo.
+#[test]
+fn a_recorder_writes_the_length_a_level_below_the_bytes() {
+    let observed: Vec<u8> = (0..64u8).collect();
+    let cases: Vec<(DetailLevel, Option<u64>, bool)> = vec![
+        (DetailLevel::Control, None, false),
+        (DetailLevel::Headers, None, false),
+        (DetailLevel::HeadersSizes, Some(64), false),
+        (DetailLevel::HeadersData, Some(64), false),
+        (DetailLevel::Full, Some(64), true),
+        (DetailLevel::Other("headers+timing".into()), None, false),
+    ];
+
+    for (detail, expected_len, expects_bytes) in cases {
+        let data = EventData::error_observed(
+            5,
+            "bad",
+            Some(ErrorKind::Protocol),
+            Some(6),
+            &observed,
+            &detail,
+        );
+        let EventData::Error { raw_len, raw, .. } = data else { panic!("expected an error") };
+
+        assert_eq!(raw_len, expected_len, "wrong 'rawlen' at detail level {detail}");
+        assert_eq!(
+            raw.as_deref(),
+            expects_bytes.then_some(observed.as_slice()),
+            "wrong 'raw' at detail level {detail}"
+        );
+    }
 }
 
 // ── forward compatibility ──────────────────────────────────
@@ -1149,6 +1521,21 @@ fn a_key_lands_in_a_field_or_in_extra_and_never_in_both() {
                 ("tdr", uint(100)),
             ]),
             vec!["traceId"],
+        ),
+        (
+            "event 6, 'sid' and 'ek' usable, 'rawlen' text and 'raw' an array",
+            cbor_map(&[
+                ("n", uint(0)),
+                ("t", uint(100)),
+                ("e", uint(6)),
+                ("ec", uint(5)),
+                ("reason", Value::Text("SUBSCRIBE_OK did not parse".into())),
+                ("sid", uint(6)),
+                ("ek", Value::Text("decode".into())),
+                ("rawlen", Value::Text("nine".into())),
+                ("raw", Value::Array(vec![uint(4), uint(255)])),
+            ]),
+            vec!["rawlen", "raw"],
         ),
         (
             "event 2, a peer id written as a number",

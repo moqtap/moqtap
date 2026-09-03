@@ -1,16 +1,16 @@
 //! Every draft's fetch state machine answers in either order.
 //!
 //! `fetch_tests.rs` drives draft-14's machine through the whole transition
-//! table. There are thirteen of those machines, one per draft module, and they
+//! table. There are fourteen of those machines, one per draft module, and they
 //! are separate types with separate copies of the same graph — so a change made
-//! to one of them and not to its twelve siblings compiles, passes that file, and
+//! to one of them and not to its thirteen siblings compiles, passes that file, and
 //! ships. This file drives the two orders and the late close on every draft the
 //! build has, so the odd sibling is a failure rather than a silence.
 //!
 //! # Ablation, run
 //!
 //! Deleting the `FetchState::Unanswered` arm from draft-07's `on_fetch_ok` and
-//! nothing else — one sibling of the thirteen put back the way it was — leaves
+//! nothing else — one sibling of the fourteen put back the way it was — leaves
 //! `fetch_tests.rs` entirely green and fails one row here:
 //!
 //! ```text
@@ -22,7 +22,7 @@
 //! how it names the far end of the range. draft-14 Section 9.17: "A publisher
 //! MAY send Objects in response to a FETCH before the FETCH_OK message is sent,
 //! but the FETCH_OK MUST NOT be sent until the End Location is known." Drafts 12
-//! through 19 word it exactly so; draft-11 waits on "the end group and object",
+//! through 20 word it exactly so; draft-11 waits on "the end group and object",
 //! and drafts 07 through 10 on "the latest group and object".
 
 macro_rules! fetch_answer_order {
@@ -91,3 +91,5 @@ fetch_answer_order!(draft17_answers_in_either_order, "draft-17", moqtap_client::
 fetch_answer_order!(draft18_answers_in_either_order, "draft-18", moqtap_client::draft18::fetch);
 #[cfg(feature = "draft19")]
 fetch_answer_order!(draft19_answers_in_either_order, "draft-19", moqtap_client::draft19::fetch);
+#[cfg(feature = "draft20")]
+fetch_answer_order!(draft20_answers_in_either_order, "draft-20", moqtap_client::draft20::fetch);

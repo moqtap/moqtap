@@ -49,10 +49,10 @@
 //!   `ProxyControl::inject_control` places a message in the peer's
 //!   control-message sequence, and nothing appears in the request stream's.
 //!
-//! Each runs once per compiled draft in 17-19, so a build with only one of
+//! Each runs once per compiled draft in 17-20, so a build with only one of
 //! them still gates that one.
 
-#![cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
+#![cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
 
 mod common;
 
@@ -116,6 +116,11 @@ fn setup(draft: DraftVersion) -> AnyControlMessage {
             use moqtap_codec::draft19::message::{ControlMessage, Setup};
             AnyControlMessage::Draft19(ControlMessage::Setup(Setup { options: Vec::new() }))
         }
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20 => {
+            use moqtap_codec::draft20::message::{ControlMessage, Setup};
+            AnyControlMessage::Draft20(ControlMessage::Setup(Setup { options: Vec::new() }))
+        }
         other => panic!("{other} does not carry its control plane on unidirectional streams"),
     }
 }
@@ -146,6 +151,13 @@ fn namespace(draft: DraftVersion, suffix: &[u8]) -> AnyControlMessage {
                 namespace_suffix: suffix,
             }))
         }
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20 => {
+            use moqtap_codec::draft20::message::{ControlMessage, Namespace};
+            AnyControlMessage::Draft20(ControlMessage::Namespace(Namespace {
+                namespace_suffix: suffix,
+            }))
+        }
         other => panic!("{other} does not carry its control plane on unidirectional streams"),
     }
 }
@@ -173,6 +185,13 @@ fn namespace_done(draft: DraftVersion, suffix: &[u8]) -> AnyControlMessage {
         DraftVersion::Draft19 => {
             use moqtap_codec::draft19::message::{ControlMessage, NamespaceDone};
             AnyControlMessage::Draft19(ControlMessage::NamespaceDone(NamespaceDone {
+                namespace_suffix: suffix,
+            }))
+        }
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20 => {
+            use moqtap_codec::draft20::message::{ControlMessage, NamespaceDone};
+            AnyControlMessage::Draft20(ControlMessage::NamespaceDone(NamespaceDone {
                 namespace_suffix: suffix,
             }))
         }
@@ -218,6 +237,16 @@ fn subscribe(draft: DraftVersion, request_id: u64, track: &[u8]) -> AnyControlMe
                 parameters: Vec::new(),
             }))
         }
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20 => {
+            use moqtap_codec::draft20::message::{ControlMessage, Subscribe};
+            AnyControlMessage::Draft20(ControlMessage::Subscribe(Subscribe {
+                request_id: id,
+                track_namespace: ns,
+                track_name: track.to_vec(),
+                parameters: Vec::new(),
+            }))
+        }
         other => panic!("{other} does not carry its control plane on unidirectional streams"),
     }
 }
@@ -250,6 +279,14 @@ fn goaway(draft: DraftVersion, uri: &[u8]) -> AnyControlMessage {
         DraftVersion::Draft19 => {
             use moqtap_codec::draft19::message::{ControlMessage, GoAway};
             AnyControlMessage::Draft19(ControlMessage::GoAway(GoAway {
+                new_session_uri: uri.to_vec(),
+                timeout,
+            }))
+        }
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20 => {
+            use moqtap_codec::draft20::message::{ControlMessage, GoAway};
+            AnyControlMessage::Draft20(ControlMessage::GoAway(GoAway {
                 new_session_uri: uri.to_vec(),
                 timeout,
             }))
@@ -621,7 +658,16 @@ async fn the_control_plane_is_the_uni_pair_and_a_bidi_is_a_request_stream_draft1
     topology_gate(DraftVersion::Draft19).await;
 }
 
-/// The body of the three rows above.
+/// [`the_control_plane_is_the_uni_pair_and_a_bidi_is_a_request_stream_draft17`],
+/// on draft 20. Section 3.3 there is draft-19's unchanged, and this is the
+/// row that says so end to end rather than by reading it.
+#[cfg(feature = "draft20")]
+#[tokio::test]
+async fn the_control_plane_is_the_uni_pair_and_a_bidi_is_a_request_stream_draft20() {
+    topology_gate(DraftVersion::Draft20).await;
+}
+
+/// The body of the four rows above.
 async fn topology_gate(draft: DraftVersion) {
     common::init_crypto();
     let alpn = draft.quic_alpn();
@@ -823,11 +869,19 @@ async fn an_injection_lands_on_the_uni_control_stream_and_not_on_a_request_strea
     injection_gate(DraftVersion::Draft19).await;
 }
 
+/// [`an_injection_lands_on_the_uni_control_stream_and_not_on_a_request_stream_draft17`],
+/// on draft 20.
+#[cfg(feature = "draft20")]
+#[tokio::test]
+async fn an_injection_lands_on_the_uni_control_stream_and_not_on_a_request_stream_draft20() {
+    injection_gate(DraftVersion::Draft20).await;
+}
+
 /// Where the injected message must appear in the relay's control sequence.
 /// Two messages precede it and one follows.
 const INJECTED_AT: usize = 2;
 
-/// The body of the three rows above.
+/// The body of the four rows above.
 async fn injection_gate(draft: DraftVersion) {
     common::init_crypto();
     let alpn = draft.quic_alpn();

@@ -8,7 +8,7 @@
 //! sender's only symptom is the close.
 //!
 //! The bound is not the same on every draft, which is why this is driven on all
-//! thirteen rather than on one. Drafts 07 through 16 define a Track Namespace
+//! fourteen rather than on one. Drafts 07 through 16 define a Track Namespace
 //! as between 1 and 32 fields. Draft-17 redefines it as between 0 and 32 and
 //! states only the upper half as a violation, so an empty namespace is legal
 //! there and refusing it would be the same defect pointing the other way.
@@ -23,6 +23,11 @@ use moqtap_codec::types::TrackNamespace;
 /// A namespace of `n` fields, each one byte, so that the field count is the
 /// only thing under test - drafts 16 and later also refuse a zero-length field,
 /// and an empty field here would fail those for the wrong reason.
+/// Every module below is behind a `#[cfg(feature = "draftNN")]`, so the
+/// zero-draft row - `--no-default-features --all-targets` - compiles this file
+/// with none of them and nothing calls this. That row proves the crate still
+/// builds with no draft at all; under any real feature set this has callers.
+#[allow(dead_code)]
 fn fields(n: usize) -> TrackNamespace {
     TrackNamespace(vec![b"x".to_vec(); n])
 }
@@ -812,6 +817,69 @@ mod draft18 {
 mod draft19 {
     use super::fields;
     use moqtap_codec::draft19::message::{ControlMessage, PublishNamespace};
+    #[allow(unused_imports)]
+    use moqtap_codec::varint::VarInt;
+
+    fn message(namespace: moqtap_codec::types::TrackNamespace) -> ControlMessage {
+        ControlMessage::PublishNamespace(PublishNamespace {
+            request_id: VarInt::from_u64(0).unwrap(),
+            track_namespace: namespace,
+            parameters: vec![],
+        })
+    }
+
+    fn encode(n: usize) -> Result<Vec<u8>, moqtap_codec::error::CodecError> {
+        let mut buf = Vec::new();
+        message(fields(n)).encode(&mut buf)?;
+        Ok(buf)
+    }
+
+    /// More fields than Section 2.4.1 permits, refused before the bytes exist.
+    ///
+    /// Dropping the check from this draft's encoder fails with:
+    ///
+    /// ```text
+    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
+    /// ```
+    ///
+    /// The `Ok` carries the frame the encoder just built, which is the whole
+    /// point: those bytes were about to go out. The list is elided here and
+    /// its leading bytes differ per draft; the message above was taken from
+    /// draft-09 with its check removed.
+    #[test]
+    fn a_namespace_of_33_fields_never_reaches_the_wire() {
+        let result = encode(33);
+        assert!(result.is_err(), "33 fields is more than this draft permits: {result:?}");
+    }
+
+    /// The boundary on the other side of the same rule. Without this the gate
+    /// above would pass on an encoder that refused every namespace.
+    #[test]
+    fn a_namespace_of_32_fields_round_trips() {
+        let buf = encode(32).expect("32 fields is the most this draft permits");
+        let decoded = ControlMessage::decode(&mut &buf[..]);
+        assert!(decoded.is_ok(), "what this codec wrote it must read: {decoded:?}");
+    }
+
+    /// A namespace of no fields, which this draft does define.
+    ///
+    /// Section 2.4.1 changed at draft-17 to "between 0 and 32 Track Namespace
+    /// Fields", and states only the upper bound as a violation. Refusing the
+    /// empty namespace here would reject traffic the draft permits, so the
+    /// gate is that it goes out and comes back.
+    #[test]
+    fn an_empty_namespace_is_carried() {
+        let result = encode(0);
+        let buf = result.expect("this draft defines the empty namespace");
+        let decoded = ControlMessage::decode(&mut &buf[..]);
+        assert!(decoded.is_ok(), "what this codec wrote it must read: {decoded:?}");
+    }
+}
+
+#[cfg(feature = "draft20")]
+mod draft20 {
+    use super::fields;
+    use moqtap_codec::draft20::message::{ControlMessage, PublishNamespace};
     #[allow(unused_imports)]
     use moqtap_codec::varint::VarInt;
 

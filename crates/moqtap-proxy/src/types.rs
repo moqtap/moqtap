@@ -149,10 +149,10 @@ pub enum BypassReason {
     /// of those five are now framed, and the two that are not report
     /// [`Self::FetchGroupOrderUnknown`], which says why.
     NoFetchObjectCodec,
-    /// A fetch stream on draft-18 or draft-19 naming a request this session
-    /// never saw asked for.
+    /// A fetch stream on draft-18, draft-19 or draft-20 naming a request this
+    /// session never saw asked for.
     ///
-    /// Those two drafts write an Object's Group ID as a difference from the
+    /// Those three drafts write an Object's Group ID as a difference from the
     /// previous Object's, and the fetch's Group Order decides which way the
     /// difference points — draft-19 Section 11.4.4.1: "If the Group Order is
     /// Ascending, the Group ID is the prior Object's Group ID plus the Group

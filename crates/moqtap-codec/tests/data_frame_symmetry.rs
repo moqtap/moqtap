@@ -16,7 +16,7 @@
 //! encoder can build and its own decoder rejects is a defect whichever axis
 //! it sits on, and neither sweep can see the other's.
 //!
-//! Not every combination names a frame. Drafts 15 and 17-19 declare eight of
+//! Not every combination names a frame. Drafts 15 and 17-20 declare eight of
 //! their datagram type bytes invalid, and those are swept as refusals rather than
 //! dropped: a shape left out of a sweep is a shape nobody tests, and the two
 //! halves are checked to add back up to the power set.
@@ -46,7 +46,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 use moqtap_codec::error::CodecError;
@@ -84,7 +85,7 @@ fn type_bytes(flag_bits: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The flag bits drafts 15-19 give a datagram type byte: 0x01 properties,
+/// The flag bits drafts 15-20 give a datagram type byte: 0x01 properties,
 /// 0x02 end of group, 0x04 zero object ID, 0x08 default priority, 0x20
 /// status. One list, read by the round-trip row and the refusal row alike, so
 /// the two sweep the same axis and their halves add back up to it.
@@ -96,11 +97,12 @@ fn type_bytes(flag_bits: &[u8]) -> Vec<u8> {
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 const DATAGRAM_FLAG_BITS: &[u8] = &[0x01, 0x02, 0x04, 0x08, 0x20];
 
-/// Whether drafts 15-19 define the datagram type byte `ty`.
+/// Whether drafts 15-20 define the datagram type byte `ty`.
 ///
 /// The same eight bytes are excluded on every draft here, but not for the same
 /// stated reason, and the rows below assert different refusals because of it.
@@ -130,25 +132,27 @@ const DATAGRAM_FLAG_BITS: &[u8] = &[0x01, 0x02, 0x04, 0x08, 0x20];
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 fn datagram_type_is_valid(ty: u8) -> bool {
     ty & 0x22 != 0x22
 }
 
-/// The half of `type_bytes(flag_bits)` drafts 15-19 define, in sweep order.
+/// The half of `type_bytes(flag_bits)` drafts 15-20 define, in sweep order.
 #[cfg(any(
     feature = "draft15",
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 fn valid_type_bytes(flag_bits: &[u8]) -> Vec<u8> {
     type_bytes(flag_bits).into_iter().filter(|&ty| datagram_type_is_valid(ty)).collect()
 }
 
-/// The half of `type_bytes(flag_bits)` drafts 15-19 declare invalid, in sweep
+/// The half of `type_bytes(flag_bits)` drafts 15-20 declare invalid, in sweep
 /// order. Together with [`valid_type_bytes`] this is the whole power set, so
 /// nothing the sweep could name goes unasked.
 #[cfg(any(
@@ -156,9 +160,16 @@ fn valid_type_bytes(flag_bits: &[u8]) -> Vec<u8> {
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
-#[cfg(any(feature = "draft15", feature = "draft17", feature = "draft18", feature = "draft19"))]
+#[cfg(any(
+    feature = "draft15",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20"
+))]
 fn invalid_type_bytes(flag_bits: &[u8]) -> Vec<u8> {
     type_bytes(flag_bits).into_iter().filter(|&ty| !datagram_type_is_valid(ty)).collect()
 }
@@ -167,7 +178,7 @@ fn invalid_type_bytes(flag_bits: &[u8]) -> Vec<u8> {
 ///
 /// The shapes differ in what the header struct holds, not in what is being
 /// asserted: drafts 15 and 16 carry an optional publisher priority behind the
-/// `0x08` bit, and drafts 17-19 renamed the extension headers to properties.
+/// `0x08` bit, and drafts 17-20 renamed the extension headers to properties.
 ///
 /// # What these rows catch
 ///
@@ -385,12 +396,13 @@ datagram_row!(ext_headers draft16_datagram_shapes, "draft16", draft16);
 datagram_row!(properties draft17_datagram_shapes, "draft17", draft17);
 datagram_row!(properties draft18_datagram_shapes, "draft18", draft18);
 datagram_row!(properties draft19_datagram_shapes, "draft19", draft19);
+datagram_row!(properties draft20_datagram_shapes, "draft20", draft20);
 
 /// Generates one draft's refusal row: the other half of the power set the
 /// round-trip row above sweeps.
 ///
 /// A shape excluded from a sweep is a shape nobody tests, so the eight type
-/// bytes drafts 17-19 declare invalid are swept here instead, and both ends
+/// bytes drafts 17-20 declare invalid are swept here instead, and both ends
 /// of the codec are asked about each:
 ///
 /// - `encode_checked` must refuse it and leave the buffer untouched. A
@@ -517,6 +529,18 @@ invalid_datagram_row!(
     CodecError::InvalidTypeValue { .. },
     "a type the draft lists as invalid"
 );
+// Draft-20 accepts and refuses the same values, and names all three of its
+// refusals — Section 11.3.1's bit-4, STATUS-with-END_OF_GROUP and
+// unspecified-bit conditions cover every invalid byte between them, so nothing
+// in the byte space is merely an unknown datagram type any more.
+invalid_datagram_row!(
+    draft20_invalid_datagram_types,
+    "draft20",
+    draft20,
+    properties,
+    CodecError::InvalidTypeValue { .. },
+    "a type the draft lists as invalid"
+);
 
 /// Generates one draft's `payload_length` row.
 ///
@@ -630,3 +654,4 @@ payload_length_row!(draft16_payload_length, "draft16", draft16);
 payload_length_row!(draft17_payload_length, "draft17", draft17);
 payload_length_row!(draft18_payload_length, "draft18", draft18);
 payload_length_row!(draft19_payload_length, "draft19", draft19);
+payload_length_row!(draft20_payload_length, "draft20", draft20);

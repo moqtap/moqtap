@@ -5,6 +5,96 @@ All notable changes to moqtap-proxy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-02
+
+Draft-20 support. Additive at this crate's own API — nothing public was removed
+and no signature moved — but `moqtap_codec::version::DraftVersion` gained a
+variant and is not `#[non_exhaustive]`, so a downstream `match` enumerating its
+variants stops compiling.
+
+Draft-20 is not a default anywhere. `capability::DEFAULT_DRAFT` is still
+draft-14 on any build that compiled it, exactly as before.
+
+### Added
+
+- **`draft20`**, a feature forwarding to both `moqtap-client/draft20` and
+  `moqtap-codec/draft20`. Included in `all-drafts`.
+- Draft-20 is advertised in the listener's ALPN list (`moqt-20`), admitted by
+  `session`'s draft check, framed by `ObjectFramer`, and answered by every
+  column of the capability table. Its data plane is draft-19's: Section 11.4.2
+  renamed the header's leading field from `Type` to `Type Flags` and changed
+  none of its bits, so the subgroup stream types, the SUBGROUP_ID_MODE values,
+  the Object ID delta encoding and the fetch Serialization Flags are all the
+  ones drafts 18 and 19 use.
+
+### Fixed
+
+- **A draft-20 client could not complete a TLS handshake against the proxy.**
+  `listener::advertised_alpns` builds its list from a hardcoded array of
+  drafts rather than from `DraftVersion` itself — the doc comment beside it
+  claimed the opposite — so `moqt-20` was never offered and the handshake
+  failed with "peer doesn't support any known protocol" before any MoQT frame
+  was written. The same shape will recur on draft-21; the array is the thing to
+  add to.
+- **`--features draft19,draft20 --all-targets` did not compile.**
+  `tests/actions_datagrams.rs` rejects every non-draft-19 `AnyDatagramHeader`
+  with a wildcard arm under a `cfg(any(feature = "draftNN", ...))` that has to
+  name every other draft, and the list ran to draft-18. Only a build enabling
+  both draft-19 and draft-20 could see it. `scripts/check-draft-cfg.py` reads
+  every such list in the workspace and refuses one that is short; CI gained a
+  `draft19,draft20` row.
+
+### Changed
+
+- `capability::fetch_group_order_is_needed`, `has_implicit_subgroup_id_mode`
+  and `subgroup_id_mode_must_be_consulted` include draft-20, as do the framer's
+  `delta_encodes_object_ids`, `elide_owes_a_fixup` and `measuring_pad`, and
+  `session`'s `control_plane_is_unidirectional` and
+  `bidi_streams_carry_requests`. Every one of these was a list ending at
+  draft-19, and every one of them answers the same for draft-20.
+- `session`'s datagram status probe gained its draft-20 arm. The match ends in
+  a `_ => false`, so a draft-20 status datagram was reported as an ordinary
+  payload datagram rather than refused.
+- **The thirteen `matches!(draft, ...)` per-draft predicates are exhaustive
+  `match`es.** `capability::fetch_group_order_is_needed`,
+  `has_implicit_subgroup_id_mode` and `subgroup_id_mode_must_be_consulted`;
+  `exec::stream_reset_code_defined` and both arms of
+  `elide_renumbers_successor`; the framer's `delta_encodes_object_ids`,
+  `elide_owes_a_fixup` and both arms of `measuring_pad`; and `session`'s
+  `stream_reset_code_defined`, `control_plane_is_unidirectional` and
+  `bidi_streams_carry_requests`. Every answer is unchanged. What changes is
+  what happens to draft-21: a `matches!` desugars to `_ => false`, so it
+  answered for a draft nobody had read, and the answers it gave were things
+  like "this fetch stream needs no Group Order", "eliding this object costs
+  the next one nothing" and "this draft's control plane is bidirectional" —
+  each of which forwards a stream wrongly rather than refusing it. They are
+  now compile errors until someone reads the draft. Two of the thirteen were
+  `!matches!(..)` and leaned the other way, granting a stream-reset error-code
+  vocabulary to a draft that may not define one; those are written out too.
+  `has_implicit_subgroup_id_mode` keeps its independent-restatement discipline
+  beside the new exhaustiveness: restatement catches a *wrong* answer about a
+  draft that is named, exhaustiveness catches a *missing* one.
+- `framer::measuring_pad`'s fetch arm states the drafts that copy as well as
+  the one that does not. Only draft-14 measures a fetch object without a copy;
+  drafts 15 through 20 read the frame through
+  `FetchObjectReader::read_object_header`, which materialises its properties,
+  so they keep the bounded pad. That was already the behaviour — the arm read
+  `matches!(self.draft, DraftVersion::Draft14)` — but it was true by omission,
+  and the doc comment above it still said "drafts 14-19" of the subgroup arm
+  that had gained draft-20.
+
+### Fixed (test-only)
+
+- **`shape::matcher`'s draft sweep was skipping draft-20.** Its
+  `const DRAFTS` was `[DraftVersion; 13]` ending at `Draft19` under a doc
+  comment reading "All fourteen, so a claim about 'every draft' is one rather
+  than a sample". The three unit tests that iterate it —
+  `naming_a_stream_kind_never_makes_a_rule_unmatchable` among them — therefore
+  made a thirteen-draft claim while asserting a fourteen-draft one. A short
+  array is not a failing test, it is a smaller one, which is why nothing said
+  so. `capability.rs` and `exec.rs` hold `[DraftVersion; 14]` and were
+  correct.
+
 ## [0.4.1] - 2026-09-02
 
 Documentation only. No behaviour change, no API change, and no value this

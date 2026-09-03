@@ -16,7 +16,9 @@ fn run_message_vectors(relative_path: &str) {
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let msg = ControlMessage::decode(&mut &bytes[..])
                 .unwrap_or_else(|e| panic!("[{}] decode failed: {e}", vector.id));
-            let actual_json = test_vectors::draft15_json::message_to_json(&msg);
+            let actual_json = test_vectors::fields_json::to_json(
+                &moqtap_codec::draft15::fields::message_fields(&msg),
+            );
             assert_eq!(
                 actual_json,
                 *expected_decoded,

@@ -88,3 +88,92 @@ fn a_large_but_allocatable_count_still_fails_on_the_missing_items() {
     let decoded = KeyValuePair::decode_list(&mut cursor);
     assert!(decoded.is_err(), "no pairs follow the count, got {decoded:?}");
 }
+
+/// Naming a field must not depend on the value being the shape the name implies.
+///
+/// The decoders refuse a parameter whose value is not one varint, but only for
+/// the types the draft in question defines as an integer. Field extraction runs
+/// on any `ControlMessage`, including one assembled in a program rather than
+/// read off a wire, and it reads the same parameter as an integer from a table
+/// of its own. Where the two disagree it used to reach `VarInt::decode(..)
+/// .unwrap()`, and an empty value is enough.
+///
+/// This builds the message rather than decoding one: draft-07 does define
+/// MAX_SUBSCRIBE_ID as an integer, so its own encoder and decoder both refuse
+/// this value, and it is exactly the case the extractor cannot assume it has
+/// been spared.
+///
+/// *Ablation:* restore the `unwrap` and this does not fail — it panics inside
+/// the function under test, which is the report.
+#[cfg(feature = "draft07")]
+#[test]
+fn a_named_integer_parameter_with_no_varint_in_it_does_not_panic() {
+    use moqtap_codec::draft07::message::{ClientSetup, ControlMessage};
+    use moqtap_codec::fields::FieldValue;
+    use moqtap_codec::kvp::KvpValue;
+    use moqtap_codec::varint::VarInt;
+
+    let msg = ControlMessage::ClientSetup(ClientSetup {
+        supported_versions: vec![VarInt::from_u64(0xff07).unwrap()],
+        // 0x02 is MAX_SUBSCRIBE_ID, and its value is nothing at all.
+        parameters: vec![KeyValuePair {
+            key: VarInt::from_u64(0x02).unwrap(),
+            value: KvpValue::Bytes(Vec::new()),
+        }],
+    });
+
+    let fields = moqtap_codec::draft07::fields::message_fields(&msg);
+    let Some(FieldValue::Map(parameters)) = fields.get("parameters") else {
+        panic!("no parameter map in {fields:?}");
+    };
+    assert_eq!(
+        parameters.get("max_subscribe_id"),
+        Some(&FieldValue::Bytes(Vec::new())),
+        "the value a message carried, not a judgement on it: {parameters:?}"
+    );
+}
+
+/// A parameter type a draft dropped is not named by the draft that had it.
+///
+/// ROLE is parameter type 0x00 in draft-07 and occurs nowhere in the text of
+/// 08, 09 or 10, which give 0x00 to nothing else. Those drafts' decoders say so
+/// — each excludes 0x00 from the setup types whose value it checks is an
+/// integer — and field extraction has to agree, or it reads an unchecked value
+/// as an integer under a name the sender cannot have meant.
+///
+/// The message is built with this crate's encoder and read back with its
+/// decoder, because that is what says the bytes are reachable: a peer can send
+/// this before a session exists, and until the tables agreed it took the
+/// process down.
+///
+/// *Ablation:* point draft-08 back at draft-07's setup table and this panics
+/// rather than fails, on the `unwrap` above or on the name below.
+#[cfg(feature = "draft08")]
+#[test]
+fn a_setup_parameter_type_draft_08_dropped_is_not_named_role() {
+    use moqtap_codec::draft08::message::{ClientSetup, ControlMessage};
+    use moqtap_codec::fields::FieldValue;
+    use moqtap_codec::kvp::KvpValue;
+    use moqtap_codec::varint::VarInt;
+
+    let msg = ControlMessage::ClientSetup(ClientSetup {
+        supported_versions: vec![VarInt::from_u64(0xff08).unwrap()],
+        parameters: vec![KeyValuePair {
+            key: VarInt::from_u64(0x00).unwrap(),
+            value: KvpValue::Bytes(Vec::new()),
+        }],
+    });
+    let mut wire = Vec::new();
+    msg.encode(&mut wire).expect("this draft does not check type 0x00");
+    let decoded = ControlMessage::decode(&mut &wire[..]).expect("nor on the way back");
+
+    let fields = moqtap_codec::draft08::fields::message_fields(&decoded);
+    let Some(FieldValue::Map(parameters)) = fields.get("parameters") else {
+        panic!("no parameter map in {fields:?}");
+    };
+    assert_eq!(parameters.get("role"), None, "draft-08 has no ROLE: {parameters:?}");
+    let Some(FieldValue::Array(unknown)) = parameters.get("unknown") else {
+        panic!("0x00 is not a draft-08 setup parameter and belongs in `unknown`: {parameters:?}");
+    };
+    assert_eq!(unknown.len(), 1, "one parameter was sent: {unknown:?}");
+}

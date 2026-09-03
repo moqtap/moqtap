@@ -48,10 +48,11 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 mod framing {
-    //! One pair, carrying the draft at run time, frames all thirteen.
+    //! One pair, carrying the draft at run time, frames all fourteen.
 
     use moqtap_client::transport::{RecvStream, SendStream};
     use moqtap_codec::version::DraftVersion;
@@ -88,6 +89,18 @@ mod framing {
         ))
     ))]
     pub use moqtap_client::draft19::connection::{FramedRecvStream, FramedSendStream};
+    #[cfg(all(
+        feature = "draft20",
+        not(any(
+            feature = "draft14",
+            feature = "draft15",
+            feature = "draft16",
+            feature = "draft17",
+            feature = "draft18",
+            feature = "draft19"
+        ))
+    ))]
+    pub use moqtap_client::draft20::connection::{FramedRecvStream, FramedSendStream};
 
     pub fn send(inner: SendStream, draft: DraftVersion) -> FramedSendStream {
         FramedSendStream::new(inner, draft)
@@ -104,7 +117,8 @@ mod framing {
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 )))]
 mod framing {
     //! A pair wired to one draft, for a build that enables no later one.
@@ -246,7 +260,7 @@ pub fn namespace_text(ns: &TrackNamespace) -> String {
 // as well. Where the lengths differ, exactly two move, the value's own and the
 // message's declared Length, and both are recomputed here.
 //
-// Every draft from 11 to 19 frames a control message the same way: a type as a
+// Every draft from 11 to 20 frames a control message the same way: a type as a
 // varint, a 16-bit big-endian Length, then the body.
 
 /// The bytes this codec writes for `value` as a varint.

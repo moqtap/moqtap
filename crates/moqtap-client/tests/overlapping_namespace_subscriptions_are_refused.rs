@@ -37,9 +37,9 @@
 //!
 //! Not the relation - the adjective in front of the subscription being
 //! compared against. Drafts 07 through 11 say "an earlier", which counts one
-//! that has already been withdrawn; drafts 12 through 19 say "active" and then
+//! that has already been withdrawn; drafts 12 through 20 say "active" and then
 //! "established", which do not. So the same second request is refused on five
-//! drafts and accepted on eight, and only a gate that withdraws the first one
+//! drafts and accepted on nine, and only a gate that withdraws the first one
 //! before making the second can see the difference. There is one on every
 //! draft, and it asserts the opposite thing on either side of the split.
 //!
@@ -66,13 +66,13 @@
 //! The rule is about what one endpoint has been asked, so the prefixes this
 //! endpoint has subscribed to are not weighed against the peer's and the
 //! peer's are not weighed against this endpoint's. Two gates per draft say so,
-//! one in each direction. On drafts 11 through 19 the state machines for both
+//! one in each direction. On drafts 11 through 20 the state machines for both
 //! directions live in one map per request kind, so the record of what actually
 //! arrived is what keeps them apart.
 //!
 //! # What was here before
 //!
-//! Nothing on any of the thirteen. Every draft states the rule and every one
+//! Nothing on any of the fourteen. Every draft states the rule and every one
 //! makes it a MUST; no endpoint compared a prefix with anything.
 //!
 //! # The third statement, on drafts 18 and 19
@@ -130,7 +130,7 @@ fn elsewhere() -> TrackNamespace {
     TrackNamespace(vec![b"elsewhere".to_vec()])
 }
 
-// -- The shapes one rule takes across thirteen drafts ------------------
+// -- The shapes one rule takes across fourteen drafts ------------------
 
 /// The request the peer sends. Drafts 07 through 10 name only the prefix,
 /// draft-11 adds a Request ID, draft-13 renames the message, drafts 14 and 15
@@ -340,7 +340,7 @@ macro_rules! we_subscribe {
 }
 
 /// The setup parameters each draft requires. Draft-07 requires a ROLE of both
-/// endpoints and is the only one of the thirteen that does.
+/// endpoints and is the only one of the fourteen that does.
 #[macro_export]
 macro_rules! setup_params {
     (role) => {
@@ -470,7 +470,7 @@ macro_rules! prefix_keyed_gates {
             /// an overlapping namespace subscription may not be accepted: ()
             /// ```
             ///
-            /// It reddens thirteen tests, this gate on every draft and
+            /// It reddens fourteen tests, this gate on every draft and
             /// nothing else: every other gate in this file compares prefixes
             /// of different lengths, so a relation that is merely too strict
             /// about equality leaves them alone. An equal prefix is the case
@@ -569,7 +569,7 @@ macro_rules! prefix_keyed_gates {
             /// and this endpoint may accept it: PeerPrefixOverlap { request: 3, established: 1 }
             /// ```
             ///
-            /// It reddens thirteen tests, this gate on every draft. It is the
+            /// It reddens fourteen tests, this gate on every draft. It is the
             /// sharpest of the relation cuts, because the pair it refuses
             /// share everything a loose reading looks at and select disjoint
             /// sets of namespaces.
@@ -595,7 +595,7 @@ macro_rules! prefix_keyed_gates {
             /// an overlapping namespace subscription may not be accepted: ()
             /// ```
             ///
-            /// It reddens thirteen tests, this gate on every draft. That
+            /// It reddens fourteen tests, this gate on every draft. That
             /// reading is not available: this endpoint is the one about to
             /// establish the first request, and accepting both would leave
             /// the session holding exactly the pair the sentence exists to
@@ -736,7 +736,7 @@ prefix_keyed_gates!(draft08, "draft08", 0xff00_0008, send_max_subscribe_id, none
 prefix_keyed_gates!(draft09, "draft09", 0xff00_0009, send_max_subscribe_id, none, "7.13");
 prefix_keyed_gates!(draft10, "draft10", 0xff00_000a, send_max_subscribe_id, none, "8.23");
 
-// -- Drafts 11 through 19 ----------------------------------------------
+// -- Drafts 11 through 20 ----------------------------------------------
 
 /// Whether a namespace subscription that has ended still counts, which is the
 /// one word that moves across the range.
@@ -771,7 +771,7 @@ macro_rules! ended_gate {
         /// and this endpoint may accept it: PeerPrefixOverlap { request: 3, established: 1 }
         /// ```
         ///
-        /// It reddens eight tests, this gate on drafts 12 through 19, and
+        /// It reddens nine tests, this gate on drafts 12 through 20, and
         /// nothing else: no other gate in this file ends a subscription
         /// before making the second request, which is what makes this pair
         /// the only one that can see the word the range turns on.
@@ -1011,7 +1011,7 @@ macro_rules! id_keyed_gates {
             /// an overlapping namespace subscription may not be accepted: ()
             /// ```
             ///
-            /// It reddens thirteen tests, this gate on every draft and
+            /// It reddens fourteen tests, this gate on every draft and
             /// nothing else: every other gate in this file compares prefixes
             /// of different lengths, so a relation that is merely too strict
             /// about equality leaves them alone. An equal prefix is the case
@@ -1103,7 +1103,7 @@ macro_rules! id_keyed_gates {
             /// and this endpoint may accept it: PeerPrefixOverlap { request: 3, established: 1 }
             /// ```
             ///
-            /// It reddens thirteen tests, this gate on every draft. It is the
+            /// It reddens fourteen tests, this gate on every draft. It is the
             /// sharpest of the relation cuts, because the pair it refuses
             /// share everything a loose reading looks at and select disjoint
             /// sets of namespaces.
@@ -1133,7 +1133,7 @@ macro_rules! id_keyed_gates {
             /// an overlapping namespace subscription may not be accepted: ()
             /// ```
             ///
-            /// It reddens thirteen tests, this gate on every draft. That
+            /// It reddens fourteen tests, this gate on every draft. That
             /// reading is not available: this endpoint is the one about to
             /// establish the first request, and accepting both would leave
             /// the session holding exactly the pair the sentence exists to
@@ -1450,4 +1450,28 @@ id_keyed_gates!(
     dropped,
     present,
     "10.18"
+);
+id_keyed_gates!(
+    draft20,
+    "draft20",
+    0xff00_0014,
+    moqtap_client::draft20::session::request_id::Role,
+    Server,
+    in_setup,
+    none,
+    one_message,
+    d18,
+    stream,
+    stream18,
+    stream18,
+    cancel,
+    params,
+    0,
+    2,
+    1,
+    0x30,
+    ignored,
+    dropped,
+    present,
+    "10.19"
 );

@@ -51,7 +51,13 @@
 //! it, and `a_priority_the_draft_calls_invalid_without_saying_more_is_carried`
 //! is what fails when one does.
 
-#![cfg(any(feature = "draft16", feature = "draft17", feature = "draft18", feature = "draft19"))]
+#![cfg(any(
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20"
+))]
 
 /// DEFAULT_PUBLISHER_GROUP_ORDER.
 const DEFAULT_PUBLISHER_GROUP_ORDER: u64 = 0x22;
@@ -401,5 +407,32 @@ track_property_range_gate!(
     },
     // Draft-16's DELIVERY_TIMEOUT range does not survive the rename to
     // OBJECT_DELIVERY_TIMEOUT, which states none.
+    also_refused = &[]
+);
+
+// Draft-20's Property registry is draft-19's unchanged — Section 15.8 Table 14
+// has the same nine rows — and SUBSCRIBE_OK frames its Track Properties the
+// same way, so the same gate answers for it. The provisional table beside it
+// did move (TIMESTAMP 0x06 to 0x10, VIDEO_FRAME_MARKING 0x0A to 0x09, and 0x0A
+// reassigned to ENCRYPTED_LIST), but those rows belong to other documents and
+// this codec carries them as opaque Key-Value-Pairs.
+#[cfg(feature = "draft20")]
+track_property_range_gate!(
+    draft20,
+    "draft20",
+    draft20,
+    track_properties,
+    put_varint = fn put_varint(v: u64, out: &mut Vec<u8>) {
+        VarInt::from_u64_moqt(v).encode_moqt::<Moqt18>(out);
+    },
+    prelude = |payload: &mut Vec<u8>| {
+        put_varint(7, payload);
+        put_varint(0, payload);
+    },
+    shell = SubscribeOk {
+        track_alias: VarInt::from_u64(7).unwrap(),
+        parameters: Vec::new(),
+        track_properties: Vec::new(),
+    },
     also_refused = &[]
 );

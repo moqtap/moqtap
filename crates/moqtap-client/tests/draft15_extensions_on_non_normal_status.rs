@@ -5,9 +5,9 @@
 //!
 //! # Why draft-15 and not only draft-19
 //!
-//! Five drafts state this rule and they state it in two vocabularies: 15 and 16
-//! say "extension headers", 17 through 19 say "properties". The client raised it
-//! on draft-19 alone, so the other four accepted the violation silently. This
+//! Six drafts state this rule and they state it in two vocabularies: 15 and 16
+//! say "extension headers", 17 through 20 say "properties". The client raised it
+//! on drafts 19 and 20, so the other four accepted the violation silently. This
 //! file is the draft-15 end of that, and it is the more awkward end: unlike
 //! drafts 17 and later, draft-15's connection has no table mapping a decode
 //! failure to a close code, so `close_for_data_stream` there answers this rule

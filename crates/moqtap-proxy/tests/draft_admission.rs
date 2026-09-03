@@ -1,6 +1,6 @@
 //! A session refuses to start on a draft this build did not compile.
 //!
-//! `DraftVersion` carries all thirteen variants under every feature set, so
+//! `DraftVersion` carries all fourteen variants under every feature set, so
 //! the draft in a `ProxySessionConfig` is a value the type system is happy
 //! with whatever the build compiled — and
 //! `ProxySessionConfig::default().draft` is one particular such value. On a
@@ -31,9 +31,9 @@
 //!
 //! Both halves are live in every build, and which of them each draft lands in
 //! is decided by the feature set rather than by a `#[cfg]` written here: an
-//! all-drafts build runs thirteen admissions and no refusals, and a
+//! all-drafts build runs fourteen admissions and no refusals, and a
 //! `--no-default-features --features draftNN` build runs one admission and
-//! twelve refusals. Nothing is skipped either way, so the row cannot quietly
+//! thirteen refusals. Nothing is skipped either way, so the row cannot quietly
 //! stop checking anything.
 
 mod common;
@@ -127,7 +127,7 @@ async fn session_outcome(draft: DraftVersion) -> ProxyError {
 /// Written out rather than derived from the feature set, because the drafts
 /// this build *left out* are exactly what the row below is about and a list
 /// assembled from `#[cfg]`s would not contain them.
-const EVERY_DRAFT: [DraftVersion; 13] = [
+const EVERY_DRAFT: [DraftVersion; 14] = [
     DraftVersion::Draft07,
     DraftVersion::Draft08,
     DraftVersion::Draft09,
@@ -141,6 +141,7 @@ const EVERY_DRAFT: [DraftVersion; 13] = [
     DraftVersion::Draft17,
     DraftVersion::Draft18,
     DraftVersion::Draft19,
+    DraftVersion::Draft20,
 ];
 
 /// A session configured for a draft this build cannot frame refuses to
@@ -158,8 +159,8 @@ const EVERY_DRAFT: [DraftVersion; 13] = [
 ///
 /// Delete the `draft_is_compiled` guard from `run_with_transport` in
 /// `src/session.rs`. Under `cargo test -p moqtap-proxy
-/// --no-default-features --features draft07 --test draft_admission`, twelve
-/// of the thirteen drafts stop being refused and the row reddens with
+/// --no-default-features --features draft07 --test draft_admission`, thirteen
+/// of the fourteen drafts stop being refused and the row reddens with
 ///
 /// ```text
 /// thread 'a_session_is_admitted_exactly_when_this_build_carries_its_draft'
@@ -175,7 +176,7 @@ const EVERY_DRAFT: [DraftVersion; 13] = [
 ///
 /// Widen the guard to refuse every draft — `if true` in place of the
 /// `!draft_is_compiled(draft)` test. Under `cargo test -p moqtap-proxy
-/// --all-features --test draft_admission` every one of the thirteen is
+/// --all-features --test draft_admission` every one of the fourteen is
 /// compiled, so the other half reddens instead:
 ///
 /// ```text

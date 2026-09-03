@@ -981,6 +981,54 @@ mod draft18 {
     }
 }
 
+#[cfg(feature = "draft20")]
+mod draft20 {
+    use moqtap_client::draft20::session::request_id::Role;
+    use moqtap_client::draft20::session::setup::{
+        validate_client_path_transport, validate_setup, SetupError,
+    };
+    use moqtap_codec::draft20::message::Setup;
+
+    use super::path;
+
+    /// Draft-20 Section 10.3.1.2 is draft-19's sentence unchanged, and so is
+    /// the one message both directions use: nothing in a SETUP says which end
+    /// sent it, so the sender is an argument. A server may not send PATH, a
+    /// client may.
+    #[test]
+    fn a_setup_from_a_server_may_not_carry_path() {
+        let setup = Setup { options: vec![path()] };
+        assert!(
+            matches!(
+                validate_setup(&setup, Role::Server),
+                Err(SetupError::WrongOptionRole(0x01, _))
+            ),
+            "a SETUP from a server carrying PATH must be refused",
+        );
+        assert!(
+            validate_setup(&setup, Role::Client).is_ok(),
+            "the same option from a client is what PATH is for",
+        );
+    }
+
+    /// The transport half of the same sentence.
+    #[test]
+    fn path_is_refused_over_webtransport_and_allowed_over_quic() {
+        let options = vec![path()];
+        assert!(
+            matches!(
+                validate_client_path_transport(&options, true),
+                Err(SetupError::PathOverWebTransport),
+            ),
+            "PATH over WebTransport must be refused",
+        );
+        assert!(
+            validate_client_path_transport(&options, false).is_ok(),
+            "PATH over native QUIC is what the option is for",
+        );
+    }
+}
+
 #[cfg(feature = "draft19")]
 mod draft19 {
     use moqtap_client::draft19::session::request_id::Role;

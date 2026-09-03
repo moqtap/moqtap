@@ -13,7 +13,14 @@
 //! the body-only `encode` must **not** satisfy `decode_stream`, or the round
 //! trip proves nothing.
 
+// Both are re-exported into every per-draft module the macro below generates,
+// and every one of those is behind a `#[cfg(feature = "draftNN")]`. The
+// zero-draft row - `--no-default-features --all-targets` - expands the macro
+// nowhere, so nothing imports these. That row is there to prove the crate still
+// builds with no draft at all, which is the whole reach of this `allow`.
+#[allow(unused_imports)]
 use moqtap_codec::dispatch::AnyFetchHeader;
+#[allow(unused_imports)]
 use moqtap_codec::version::DraftVersion;
 
 macro_rules! fetch_stream_suite {
@@ -99,3 +106,4 @@ fetch_stream_suite!("draft16", draft16, Draft16, DraftVersion::Draft16, request_
 fetch_stream_suite!("draft17", draft17, Draft17, DraftVersion::Draft17, request_id, false);
 fetch_stream_suite!("draft18", draft18, Draft18, DraftVersion::Draft18, request_id, false);
 fetch_stream_suite!("draft19", draft19, Draft19, DraftVersion::Draft19, request_id, false);
+fetch_stream_suite!("draft20", draft20, Draft20, DraftVersion::Draft20, request_id, false);

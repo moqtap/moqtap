@@ -440,28 +440,21 @@ impl FramedRecvStream {
                 Ok(header) => {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
+                    // Clippy would rather see these two arms as an `if let`, and rustc rejects
+                    // that in a single-draft build, where the pattern is irrefutable. Only a
+                    // `match` satisfies both.
+                    #[allow(clippy::single_match)]
                     match header {
                         AnySubgroupHeader::Draft11(ref d) => {
                             self.subgroup_has_extensions = d.stream_type.has_extensions();
                         }
-                        // Only this draft's header sets the flag. With draft 11
-                        // as the only enabled draft `AnySubgroupHeader` has a
-                        // single variant, the arm above is exhaustive and this
-                        // one unreachable.
-                        #[cfg(any(
-                            feature = "draft07",
-                            feature = "draft08",
-                            feature = "draft09",
-                            feature = "draft10",
-                            feature = "draft12",
-                            feature = "draft13",
-                            feature = "draft14",
-                            feature = "draft15",
-                            feature = "draft16",
-                            feature = "draft17",
-                            feature = "draft18",
-                            feature = "draft19",
-                        ))]
+                        // Only this draft's header sets the flag. With draft 11 the only enabled
+                        // draft `AnySubgroupHeader` has a single variant, the arm above is
+                        // exhaustive and this one unreachable. Compiled in every configuration with
+                        // the lint allowed, rather than gated on a `cfg` naming the other thirteen
+                        // drafts: that list had to be edited in every draft module whenever a draft
+                        // was added, and a copy that omitted one left this match non-exhaustive.
+                        #[allow(unreachable_patterns)]
                         _ => {}
                     }
                     return Ok(header);
@@ -788,24 +781,13 @@ impl Connection {
         }
         match any {
             AnyControlMessage::Draft11(msg) => Ok(msg),
-            // `AnyControlMessage` carries one variant per enabled draft feature.
-            // When draft 11 is the only one enabled the arm above is exhaustive
-            // and this rejection arm is unreachable, so it is compiled only for
-            // builds in which another draft's variant can actually turn up.
-            #[cfg(any(
-                feature = "draft07",
-                feature = "draft08",
-                feature = "draft09",
-                feature = "draft10",
-                feature = "draft12",
-                feature = "draft13",
-                feature = "draft14",
-                feature = "draft15",
-                feature = "draft16",
-                feature = "draft17",
-                feature = "draft18",
-                feature = "draft19"
-            ))]
+            // `AnyControlMessage` carries one variant per enabled draft feature. With draft 11 the
+            // only one enabled the arm above is exhaustive and this rejection arm unreachable.
+            // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
+            // naming the other thirteen drafts: that list had to be edited in every draft module
+            // whenever a draft was added, and a copy that omitted one left this match
+            // non-exhaustive.
+            #[allow(unreachable_patterns)]
             _ => Err(ConnectionError::Codec(CodecError::UnknownMessageType(0))),
         }
     }

@@ -7,7 +7,7 @@
 //! frame ends and cannot read what is inside it. Nothing about that is
 //! exotic or per-draft: a Message Type the configured draft does not assign,
 //! a body that does not match its own length field, and anything an
-//! extension adds all arrive this way on all thirteen drafts.
+//! extension adds all arrive this way on all fourteen drafts.
 //!
 //! # Two things were owed and neither was paid
 //!
@@ -40,7 +40,7 @@
 //! # What the fixture is
 //!
 //! A frame declaring Message Type `0x3A` with an honest length of zero.
-//! `0x3A` is unassigned on every draft from 07 to 19, and it is below
+//! `0x3A` is unassigned on every draft from 07 to 20, and it is below
 //! `0x40`, so it is a single byte under RFC 9000's varint encoding and under
 //! MoQT's alike — one fixture, no per-draft encoder, and nothing malformed
 //! about it. The decoder has nowhere to send it and says so; the parser can
@@ -79,7 +79,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 mod common;
@@ -131,6 +132,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The draft both fixtures are built for: the newest compiled.
@@ -138,7 +141,7 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
 /// Derived rather than named, so a single-draft CI row runs this file
 /// against the draft it compiled instead of going green by absence. Nothing
 /// asserted here is draft-specific — the Message Type is unassigned on all
-/// thirteen and the refusal is one code path shared by every draft.
+/// fourteen and the refusal is one code path shared by every draft.
 const DRAFT: DraftVersion = COMPILED_DRAFTS[COMPILED_DRAFTS.len() - 1];
 
 /// The ALPN the front-end advertises and the session is told the client

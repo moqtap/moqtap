@@ -51,13 +51,27 @@ pub enum DraftVersion {
     Draft18,
     /// draft-ietf-moq-transport-19.
     Draft19,
+    /// draft-ietf-moq-transport-20.
+    Draft20,
 }
 
 impl DraftVersion {
-    /// The MoQT version number announced in CLIENT_SETUP.
+    /// The MoQT version number this draft would announce in CLIENT_SETUP.
     ///
-    /// Format: `0xff000000 + draft_number`. Draft-15+ use ALPN for version
-    /// negotiation and may not include a version in CLIENT_SETUP at all.
+    /// Format: `0xff000000 + draft_number`.
+    ///
+    /// **From draft-15 on there is no such value on the wire at all.** Draft-15
+    /// deleted the version field from CLIENT_SETUP and moved version selection
+    /// into the ALPN (`moqt-<N>`, see [`Self::quic_alpn`]), so the number this
+    /// returns for drafts 15 through 20 — `0xff00000f` through `0xff000014` —
+    /// is a continuation of the mapping and not something a peer can observe or
+    /// send. Nothing in this crate encodes it for those drafts. It is kept so
+    /// that a caller with a draft in hand can name the version the series would
+    /// have used, and so the mapping does not acquire a hole.
+    ///
+    /// A tool that tries to detect the negotiated draft by looking for
+    /// `0xff0000NN` in a capture will find nothing from draft-15 on; the ALPN is
+    /// the only signal.
     pub fn version_varint(&self) -> VarInt {
         let n = match self {
             DraftVersion::Draft07 => 7,
@@ -73,6 +87,7 @@ impl DraftVersion {
             DraftVersion::Draft17 => 17,
             DraftVersion::Draft18 => 18,
             DraftVersion::Draft19 => 19,
+            DraftVersion::Draft20 => 20,
         };
         VarInt::from_usize(0xff000000 + n as usize)
     }
@@ -98,13 +113,14 @@ impl DraftVersion {
             DraftVersion::Draft17 => b"moqt-17",
             DraftVersion::Draft18 => b"moqt-18",
             DraftVersion::Draft19 => b"moqt-19",
+            DraftVersion::Draft20 => b"moqt-20",
         }
     }
 
     /// Resolve an ALPN identifier to a specific draft version.
     ///
     /// Returns `Some` for ALPNs that unambiguously identify a draft
-    /// (`moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`, `moqt-19`). Returns `None`
+    /// (`moqt-15` through `moqt-20`). Returns `None`
     /// for `moq-00` — which covers drafts 07–14 and requires inspecting
     /// CLIENT_SETUP's supported-versions list — and for any unrecognized
     /// ALPN.
@@ -115,11 +131,12 @@ impl DraftVersion {
             b"moqt-17" => Some(DraftVersion::Draft17),
             b"moqt-18" => Some(DraftVersion::Draft18),
             b"moqt-19" => Some(DraftVersion::Draft19),
+            b"moqt-20" => Some(DraftVersion::Draft20),
             _ => None,
         }
     }
 
-    /// Resolve a draft number (e.g. 7..=18) to a `DraftVersion`.
+    /// Resolve a draft number (e.g. 7..=20) to a `DraftVersion`.
     ///
     /// Returns `None` for numbers outside the supported range.
     pub fn from_number(n: u8) -> Option<DraftVersion> {
@@ -137,6 +154,7 @@ impl DraftVersion {
             17 => Some(DraftVersion::Draft17),
             18 => Some(DraftVersion::Draft18),
             19 => Some(DraftVersion::Draft19),
+            20 => Some(DraftVersion::Draft20),
             _ => None,
         }
     }
@@ -169,7 +187,13 @@ impl DraftVersion {
             | DraftVersion::Draft15
             | DraftVersion::Draft16 => VarIntEncoding::Rfc9000,
             DraftVersion::Draft17 => VarIntEncoding::Moqt17,
-            DraftVersion::Draft18 | DraftVersion::Draft19 => VarIntEncoding::Moqt18,
+            // Draft-20 Section 1.4.1 is draft-18's encoding verbatim: the same
+            // leading-ones-count prefix over all nine lengths. The revision
+            // changed the hyphen in "Variable-length" in the heading and
+            // nothing else about it.
+            DraftVersion::Draft18 | DraftVersion::Draft19 | DraftVersion::Draft20 => {
+                VarIntEncoding::Moqt18
+            }
         }
     }
 
@@ -218,7 +242,7 @@ impl DraftVersion {
         }
     }
 
-    /// The draft number (e.g. 7, 14, 17).
+    /// The draft number (e.g. 7, 14, 20).
     pub fn number(&self) -> u8 {
         match self {
             DraftVersion::Draft07 => 7,
@@ -234,6 +258,7 @@ impl DraftVersion {
             DraftVersion::Draft17 => 17,
             DraftVersion::Draft18 => 18,
             DraftVersion::Draft19 => 19,
+            DraftVersion::Draft20 => 20,
         }
     }
 }
@@ -267,6 +292,7 @@ mod tests {
             (DraftVersion::Draft17, Moqt17),
             (DraftVersion::Draft18, Moqt18),
             (DraftVersion::Draft19, Moqt18),
+            (DraftVersion::Draft20, Moqt18),
         ];
         for (draft, encoding) in expected {
             assert_eq!(draft.varint_encoding(), encoding, "{draft}");
@@ -284,14 +310,14 @@ mod tests {
         assert_eq!(DraftVersion::Draft14.varint_len(buf[0]), 2);
 
         let mut buf = Vec::new();
-        DraftVersion::Draft19.encode_varint(VarInt::from_usize(5000), &mut buf);
+        DraftVersion::Draft20.encode_varint(VarInt::from_usize(5000), &mut buf);
         assert_eq!(buf, vec![0x93, 0x88]);
-        assert_eq!(DraftVersion::Draft19.varint_len(buf[0]), 2);
+        assert_eq!(DraftVersion::Draft20.varint_len(buf[0]), 2);
 
         // 0x40 is a two-byte prefix under RFC 9000 and the one-byte value 64
         // from draft-17 on.
         assert_eq!(DraftVersion::Draft14.varint_len(0x40), 2);
-        assert_eq!(DraftVersion::Draft19.varint_len(0x40), 1);
+        assert_eq!(DraftVersion::Draft20.varint_len(0x40), 1);
     }
 
     #[test]
@@ -301,6 +327,7 @@ mod tests {
         assert_eq!(DraftVersion::from_alpn(b"moqt-17"), Some(DraftVersion::Draft17));
         assert_eq!(DraftVersion::from_alpn(b"moqt-18"), Some(DraftVersion::Draft18));
         assert_eq!(DraftVersion::from_alpn(b"moqt-19"), Some(DraftVersion::Draft19));
+        assert_eq!(DraftVersion::from_alpn(b"moqt-20"), Some(DraftVersion::Draft20));
     }
 
     #[test]
@@ -319,6 +346,7 @@ mod tests {
             DraftVersion::Draft17,
             DraftVersion::Draft18,
             DraftVersion::Draft19,
+            DraftVersion::Draft20,
         ] {
             assert_eq!(DraftVersion::from_alpn(d.quic_alpn()), Some(d));
         }
@@ -326,7 +354,7 @@ mod tests {
 
     #[test]
     fn from_number_resolves_supported_range() {
-        for n in 7..=19u8 {
+        for n in 7..=20u8 {
             assert!(DraftVersion::from_number(n).is_some(), "draft {n} should resolve");
         }
     }
@@ -335,7 +363,7 @@ mod tests {
     fn from_number_none_outside_range() {
         assert_eq!(DraftVersion::from_number(0), None);
         assert_eq!(DraftVersion::from_number(6), None);
-        assert_eq!(DraftVersion::from_number(20), None);
+        assert_eq!(DraftVersion::from_number(21), None);
         assert_eq!(DraftVersion::from_number(255), None);
     }
 }

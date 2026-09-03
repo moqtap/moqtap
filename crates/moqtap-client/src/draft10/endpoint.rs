@@ -1171,10 +1171,15 @@ impl Endpoint {
     /// Closing on the wire is the connection layer's job - see
     /// [`EndpointError::session_error_code`] for the code it should use.
     fn fail_session(&mut self, err: EndpointError) -> EndpointError {
-        // `on_close` accepts Active and Draining and nothing else. A
-        // violation seen in any other state leaves the state machine
-        // alone: there is no session to close, and the error itself is
-        // still the answer.
+        // `on_close` accepts SetupExchange, Active and Draining. A violation
+        // seen in Connecting or Closed leaves the state machine alone: there
+        // is no session to close, and the error itself is still the answer.
+        //
+        // SetupExchange is in that set because the Termination section says
+        // "The Transport Session can be terminated at any point", and the
+        // Setup exchange is a point. So a violation caught while the setup is
+        // still in flight does close the session rather than being recorded
+        // and forgotten, which is what this discarded result used to mean.
         let _ = self.session.on_close();
         err
     }

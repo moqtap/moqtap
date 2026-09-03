@@ -39,7 +39,7 @@
 //! waited for an answer the crate had no record to build.
 //!
 //! Draft-16 already carries all of this, because there the request arrives on a
-//! bidirectional stream of its own, and drafts 17 through 19 keep it that way.
+//! bidirectional stream of its own, and drafts 17 through 20 keep it that way.
 //!
 //! # Why none of this ends the session
 //!

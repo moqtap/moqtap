@@ -1,6 +1,6 @@
 //! The declared Length of a control message is part of the message.
 //!
-//! Every draft from 07 through 19 carries the same sentence in its control
+//! Every draft from 07 through 20 carries the same sentence in its control
 //! message section: control messages have a length to make parsing easier, but
 //! no control message is intended to be ignored, and if the length does not
 //! match the length of the message payload the receiver MUST close the session.
@@ -28,6 +28,13 @@
 //! is not shared. Drafts 07 through 10 carry a variable-length Length; drafts
 //! 11 onward carry a fixed 16-bit one.
 
+// Every gate below is behind a `#[cfg(feature = "draftNN")]`, so the zero-draft
+// row - `--no-default-features --all-targets` - compiles this file with none of
+// them and nothing here is reached. That row exists to prove the crate still
+// builds with no draft at all, not to find dead code, so the reach of this
+// `allow` is exactly the reach of that row: under any real feature set the
+// modules below use both of these.
+#[allow(unused_imports)]
 use moqtap_codec::error::CodecError;
 use moqtap_codec::varint::VarInt;
 
@@ -98,7 +105,7 @@ fn vi(v: u64) -> VarInt {
 
 /// Build one gate for a draft, given its Length width and any extra GOAWAY fields.
 ///
-/// GOAWAY is the vehicle because every draft from 07 to 19 assigns it type
+/// GOAWAY is the vehicle because every draft from 07 to 20 assigns it type
 /// 0x10 and gives it a length-prefixed URI, so the same shape reaches every
 /// decoder under test.
 ///
@@ -195,6 +202,15 @@ declared_length_gate!(
     draft19_reads_its_whole_declared_payload,
     "draft19",
     draft19,
+    2, 1,
+    timeout: vi(0),
+);
+// Draft-20's GOAWAY is draft-19's unchanged: a New Session URI and a Timeout,
+// and no trailing Request ID for a spare byte to be mistaken for.
+declared_length_gate!(
+    draft20_reads_its_whole_declared_payload,
+    "draft20",
+    draft20,
     2, 1,
     timeout: vi(0),
 );

@@ -4,7 +4,7 @@
 //! caller it exists for is a relay that reads one fetch stream and writes
 //! another from the same frames with some of them removed. On drafts 07 to 14
 //! that is byte deletion: every field of a fetch object is on the wire
-//! outright. On drafts 15 to 19 nearly every field is defined against the
+//! outright. On drafts 15 to 20 nearly every field is defined against the
 //! frame before it, so a survivor that follows a removed run was encoded
 //! against something that is no longer there.
 //!
@@ -14,8 +14,8 @@
 //! draft, so that what each object puts on the wire is chosen rather than
 //! derived. That is the right shape for holding one draft's writer to one
 //! draft's rules, and the wrong shape for this file: the claim here is that
-//! **one** call sequence works on all thirteen drafts, and a fixture written
-//! thirteen times is thirteen chances to write it in the shape the code
+//! **one** call sequence works on all fourteen drafts, and a fixture written
+//! fourteen times is fourteen chances to write it in the shape the code
 //! already has. The corpus's fetch streams are bytes nothing in this crate
 //! produced.
 //!
@@ -34,7 +34,7 @@
 //! 2. A stream with one frame removed decodes back to exactly the survivors'
 //!    original Locations and priorities.
 //! 3. Removing a frame reframes at least one survivor on **every** draft 15
-//!    to 19 and **no** survivor on any draft 07 to 14. Without it, gate 2
+//!    to 20 and **no** survivor on any draft 07 to 14. Without it, gate 2
 //!    passes just as well for a writer that deleted the bytes and re-encoded
 //!    nothing — which is the bug this whole path exists to prevent, and which
 //!    is byte-perfect right up to the moment a survivor is renumbered.
@@ -78,7 +78,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 mod test_vectors;
@@ -119,11 +120,13 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The drafts whose fetch objects are written against the frame before them.
 ///
-/// Drafts 15 to 19: from 15 a Serialization Flags field decides which of an
+/// Drafts 15 to 20: from 15 a Serialization Flags field decides which of an
 /// object's Group ID, Subgroup ID, Object ID and Priority reach the wire at
 /// all, and from 18 the two ID fields that remain are differences. The list is
 /// by draft **number**, so it answers for drafts this build did not compile
@@ -136,6 +139,7 @@ fn frames_are_written_against_each_other(draft: DraftVersion) -> bool {
             | DraftVersion::Draft17
             | DraftVersion::Draft18
             | DraftVersion::Draft19
+            | DraftVersion::Draft20
     )
 }
 
@@ -155,6 +159,7 @@ fn corpus_dir(draft: DraftVersion) -> &'static str {
         DraftVersion::Draft17 => "draft17",
         DraftVersion::Draft18 => "draft18",
         DraftVersion::Draft19 => "draft19",
+        DraftVersion::Draft20 => "draft20",
     }
 }
 

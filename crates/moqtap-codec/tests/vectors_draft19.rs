@@ -16,7 +16,9 @@ fn run_message_vectors(relative_path: &str) {
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let msg = ControlMessage::decode(&mut &bytes[..])
                 .unwrap_or_else(|e| panic!("[{}] decode failed: {e}", vector.id));
-            let actual_json = test_vectors::draft19_json::message_to_json(&msg);
+            let actual_json = test_vectors::fields_json::to_json(
+                &moqtap_codec::draft19::fields::message_fields(&msg),
+            );
             assert_eq!(
                 actual_json,
                 *expected_decoded,
@@ -463,24 +465,34 @@ fn run_fetch_vectors(relative_path: &str) {
                 let object_id_delta = object.object_id_delta.map(VarInt::into_inner);
 
                 let group_id = if first_object {
-                    prev_object_id = None;
                     group_id_delta.expect("first fetch object must include Group ID Delta")
                 } else if let Some(d) = group_id_delta {
-                    prev_object_id = None;
                     prev_group_id + d + 1
                 } else {
                     prev_group_id
                 };
                 prev_group_id = group_id;
 
+                // Section 11.4.4.1, all four combinations. A Group ID Delta does
+                // not on its own restart the Object ID: "If Object ID Delta is
+                // not present, the Object ID is the prior Object's ID plus one,
+                // regardless of which group it belongs to." Only an Object ID
+                // Delta arriving alongside a Group ID Delta sets the Object ID
+                // outright.
+                //
+                // This previously cleared `prev_object_id` on a group change and
+                // read a missing Object ID Delta as 0, which is the reading the
+                // sentence above rules out. No vector reached it until
+                // `fetch-stream-new-group-object-id-continues` was added.
                 let object_id = if first_object {
                     object_id_delta.expect("first fetch object must include Object ID Delta")
-                } else if group_id_delta.is_some() {
-                    object_id_delta.unwrap_or(0)
-                } else if let Some(d) = object_id_delta {
-                    prev_object_id.unwrap_or(0) + d
                 } else {
-                    prev_object_id.map(|p| p + 1).unwrap_or(0)
+                    let prev = prev_object_id.expect("a non-first object has a predecessor");
+                    match (group_id_delta.is_some(), object_id_delta) {
+                        (true, Some(d)) => d,
+                        (false, Some(d)) => prev + d,
+                        (_, None) => prev + 1,
+                    }
                 };
                 prev_object_id = Some(object_id);
 

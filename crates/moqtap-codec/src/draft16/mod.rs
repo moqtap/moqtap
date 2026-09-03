@@ -10,11 +10,10 @@
 
 #[allow(missing_docs)]
 pub mod data_stream;
-/// Error and status code registries.
 pub mod error_codes;
+/// This draft's field names for a decoded control message.
+pub mod fields;
 #[allow(missing_docs)]
-/// Control message types with encode/decode.
 pub mod message;
 #[allow(missing_docs)]
-/// Draft-16 types.
 pub mod types;

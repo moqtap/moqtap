@@ -96,6 +96,17 @@ fn varint_draft19() {
     run_moqt_varint_vectors::<Moqt18>("transport/draft19/codec/varint.json");
 }
 
+/// Draft-20 Section 1.4.1 is draft-18's encoding unchanged, so the same profile
+/// reads its vectors. The revision touched the hyphen in "Variable-length" in
+/// the heading and nothing in the encoding, and the corpus's draft-20
+/// `varint.json` is byte-identical to draft-19's — which is a fact worth having
+/// a test for rather than an argument for not running it, since a draft that
+/// silently changed the encoding would produce exactly the same file name.
+#[test]
+fn varint_draft20() {
+    run_moqt_varint_vectors::<Moqt18>("transport/draft20/codec/varint.json");
+}
+
 /// Draft-17 omits the 7-byte length and calls 11111100 an invalid code point,
 /// while draft-18 restored it. The same bytes must therefore be rejected on a
 /// draft-17 session and accepted on a later one.

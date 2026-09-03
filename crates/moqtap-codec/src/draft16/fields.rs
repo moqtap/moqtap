@@ -1,16 +1,16 @@
-use moqtap_codec::draft16::message::ControlMessage;
-use moqtap_codec::kvp::{KeyValuePair, KvpValue};
-use moqtap_codec::types::*;
-use moqtap_codec::varint::VarInt;
-use serde_json::{Map, Value};
+use crate::draft16::message::ControlMessage;
+use crate::fields::{FieldMap as Map, FieldValue as Value};
+use crate::kvp::{KeyValuePair, KvpValue};
+use crate::types::*;
+use crate::varint::VarInt;
 
 fn vi(v: u64) -> Value {
-    Value::String(v.to_string())
+    Value::Uint(v)
 }
 
 fn ns_to_json(ns: &TrackNamespace) -> Value {
     Value::Array(
-        ns.0.iter().map(|e| Value::String(String::from_utf8_lossy(e).into_owned())).collect(),
+        ns.0.iter().map(|e| Value::Text(String::from_utf8_lossy(e).into_owned())).collect(),
     )
 }
 
@@ -48,7 +48,7 @@ fn auth_token_to_json_d16(bytes: &[u8]) -> Value {
     let mut buf = bytes;
     let alias_type = match VarInt::decode(&mut buf) {
         Ok(v) => v,
-        Err(_) => return Value::String(hex::encode(bytes)),
+        Err(_) => return Value::Bytes(bytes.to_vec()),
     };
     let at = alias_type.into_inner();
     let mut o = Map::new();
@@ -66,16 +66,16 @@ fn auth_token_to_json_d16(bytes: &[u8]) -> Value {
             if let Ok(tt) = VarInt::decode(&mut buf) {
                 o.insert("token_type".into(), vi(tt.into_inner()));
             }
-            o.insert("token_value".into(), Value::String(hex::encode(buf)));
+            o.insert("token_value".into(), Value::Bytes(buf.to_vec()));
         }
         _ => {
             if let Ok(tt) = VarInt::decode(&mut buf) {
                 o.insert("token_type".into(), vi(tt.into_inner()));
             }
-            o.insert("token_value".into(), Value::String(hex::encode(buf)));
+            o.insert("token_value".into(), Value::Bytes(buf.to_vec()));
         }
     }
-    Value::Object(o)
+    Value::Map(o)
 }
 
 fn decode_subscription_filter(bytes: &[u8]) -> Value {
@@ -100,17 +100,46 @@ fn decode_subscription_filter(bytes: &[u8]) -> Value {
         }
         _ => {}
     }
-    Value::Object(obj)
+    Value::Map(obj)
 }
 
+/// Render a draft-16 LARGEST_OBJECT (0x09) parameter value: a Group and an
+/// Object, as two varints.
+///
+/// # Nothing has checked that the value is two varints
+///
+/// Drafts 17 and later give 0x09 a `Location` encoding: their decoders read the
+/// two varints and re-serialise them into the stored value, so what reaches
+/// their extractor is two varints by construction. Draft-16 has no such table.
+/// 0x09 is an odd Type, so `KeyValuePair::decode` keeps whatever
+/// length-prefixed bytes arrived, and `decode_parameters_in` checks duplicates,
+/// authorization tokens, varint value ranges and subscription filters — none of
+/// which looks at 0x09. `KNOWN_MESSAGE_PARAMETERS` admits it and
+/// `check_parameter_scope` permits it on SUBSCRIBE_OK, so a short SUBSCRIBE_OK
+/// carrying `0x09` with an empty value reaches here.
+///
+/// An empty value fails the first read and a single `0x00` fails the *second*,
+/// which is the nastier of the two: the first varint decodes cleanly and the
+/// value looks well formed right up to the point where it is not.
+///
+/// # What a value it cannot read renders as
+///
+/// The raw bytes, as `fields::params` and this file's own
+/// `auth_token_to_json_d16` do. Field extraction runs on a message that has
+/// already decoded, so it has no refusal to give: what a peer sent is what
+/// there is to show.
 fn decode_largest_object(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let group = VarInt::decode(&mut buf).unwrap().into_inner();
-    let object = VarInt::decode(&mut buf).unwrap().into_inner();
+    let Ok(group) = VarInt::decode(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
+    let Ok(object) = VarInt::decode(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
     let mut obj = Map::new();
-    obj.insert("group".into(), vi(group));
-    obj.insert("object".into(), vi(object));
-    Value::Object(obj)
+    obj.insert("group".into(), vi(group.into_inner()));
+    obj.insert("object".into(), vi(object.into_inner()));
+    Value::Map(obj)
 }
 
 fn kvp_to_json_d16_inner(
@@ -139,23 +168,23 @@ fn kvp_to_json_d16_inner(
                 (KvpValue::Bytes(b), _) => {
                     obj.insert(
                         name.to_string(),
-                        Value::String(String::from_utf8_lossy(b).into_owned()),
+                        Value::Text(String::from_utf8_lossy(b).into_owned()),
                     );
                 }
             }
         } else {
             let mut entry = Map::new();
-            entry.insert("id".to_string(), Value::String(format!("0x{:x}", key)));
+            entry.insert("id".to_string(), Value::Text(format!("0x{:x}", key)));
             match &p.value {
                 KvpValue::Varint(v) => {
                     entry.insert("length".to_string(), vi(v.into_inner()));
                 }
                 KvpValue::Bytes(b) => {
                     entry.insert("length".to_string(), vi(b.len() as u64));
-                    entry.insert("raw_hex".to_string(), Value::String(hex::encode(b)));
+                    entry.insert("raw_hex".to_string(), Value::Bytes(b.to_vec()));
                 }
             }
-            unknown.push(Value::Object(entry));
+            unknown.push(Value::Map(entry));
         }
     }
 
@@ -163,7 +192,7 @@ fn kvp_to_json_d16_inner(
         obj.insert("unknown".to_string(), Value::Array(unknown));
     }
 
-    Value::Object(obj)
+    Value::Map(obj)
 }
 
 fn kvp_to_json_d16(params: &[KeyValuePair]) -> Value {
@@ -190,7 +219,12 @@ fn kvp_to_json_d16_track_ext(params: &[KeyValuePair]) -> Value {
     kvp_to_json_d16_inner(params, d16_track_ext_name)
 }
 
-pub fn message_to_json(msg: &ControlMessage) -> Value {
+/// This draft's field names for a decoded control message.
+///
+/// Keys are the names this draft gives its fields, in the order it defines
+/// them. An optional field the message did not carry is absent rather than
+/// zero.
+pub fn message_fields(msg: &ControlMessage) -> Map {
     let obj = match msg {
         ControlMessage::ClientSetup(m) => {
             let mut o = Map::new();
@@ -206,7 +240,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             let mut o = Map::new();
             o.insert(
                 "new_session_uri".into(),
-                Value::String(String::from_utf8_lossy(&m.new_session_uri).into_owned()),
+                Value::Text(String::from_utf8_lossy(&m.new_session_uri).into_owned()),
             );
             o
         }
@@ -233,7 +267,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("retry_interval".into(), vi(m.retry_interval.into_inner()));
             o.insert(
                 "reason_phrase".into(),
-                Value::String(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
+                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
             );
             o
         }
@@ -243,7 +277,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
             o.insert(
                 "track_name".into(),
-                Value::String(String::from_utf8_lossy(&m.track_name).into_owned()),
+                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
             o.insert("parameters".into(), kvp_to_json_d16(&m.parameters));
             o
@@ -276,7 +310,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
             o.insert(
                 "track_name".into(),
-                Value::String(String::from_utf8_lossy(&m.track_name).into_owned()),
+                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
             o.insert("parameters".into(), kvp_to_json_d16(&m.parameters));
@@ -298,7 +332,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("stream_count".into(), vi(m.stream_count.into_inner()));
             o.insert(
                 "reason_phrase".into(),
-                Value::String(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
+                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
             );
             o
         }
@@ -320,7 +354,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("error_code".into(), vi(m.error_code.into_inner()));
             o.insert(
                 "reason_phrase".into(),
-                Value::String(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
+                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
             );
             o
         }
@@ -348,7 +382,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
             o.insert(
                 "track_name".into(),
-                Value::String(String::from_utf8_lossy(&m.track_name).into_owned()),
+                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
             o.insert("parameters".into(), kvp_to_json_d16(&m.parameters));
             o
@@ -358,7 +392,7 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("fetch_type".into(), vi(m.fetch_type as u64));
             match &m.fetch_payload {
-                moqtap_codec::draft16::message::FetchPayload::Standalone {
+                crate::draft16::message::FetchPayload::Standalone {
                     track_namespace,
                     track_name,
                     start_group,
@@ -369,14 +403,14 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
                     o.insert("track_namespace".into(), ns_to_json(track_namespace));
                     o.insert(
                         "track_name".into(),
-                        Value::String(String::from_utf8_lossy(track_name).into_owned()),
+                        Value::Text(String::from_utf8_lossy(track_name).into_owned()),
                     );
                     o.insert("start_group".into(), vi(start_group.into_inner()));
                     o.insert("start_object".into(), vi(start_object.into_inner()));
                     o.insert("end_group".into(), vi(end_group.into_inner()));
                     o.insert("end_object".into(), vi(end_object.into_inner()));
                 }
-                moqtap_codec::draft16::message::FetchPayload::Joining {
+                crate::draft16::message::FetchPayload::Joining {
                     joining_request_id,
                     joining_start,
                 } => {
@@ -405,5 +439,5 @@ pub fn message_to_json(msg: &ControlMessage) -> Value {
             o
         }
     };
-    Value::Object(obj)
+    obj
 }

@@ -1,8 +1,8 @@
 //! The Reason Phrase and New Session URI caps, on the drafts that state them.
 //!
-//! Drafts 11 through 19 cap a Reason Phrase at 1,024 bytes and a New Session
+//! Drafts 11 through 20 cap a Reason Phrase at 1,024 bytes and a New Session
 //! URI at 8,192, and both sentences are written about a receiver. Drafts 14
-//! through 19 word it: "If an endpoint receives a length exceeding the maximum,
+//! through 20 word it: "If an endpoint receives a length exceeding the maximum,
 //! it MUST close the session with a PROTOCOL_VIOLATION." Drafts 11, 12 and 13
 //! say a Protocol Violation instead, and drafts 07 through 10 state neither
 //! cap.
@@ -20,7 +20,7 @@
 //! interoperability just as surely as accepting what it forbids, and only a
 //! test that names the draft can tell the two apart.
 //!
-//! Drafts 17 through 19 read these fields with the other variable-length
+//! Drafts 17 through 20 read these fields with the other variable-length
 //! integer encoding and already applied both caps; they are covered by their
 //! own draft's tests.
 

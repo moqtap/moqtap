@@ -1879,16 +1879,36 @@ impl FetchObjectWriter {
 
         if frame.group_id != prior_group {
             // A Group ID Delta moves the group by delta + 1, forwards under
-            // Ascending and backwards under Descending, and restarts the Object
-            // ID from its own delta. The restart is why the Object ID Delta is
-            // always written here: without it the Object ID would be read as
-            // the predecessor's plus one, which is the previous group's
-            // numbering carried into the new one.
+            // Ascending and backwards under Descending, and when an Object ID
+            // Delta accompanies it the Object ID is that delta outright rather
+            // than an advance on the predecessor.
             let step = match self.group_order {
                 GroupOrder::Ascending => frame.group_id.checked_sub(prior_group),
                 GroupOrder::Descending => prior_group.checked_sub(frame.group_id),
             };
             let delta = step.and_then(|s| s.checked_sub(1)).ok_or(CodecError::InvalidField)?;
+
+            // Omitting the Object ID Delta across a group boundary is legal and
+            // is a byte shorter. Section 11.4.4.1: "If Object ID Delta is not
+            // present, the Object ID is the prior Object's ID plus one,
+            // REGARDLESS OF WHICH GROUP IT BELONGS TO." So an Object that
+            // continues the numbering into a new group encodes without one --
+            // the Object ID does not restart at the group boundary unless a
+            // delta says so.
+            //
+            // Gated on the frame's own framing, like the same-group case below,
+            // so re-emitting a stream reproduces the publisher's bytes instead
+            // of silently rewriting the shorter form into the longer one. It
+            // also keeps markers correct without a special case: a marker
+            // always arrives with an Object ID Delta and never takes this
+            // branch.
+            if original.object_id_delta.is_none()
+                && frame.object_id == prior_object.wrapping_add(1)
+                && prior_object != u64::MAX
+            {
+                return Ok((Some(VarInt::from_u64(delta)?), None));
+            }
+
             return Ok((Some(VarInt::from_u64(delta)?), Some(VarInt::from_u64(frame.object_id)?)));
         }
 

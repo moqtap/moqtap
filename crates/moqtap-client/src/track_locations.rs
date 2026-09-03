@@ -67,13 +67,13 @@
 //!
 //! # A second rule, and a third number
 //!
-//! Drafts 12 through 19 carry a Malformed Track condition this record is the
+//! Drafts 12 through 20 carry a Malformed Track condition this record is the
 //! right place for as well. Draft-12 Section 2.5: "An Object is received on a
 //! Track whose Group and Object ID are larger than the final Object in the
 //! Track. The final Object in a Track is the Object with Status END_OF_TRACK or
 //! the last Object sent in a FETCH whose response indicated End of Track."
-//! Drafts 13 through 17 carry it word for word; drafts 18 and 19 drop the two
-//! words "on a Track" and change nothing else.
+//! Drafts 13 through 17 carry it word for word; drafts 18, 19 and 20 drop the
+//! two words "on a Track" and change nothing else.
 //!
 //! **It is the mirror of the rule above rather than a widening of it.** That
 //! one asks whether an end-of-track object is behind what the track has
@@ -355,7 +355,7 @@ pub enum ObjectRole {
     /// `Some(form)` on a draft that states a rule about where one may be
     /// placed, naming which of the two conditions to judge it by, and `None` on
     /// a draft that states none. Drafts 08 through 13 are the first; drafts 07
-    /// and 14 through 19 are the second, and
+    /// and 14 through 20 are the second, and
     /// `a_track_may_end_where_it_has_already_been.rs` asserts the acceptance on
     /// all seven of them. Either way the object settles where the track ended,
     /// which is the other record's business and not that rule's.

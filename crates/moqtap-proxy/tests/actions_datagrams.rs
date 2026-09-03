@@ -23,7 +23,7 @@
 //! direct assertion on the engine's offset arithmetic.
 //!
 //! Every fixture here opens with the datagram's own type field, on all
-//! thirteen drafts. That was not always true: drafts 07-13 model the type
+//! fourteen drafts. That was not always true: drafts 07-13 model the type
 //! separately from `DatagramHeader`, and for a while nothing between the
 //! fixtures and the client wrote it, so the whole family put headerless
 //! datagrams on the wire and read a peer's type octet as the first byte of
@@ -50,9 +50,9 @@
 //!
 //! # Which drafts this file covers
 //!
-//! [`DELIMITED`] is cfg-built, so the twelve-draft splice sweep is really
+//! [`DELIMITED`] is cfg-built, so the thirteen-draft splice sweep is really
 //! "every compiled draft whose datagram header delimits its payload".
-//! [`STATUS_DRAFTS`] is the same idea for the five drafts that have a
+//! [`STATUS_DRAFTS`] is the same idea for the six drafts that have a
 //! status datagram. Draft-14's swallowing decode is the one probe gated on
 //! a single draft, because draft-14 is the only draft it is about.
 //!
@@ -83,7 +83,8 @@
     feature = "draft16",
     feature = "draft17",
     feature = "draft18",
-    feature = "draft19"
+    feature = "draft19",
+    feature = "draft20"
 ))]
 
 mod common;
@@ -107,7 +108,7 @@ use moqtap_proxy::observer::{NoOpProxyObserver, ProxyObserver};
 
 use common::{FakeRelay, RecordingObserver};
 
-/// Every draft whose datagram header delimits its payload — all thirteen
+/// Every draft whose datagram header delimits its payload — all fourteen
 /// except draft-14, whose header decode swallows it.
 const DELIMITED: &[DraftVersion] = &[
     #[cfg(feature = "draft07")]
@@ -134,6 +135,8 @@ const DELIMITED: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// Every draft this build compiled, delimited or not.
@@ -172,9 +175,11 @@ const COMPILED: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
-/// Drafts 15-19, whose datagram type carries a status flag at bit 5 and,
+/// Drafts 15-20, whose datagram type carries a status flag at bit 5 and,
 /// when it is set, ends the header with a status field and no payload.
 ///
 /// Draft-14 is left out although it has the same flag: its header decode
@@ -192,6 +197,8 @@ const STATUS_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft18,
     #[cfg(feature = "draft19")]
     DraftVersion::Draft19,
+    #[cfg(feature = "draft20")]
+    DraftVersion::Draft20,
 ];
 
 /// The draft the single-session tests below run on: whichever this build
@@ -288,18 +295,20 @@ fn datagram_header(draft: DraftVersion, payload_len: usize) -> Vec<u8> {
             varint(OBJECT_ID, &mut h);
             h.push(PRIORITY);
         }
-        // 14-19: a leading datagram-type field. `0x00` clears every flag
+        // 14-20: a leading datagram-type field. `0x00` clears every flag
         // — object ID present, priority present, no extensions or
         // properties, no status — so the layout is the same five fields on
-        // all six. It is written as one octet, which is both a valid
+        // all seven. It is written as one octet, which is both a valid
         // one-byte varint (drafts 14-16 read it as a varint) and the raw
-        // `u8` drafts 17-19 read.
+        // `u8` drafts 17-20 read. Draft-20 renamed the field from `Type` to
+        // `Type Flags` and changed none of its bits.
         DraftVersion::Draft14
         | DraftVersion::Draft15
         | DraftVersion::Draft16
         | DraftVersion::Draft17
         | DraftVersion::Draft18
-        | DraftVersion::Draft19 => {
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20 => {
             h.push(0x00);
             varint(TRACK_ALIAS, &mut h);
             varint(GROUP_ID, &mut h);
@@ -321,13 +330,13 @@ fn datagram(draft: DraftVersion, payload: &[u8]) -> Vec<u8> {
 /// status flag, so the header ends with a status field and there is no
 /// payload slot at all.
 ///
-/// One byte-for-byte layout serves all five. The type is a single octet,
+/// One byte-for-byte layout serves all six. The type is a single octet,
 /// which drafts 15 and 16 read as a one-byte varint and 17-19 as a raw
 /// `u8`; the status is `0x3`, which is one byte under both the RFC 9000
 /// varint and MoQT's.
 ///
 /// `0x3` is "End of Group" and it is the point of the choice. Drafts
-/// 15-19 assign `0x0`, `0x3` and `0x4` (15 also assigns `0x1`), and the
+/// 15-20 assign `0x0`, `0x3` and `0x4` (15 also assigns `0x1`), and the
 /// codec refuses an unassigned code on decode — so an arbitrary octet
 /// here would make the fixture undecodable and route every assertion
 /// below down the undecodable-header path instead of the status path it
@@ -431,7 +440,8 @@ fn the_hand_built_fixtures_decode_on_every_draft() {
                 feature = "draft15",
                 feature = "draft16",
                 feature = "draft17",
-                feature = "draft18"
+                feature = "draft18",
+                feature = "draft20"
             ))]
             other => panic!("expected a draft-19 header, got {other:?}"),
         }
