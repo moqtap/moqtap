@@ -5,7 +5,7 @@ All notable changes to moqtap-proxy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-09-02
+## [0.5.0] - 2026-09-03
 
 Draft-20 support. Additive at this crate's own API — nothing public was removed
 and no signature moved — but `moqtap_codec::version::DraftVersion` gained a
