@@ -23,7 +23,7 @@
 mod corpus;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use corpus::{authored_cases, v2_basic, v2_segmented, Case, CORPUS_MISSING_MESSAGE};
 use moqtap_trace::writer::MoqTraceWriter;
@@ -76,7 +76,15 @@ fn write(dir: &Path, case_name: &str, bytes: &[u8]) {
 }
 
 fn main() {
-    let dir = corpus::corpus_dir().expect(CORPUS_MISSING_MESSAGE);
+    // An explicit output directory, or wherever the corpus is found. The
+    // default writes into the pinned submodule, which is a real checkout but
+    // not the one corpus development commits from; naming the path keeps both
+    // generators writing into the same directory.
+    let dir = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .or_else(corpus::corpus_dir)
+        .expect(CORPUS_MISSING_MESSAGE);
     println!("corpus: {}", dir.display());
 
     for (name, case) in authored_cases() {

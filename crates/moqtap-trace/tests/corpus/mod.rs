@@ -17,8 +17,8 @@
 use std::path::{Path, PathBuf};
 
 use moqtap_trace::event::{
-    DerivationKind, Direction, EventData, PeerRole, Side, StreamType, SubscriptionRef, TraceEvent,
-    TRACE_ID_LEN,
+    DerivationKind, Direction, ErrorKind, EventData, PeerRole, Side, StreamType, SubscriptionRef,
+    TraceEvent, ERROR_RAW_CAP, TRACE_ID_LEN,
 };
 use moqtap_trace::header::{DetailLevel, Perspective, SamplingInfo, SegmentInfo, TraceHeader};
 use moqtap_trace::Value;
@@ -39,6 +39,16 @@ pub fn trace_id() -> [u8; TRACE_ID_LEN] {
         *byte = i as u8;
     }
     id
+}
+
+/// `length` bytes of a fixed, position-dependent pattern.
+///
+/// Position-dependent rather than a repeated constant: a run of one byte value
+/// cannot catch a copy that loses or duplicates a stretch in the middle, and a
+/// period coprime with 256 means no alignment to a power-of-two boundary hides
+/// an off-by-one either. `@moqtap/trace`'s generator computes the same series.
+fn pattern(length: usize) -> Vec<u8> {
+    (0..length).map(|i| (i.wrapping_mul(37).wrapping_add(11) & 0xff) as u8).collect()
 }
 
 /// One corpus case: a header and the events under it.
@@ -741,6 +751,90 @@ pub fn v2_header_extra() -> Case {
     }
 }
 
+/// Event 6 carrying the bytes behind an error, at and below the cap.
+///
+/// The corpus case SPEC.md asks for by name: the cap on `"raw"` is a number a
+/// reader can test, and "the corpus can hold a case proving the cap was applied
+/// rather than merely described". Nothing else here proves it. A cap stated in
+/// prose and a cap applied by two encoders are different claims, and only the
+/// second one survives someone moving the constant.
+///
+/// The first error event is the load-bearing one: `raw` is exactly
+/// [`ERROR_RAW_CAP`] while `raw_len` says 9000. That pair is the whole
+/// mechanism — a reader learns the capture is partial, and by how much, from
+/// two numbers that disagree. It also drags the 16-bit CBOR byte-string length
+/// form (`0x59` plus two bytes) into the corpus, which no other case reaches:
+/// every other byte string here is under 256 bytes and takes the `0x58` form.
+/// That is the length prefix two encoders are most likely to disagree about.
+///
+/// The second is an error with no bytes at all and no stream, the shape a
+/// transport failure takes: every optional key absent, and the event still an
+/// error a reader must keep. The third carries a kind
+/// outside the vocabulary this revision names and a *complete* capture, its
+/// `raw_len` equal to its own length — the signal that says "not truncated",
+/// which only means something because the first event can say otherwise.
+///
+/// `Full`, necessarily: `"raw"` reaches no lower level.
+pub fn v2_error_with_raw() -> Case {
+    let mut header =
+        TraceHeader::new("moq-transport-19", Perspective::Observer, DetailLevel::Full, START_TIME);
+    header.session_id = Some("v2-error-with-raw".into());
+    Case {
+        header,
+        events: vec![
+            TraceEvent::new(
+                0,
+                100,
+                EventData::StreamOpened {
+                    stream_id: 4,
+                    direction: Direction::Receive,
+                    stream_type: StreamType::Subgroup,
+                    track_alias: None,
+                    subgroup_id: None,
+                    fetch_request_id: None,
+                    group_id: None,
+                },
+            ),
+            TraceEvent::new(
+                1,
+                200,
+                EventData::Error {
+                    error_code: 0,
+                    reason: "object decode failed mid-stream".into(),
+                    stream_id: Some(4),
+                    kind: Some(ErrorKind::Decode),
+                    raw_len: Some(9000),
+                    raw: Some(pattern(ERROR_RAW_CAP)),
+                },
+            ),
+            TraceEvent::new(
+                2,
+                300,
+                EventData::Error {
+                    error_code: 2,
+                    reason: "uni stream pipe: connection lost".into(),
+                    stream_id: None,
+                    kind: Some(ErrorKind::Transport),
+                    raw_len: None,
+                    raw: None,
+                },
+            ),
+            TraceEvent::new(
+                3,
+                400,
+                EventData::Error {
+                    error_code: 0,
+                    reason: "control message rejected by the fuzz harness".into(),
+                    stream_id: Some(0),
+                    kind: Some(ErrorKind::Other("x-fuzzer".into())),
+                    raw_len: Some(12),
+                    raw: Some(pattern(12)),
+                },
+            ),
+        ],
+    }
+}
+
 /// Every single-segment case both implementations author, by directory name.
 pub fn authored_cases() -> Vec<(&'static str, Case)> {
     vec![
@@ -752,6 +846,7 @@ pub fn authored_cases() -> Vec<(&'static str, Case)> {
         ("v2-control-msg-map", v2_control_msg_map()),
         ("v2-headers-level-flow", v2_headers_level_flow()),
         ("v2-header-extra", v2_header_extra()),
+        ("v2-error-with-raw", v2_error_with_raw()),
     ]
 }
 
