@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Breaking, which is why the next release is 0.3.0 and not 0.2.1.**
+`TraceEvent`, `TraceHeader`, `SegmentInfo` and `SamplingInfo` each gained a
+public field, as did the `Error` and `StreamOpened` variants of `EventData`, so
+a struct literal or an exhaustive destructuring over any of them stops
+compiling. Under Cargo's 0.x rules the minor position *is* the major position,
+so `^0.2.0` would hand those breaks to every current consumer under a patch
+number.
+
+The fix at each site is one line, and the constructors avoid it entirely:
+`TraceEvent::new`, `TraceEvent::for_peer`, `TraceHeader::new` and
+`SegmentInfo::new`. A constructor does not have to be edited every time its
+struct gains a field, which is why they exist.
+
+Three breaks are not fields, and each is described in the entry it belongs to:
+`SegmentInfo` loses its `Eq` impl, the malformed-header error strings now
+distinguish an absent key from an unusable one, and `header.custom` reads
+`None` on a `"custom"` this crate used to hand back in part.
+
 ### Added
 
 - **`EventData::Error` carries the bytes behind the error** — `stream_id`
@@ -53,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whatever holds the flow. See SPEC.md, Event 6.
 
   **Breaking for anyone constructing or exhaustively destructuring the
-  variant**, the way `TraceEvent::extra` was for 0.3.0. Reading is unaffected:
+  variant**, as `TraceEvent::extra` is for `TraceEvent`. Reading is unaffected:
   every key is optional, and a file written before they existed carries none.
 
 - **`EventData::StreamOpened` carries the stream's identifiers** — `track_alias`
@@ -75,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existed.
 
   **Breaking for anyone constructing or exhaustively destructuring the variant**,
-  the way `TraceEvent::extra` was for 0.3.0. Reading is unaffected: every key is
+  as `TraceEvent::extra` is for `TraceEvent`. Reading is unaffected: every key is
   optional, and a file written before they existed carries none.
 
 - **The header's three maps carry unrecognised-key stores** —
@@ -90,11 +108,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrecognised key there.
 
   **Breaking for anyone constructing or exhaustively destructuring these three
-  structs**, the way `TraceEvent::extra` was for 0.3.0. `TraceHeader::new` and
+  structs**, as `TraceEvent::extra` is for `TraceEvent`. `TraceHeader::new` and
   `SegmentInfo::new` avoid it, and `SamplingInfo` still derives `Default`.
   `SegmentInfo` also loses its `Eq` impl, since the store holds arbitrary CBOR
   and a CBOR value may be a float; `TraceHeader` and `SamplingInfo` have never
   had `Eq` for that reason.
+
+- **`TraceEvent::extra: Vec<(Value, Value)>`** — every key on an event that
+  neither the common fields nor the event's own type owns, kept verbatim and
+  written back out.
+
+  The format lets optional keys be added to an existing event type without a
+  version bump, and SPEC.md says unknown keys "MUST be ignored". That was read
+  as making new keys safe. They were safe to *read past* and silently destroyed
+  by any read-modify-write — a redaction pass, a filter, a re-segmentation, a
+  download with annotations applied. The output is a valid file that looks like
+  it never carried the key, so one tool's ignorance became permanent for every
+  reader downstream of it.
+
+  `EventData::Unknown` already gave that guarantee for an event *type* this
+  crate cannot name. This is the same guarantee one level down, for a key on a
+  type it can.
+
+  An `EventData::Unknown` event does not fill `extra`: its `fields` already
+  hold every non-common key, and collecting them twice writes a CBOR map with
+  duplicate keys. An `extra` entry whose key collides with one the event's type
+  owns is dropped on serialization for the same reason — the field is what a
+  reader would have produced.
+
+- **`TraceEvent::with_extra`** — attaches unrecognised keys, for a caller
+  reconstructing an event it did not decode itself.
+
+### Changed
+
+- The crate is now checked against the shared `.moqtrace` corpus, in
+  `tests/corpus_tests.rs`. Half its files were written by `@moqtap/trace` and a
+  quarter were recorded from third-party relays, so for the first time this
+  crate's reader is tested on bytes it did not write. `examples/generate_corpus`
+  writes this crate's half.
+
+  The corpus earned its place immediately: it caught the duplicate-key bug
+  below on the first run of the new code, before either implementation had a
+  test naming the behaviour.
+
+  Two of its files carry the non-canonical encodings SPEC.md requires readers
+  to accept — integers past 2^32 as CBOR float64, byte strings under RFC 8746
+  tag 64. Both rules exist because both were broken in released code, and until
+  now nothing exercised either form in this crate.
 
 ### Fixed
 
@@ -307,11 +367,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"role"` and `"side"` on event 8, `"reason"` on event 9, and `"traceId"`,
   `"tn"`, `"tdr"`, `"tus"`, `"tuo"` and `"tdo"` on event 10.
 
-  The hole is as old as `extra`: 0.3.0 started keeping a key this crate had
-  never heard of while still dropping one it knew and could not use, so knowing
-  more about a key made it preserve less. Event 1's four keys, added above, are
-  four more keys falling through the same hole rather than a new one, and that
-  part of it has not been released.
+  The hole is as old as `extra` itself: the work that started keeping a key this
+  crate had never heard of went on dropping one it knew and could not use, so
+  knowing more about a key made it preserve less. Event 1's four keys, added
+  above, are four more keys falling through the same hole rather than a new one.
+  None of it reached a release.
 
   Nothing changes for a value of the type its key is defined to carry: it still
   reads into its field and is still written from there, so a file whose types
@@ -354,61 +414,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing since the helper was written: not this crate's corpus, not a trace
   from any other implementation. Callers that got `None` from it on every real
   trace now get the value.
-
-## [0.3.0] - 2026-09-02
-
-**Breaking, which is why this is 0.3.0 and not 0.2.1.** `TraceEvent` gained a
-public field, `extra`, so any struct literal over it stops compiling. Under
-Cargo's 0.x rules the minor position *is* the major position, so `^0.2.0` would
-hand that break to every current consumer under a patch number.
-
-The fix at each site is one line, and `TraceEvent::new` / `TraceEvent::for_peer`
-avoid it entirely — a constructor does not have to be edited every time the
-struct gains a field, which is why they exist.
-
-### Added
-
-- **`TraceEvent::extra: Vec<(Value, Value)>`** — every key on an event that
-  neither the common fields nor the event's own type owns, kept verbatim and
-  written back out.
-
-  The format lets optional keys be added to an existing event type without a
-  version bump, and SPEC.md says unknown keys "MUST be ignored". That was read
-  as making new keys safe. They were safe to *read past* and silently destroyed
-  by any read-modify-write — a redaction pass, a filter, a re-segmentation, a
-  download with annotations applied. The output is a valid file that looks like
-  it never carried the key, so one tool's ignorance became permanent for every
-  reader downstream of it.
-
-  `EventData::Unknown` already gave that guarantee for an event *type* this
-  crate cannot name. This is the same guarantee one level down, for a key on a
-  type it can.
-
-  An `EventData::Unknown` event does not fill `extra`: its `fields` already
-  hold every non-common key, and collecting them twice writes a CBOR map with
-  duplicate keys. An `extra` entry whose key collides with one the event's type
-  owns is dropped on serialization for the same reason — the field is what a
-  reader would have produced.
-
-- **`TraceEvent::with_extra`** — attaches unrecognised keys, for a caller
-  reconstructing an event it did not decode itself.
-
-### Changed
-
-- The crate is now checked against the shared `.moqtrace` corpus, in
-  `tests/corpus_tests.rs`. Half its files were written by `@moqtap/trace` and a
-  quarter were recorded from third-party relays, so for the first time this
-  crate's reader is tested on bytes it did not write. `examples/generate_corpus`
-  writes this crate's half.
-
-  The corpus earned its place immediately: it caught the duplicate-key bug
-  above on the first run of the new code, before either implementation had a
-  test naming the behaviour.
-
-  Two of its files carry the non-canonical encodings SPEC.md requires readers
-  to accept — integers past 2^32 as CBOR float64, byte strings under RFC 8746
-  tag 64. Both rules exist because both were broken in released code, and until
-  now nothing exercised either form in this crate.
 
 ## [0.2.0] - 2026-08-29
 
