@@ -7,7 +7,7 @@
 //! own `FetchHeader` for a caller that already knows the draft. They consume
 //! the same bytes off the same stream.
 //!
-//! Only the first used to seed `fetch_io`. `read_fetch_object` opens with
+//! Both must seed `fetch_io`, because `read_fetch_object` opens with
 //!
 //! ```text
 //! if self.fetch_io.is_none() {
@@ -15,11 +15,12 @@
 //! }
 //! ```
 //!
-//! so a caller that reached for the typed accessor got that refusal about a
-//! header it had just successfully read — and could not recover from it, because
-//! the header's bytes were already consumed and a second read would decode the
-//! first object's bytes as a header. A public method whose only effect is to
-//! make the next call impossible is worth a gate.
+//! and a stream that only one of the two seeded would answer a caller reaching
+//! for the typed accessor with that refusal, about a header it has just
+//! successfully read — and the caller could not recover from it, because the
+//! header's bytes are already consumed and a second read would decode the first
+//! object's bytes as a header. A public method whose only effect is to make the
+//! next call impossible is worth a gate.
 //!
 //! # Why only drafts 15 and 17
 //!
@@ -41,20 +42,24 @@
 //! not* is what the gate is about. Quote marks are reserved here for a draft's
 //! own words, which neither of those is.
 //!
-//! # The second half: the method could not reach its own refill
+//! # The second half: the refill the method has to reach
 //!
-//! The seeding is not all that was wrong. The loop had no `ensure(1)` and its
-//! short-read arm matched `CodecError::UnexpectedEnd` alone, but the
-//! draft-specific `FetchHeader::decode` reports a varint that ran out of buffer
-//! as `CodecError::VarInt(VarIntError::UnexpectedEnd)` — a different variant,
-//! which fell through to the arm that returns. `read_fetch_header` never showed
-//! it because `AnyFetchHeader::decode` reports the bare variant and because it
-//! calls `ensure(1)` first.
+//! Seeding is not the whole of it. The loop needs its `ensure(1)`, and its
+//! short-read arm has to match `CodecError::VarInt(VarIntError::UnexpectedEnd)`
+//! beside the bare `CodecError::UnexpectedEnd`: the draft-specific
+//! `FetchHeader::decode` reports a varint that ran out of buffer as the `VarInt`
+//! variant, and an arm matching the bare one alone falls through to the arm that
+//! returns. `read_fetch_header` meets neither problem: it calls `ensure(1)`
+//! first, and its short-read arm is `Err(e) if e.is_incomplete()`, which admits
+//! the `VarInt` spelling beside the bare one. The error is not what separates
+//! the two methods — on these drafts `AnyFetchHeader::decode` is that same
+//! `FetchHeader::decode` behind a `map`, so it reports the same `VarInt`
+//! variant — the arm is.
 //!
-//! Since `buf` starts empty, that made the first call on a fresh stream fail
-//! outright, which is the only way this method is ever reached. It is public on
-//! five drafts and no caller in this workspace or its consumers has one, which
-//! is the only reason nothing had noticed.
+//! `buf` starts empty, so the first call on a fresh stream — the only way this
+//! method is ever reached — is the call that needs the refill. It is public on
+//! drafts 15 through 20 and no caller in this workspace has one, so these gates
+//! are its only readers.
 //!
 //! # Ablations, measured
 //!
@@ -65,8 +70,7 @@
 //! the typed header read must leave the stream able to read objects, and it did not: DataStreamState("fetch header not read yet")
 //! ```
 //!
-//! Reverting the refill half — dropping the `ensure(1)` and the `VarInt`
-//! arm — which is the state both drafts shipped in:
+//! Dropping the `ensure(1)` and the `VarInt` arm, the refill half:
 //!
 //! ```text
 //! the typed accessor must read the header the writer wrote: Codec(VarInt(UnexpectedEnd))

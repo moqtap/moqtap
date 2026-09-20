@@ -67,6 +67,31 @@ pub enum EndpointError {
     /// A subscribe ID allocation or validation error.
     #[error("subscribe ID error: {0}")]
     SubscribeId(#[from] SubscribeIdError),
+    /// This endpoint was asked to advertise a Maximum Subscribe ID that does
+    /// not increase, and refused. Nothing was written.
+    ///
+    /// The send-side mirror of the rule a peer breaks by sending one — Section 8.4:
+    /// "The Maximum Subscribe Id MUST only increase within a session". No closing
+    /// mark, because the draft's sentence does not close there: it runs on
+    /// into the receipt half, which is the peer's side of this rule and not
+    /// this one's. Its own
+    /// variant, and not the received one, because the two are opposite
+    /// findings that would otherwise arrive as the same value: the received one
+    /// is a peer in violation and this one is a caller of this library asking
+    /// for a message that would put this endpoint in violation, and
+    /// [`EndpointError::session_error_code`] answers `Some` for it either way.
+    ///
+    /// Not fatal. The message is refused instead of built, the ceiling stays
+    /// where it was, and nothing reaches the peer to object to.
+    #[error(
+        "the Maximum Subscribe ID already advertised is {advertised}, so {offered} would not increase it"
+    )]
+    MaxSubscribeIdWouldNotIncrease {
+        /// The ceiling this endpoint has already advertised.
+        advertised: u64,
+        /// The value it was asked to advertise instead.
+        offered: u64,
+    },
     /// A subscription state machine error.
     #[error("subscription error: {0}")]
     Subscription(#[from] SubscriptionError),
@@ -427,6 +452,86 @@ struct TrackBinding {
 }
 
 impl EndpointError {
+    /// Whose doing this is — the peer's, or this endpoint's, or a variant that
+    /// cannot say.
+    ///
+    /// The companion of [`EndpointError::session_error_code`], which answers
+    /// *what the draft requires be done about it*. Neither answers the other's
+    /// question and the pair is what a caller needs: a code without a side
+    /// names nobody, and a side without a code is not grounds to publish
+    /// anything.
+    ///
+    /// Exhaustive, with no wildcard arm, so a variant added to this draft's
+    /// `EndpointError` is a compile error here rather than a silent arrival on
+    /// the wrong side of the answer. See
+    /// [`EndpointFault`](crate::above_codec_rules::EndpointFault) for the three
+    /// answers and for the collision that made the third one necessary.
+    pub fn fault(&self) -> crate::above_codec_rules::EndpointFault {
+        use crate::above_codec_rules::{AboveCodecRule as Rule, EndpointFault as Fault};
+
+        match self {
+            // Raised on both a receive path and a send path, so the
+            // variant cannot say which end is at fault. The state machines
+            // render as `invalid transition from X on event Y` whichever end
+            // asked for the transition, and the unknown-request errors name
+            // an id that may be one the peer sent or one a caller here made
+            // up.
+            EndpointError::Session(..)
+            | EndpointError::Subscription(..)
+            | EndpointError::Fetch(..)
+            | EndpointError::Namespace(..)
+            | EndpointError::TrackStatus(..)
+            | EndpointError::Setup(..)
+            | EndpointError::UnknownSubscribe(..)
+            | EndpointError::UnknownNamespace
+            | EndpointError::UnknownPeerNamespace
+            | EndpointError::UnknownPeerNamespaceSubscription => Fault::EitherEnd,
+
+            // Raised on the way out. Nothing reached the wire, so none of
+            // these is evidence about a peer — including the ones a peer
+            // caused, where what failed is this side's attempt to accept
+            // something the draft says to refuse.
+            EndpointError::MaxSubscribeIdWouldNotIncrease { .. }
+            | EndpointError::UnknownPeerTrackStatus
+            | EndpointError::NotActive
+            | EndpointError::Draining
+            | EndpointError::FilterNeedsRange
+            | EndpointError::TrackAliasInUse { .. }
+            | EndpointError::UnjoinableSubscription { .. }
+            | EndpointError::OwnPrefixOverlap => Fault::ThisEndpoint,
+
+            // Raised reading what the peer sent.
+            EndpointError::DuplicateTrackAlias { .. } => Fault::Peer(Rule::DuplicateTrackAlias),
+            EndpointError::EndOfTrackOutOfPlace { .. } => Fault::Peer(Rule::EndOfTrackOutOfPlace),
+            EndpointError::GoAwayUriAtServer => Fault::Peer(Rule::GoAwayAtServer),
+            EndpointError::UnknownTrackStatus => Fault::Peer(Rule::MessageNamesAnUnknownRequest),
+            EndpointError::MixedForwardingPreference { .. } => {
+                Fault::Peer(Rule::MixedForwardingPreference)
+            }
+            EndpointError::PeerPrefixOverlap => Fault::Peer(Rule::NamespacePrefixOverlap),
+            EndpointError::RepeatedGoAway => Fault::Peer(Rule::RepeatedGoAway),
+            EndpointError::PeerSubscribeIdNotIncreasing(..) => {
+                Fault::Peer(Rule::RequestIdOutOfSequence)
+            }
+            EndpointError::UpdateForUnknownSubscribe(..) => {
+                Fault::Peer(Rule::RequestUpdateForTheWrongRequest)
+            }
+            EndpointError::MalformedSetupParameter(..) => Fault::Peer(Rule::SetupParameterValue),
+
+            // The ceiling rules, which are the peer's whenever they are read
+            // off the wire. The mirror — this endpoint asked to advertise a
+            // ceiling that does not increase — is
+            // `MaxSubscribeIdWouldNotIncrease` above, which is a variant of its
+            // own so that the two never arrive as one value.
+            EndpointError::SubscribeId(e) => match e {
+                SubscribeIdError::Decreased(..) => Fault::Peer(Rule::MaxRequestIdDecreased),
+                SubscribeIdError::ExceedsMax(..) => Fault::Peer(Rule::RequestIdCeiling),
+                // This endpoint has spent the budget the peer granted it.
+                SubscribeIdError::Blocked => Fault::ThisEndpoint,
+            },
+        }
+    }
+
     /// The code to close the session with, when draft-10 answers this error
     /// with a close rather than leaving it to the one request it concerns.
     ///
@@ -668,6 +773,39 @@ impl Endpoint {
             let other_track = binding.namespace != *namespace || binding.name != name;
             (binding.alias == alias && other_track && self.binding_is_live(key)).then_some(key)
         })
+    }
+
+    /// The lowest Track Alias no live binding has given to a track.
+    ///
+    /// Drafts 07 through 11 make the **subscriber** choose the Track Alias, and
+    /// require it to name one track per session; draft-12 moved the field to
+    /// SUBSCRIBE_OK and made the choice the publisher's. A client spanning both
+    /// eras therefore has to supply a value on these drafts and cannot on the
+    /// later ones, so the value is read off the endpoint rather than asked of
+    /// the caller: that is what lets
+    /// [`crate::dispatch::AnyConnection::subscribe`] carry one signature across
+    /// all fourteen drafts instead of an argument that does nothing on nine of
+    /// them.
+    ///
+    /// Read rather than kept, for the same reason the alias table beside it
+    /// gives: a binding whose request has ended holds nothing, so an alias
+    /// falls free when its subscription does and may name a different track
+    /// next. A caller that mixes this with aliases of its own choosing stays
+    /// correct by construction, because both read this one table — and
+    /// `subscribe` refuses a duplicate before the alias reaches the wire
+    /// either way.
+    pub fn next_free_track_alias(&self) -> VarInt {
+        let taken: std::collections::BTreeSet<u64> = self
+            .track_bindings
+            .iter()
+            .filter(|(&key, _)| self.binding_is_live(key))
+            .map(|(_, binding)| binding.alias)
+            .collect();
+        let mut candidate = 0;
+        while taken.contains(&candidate) {
+            candidate += 1;
+        }
+        VarInt::from_u64_moqt(candidate)
     }
 
     /// The track a live binding has given `alias` to.
@@ -1095,17 +1233,20 @@ impl Endpoint {
     ///
     /// # Errors
     ///
-    /// The decrease error if the value does not strictly increase.
+    /// [`EndpointError::MaxSubscribeIdWouldNotIncrease`] if the value does not
+    /// strictly increase. Its own variant rather than the one a *received*
+    /// ceiling that did not increase raises, so that a refusal to write is
+    /// never read back as a peer in violation.
     pub fn send_max_subscribe_id(
         &mut self,
         max_id: VarInt,
     ) -> Result<ControlMessage, EndpointError> {
         let new_val = max_id.into_inner();
         if new_val <= self.advertised_max_id {
-            return Err(EndpointError::SubscribeId(SubscribeIdError::Decreased(
-                self.advertised_max_id,
-                new_val,
-            )));
+            return Err(EndpointError::MaxSubscribeIdWouldNotIncrease {
+                advertised: self.advertised_max_id,
+                offered: new_val,
+            });
         }
         self.advertised_max_id = new_val;
         Ok(ControlMessage::MaxSubscribeId(MaxSubscribeId { subscribe_id: max_id }))
@@ -1178,8 +1319,8 @@ impl Endpoint {
         // SetupExchange is in that set because the Termination section says
         // "The Transport Session can be terminated at any point", and the
         // Setup exchange is a point. So a violation caught while the setup is
-        // still in flight does close the session rather than being recorded
-        // and forgotten, which is what this discarded result used to mean.
+        // still in flight does close the session, and the discarded result is
+        // safe because that is one of the states `on_close` accepts.
         let _ = self.session.on_close();
         err
     }

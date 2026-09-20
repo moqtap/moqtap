@@ -7,6 +7,7 @@
   "row_definition": "One <tr> of a table identified as an error, status or termination code registry that assigns a code point. Header rows are excluded; empty-code line-wrap continuation rows are merged into the row above; range and expression code points count as one row each and are tagged kind=\"reserved\".",
   "description_coverage_note": "rows_described_from_reason_column counts rows whose description is the Reason cell of the table itself, copied verbatim -- a phrase such as 'Internal Error', not the draft's full rule for the code. Where those drafts say more about a code, they say it in prose after the table, and this tool does not follow that prose. A legacy-shape draft therefore reaches full coverage by having a Reason column, which is a weaker claim than it looks. rows_described_from_section_prose is the strong one: it counts rows whose description was read from the definition list in the section the table's Specification column points at.",
   "object_status_note": "object_status is a second registry family, counted under its own definition and reported separately. totals.rows and the registries list cover the error, status and termination code registries only, and are unchanged by its presence; totals.object_status_rows is not included in totals.rows and must not be added to it without a deliberate decision to do so. Drafts 19 and 20 have an IANA registry for Object Status (object_status.iana_registry); in drafts 07-18 the same code points are assigned in prose and object_status.form is 'prose-list'.",
+  "parameter_note": "parameters is a third registry family -- the parameters carried by control messages, the properties carried by objects and tracks, the setup options, and the auth token alias and type codes -- counted under its own definition and reported separately. totals.rows, the registries list, totals.object_status_rows and object_status are unchanged by its presence; totals.parameter_rows is in neither of them and the three must not be added together without a deliberate decision to do so. Rows carry no description except in drafts 11-14, whose AUTHORIZATION TOKEN table prints a 'Serialization and behavior' column; the sections these tables point at are prose rather than the definition lists the error-code sections use, so description_source is null everywhere else, which is a fact about the drafts and not a gap. Join rows by (registry_id, code) and never by code alone: registries in one family share a code space, and totals.parameter_codes_registered_more_than_once_in_a_family counts where that matters.",
   "totals": {
     "registries": 4,
     "rows": 47,
@@ -14,7 +15,11 @@
     "rows_described_from_reason_column": 0,
     "rows_described_from_section_prose": 47,
     "object_status_rows": 4,
-    "object_status_rows_also_counted_in_rows": 0
+    "object_status_rows_also_counted_in_rows": 0,
+    "parameter_registries": 2,
+    "parameter_rows": 16,
+    "parameter_rows_also_counted_in_rows": 0,
+    "parameter_codes_registered_more_than_once_in_a_family": 0
   },
   "registries": [
     {
@@ -654,6 +659,236 @@
       }
     ]
   },
+  "parameters": {
+    "family": "parameters, properties, setup options and auth token code points",
+    "present": true,
+    "reason_absent": null,
+    "row_definition": "One <tr> of a table that assigns a parameter, property, setup option or auth token code point. Header rows are excluded; empty-code line-wrap continuation rows are merged into the row above and counted in continuation_rows_merged; range and expression code points count as one row each and are tagged kind=\"reserved\". Counted separately from totals.rows and totals.object_status_rows; the three are never summed.",
+    "registry_count": 2,
+    "row_count": 16,
+    "registries": [
+      {
+        "registry": "Authorization Token Alias Type",
+        "registry_id": "authorization_token_alias_type",
+        "family": "auth-token-alias-type",
+        "shape": "code-name",
+        "iana_registry": true,
+        "chapter": "IANA Considerations",
+        "table": "table-9",
+        "section": "13.1. Authorization Token Alias Type",
+        "continuation_rows_merged": 0,
+        "row_count": 4,
+        "rows": [
+          {
+            "code": "0x0",
+            "code_value": 0,
+            "kind": "assignment",
+            "name": "DELETE",
+            "name_normalized": "DELETE",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Authorization Token Alias Type",
+            "registry_id": "authorization_token_alias_type"
+          },
+          {
+            "code": "0x1",
+            "code_value": 1,
+            "kind": "assignment",
+            "name": "REGISTER",
+            "name_normalized": "REGISTER",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Authorization Token Alias Type",
+            "registry_id": "authorization_token_alias_type"
+          },
+          {
+            "code": "0x2",
+            "code_value": 2,
+            "kind": "assignment",
+            "name": "USE_ALIAS",
+            "name_normalized": "USE_ALIAS",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Authorization Token Alias Type",
+            "registry_id": "authorization_token_alias_type"
+          },
+          {
+            "code": "0x3",
+            "code_value": 3,
+            "kind": "assignment",
+            "name": "USE_VALUE",
+            "name_normalized": "USE_VALUE",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Authorization Token Alias Type",
+            "registry_id": "authorization_token_alias_type"
+          }
+        ]
+      },
+      {
+        "registry": "Version Specific Parameters",
+        "registry_id": "message_parameters",
+        "family": "message-parameter",
+        "shape": "parameter-type",
+        "iana_registry": true,
+        "chapter": "IANA Considerations",
+        "table": "table-10",
+        "section": "13.2. Version Specific Parameters",
+        "continuation_rows_merged": 0,
+        "row_count": 12,
+        "rows": [
+          {
+            "code": "0x02",
+            "code_value": 2,
+            "kind": "assignment",
+            "name": "DELIVERY_TIMEOUT",
+            "name_normalized": "DELIVERY_TIMEOUT",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x03",
+            "code_value": 3,
+            "kind": "assignment",
+            "name": "AUTHORIZATION_TOKEN",
+            "name_normalized": "AUTHORIZATION_TOKEN",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x04",
+            "code_value": 4,
+            "kind": "assignment",
+            "name": "MAX_CACHE_DURATION",
+            "name_normalized": "MAX_CACHE_DURATION",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x08",
+            "code_value": 8,
+            "kind": "assignment",
+            "name": "EXPIRES",
+            "name_normalized": "EXPIRES",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x09",
+            "code_value": 9,
+            "kind": "assignment",
+            "name": "LARGEST_OBJECT",
+            "name_normalized": "LARGEST_OBJECT",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x0E",
+            "code_value": 14,
+            "kind": "assignment",
+            "name": "PUBLISHER_PRIORITY",
+            "name_normalized": "PUBLISHER_PRIORITY",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x10",
+            "code_value": 16,
+            "kind": "assignment",
+            "name": "FORWARD",
+            "name_normalized": "FORWARD",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x20",
+            "code_value": 32,
+            "kind": "assignment",
+            "name": "SUBSCRIBER_PRIORITY",
+            "name_normalized": "SUBSCRIBER_PRIORITY",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x21",
+            "code_value": 33,
+            "kind": "assignment",
+            "name": "SUBSCRIPTION_FILTER",
+            "name_normalized": "SUBSCRIPTION_FILTER",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x22",
+            "code_value": 34,
+            "kind": "assignment",
+            "name": "GROUP_ORDER",
+            "name_normalized": "GROUP_ORDER",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x30",
+            "code_value": 48,
+            "kind": "assignment",
+            "name": "DYNAMIC_GROUPS",
+            "name_normalized": "DYNAMIC_GROUPS",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          },
+          {
+            "code": "0x32",
+            "code_value": 50,
+            "kind": "assignment",
+            "name": "NEW_GROUP_REQUEST",
+            "name_normalized": "NEW_GROUP_REQUEST",
+            "scope": null,
+            "description_source": null,
+            "draft": 15,
+            "registry": "Version Specific Parameters",
+            "registry_id": "message_parameters"
+          }
+        ]
+      }
+    ]
+  },
   "excluded_candidates": [
     {
       "kind": "table",
@@ -665,7 +900,7 @@
       ],
       "hex_rows": 26,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "table",
@@ -677,7 +912,7 @@
       ],
       "hex_rows": 3,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "table",
@@ -689,7 +924,7 @@
       ],
       "hex_rows": 2,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "table",
@@ -701,7 +936,7 @@
       ],
       "hex_rows": 1,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "table",
@@ -717,7 +952,7 @@
       ],
       "hex_rows": 24,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "table",
@@ -733,7 +968,7 @@
       ],
       "hex_rows": 24,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "table",
@@ -745,7 +980,7 @@
       ],
       "hex_rows": 4,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "table",
@@ -758,33 +993,7 @@
       ],
       "hex_rows": 6,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
-    },
-    {
-      "kind": "table",
-      "table": "table-9",
-      "section": "13.1. Authorization Token Alias Type",
-      "header": [
-        "Code",
-        "Name",
-        "Specification"
-      ],
-      "hex_rows": 4,
-      "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
-    },
-    {
-      "kind": "table",
-      "table": "table-10",
-      "section": "13.2. Version Specific Parameters",
-      "header": [
-        "Parameter Type",
-        "Parameter Name",
-        "Specification"
-      ],
-      "hex_rows": 12,
-      "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     }
   ],
   "warnings": []

@@ -27,8 +27,8 @@
 //! the end of this file, and what they hold is the status of the ending rather
 //! than its timing: a publisher with a second update still outstanding may
 //! answer that first, because the sentence names a message and says nothing
-//! about order. A first attempt at this refused every answer for the request
-//! until the termination was written, and two of the gates above caught it.
+//! about order. An endpoint that refused every answer for the request until the
+//! termination had been written would fail two of the gates above.
 //!
 //! Drafts 15 and 16 state the same sentence and are not here, because neither
 //! can refuse an update at all: their `receive_*_update` records the update
@@ -47,8 +47,7 @@
 //!
 //! On a SUBSCRIBE or FETCH stream no ordering is needed. Those are answered with
 //! SUBSCRIBE_OK and FETCH_OK, so a REQUEST_OK there has nothing else it could be
-//! answering — and that is the case this file exists for, because it is the one
-//! the endpoint used to refuse outright.
+//! answering — and that is the case this file exists for.
 //!
 //! # What the drafts do not agree on
 //!
@@ -179,10 +178,9 @@ macro_rules! request_update_answer_gates {
             /// A REQUEST_OK answers an update on a subscription's stream, and the
             /// subscription is untouched by it.
             ///
-            /// The whole of what was missing: a SUBSCRIBE is answered with
-            /// SUBSCRIBE_OK, so nothing in the responder's response path had a
-            /// place for a REQUEST_OK on that stream and the answer the draft
-            /// requires could not be written at all.
+            /// A SUBSCRIBE is answered with SUBSCRIBE_OK, so a responder whose
+            /// response path has no place for a REQUEST_OK on that stream
+            /// cannot write the answer the draft requires at all.
             ///
             /// The PUBLISH_DONE at the end is the half that says the update did
             /// not move the subscription: it is the transition out of Active, so
@@ -192,7 +190,7 @@ macro_rules! request_update_answer_gates {
             /// # What it catches
             ///
             /// Ablation: dropping the `answers_an_update` branch from
-            /// `send_response_on_stream`, which is what the endpoint did before:
+            /// `send_response_on_stream`:
             ///
             /// ```text
             /// the REQUEST_OK a REQUEST_UPDATE requires: Err(UnknownRequest(0))
@@ -285,20 +283,19 @@ macro_rules! request_update_answer_gates {
             /// A SUBSCRIBE stream has the same freedom from ordering a FETCH
             /// stream does — SUBSCRIBE_OK is the only thing that answers a
             /// SUBSCRIBE — but a subscription has a lifecycle where a fetch has
-            /// only an answer, and the update used to be refused for arriving
-            /// while that lifecycle was still at Subscribing. The PUBLISH_DONE
-            /// at the end says the update moved nothing: it is the transition
-            /// out of Active, so it succeeds only if the update left the
-            /// subscription to be accepted normally.
+            /// only an answer, and a lifecycle that admits an update only from
+            /// Active refuses one that arrives while the SUBSCRIBE is still
+            /// unanswered. The PUBLISH_DONE at the end says the update moved
+            /// nothing: it is the transition out of Active, so it succeeds only
+            /// if the update left the subscription to be accepted normally.
             ///
             /// # What it catches
             ///
-            /// Ablation: `on_subscribe_update` restricted to `Active`, which is
-            /// what the subscription machine shipped:
+            /// Ablation: `on_subscribe_update` restricted to `Active`:
             ///
             /// ```text
             /// thread 'draft19::an_update_before_a_subscribes_own_answer_is_still_answered'
-            /// panicked at crates\moqtap-client\tests\request_update_answers.rs:549:1:
+            /// panicked at crates\moqtap-client\tests\request_update_answers.rs:
             /// a REQUEST_UPDATE on its own request's stream: Subscription(InvalidTransition { from: Subscribing, event: "on_subscribe_update" })
             /// ```
             ///
@@ -461,8 +458,7 @@ macro_rules! request_update_answer_gates {
             ///
             /// # What it catches
             ///
-            /// Refusing an update and recording nothing, which is what all three
-            /// drafts did:
+            /// Refusing an update and recording nothing:
             ///
             /// ```text
             /// the ending after a refused update carries UPDATE_FAILED and no other
@@ -806,10 +802,11 @@ request_update_answer_gates!(
 ///
 /// Section 10.9's list of the requests an update may modify grew by one between
 /// draft-17 and draft-18: "SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE,
-/// SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS". The endpoint probed every other kind
-/// and not that one, so a conforming subscriber updating a SUBSCRIBE_TRACKS was
-/// told the crate did not know the request — a refusal of traffic the draft
-/// permits, which is the same shape as the gap this file's other gates close.
+/// SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS". An endpoint that probed every other
+/// kind and not that one would tell a conforming subscriber updating a
+/// SUBSCRIBE_TRACKS that the crate did not know the request — a refusal of
+/// traffic the draft permits, which is the same shape as the gap this file's
+/// other gates close.
 ///
 /// It sits outside the macro above because draft-17 has no such message and
 /// draft-19, which does, already probed for it.

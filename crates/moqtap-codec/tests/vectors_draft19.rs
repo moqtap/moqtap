@@ -480,10 +480,10 @@ fn run_fetch_vectors(relative_path: &str) {
                 // Delta arriving alongside a Group ID Delta sets the Object ID
                 // outright.
                 //
-                // This previously cleared `prev_object_id` on a group change and
-                // read a missing Object ID Delta as 0, which is the reading the
-                // sentence above rules out. No vector reached it until
-                // `fetch-stream-new-group-object-id-continues` was added.
+                // Clearing `prev_object_id` on a group change and reading a
+                // missing Object ID Delta as 0 is the reading the sentence above
+                // rules out. `fetch-stream-new-group-object-id-continues` is the
+                // one vector that tells the two apart.
                 let object_id = if first_object {
                     object_id_delta.expect("first fetch object must include Object ID Delta")
                 } else {

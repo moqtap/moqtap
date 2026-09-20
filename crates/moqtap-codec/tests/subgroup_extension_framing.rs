@@ -8,11 +8,12 @@
 //! not a property of the object, and an encoder holding only the object cannot
 //! work it out.
 //!
-//! The codec's draft-neutral writer knows this and always has: it is handed the
-//! header, keeps the answer, and refuses an object that disagrees with it. The
-//! per-draft `ObjectHeader::encode` beside it does not take a header, so it
-//! guessed — "absent", on every call — and `encode_checked` inherited the
-//! guess. That is the path the client writes objects through.
+//! The codec's draft-neutral writer is handed the header, keeps the answer, and
+//! refuses an object that disagrees with it. The per-draft
+//! `ObjectHeader::encode` beside it does not take a header, so it has no answer
+//! to keep: an entry point built on it can only guess, and "absent" on every
+//! call is the guess `encode_checked` is left with. That is the path the client
+//! writes objects through.
 //!
 //! On a stream whose header said otherwise the guess is worse than lossy. The
 //! reader is looking for an Extension Headers Length and takes the Object
@@ -27,7 +28,7 @@
 //! drafts 08 through 10 give every object one unconditionally, so no header
 //! type can disagree with an object and there is nothing to guess. Drafts 14
 //! and later hold the framing in a reader object the write path threads
-//! through, so they were told all along.
+//! through, so the answer reaches the write path rather than being guessed.
 //!
 //! # What is gated here
 //!
@@ -170,8 +171,8 @@ fn told_the_framing_the_object_survives_its_own_reader() {
 fn the_guessed_framing_is_read_back_as_a_different_object() {
     use moqtap_codec::draft11::data_stream::ObjectHeader;
 
-    // Exactly what `encode_checked` used to emit: the object's own fields, in
-    // the framing that omits the block.
+    // What a writer that omits the block emits: the object's own fields, in
+    // the framing that leaves the extension block out.
     let mut alone = Vec::new();
     object_11().encode_with_extensions(false, &mut alone);
     alone.extend_from_slice(&[0xDE, 0xAD]);

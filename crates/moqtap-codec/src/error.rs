@@ -305,9 +305,9 @@ pub enum CodecError {
     /// the four sites state the close outright, and the sentence enumerates 0
     /// and 1 without giving a third value any meaning — so this is the same rule
     /// stated shorter, not a permission. Reading an omission the other way is
-    /// what put a wrong claim about Group Order into this codec: drafts 12
-    /// through 14 do state the 0x0 rule for SUBSCRIBE_OK, PUBLISH and FETCH_OK,
-    /// and a doc comment here asserted for a while that they did not.
+    /// how a wrong claim gets in: on Group Order, drafts 12 through 14 do state
+    /// the 0x0 rule for SUBSCRIBE_OK, PUBLISH and FETCH_OK, so a reading that has
+    /// them silent about it is wrong about all three.
     ///
     /// Drafts 07 through 10 have no such field. Drafts 15 and later carry
     /// forwarding as the FORWARD parameter instead, under the same rule but a
@@ -335,8 +335,8 @@ pub enum CodecError {
     ///
     /// The serialization moves as well. Drafts 07 through 14 carry the Filter
     /// Type as a field of SUBSCRIBE and its relatives; drafts 15 and later carry
-    /// it as the first field inside the length-prefixed filter parameter, where
-    /// nothing had been reading it at all.
+    /// it as the first field inside the length-prefixed filter parameter, which
+    /// is a place a reader of the field has to know to look.
     #[error("filter type {0} is not one this draft assigns")]
     InvalidFilterType(u64),
     /// A FETCH names a Fetch Type no draft in its range assigns.
@@ -482,9 +482,9 @@ pub enum CodecError {
     /// Section 10.4.2 describes the same arithmetic and states no consequence,
     /// so on that draft this is a decode failure and nothing more.
     ///
-    /// Distinct from [`CodecError::InvalidField`], which the object reader
-    /// previously answered with: a caller could not tell the wrap from a dozen
-    /// unrelated malformations, and so could not act on the rule.
+    /// Distinct from [`CodecError::InvalidField`], which is too coarse for this
+    /// rule: a caller could not tell the wrap from a dozen unrelated
+    /// malformations, and so could not act on the rule.
     #[error("object id {0} + {1} + 1 exceeds 2^64 - 1")]
     ObjectIdOverflow(u64, u64),
     /// An Object with Object Status 'Object Does Not Exist' carries extension
@@ -512,10 +512,10 @@ pub enum CodecError {
     /// and a status datagram. A plain datagram has no status field and is the
     /// one carrier that cannot break the rule.
     ///
-    /// Distinct from [`CodecError::InvalidField`], which these four drafts
-    /// previously answered with: a caller could not tell this rule from a dozen
-    /// unrelated malformations, so a session could not be closed over it
-    /// without closing sessions the drafts do not ask to be closed.
+    /// Distinct from [`CodecError::InvalidField`], which is too coarse for this
+    /// rule: a caller could not tell it from a dozen unrelated malformations, so
+    /// a session could not be closed over it without closing sessions the drafts
+    /// do not ask to be closed.
     #[error("object with status 'object does not exist' carries {0} bytes of extension headers")]
     ExtensionsOnNonExistentObject(usize),
     /// An object arrived carrying a payload the draft gives it no room for.
@@ -678,9 +678,9 @@ pub enum CodecError {
     /// inside a buffer already bounded by the declared Length there is nothing
     /// left to arrive, so running out there means something else entirely.
     ///
-    /// Distinct from [`CodecError::InvalidField`], which the leftover-bytes case
-    /// previously answered with: a caller could not tell it from a dozen
-    /// unrelated malformations, so a session could not be closed over it.
+    /// Distinct from [`CodecError::InvalidField`], which is too coarse for the
+    /// leftover-bytes case: a caller could not tell it from a dozen unrelated
+    /// malformations, so a session could not be closed over it.
     #[error("control message declares {declared} bytes of payload; {detail}")]
     ControlMessageLengthMismatch {
         /// The Length field the sender wrote.
@@ -698,4 +698,58 @@ pub enum CodecError {
     /// Draft not implemented or not enabled via feature flag.
     #[error("unsupported draft: {0}")]
     UnsupportedDraft(String),
+}
+
+impl CodecError {
+    /// Whether more bytes might complete this decode.
+    ///
+    /// A reader that owns a growing buffer asks this to tell *the input has
+    /// not all arrived* from *the input is wrong*: `true` means fill the
+    /// buffer and decode again, `false` means the bytes are what they are and
+    /// no amount of waiting improves them.
+    ///
+    /// # Why this is a predicate and not a variant test
+    ///
+    /// Running out of bytes has four spellings here, because a decode can run
+    /// out inside a nested decoder that reports in its own error type and each
+    /// one names the condition after itself:
+    ///
+    /// * [`CodecError::UnexpectedEnd`], from a field this module read;
+    /// * [`CodecError::VarInt`] carrying [`VarIntError::UnexpectedEnd`], from a
+    ///   varint whose length prefix promised bytes the buffer did not hold;
+    /// * [`CodecError::Kvp`] carrying [`KvpError::UnexpectedEnd`], and
+    /// * the same wrapped one level deeper as
+    ///   [`KvpError::VarInt`]`(`[`VarIntError::UnexpectedEnd`]`)`, from a
+    ///   key-value pair that ran out in its length or in its value.
+    ///
+    /// All four mean the same thing to a caller and only the first announces
+    /// it in the variant name. That is not a hypothetical: a reader matching
+    /// the first alone treated a subgroup object whose leading varint had not
+    /// arrived yet as a malformed stream, and reported `insufficient bytes for
+    /// varint decoding` for an object that was merely still in flight. The
+    /// condition is one fact about a buffer, so it is answered in one place
+    /// rather than re-derived by every reader that has to know it.
+    ///
+    /// # What is deliberately not here
+    ///
+    /// [`CodecError::ControlMessageLengthMismatch`] is the case that looks
+    /// like this one and is its opposite, and its own documentation says why:
+    /// inside a buffer already bounded by a declared Length there is nothing
+    /// left to arrive, so running out there is a malformation and waiting for
+    /// more would be waiting forever.
+    ///
+    /// [`VarIntError::UnexpectedEnd`]: crate::varint::VarIntError::UnexpectedEnd
+    /// [`KvpError::UnexpectedEnd`]: crate::kvp::KvpError::UnexpectedEnd
+    /// [`KvpError::VarInt`]: crate::kvp::KvpError::VarInt
+    pub fn is_incomplete(&self) -> bool {
+        use crate::kvp::KvpError;
+        use crate::varint::VarIntError;
+        matches!(
+            self,
+            CodecError::UnexpectedEnd
+                | CodecError::VarInt(VarIntError::UnexpectedEnd)
+                | CodecError::Kvp(KvpError::UnexpectedEnd)
+                | CodecError::Kvp(KvpError::VarInt(VarIntError::UnexpectedEnd))
+        )
+    }
 }

@@ -15,14 +15,6 @@
 //! publisher, so the subscription it names is one the peer opened - and the
 //! record that holds those is not the record that holds this endpoint's own.
 //!
-//! # What was here before
-//!
-//! The update was looked for among the subscriptions this endpoint had opened,
-//! on every draft. On these five that is worse than a miss: they have no
-//! parity rule, both ends allocate identifiers from zero, and the peer's
-//! subscribe 3 and this endpoint's subscribe 3 are two different
-//! subscriptions. An update for the peer's found this endpoint's and moved it.
-//!
 //! # Why none of this closes the session
 //!
 //! These five say **SHOULD**: "A publisher SHOULD close the Session as a
@@ -350,7 +342,7 @@ macro_rules! update_gates {
             /// # What it catches, observed by making the change and running it
             ///
             /// Looking the update up among the subscriptions this endpoint
-            /// opened, which is what every draft used to do:
+            /// opened rather than among the peer's:
             ///
             /// ```text
             /// the peer's update of its own subscription: UpdateForUnknownSubscribe(0)

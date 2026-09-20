@@ -104,7 +104,7 @@ fn subscribe_ok_with_an_unassigned_content_exists() -> Vec<u8> {
 /// ```text
 /// ---- an_unassigned_content_exists_closes_the_quic_connection stdout ----
 ///
-/// thread 'an_unassigned_content_exists_closes_the_quic_connection' (36548) panicked at crates\moqtap-client\tests\draft14_content_exists_closes_the_session.rs:134:14:
+/// thread 'an_unassigned_content_exists_closes_the_quic_connection' (36548) panicked at crates\moqtap-client\tests\draft14_content_exists_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 ///

@@ -51,9 +51,9 @@ use moqtap_proxy::parser::data::DataStreamType;
 
 /// A [`FramerConfig`] with an explicit buffer cap.
 ///
-/// `FramerConfig` is `#[non_exhaustive]` from 0.4.0, so a struct literal
-/// no longer compiles from this crate. Only the construction changed; the
-/// boundary these tests assert on is the same number.
+/// `FramerConfig` is `#[non_exhaustive]`, so a struct literal does not
+/// compile from this crate. The boundary these tests assert on is the
+/// number the builder sets.
 fn capped(max_buffered_object_bytes: usize) -> FramerConfig {
     FramerConfig::new().with_max_buffered_object_bytes(max_buffered_object_bytes)
 }
@@ -512,10 +512,10 @@ fn objects_with_extensions_frame_correctly_from_independent_bytes() {
 /// acceptable, so it is worth a test.
 ///
 /// The framers here are built with [`ObjectFramer::new`], which hands over no
-/// fetch Group Order at all, so on drafts 18 and 19 every stream below is the
-/// case a session reaches when a publisher opens a response to a request
+/// fetch Group Order at all, so on drafts 18, 19 and 20 every stream below is
+/// the case a session reaches when a publisher opens a response to a request
 /// nobody made. Every other draft resolves such a stream from its own bytes
-/// and is framed rather than forwarded, which is why only two appear here.
+/// and is framed rather than forwarded, which is why only three appear here.
 ///
 /// Catches a framer that dropped, truncated, or duplicated bytes on the
 /// path it takes when a stream is not addressed — the least-exercised path
@@ -530,6 +530,8 @@ fn fetch_streams_whose_group_order_is_unknown_are_forwarded_intact() {
         DraftVersion::Draft18,
         #[cfg(feature = "draft19")]
         DraftVersion::Draft19,
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20,
     ] {
         for chunk in [1usize, 7, stream.len()] {
             let out =
@@ -724,7 +726,7 @@ fn unsubgrouped_fetch_stream(draft: DraftVersion) -> Vec<u8> {
 /// *Ablation (measured):* restore `subgroup_id: Some(m.subgroup_id)` in
 /// `ObjectFramer::object_meta`. Fails on both drafts with
 /// `left: [Some(2), Some(0), Some(0)]`, `right: [Some(2), None, None]` — the
-/// placeholder arriving as subgroup zero, exactly as it used to.
+/// placeholder arriving as subgroup zero.
 #[test]
 #[cfg(any(feature = "draft16", feature = "draft17"))]
 fn a_fetch_frame_with_no_subgroup_of_its_own_reports_none() {
@@ -845,12 +847,11 @@ impl ProxyObserver for ObjectCollector {
 /// A subgroup stream and an unframeable fetch stream, both on draft-19,
 /// through a real proxy session with an observer attached.
 ///
-/// Asserts the two acceptance properties together on a draft where
-/// the proxy previously emitted no object events at all: the bytes arriving
-/// upstream are identical to those sent, and one `ProxyEvent::Object` fires
-/// per object with the values the *wire* states — the stream is built by
-/// this file's encoder, not by the codec, so a reader and writer that share
-/// a misunderstanding cannot both hide inside a passing result.
+/// Asserts the two acceptance properties together: the bytes arriving
+/// upstream are identical to those sent, and one `ProxyEvent::Object`
+/// fires per object with the values the *wire* states — the stream is
+/// built by this file's encoder, not by the codec, so a reader and writer
+/// that share a misunderstanding cannot both hide inside a passing result.
 ///
 /// The fetch stream rides the same session to prove the forwarding-fidelity
 /// promise end to end: unframeable, therefore unaddressable, but not one

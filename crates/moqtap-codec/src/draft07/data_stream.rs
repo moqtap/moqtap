@@ -555,7 +555,8 @@ mod tests {
     /// the loss this gate exists for: the datagram that comes back is an
     /// ordinary object and the marker is simply gone, indistinguishable from
     /// one that never carried a status. The second half of the test observes
-    /// exactly that, so the gate states the old behaviour as well as the new.
+    /// exactly that, so the gate states `encode`'s silent drop as well as
+    /// `encode_checked`'s refusal.
     ///
     /// The statuses are read from `ObjectStatus::ALL` rather than listed here,
     /// so the sweep follows the draft's registry instead of a copy of it.
@@ -567,7 +568,7 @@ mod tests {
     /// # What this catches, observed by making each change and running it
     ///
     /// Dropping the check from `encode_checked`, leaving the payload length to
-    /// decide on its own as it did before:
+    /// decide on its own:
     ///
     /// ```text
     /// encode_checked must refuse ObjectDoesNotExist beside a payload; got Ok(())

@@ -8,16 +8,11 @@
 //! restriction at all: it "communicates an initial value ... to the receiving
 //! endpoint", which is something either end may do.
 //!
-//! The client had the two exactly the wrong way round. It refused the budget
-//! parameter in a CLIENT_SETUP and accepted a PATH from a server. The first
-//! half meant no peer could grant this endpoint a budget during the handshake,
-//! so the first request was Blocked in both directions.
-//!
 //! The first gate below decodes a canonical vector rather than building a
-//! message, because that is where the disagreement showed: the corpus carried
-//! a CLIENT_SETUP the validator would not accept, and only one of the two was
-//! being tested. Every draft is driven, because the sentence is in every draft
-//! and it was enforced correctly in none of them.
+//! message, because that is where a disagreement between the two shows: a
+//! CLIENT_SETUP the corpus carries and the validator will not accept is
+//! invisible to a gate that builds its own message, which exercises only one of
+//! them. Every draft is driven, because the sentence is in every draft.
 
 #![allow(clippy::items_after_test_module)]
 

@@ -173,8 +173,8 @@ mod draft08 {
         encoded(&object(9, ObjectStatus::Normal)).expect("a normal object has no such rule");
     }
 
-    /// The status datagram carries the same status field and the same rule, and
-    /// had no checked entry point at all before this.
+    /// The status datagram carries the same status field and the same rule, so
+    /// it needs a checked entry point of its own.
     #[test]
     fn a_status_datagram_states_the_rule_too() {
         let mut buf = Vec::new();
@@ -320,8 +320,8 @@ mod draft09 {
         encoded(&object(9, ObjectStatus::Normal)).expect("a normal object has no such rule");
     }
 
-    /// The status datagram carries the same status field and the same rule, and
-    /// had no checked entry point at all before this.
+    /// The status datagram carries the same status field and the same rule, so
+    /// it needs a checked entry point of its own.
     #[test]
     fn a_status_datagram_states_the_rule_too() {
         let mut buf = Vec::new();
@@ -467,8 +467,8 @@ mod draft10 {
         encoded(&object(9, ObjectStatus::Normal)).expect("a normal object has no such rule");
     }
 
-    /// The status datagram carries the same status field and the same rule, and
-    /// had no checked entry point at all before this.
+    /// The status datagram carries the same status field and the same rule, so
+    /// it needs a checked entry point of its own.
     #[test]
     fn a_status_datagram_states_the_rule_too() {
         let mut buf = Vec::new();

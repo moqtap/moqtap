@@ -1395,8 +1395,8 @@ fn writes_variant_key(data: &EventData, key: &str) -> bool {
 /// for the first entry it can **use**, where the header's lookup returns the
 /// first entry for a key whatever it holds. So on a file repeating a key with
 /// two different types — `"sid": "x"` and then `"sid": 9` — the field takes
-/// the second and the walk drops the first. Both were lost before this walk
-/// existed, and SPEC.md leaves readers free to disagree over which of a
+/// the second and the walk drops the first. Without this walk both are lost,
+/// and SPEC.md leaves readers free to disagree over which of a
 /// duplicate pair wins, so nothing may depend on which one it is.
 fn unrecognised_keys(
     pairs: &[(Value, Value)],

@@ -9,30 +9,29 @@
 //!
 //! # What the empty table means
 //!
-//! Six vectors used to sit in it. Drafts 11 and 12 each carried a
-//! `datagram-status-end-of-track`, a `fetch-end-of-track` and a
-//! `subgroup-end-of-track` vector at Object Status 0x5, seeded from the earlier
-//! numbering in which 0x4 is End of Track and Group and 0x5 is End of Track.
-//! Draft-11 Section 9.1.1.1 and draft-12 Section 9.2.1.1 merged those two into
-//! one: they assign 0x0, 0x1, 0x3 and 0x4 only, name 0x4 "End of Track", and
-//! say any other value SHOULD be treated as a protocol error that terminates
-//! the session with a Protocol Violation. The corpus now encodes 0x4, so the
-//! disagreement is gone and the rows went with it.
+//! The trap a row would record is a vector seeded from the draft-08 numbering,
+//! in which 0x4 is End of Track and Group and 0x5 is End of Track. Draft-11
+//! Section 9.1.1.1 and draft-12 Section 9.2.1.1 merge those two into one: they
+//! assign 0x0, 0x1, 0x3 and 0x4 only, name 0x4 "End of Track", and say any
+//! other value SHOULD be treated as a protocol error that terminates the
+//! session with a Protocol Violation. A `datagram-status-end-of-track`,
+//! `fetch-end-of-track` or `subgroup-end-of-track` vector carrying 0x5 on
+//! either draft is that trap; the corpus encodes 0x4, so no row is needed.
 //!
 //! An empty table is not a weaker check than a populated one — it is the
 //! stronger claim. The sweep is the invariant; the table only ever named the
 //! exceptions to it. With no exceptions left, every draft asserts that its
 //! corpus agrees with it completely, and a bad vector on any draft fails
-//! exactly as the original six would have. A row is added back only to record a
+//! outright rather than being excused by a row. A row is added only to record a
 //! disagreement this repository has decided to keep, and never to quiet one.
 //!
 //! # Why an empty result is not trusted on its own
 //!
-//! The sweep now expects an empty row set everywhere, which is also what a
-//! sweep that read nothing produces. Three ways of reading nothing are
-//! therefore refused rather than returned as a clean answer: a directory with
-//! no vector files, a file with no vectors, and — the one that actually
-//! happened — a draft whose whole corpus yielded no status field at all.
+//! The sweep expects an empty row set everywhere, which is also what a sweep
+//! that read nothing produces. Three ways of reading nothing are therefore
+//! refused rather than returned as a clean answer: a directory with no vector
+//! files, a file with no vectors, and — the one this corpus can actually
+//! produce — a draft whose whole corpus yields no status field at all.
 //!
 //! That last one is why [`test_vectors::statuses_in`] names two JSON keys. The
 //! corpus spells the field `object_status` in drafts 07-14 and on drafts 15-20's
@@ -147,10 +146,10 @@ fn data_stream_files(draft: &str) -> Vec<String> {
 ///
 /// Three ways of proving nothing are refused rather than returned as an empty
 /// answer: a directory with no files, a file with no vectors, and — the one
-/// that actually happened — a draft whose whole corpus yielded no status field,
-/// which is what a walk looking for a key the corpus stopped using looks like
-/// from here. All three read as "clean" in the row set alone, and now that
-/// every draft's expected set is empty, "clean" is the answer every sweep is
+/// this corpus can actually produce — a draft whose whole corpus yields no
+/// status field, which is what a walk looking for a key the corpus does not use
+/// looks like from here. All three read as "clean" in the row set alone, and
+/// with every draft's expected set empty, "clean" is the answer every sweep is
 /// hoping for.
 fn sweep(draft: &str, assigned: &[u64]) -> Vec<Row> {
     let mut rows = Vec::new();
@@ -249,21 +248,22 @@ corpus_sweep!(draft20_corpus_object_statuses, "draft20", draft20, "draft20");
 // decodes every committed message vector that claims a successful decode, and
 // the set that fails must be exactly the rows recorded for that draft.
 //
-// The last clause of that assertion has now fired for real. Ten rows used to be
-// here, each a parameter written with an outer length its own definition does
-// not give it, and correcting the corpus made the sweep report them as rows
-// recorded and no longer refused — which is the prompt the message was written
-// for. Draft-17 was the control that made those ten readable as an error rather
-// than as a disagreement about the draft, because its same-named vectors already
-// carried the shorter framing; `request-ok.json [with-largest-object]` on drafts
-// 18 and 19 is now byte for byte the draft-17 vector it should always have
-// matched.
+// Both shapes that could populate it have an answer that is not a row.
 //
-// What is left is the other kind, where the bytes are right and the message is
-// wrong, and there draft-17 carries rows of its own. That is the direction worth
-// keeping in mind when reading the list: it is not a record of two late drafts
-// being sloppier than their predecessor, it is a record of a rule that arrives
-// at draft-17 and of a corpus written before it did.
+// One is a parameter written with an outer length its own definition does not
+// give it. Draft-17 Section 9.3 defines a Location as "Two consecutive varints
+// (Group, Object)", so it carries no outer length, and a vector that wraps one
+// in a length is simply wrong bytes; the answer is to correct them. Drafts 18,
+// 19 and 20 spell `request-ok.json [with-largest-object]` byte for byte as
+// draft-17 does, and draft-17 is the control that makes the shorter framing
+// readable as correct rather than as a disagreement about the draft.
+//
+// The other is where the bytes are right and the message is wrong: a parameter
+// in a message type its own definition does not name, which draft-17 Section
+// 9.3.1 and drafts 18 through 20 Section 10.2.1 require the receiver to close
+// the connection over. Those are recorded as negative vectors asserting
+// `parameter_out_of_scope` rather than as rows here, which is the difference
+// between a rule being tested and a rule being tolerated.
 //
 // A corrected vector is read, not skipped, and that is measured rather than
 // assumed. Splicing the length back into draft-18 `request-ok.json
@@ -280,7 +280,7 @@ corpus_sweep!(draft20_corpus_object_statuses, "draft20", draft20, "draft20");
 // and in the runner that would otherwise have skipped it:
 //
 // ```text
-// thread 'd18_request_ok' panicked at crates\moqtap-codec\tests\vectors_draft18.rs:27:37:
+// thread 'd18_request_ok' panicked at crates\moqtap-codec\tests\vectors_draft18.rs:
 // [with-largest-object] decode failed: control message declares 5 bytes of payload; its fields ran past the end
 // ```
 

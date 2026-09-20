@@ -262,7 +262,7 @@ pub struct Unannounce {
 }
 
 // ============================================================
-// Subscribe Namespace Messages (renamed from Subscribe Announces)
+// Subscribe Namespace Messages (SUBSCRIBE_ANNOUNCES on drafts 12 and earlier)
 // ============================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]

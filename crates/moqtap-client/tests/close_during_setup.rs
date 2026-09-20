@@ -11,26 +11,29 @@
 //! the sentence and kept the code: VERSION_NEGOTIATION_FAILED (0x15), "The
 //! client didn't offer a version supported by the server".
 //!
-//! A version mismatch is discoverable only from the Setup exchange, so a state
-//! machine that cannot close there cannot record the one outcome that code
-//! exists for. Thirteen of the fourteen could not: `on_close` accepted `Active`
-//! and `Draining` and nothing else, in the same line in the same place in each.
+//! On drafts 07 through 14 a version mismatch is discoverable only from the
+//! Setup exchange, so a state machine that cannot close there cannot carry out
+//! the close those drafts demand. A machine whose `on_close` accepts only
+//! `Active` and `Draining` cannot, and the arm that admits `SetupExchange` is
+//! one line in one place in each of the fourteen modules, which is why every
+//! draft is gated separately.
 //!
 //! # Draft-20 is here for the first sentence only
 //!
-//! It has no VERSION_NEGOTIATION_FAILED. Draft-20 removed the row, and its
-//! registry says why: "Version selection has happened in the ALPN since
-//! draft-15, so there is no in-band negotiation left to fail." The code that
-//! motivated the widening on the other thirteen is the one code draft-20 has
-//! not got.
+//! It has no VERSION_NEGOTIATION_FAILED: draft-20's changelog records the row
+//! being taken out — "Remove the VERSION_NEGOTIATION_FAILED session error
+//! (#1867)" — and no other code replaces it. Nothing is left for such a code
+//! to report, because draft-20 performs version negotiation in the ALPN; it is
+//! the drafts before 15 that negotiate in the SETUP messages. So the one code
+//! that names a Setup-time outcome on drafts 11 through 19 is the one code
+//! draft-20 has not got.
 //!
 //! Which leaves the Termination sentence, and that is enough on its own: a
 //! session may be terminated at any point, the Setup exchange is a point, and a
 //! machine that refuses there is wrong whether or not a registered code names
-//! the reason. Draft-20 was ported after the widening and inherited it, so this
-//! gate is a regression guard rather than a fix — which is what makes its
-//! absence worth closing, because nothing else would have said if the port had
-//! dropped the `SetupExchange` arm on the way across.
+//! the reason. On draft-20 this gate is therefore a pure regression guard, and
+//! it earns its place as one: nothing else in the file would say if draft-20's
+//! `on_close` lost its `SetupExchange` arm.
 //!
 //! `Connecting` still refuses, and that is asserted too. It is the state before
 //! any transport exists, so there is no session to terminate rather than a
@@ -55,12 +58,12 @@ macro_rules! close_during_setup_gates {
             ///
             /// # Ablation
             ///
-            /// `SetupExchange` removed from `on_close`, which is what
-            /// thirteen of the fourteen shipped, measured on draft-19:
+            /// `SetupExchange` removed from `on_close`, measured on
+            /// draft-19:
             ///
             /// ```text
             /// thread 'draft19::a_session_closes_before_it_is_established'
-            /// panicked at crates\moqtap-client\tests\close_during_setup.rs:111:1:
+            /// panicked at crates\moqtap-client\tests\close_during_setup.rs:
             /// a session may be terminated at any point: InvalidTransition { from: SetupExchange, to: Closed }
             /// ```
             ///
@@ -69,12 +72,12 @@ macro_rules! close_during_setup_gates {
             ///
             /// ```text
             /// thread 'draft19::an_endpoint_closes_before_it_is_established'
-            /// panicked at crates\moqtap-client\tests\close_during_setup.rs:111:1:
+            /// panicked at crates\moqtap-client\tests\close_during_setup.rs:
             /// an endpoint may terminate at any point: Session(InvalidTransition { from: SetupExchange, to: Closed })
             /// ```
             ///
-            /// The same cut was made again in draft-20's `on_close` when this
-            /// file gained its arm, to establish that the arm can fail. It
+            /// The same cut in draft-20's `on_close` establishes that the
+            /// draft-20 arm can fail too. It
             /// reddens these two gates on draft-20 and nothing else in the
             /// file — 40 passed, 2 failed — which is the count that says the
             /// third gate below is a control and not a copy: it asserts the
@@ -90,8 +93,8 @@ macro_rules! close_during_setup_gates {
                 assert_eq!(sm.state(), SessionState::Closed);
             }
 
-            /// The endpoint reaches the same close, so the widening is not
-            /// stranded one layer below its only caller.
+            /// The endpoint reaches the same close, so the `SetupExchange` arm
+            /// is not stranded one layer below its only caller.
             #[test]
             fn an_endpoint_closes_before_it_is_established() {
                 let mut endpoint = Endpoint::new(Role::Client);

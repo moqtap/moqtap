@@ -128,22 +128,63 @@ fn decode_range_filter(bytes: &[u8], parameter_type: u64) -> Value {
     Value::Map(o)
 }
 
+/// Render a LOCATION FILTER (0x21) parameter value: a Filter Type and the Start
+/// Location and End Group Delta that type promises.
+///
+/// # Nothing has checked that the value holds the fields its Filter Type names
+///
+/// 0x21 is an odd Type, so `KeyValuePair::decode` keeps whatever
+/// length-prefixed bytes arrived and the value reaches here unexamined. None of
+/// `decode_parameters`' own checks looks at the *contents* of a filter value,
+/// and `crate::dispatch::AnyControlMessage::fields` renders every message that
+/// decoded — so a peer's bytes reach this function directly. That is the chain
+/// `tests/hostile_parameter_values.rs` sets out in full.
+///
+/// The truncation that follows an AbsoluteStart or AbsoluteRange Filter Type is
+/// the nastier shape, because the value looks well formed right up to the point
+/// where it is not: the Filter Type decodes cleanly and the Start Location it
+/// promises is simply not there.
+///
+/// # What a value it cannot read renders as
+///
+/// The raw bytes, as `fields::params`, `decode_range_filter` and
+/// `decode_largest_object` do. Field extraction runs on a message that has
+/// already decoded, so it has no refusal to give: what a peer sent is what
+/// there is to show.
 fn decode_location_filter(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let filter_type = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
+    let Ok(filter_type) = VarInt::decode_moqt::<Wire>(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
+    let filter_type = filter_type.into_inner();
     let mut obj = Map::new();
     obj.insert("filter_type".into(), vi(filter_type));
     match filter_type {
         3 => {
-            let start_group = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
-            let start_object = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
+            let Ok(start_group) = VarInt::decode_moqt::<Wire>(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_group = start_group.into_inner();
+            let Ok(start_object) = VarInt::decode_moqt::<Wire>(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_object = start_object.into_inner();
             obj.insert("start_group".into(), vi(start_group));
             obj.insert("start_object".into(), vi(start_object));
         }
         4 => {
-            let start_group = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
-            let start_object = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
-            let end_group = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
+            let Ok(start_group) = VarInt::decode_moqt::<Wire>(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_group = start_group.into_inner();
+            let Ok(start_object) = VarInt::decode_moqt::<Wire>(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_object = start_object.into_inner();
+            let Ok(end_group) = VarInt::decode_moqt::<Wire>(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let end_group = end_group.into_inner();
             obj.insert("start_group".into(), vi(start_group));
             obj.insert("start_object".into(), vi(start_object));
             obj.insert("end_group".into(), vi(end_group));
@@ -188,10 +229,27 @@ fn auth_token_to_json_d19(bytes: &[u8]) -> Value {
     Value::Map(o)
 }
 
+/// Render a LARGEST OBJECT (0x09) parameter value: a Group and an Object, as
+/// two varints.
+///
+/// # What a value it cannot read renders as
+///
+/// The raw bytes, as `fields::params` does. Field extraction runs on a message
+/// that has already decoded, so it has no refusal to give, and it has no
+/// guarantee the two varints are there: nothing between `KeyValuePair::decode`
+/// and here looks at a 0x09 value's contents. An empty value fails the first
+/// read and a single `0x00` fails the second, which is the nastier of the two —
+/// the value looks well formed right up to the point where it is not. Neither
+/// read may panic on it.
 fn decode_largest_object(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let group = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
-    let object = VarInt::decode_moqt::<Wire>(&mut buf).unwrap().into_inner();
+    let Ok(group) = VarInt::decode_moqt::<Wire>(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
+    let Ok(object) = VarInt::decode_moqt::<Wire>(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
+    let (group, object) = (group.into_inner(), object.into_inner());
     let mut obj = Map::new();
     obj.insert("group".into(), vi(group));
     obj.insert("object".into(), vi(object));
@@ -228,7 +286,7 @@ fn params_to_json(params: &[KeyValuePair]) -> Value {
     })
 }
 
-fn options_to_json(options: &[KeyValuePair]) -> Value {
+pub(crate) fn options_to_json(options: &[KeyValuePair]) -> Value {
     crate::fields::kvp_entries(options, |key, value| {
         let Some(name) = d19_option_name(key) else {
             return (None, None);

@@ -556,12 +556,18 @@ fn check_track_property_values(properties: &[KeyValuePair]) -> Result<(), CodecE
             }
             KvpValue::Bytes(bytes) if key == IMMUTABLE_PROPERTIES => {
                 let mut inner = &bytes[..];
-                match decode_kvp_delta(&mut inner) {
-                    Ok(nested) => check_track_property_values(&nested)?,
-                    // Not a Key-Value-Pair run. See the note above: reading the
-                    // block is a permission, so one that cannot be read is
-                    // carried rather than refused.
-                    Err(_) => return Ok(()),
+                // A block that is not a Key-Value-Pair run is skipped rather
+                // than refused. See the note above: reading inside it is a
+                // permission, so one that cannot be read is carried.
+                //
+                // Skipped means this block and only this block. The rule the
+                // draft states here is about the block whose pairs will not
+                // parse, and says nothing about its neighbours; ending the
+                // whole walk would let a peer keep an out-of-range property
+                // from being looked at by putting an unparseable block in
+                // front of it.
+                if let Ok(nested) = decode_kvp_delta(&mut inner) {
+                    check_track_property_values(&nested)?;
                 }
             }
             KvpValue::Bytes(_) => {}

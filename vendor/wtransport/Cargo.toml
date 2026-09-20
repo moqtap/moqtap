@@ -1,0 +1,147 @@
+# wtransport 0.7.2, vendored and patched. See PATCH.md for what changed and
+# why; `Cargo.toml.upstream` is the manifest crates.io published, kept beside
+# this one so the difference is readable.
+#
+# What was dropped from it: the four `[[example]]` entries (their sources are
+# not vendored) and the `[dev-dependencies]` block (anyhow, axum, hyper,
+# tracing-subscriber — needed only by this crate's own test suite, which is not
+# vendored either). What was added: the empty `[workspace]` below. Everything
+# else is upstream's, unedited, including the version number: this is 0.7.2 plus
+# one patch, not a fork with a version of its own, and a bump upstream should be
+# taken by re-vendoring rather than by editing here.
+
+# This directory sits inside the moqtap workspace without being a member of it,
+# which cargo rejects unless one of them says so. Declaring it here rather than
+# in `workspace.exclude` keeps the whole of the vendoring inside the vendored
+# directory, so re-vendoring is a copy plus a patch and never an edit two levels
+# up. It also stops this crate inheriting our lints and profiles, which it
+# should not: it is somebody else's code held at their settings.
+#
+# Without it `cargo` commands run from *inside* here fail — the workspace build
+# resolves it through `[patch]` and does not notice.
+[workspace]
+[package]
+edition = "2021"
+rust-version = "1.88"
+name = "wtransport"
+version = "0.7.2"
+authors = ["Biagio Festa"]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Implementation of the WebTransport (over HTTP3) protocol"
+readme = "README.md"
+keywords = ["webtransport"]
+categories = [
+    "network-programming",
+    "asynchronous",
+]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/BiagioFesta/wtransport"
+
+[features]
+aws-lc-rs = [
+    "quinn/aws-lc-rs",
+    "quinn/rustls-aws-lc-rs",
+    "rustls/aws-lc-rs",
+    "rcgen?/aws_lc_rs",
+]
+aws-lc-rs-fips = [
+    "quinn/aws-lc-rs-fips",
+    "quinn/rustls-aws-lc-rs-fips",
+    "rustls/fips",
+    "rcgen?/fips",
+]
+dangerous-configuration = []
+default = [
+    "self-signed",
+    "ring",
+]
+fips = ["aws-lc-rs-fips"]
+quinn = []
+quinn-log = ["quinn/log"]
+ring = [
+    "quinn/ring",
+    "quinn/rustls",
+    "rustls/ring",
+    "rcgen?/ring",
+]
+self-signed = ["dep:rcgen"]
+
+[lib]
+name = "wtransport"
+path = "src/lib.rs"
+
+[dependencies.bytes]
+version = "1.4.0"
+
+[dependencies.pem]
+version = "3.0.4"
+
+[dependencies.quinn]
+version = "0.11.6"
+features = ["runtime-tokio"]
+default-features = false
+
+[dependencies.rcgen]
+version = "0.14.5"
+optional = true
+default-features = false
+
+[dependencies.rustls]
+version = "0.23.23"
+default-features = false
+
+[dependencies.rustls-native-certs]
+version = "0.8.0"
+
+[dependencies.rustls-pki-types]
+version = "1.13.2"
+
+[dependencies.sha2]
+version = "0.11.0"
+
+[dependencies.socket2]
+version = "0.6.3"
+
+[dependencies.thiserror]
+version = "2.0.3"
+
+[dependencies.time]
+version = "0.3.21"
+
+[dependencies.tokio]
+version = "1.28.1"
+features = [
+    "macros",
+    "fs",
+    "io-util",
+]
+default-features = false
+
+[dependencies.tracing]
+version = "0.1.37"
+
+[dependencies.url]
+version = "2.4.0"
+
+[dependencies.wtransport-proto]
+version = "0.7.2"
+features = ["async"]
+
+[dependencies.x509-parser]
+version = "0.18.1"
+
+[lints.clippy]
+manual_is_variant_and = "warn"
+manual_let_else = "warn"
+unnecessary_cast = "deny"
+
+[lints.rust]
+unfulfilled_lint_expectations = "deny"
+unit_bindings = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_qualifications = "warn"

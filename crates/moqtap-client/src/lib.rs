@@ -151,4 +151,6 @@ pub mod track_locations;
 ))]
 pub mod malformed_tracks;
 
+pub mod above_codec_rules;
+
 pub mod dispatch;

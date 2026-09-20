@@ -29,23 +29,22 @@
 //! UNSUBSCRIBE, the publisher terminates a subscription ... using
 //! PUBLISH_DONE."
 //!
-//! # What was here before
+//! # Why the range is these five, and what the read-back gates are for
 //!
-//! Drafts 12 and 13 kept the message until they answered it and then dropped
-//! it, so nothing outlived the answer. Drafts 14, 15 and 16 kept nothing at
-//! all and had no way to answer: a PUBLISH reached the request-id check and
-//! stopped there, which left the peer waiting for a response the crate could
-//! not build. Drafts 17, 18 and 19 already carried the whole flow, and are the
-//! shape the five below were brought to.
+//! PUBLISH arrives at draft-12; draft-11 has no such message. Drafts 17
+//! through 20 carry the whole flow already, on the request stream of their own
+//! that they give it, so the range runs 12 through 16.
 //!
-//! Then drafts 14, 15 and 16 kept the state and dropped the offer. A state
-//! machine says how far a request has got and a track binding says which
-//! track it is about; neither says what was offered, and the offer is what an
-//! answer is decided from. Drafts 14 and 15 carry a delivery order, a largest
-//! location and a forwarding preference in the PUBLISH and nowhere else, so
-//! an application taking one of those offers had nothing to read. The
-//! read-back gates below are on all five drafts: on 12 and 13 they hold a
-//! record that was already there, and on 14, 15 and 16 they are the record.
+//! A state machine says how far a request has got and a track binding says
+//! which track it is about; neither says what was offered, and the offer is
+//! what an answer is decided from. The peer states the offer once, in the
+//! PUBLISH: on drafts 12, 13 and 14 that is a delivery order, a largest
+//! location and a forwarding preference carried as fields of the message, and
+//! on 15 and 16 it is the parameters, with the track extensions beside them on
+//! 16. An application taking one of those offers with only the state to read
+//! has nothing to read. The read-back gates below are on all five drafts:
+//! on 12 and 13 the offer sits inside the same record the state machine lives
+//! in, and on 14, 15 and 16 it is a record of its own.
 //!
 //! # Why none of this closes the session
 //!
@@ -60,19 +59,19 @@
 //!
 //! Six cuts were made and run, five of them recorded on the gate they belong
 //! to. The sixth is recorded here because it is the one that spans files:
-//! letting the acceptance build its PUBLISH_OK without moving the record on -
-//! which is what these drafts did, either by dropping the record or by never
-//! making one - reddens thirty-five tests. Four of the seven gates here, on
-//! all five drafts, and in the alias files the accepted offer's alias stops
-//! being held, in process and over QUIC:
+//! letting the acceptance build its PUBLISH_OK without moving the record on
+//! reddens thirty-five tests. Four of the eleven gates here, on all five
+//! drafts, and in the alias files the accepted offer's alias stops being held,
+//! in process and over QUIC:
 //!
 //! ```text
 //! a second PUBLISH_OK was sent for one PUBLISH: ()
 //! ```
 //!
-//! The three it leaves green are worth naming, because they are what the cut
-//! does not reach: the offer still arrives and is still looked up by the id
-//! it names, and an offer stuck at "arrived" still cannot be unsubscribed.
+//! Three of the gates it leaves green are worth naming, because they are what
+//! the cut does not reach: the offer still arrives and is still looked up by
+//! the id it names, and an offer stuck at "arrived" still cannot be
+//! unsubscribed.
 
 #![allow(clippy::items_after_test_module)]
 
@@ -309,7 +308,8 @@ macro_rules! own_offer_gate {
     };
 }
 
-/// One draft's seven gates.
+/// One draft's eleven gates: the ten defined here, plus the own-offer gate
+/// this body invokes.
 macro_rules! inbound_publish_gates {
     ($draft:ident, $feat:literal, $version:expr, $setup:tt, $pubmsg:tt, $accept:tt,
      $reject:tt, $ends:tt, $own:tt, $ownmsg:tt, $sec:literal) => {
@@ -383,8 +383,8 @@ macro_rules! inbound_publish_gates {
             ///
             /// The dispatch arm is the whole of what this measures. Without
             /// it a PUBLISH is checked for its Request ID and then dropped,
-            /// which is what these drafts did: the peer waits for an answer
-            /// the endpoint has no record to build one from.
+            /// and the peer waits for an answer the endpoint has no record to
+            /// build one from.
             ///
             /// # What it catches, observed by making the change and running it
             ///
@@ -422,8 +422,8 @@ macro_rules! inbound_publish_gates {
             ///
             /// # What it catches, observed by making the change and running it
             ///
-            /// Moving the state machine on and dropping the message, which is
-            /// what drafts 14, 15 and 16 did:
+            /// Moving the state machine on and dropping the message, which on
+            /// drafts 14, 15 and 16 leaves nothing holding the offer:
             ///
             /// ```text
             /// the offer the peer made must be readable
@@ -562,11 +562,11 @@ macro_rules! inbound_publish_gates {
             ///
             /// # What it catches
             ///
-            /// Answering without moving the record on - the shape these
-            /// drafts had, where the answer either dropped the record or
-            /// never made one. That cut is the one recorded in this file's
-            /// header, because it reaches thirty-five tests across three
-            /// files and no single gate is where it belongs:
+            /// Answering without moving the record on, so that the answer
+            /// either drops the record or never makes one. That cut is the
+            /// one recorded in this file's header, because it reaches
+            /// thirty-five tests across three files and no single gate is
+            /// where it belongs:
             ///
             /// ```text
             /// a second PUBLISH_OK was sent for one PUBLISH: ()

@@ -128,11 +128,11 @@ const BLOCKED_WAIT: Duration = Duration::from_secs(2);
 /// The drafts this build compiled, draft-14 first.
 ///
 /// Order rather than a plain list: every session here is a byte pump, so any
-/// compiled draft serves, and putting 14 first keeps the default all-drafts
-/// build on the draft this file has always used. A reduced build takes
-/// whichever one it has instead of configuring a session for a draft it
-/// cannot frame — which the session refuses before it dials, and the relay
-/// leg would then never be made over the socket under test.
+/// compiled draft serves, and putting 14 first pins the default all-drafts
+/// build to draft-14. A reduced build takes whichever one it has instead of
+/// configuring a session for a draft it cannot frame — which the session
+/// refuses before it dials, and the relay leg would then never be made over
+/// the socket under test.
 const CANDIDATE_DRAFTS: &[DraftVersion] = &[
     #[cfg(feature = "draft14")]
     DraftVersion::Draft14,

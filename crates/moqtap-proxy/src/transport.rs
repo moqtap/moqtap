@@ -73,6 +73,15 @@
 //! is configured, reported as applied, and silently replaced by something
 //! else is indistinguishable from one that worked, and a run built on it is
 //! believed.
+//!
+//! Nothing has to remember to call it. [`TransportProfile::apply_to`] runs it
+//! as its first statement, so [`TransportProfile::into_config`], every
+//! [`TransportInstaller`] built on either of them, `resolve` below and
+//! `ProxyControl::set_transport` all inherit the same refusal; and under the
+//! `serde` feature **deserializing** runs it too, so a profile that parsed is
+//! a profile that installs. That last one is the seam a caller can otherwise
+//! fall through: a consumer that reads a profile from a file and never
+//! installs it has no other moment at which a refusal could happen.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -108,6 +117,15 @@ const QUIC_INITIAL_MTU: u16 = 1200;
 /// which is what the example does — it is the only path the attribute
 /// leaves, so it is the one worth proving.
 ///
+/// # Reading one from a file
+///
+/// Under the non-default `serde` feature this type serializes and
+/// deserializes, and the two directions are **not symmetric**: reading one
+/// runs [`TransportProfile::validate`] and a profile that fails it is a parse
+/// error, while writing one cannot produce an invalid profile and so checks
+/// nothing. See the two impls below for how that is arranged and why it is
+/// not the mirror struct [`ShapeProfile`](crate::shape::ShapeProfile) uses.
+///
 /// ```
 /// use std::time::Duration;
 ///
@@ -127,7 +145,7 @@ const QUIC_INITIAL_MTU: u16 = 1200;
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields, remote = "Self"))]
 #[non_exhaustive]
 pub struct TransportProfile {
     /// Which congestion controller to install.
@@ -183,10 +201,10 @@ pub struct TransportProfile {
     ///   SUBSCRIBE_NAMESPACE (draft-16 Section 3.3). It is the one draft
     ///   on which a cap can starve something and leave the session
     ///   running.
-    /// * Drafts 17 through 19 moved the control plane onto a pair of
+    /// * Drafts 17 through 20 moved the control plane onto a pair of
     ///   unidirectional streams and give bidirectional streams to
     ///   requests alone — six message types on draft-17, seven on drafts
-    ///   18 and 19 (draft-17 Section 3.3). A cap there is the request-side
+    ///   18, 19 and 20 (draft-17 Section 3.3). A cap there is the request-side
     ///   counterpart of
     ///   [`TransportProfile::max_concurrent_uni_streams`] on the media
     ///   side, and it is the case this knob is carried for.
@@ -480,6 +498,75 @@ impl TransportProfile {
     }
 }
 
+/// Written exactly as the struct is declared, so the derive decides the
+/// format and this impl decides nothing.
+///
+/// It exists only because `#[serde(remote = "Self")]` on the struct asks the
+/// derive for an *inherent* `serialize` instead of this trait impl, which is
+/// what the deserialize side below needs. `Self::serialize` here is that
+/// inherent function — an inherent associated function shadows a trait one of
+/// the same name — so the format is the derived one and nothing about the
+/// written form changed when the check was added.
+#[cfg(feature = "serde")]
+impl serde::Serialize for TransportProfile {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Self::serialize(self, serializer)
+    }
+}
+
+/// Read a profile, and refuse one [`TransportProfile::validate`] refuses.
+///
+/// # Why the check is here and not left to the caller
+///
+/// The fields are public, so nothing can stop code in this process from
+/// assigning `f32::NAN` to [`TransportProfile::time_threshold`] — that is what
+/// [`TransportProfile::apply_to`] refuses, at the moment a leg installs one,
+/// and it is the check every path through this crate already makes. A **file**
+/// is the case it covers badly. A consumer that reads a profile and does not
+/// install it — a scenario checker, a `--dry-run`, a configuration linter —
+/// has nowhere for that refusal to happen, so an unusable profile is accepted,
+/// stored and reported valid, and the run built on it is believed. Running the
+/// validator on the way in makes *a profile that parsed is a profile that
+/// installs* true, which is the same guarantee
+/// [`ShapeProfile`](crate::shape::ShapeProfile) gets from
+/// `#[serde(try_from = "ShapeProfileSpec")]`.
+///
+/// It stayed invisible for as long as JSON was the only format anyone read.
+/// `serde_json` writes a non-finite float as `null` and has no syntax to read
+/// one back, so `time_threshold` could not carry `NaN` or an infinity through
+/// a JSON file at all — the value the rule exists for could not be written
+/// down, let alone refused. CBOR, MessagePack and bincode all carry it, and so
+/// does a `serde::Deserializer` built in Rust over values that are already
+/// floats. CBOR is why this crate dev-depends on `ciborium`: the test below
+/// writes the profile the guard refuses and reads it back, which the crate's
+/// other serde tests cannot express.
+///
+/// # Why this shape rather than the mirror struct `ShapeProfile` uses
+///
+/// `ShapeProfile`'s fields are private, so its written form has to be a
+/// separate type and [`ShapeProfileSpec`](crate::shape::ShapeProfileSpec) is
+/// that type. This one's eighteen fields are public and are already exactly
+/// what goes on the wire, so a mirror would be eighteen fields whose only job
+/// is to be kept identical to eighteen fields — and the failure of that
+/// arrangement is silent in one direction, since a field added here and
+/// forgotten there is a key the mirror's `deny_unknown_fields` rejects only if
+/// something round-trips it.
+///
+/// `#[serde(remote = "Self")]` avoids the duplication: it turns both derives
+/// into inherent functions, leaving the trait impls to be written by hand
+/// around them, so the field list is still written once. `Self::deserialize`
+/// below is the derived inherent function rather than this trait method —
+/// inherent associated functions shadow trait ones — which is what keeps this
+/// from being infinite recursion.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for TransportProfile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let profile = Self::deserialize(deserializer)?;
+        profile.validate().map_err(serde::de::Error::custom)?;
+        Ok(profile)
+    }
+}
+
 /// The congestion controller to install.
 ///
 /// Deliberately **not** `#[non_exhaustive]`. `tests/transport_exhaustive.rs`
@@ -553,7 +640,7 @@ impl Congestion {
 /// here, is a request the peer will honour and nobody meant to make.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields, remote = "Self"))]
 #[non_exhaustive]
 pub struct AckFrequency {
     /// How many ack-eliciting packets the peer may receive before it must
@@ -608,6 +695,34 @@ impl AckFrequency {
             self.reordering_threshold,
         )?);
         Ok(config)
+    }
+}
+
+/// Written exactly as the struct is declared — see the same impl on
+/// [`TransportProfile`] for why it is hand-written at all.
+#[cfg(feature = "serde")]
+impl serde::Serialize for AckFrequency {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Self::serialize(self, serializer)
+    }
+}
+
+/// Read an ack-frequency request, and refuse one whose thresholds quinn could
+/// not carry.
+///
+/// Guarded separately from the [`TransportProfile`] that usually holds it,
+/// because the field is public and this type is public: a caller's own
+/// configuration may hold an `AckFrequency` of its own, read on its own, and
+/// reach a profile only later or never. Both checks run for an embedded one —
+/// this impl first, then [`TransportProfile::validate`] over the whole profile
+/// — and they report the same dotted field name either way, so which of them
+/// answered is not something a reader has to work out.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for AckFrequency {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let ack = Self::deserialize(deserializer)?;
+        ack.validate().map_err(serde::de::Error::custom)?;
+        Ok(ack)
     }
 }
 
@@ -875,8 +990,8 @@ impl TransportInstaller for DefaultInstaller {
 /// installer it may have supplied.
 ///
 /// `None` back means the leg installs nothing and quinn's defaults apply,
-/// which is the case that has to stay bit-identical to the behaviour from
-/// before profiles existed.
+/// which is the answer a leg that names no config, no profile and no
+/// installer must keep getting.
 ///
 /// Called once per leg, **before** the endpoint is built, so every refusal
 /// below costs a caller no socket, no handshake and no connection to tear
@@ -897,7 +1012,8 @@ impl TransportInstaller for DefaultInstaller {
 /// mutating a `quinn::TransportConfig` this function still holds by value,
 /// and that single fact decides all four combinations:
 ///
-/// * **Raw config alone** — installed as it was given, exactly as before.
+/// * **Raw config alone** — installed exactly as it was given; with no spec
+///   beside it, nothing here changes what the leg installs.
 /// * **Raw config and a spec** — `ProxyError::TransportConfigAndQlog`,
 ///   because the config arrives behind an `Arc` that can be neither cloned
 ///   nor mutated. The variant carries the whole reason.
@@ -911,9 +1027,8 @@ impl TransportInstaller for DefaultInstaller {
 ///   `quinn::TransportConfig::default()`.
 /// * **Spec alone** — still a fresh `quinn::TransportConfig` with the sink
 ///   on it, and the leg installs it. This is the case worth being careful
-///   about: a leg that named only a spec used to install nothing, and
-///   installing nothing here would leave the commonest way of asking for a
-///   capture producing no capture and no error.
+///   about: installing nothing here would leave the commonest way of asking
+///   for a capture producing no capture and no error.
 ///
 /// A spec with no writer never reaches an endpoint: `attach_to` validates
 /// before it builds, so `QlogError::NoWriter` is answered here, and by the
@@ -1331,7 +1446,7 @@ mod tests {
             resolve_uncaptured(Leg::Client, None, None, None)
                 .expect("nothing named is nothing to refuse")
                 .is_none(),
-            "a leg with no opinion has to stay exactly as it was before profiles existed"
+            "a leg with no opinion installs nothing, so quinn's own defaults apply"
         );
     }
 
@@ -1465,10 +1580,11 @@ mod tests {
 
     /// A leg carrying only a spec still installs a config.
     ///
-    /// The case most likely to be silently wrong, and the reason is that
-    /// `None` back from `resolve` used to be the right answer for a leg that
-    /// named neither of the other two fields. A leg that installed nothing
-    /// here would leave the sink attached to a `quinn::TransportConfig` that
+    /// The case most likely to be silently wrong: `None` back from `resolve`
+    /// is the right answer for a leg that names neither of the other two
+    /// fields, and a leg carrying only a spec looks like that leg from every
+    /// angle but this one. A leg that installed nothing here would leave the
+    /// sink attached to a `quinn::TransportConfig` that
     /// went nowhere — and that produces a file which exists, parses, names a
     /// qlog version and holds no event, which is the one failure a caller
     /// watching their disk cannot see.
@@ -1606,5 +1722,123 @@ mod tests {
             "a derived default would ask the peer to ack every packet and never ack reordering"
         );
         assert_eq!(ack.max_ack_delay, None, "`None` leaves the peer's advertised delay in place");
+    }
+
+    // ── the written form ────────────────────────────────────────────────
+
+    /// Write a profile as CBOR and read it back.
+    ///
+    /// CBOR rather than JSON because of the one input this is here for:
+    /// `serde_json` writes a non-finite float as `null` and has no syntax to
+    /// read one back, so a profile carrying `NaN` cannot be *expressed* in the
+    /// format the crate's other serde tests use — which is exactly why a
+    /// profile carrying one was never refused on the way in and never seen.
+    /// Serializing does not validate, so an invalid profile can still be
+    /// written, which is what makes the read side testable at all.
+    #[cfg(feature = "serde")]
+    fn cbor_round_trip(profile: &TransportProfile) -> Result<TransportProfile, String> {
+        let mut bytes = Vec::new();
+        ciborium::into_writer(profile, &mut bytes).expect("CBOR carries every field of a profile");
+        ciborium::from_reader(bytes.as_slice()).map_err(|e: ciborium::de::Error<_>| e.to_string())
+    }
+
+    /// Every field of the control profile survives a write and a read.
+    ///
+    /// The two directions are two separate impls — a derived inherent pair
+    /// with a hand-written trait pair around it — so a `Serialize` that
+    /// stopped agreeing with the `Deserialize` beside it would show up here
+    /// and nowhere else. The all-`None` profile is the second row because its
+    /// written form is entirely nulls, which is the shape the `default` on the
+    /// container has to survive.
+    ///
+    /// The misspelt key at the end is here because `deny_unknown_fields` is a
+    /// container attribute and the hand-written impls sit between the derive
+    /// and the caller: an arrangement that dropped it would still round-trip
+    /// every value above while quietly accepting a typo, and a typo is a knob
+    /// an author asked for and did not get.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_profile_survives_being_written_and_read_back() {
+        for before in [healthy(), TransportProfile::default()] {
+            let written = serde_json::to_string(&before).expect("a profile serializes");
+            let after: TransportProfile =
+                serde_json::from_str(&written).expect("and reads back as itself");
+            assert_eq!(before, after, "round trip through {written}");
+        }
+
+        for written in [r#"{"initial_mtuu":1350}"#, r#"{"congestion":"bbr","nope":1}"#] {
+            assert!(
+                serde_json::from_str::<TransportProfile>(written).is_err(),
+                "a key this profile has no field for is a mistake, not a comment: {written}"
+            );
+        }
+    }
+
+    /// A profile no leg would install is refused **where it is read**, not
+    /// later where it is applied.
+    ///
+    /// The non-finite row is the one this exists for. A consumer that reads a
+    /// profile and never installs it — a scenario checker, a `--dry-run` —
+    /// has no later moment at which `validate` would run, so without a check
+    /// on the read the value would be accepted, stored, reported valid, and
+    /// believed.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_profile_the_validator_refuses_does_not_deserialize() {
+        for (label, threshold) in
+            [("not a number", f32::NAN), ("infinite", f32::INFINITY), ("exactly one", 1.0)]
+        {
+            let mut profile = healthy();
+            profile.time_threshold = Some(threshold);
+            let err = cbor_round_trip(&profile)
+                .expect_err("a multiplier that cannot be honoured is not a profile");
+            assert!(
+                err.contains("time_threshold"),
+                "a {label} threshold has to be refused by name: {err}"
+            );
+        }
+
+        // A rule from a different corner of `validate`, so what guards the
+        // read is the whole validator and not the one branch a float takes.
+        let mut profile = healthy();
+        profile.initial_mtu = Some(900);
+        let err = cbor_round_trip(&profile)
+            .expect_err("an MTU quinn would silently raise is not a profile either");
+        assert!(err.contains("initial_mtu"), "{err}");
+
+        // The positive control: the same fields holding usable values read
+        // back, so the refusals above are about the values and not about the
+        // fields being set at all.
+        let mut profile = healthy();
+        profile.time_threshold = Some(1.5);
+        assert_eq!(
+            cbor_round_trip(&profile).expect("a usable multiplier reads"),
+            profile,
+            "a valid profile still survives the format the invalid ones were written in"
+        );
+    }
+
+    /// An `AckFrequency` read on its own is checked on its own.
+    ///
+    /// It is public and its field on a profile is public, so a caller's own
+    /// configuration may hold one, read it, and reach a
+    /// [`TransportProfile`] only later or never.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn an_ack_frequency_is_checked_when_it_is_read_by_itself() {
+        let written = format!(r#"{{"ack_eliciting_threshold":{}}}"#, VARINT_MAX + 1);
+        let err = serde_json::from_str::<AckFrequency>(&written)
+            .expect_err("a threshold above the varint ceiling cannot be requested");
+        assert!(
+            err.to_string().contains("ack_frequency.ack_eliciting_threshold"),
+            "the dotted name is what says which part of the file to look at: {err}"
+        );
+
+        assert_eq!(
+            serde_json::from_str::<AckFrequency>(r#"{"reordering_threshold":3}"#)
+                .expect("a request inside the range is read"),
+            AckFrequency { reordering_threshold: 3, ..Default::default() },
+            "and the fields it leaves out come from the hand-written default, not from zero"
+        );
     }
 }

@@ -719,10 +719,10 @@ fn an_unassigned_status_has_no_payload_permission() {
 /// Draft-15 Section 10 requires closing the session on a datagram type the
 /// draft does not define, and Section 10.3.1 Table 5 defines twenty-four.
 ///
-/// Sixty-four byte values used to decode: every value the low bits could name,
-/// whether or not Table 5 assigned it. Field presence was then inferred from
-/// bits carrying no meaning, so an undefined type produced a header that looked
-/// well formed.
+/// Without the assignment check, sixty-four byte values decode: every value the
+/// low bits can name, whether or not Table 5 assigns it. Field presence is then
+/// inferred from bits carrying no meaning, so an undefined type produces a
+/// header that looks well formed.
 ///
 /// *Ablation:* delete the `datagram_type_is_assigned` call from
 /// `DatagramHeader::decode`, and this fails with:

@@ -16,7 +16,7 @@
 
 use moqtap_codec::draft14::error_codes::{
     AnnounceErrorCode, DataStreamResetErrorCode, FetchErrorCode, PublishDoneStatusCode,
-    PublishErrorCode, RequestErrorCode, SessionErrorCode, SubscribeNamespaceErrorCode,
+    PublishErrorCode, SessionErrorCode, SubscribeErrorCode, SubscribeNamespaceErrorCode,
 };
 
 /// Draft-14 Section 13.1.1 Session Termination Error Codes.
@@ -45,15 +45,15 @@ const SESSION: [(SessionErrorCode, u64); 21] = [
 ];
 
 /// Draft-14 Section 13.1.2 SUBSCRIBE_ERROR Codes.
-const SUBSCRIBE_ERROR: [(RequestErrorCode, u64); 8] = [
-    (RequestErrorCode::InternalError, 0x0),
-    (RequestErrorCode::Unauthorized, 0x1),
-    (RequestErrorCode::Timeout, 0x2),
-    (RequestErrorCode::NotSupported, 0x3),
-    (RequestErrorCode::TrackDoesNotExist, 0x4),
-    (RequestErrorCode::InvalidRange, 0x5),
-    (RequestErrorCode::MalformedAuthToken, 0x10),
-    (RequestErrorCode::ExpiredAuthToken, 0x12),
+const SUBSCRIBE_ERROR: [(SubscribeErrorCode, u64); 8] = [
+    (SubscribeErrorCode::InternalError, 0x0),
+    (SubscribeErrorCode::Unauthorized, 0x1),
+    (SubscribeErrorCode::Timeout, 0x2),
+    (SubscribeErrorCode::NotSupported, 0x3),
+    (SubscribeErrorCode::TrackDoesNotExist, 0x4),
+    (SubscribeErrorCode::InvalidRange, 0x5),
+    (SubscribeErrorCode::MalformedAuthToken, 0x10),
+    (SubscribeErrorCode::ExpiredAuthToken, 0x12),
 ];
 
 /// Draft-14 Section 13.1.3 PUBLISH_DONE Codes.
@@ -169,7 +169,7 @@ macro_rules! check_registry {
 #[test]
 fn round_trip_every_variant() {
     check_registry!(SESSION, SessionErrorCode, "SessionErrorCode");
-    check_registry!(SUBSCRIBE_ERROR, RequestErrorCode, "RequestErrorCode");
+    check_registry!(SUBSCRIBE_ERROR, SubscribeErrorCode, "SubscribeErrorCode");
     check_registry!(PUBLISH_DONE, PublishDoneStatusCode, "PublishDoneStatusCode");
     check_registry!(PUBLISH_ERROR, PublishErrorCode, "PublishErrorCode");
     check_registry!(FETCH_ERROR, FetchErrorCode, "FetchErrorCode");
@@ -199,7 +199,7 @@ fn unassigned_code_points_decode_to_none() {
 
     // SUBSCRIBE_ERROR: assigns 0x0-0x5, 0x10, 0x12.
     for code in [0x6, 0x7, 0x8, 0x9, 0xA, 0xF, 0x11, 0x13, 0x14] {
-        assert_eq!(RequestErrorCode::from_u64(code), None, "subscribe {code:#x}");
+        assert_eq!(SubscribeErrorCode::from_u64(code), None, "subscribe {code:#x}");
     }
 
     // PUBLISH_DONE: assigns 0x0-0x7 only.
@@ -243,7 +243,7 @@ fn unassigned_code_points_decode_to_none() {
 fn out_of_range_codes_decode_to_none() {
     for code in [0xFFFF_u64, 0x7FFF_FFFF, u64::MAX] {
         assert_eq!(SessionErrorCode::from_u64(code), None);
-        assert_eq!(RequestErrorCode::from_u64(code), None);
+        assert_eq!(SubscribeErrorCode::from_u64(code), None);
         assert_eq!(PublishDoneStatusCode::from_u64(code), None);
         assert_eq!(PublishErrorCode::from_u64(code), None);
         assert_eq!(FetchErrorCode::from_u64(code), None);
@@ -259,7 +259,7 @@ fn out_of_range_codes_decode_to_none() {
 /// than a decode failure, so the divergence is pinned here.
 #[test]
 fn request_scoped_registries_diverge_at_0x4() {
-    assert_eq!(RequestErrorCode::from_u64(0x4), Some(RequestErrorCode::TrackDoesNotExist));
+    assert_eq!(SubscribeErrorCode::from_u64(0x4), Some(SubscribeErrorCode::TrackDoesNotExist));
     assert_eq!(FetchErrorCode::from_u64(0x4), Some(FetchErrorCode::TrackDoesNotExist));
     assert_eq!(PublishErrorCode::from_u64(0x4), Some(PublishErrorCode::Uninterested));
     assert_eq!(AnnounceErrorCode::from_u64(0x4), Some(AnnounceErrorCode::Uninterested));
@@ -271,7 +271,7 @@ fn request_scoped_registries_diverge_at_0x4() {
     // PUBLISH_ERROR is the only request-scoped registry with no auth-token codes.
     assert_eq!(PublishErrorCode::from_u64(0x10), None);
     assert_eq!(PublishErrorCode::from_u64(0x12), None);
-    assert!(RequestErrorCode::from_u64(0x10).is_some());
+    assert!(SubscribeErrorCode::from_u64(0x10).is_some());
     assert!(FetchErrorCode::from_u64(0x10).is_some());
     assert!(AnnounceErrorCode::from_u64(0x10).is_some());
     assert!(SubscribeNamespaceErrorCode::from_u64(0x10).is_some());

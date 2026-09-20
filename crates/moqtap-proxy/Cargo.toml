@@ -1,7 +1,7 @@
 [package]
 name = "moqtap-proxy"
 description = "MoQT intercepting proxy — transparent forwarding with inline frame parsing"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -148,10 +148,20 @@ serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 rcgen = "0.14"
-# The unit tests that gate the two serde detours — the shaping mirror and the
-# side names — need a format to round-trip through. A dev-dependency, as
-# everywhere else in this workspace: reading a file is the caller's job.
+# The unit tests that gate the three serde detours — the shaping mirror, the
+# side names and the transport profile's validating read — need a format to
+# round-trip through. A dev-dependency, as everywhere else in this workspace:
+# reading a file is the caller's job.
 serde_json = { workspace = true }
+# A second format, for the one input JSON cannot express. `TransportProfile`
+# refuses a non-finite `time_threshold`, and that refusal was unreachable from a
+# test for as long as JSON was the only format here: `serde_json` writes a
+# non-finite float as `null` and has no syntax to read one back, so the value
+# the guard exists for could not be written down. CBOR carries it, which is what
+# makes "written by a format that can hold it, refused when it is read back" a
+# test rather than a claim — and is the same reason the defect survived: the
+# only consumer reading these profiles read JSON.
+ciborium = { workspace = true }
 # Also a dev-dependency, unconditionally and with the decorator compiled, so the
 # integration tests get it whatever the feature flags say. `quinn-socket` is the
 # non-default feature that compiles the `AsyncUdpSocket` decorator; without it

@@ -38,16 +38,6 @@
 //! rather than in the range below: the states outlived the message that named
 //! them.
 //!
-//! # What was here before
-//!
-//! On all five drafts `receive_unsubscribe` looked in one record: the
-//! subscriptions the **peer** opened with SUBSCRIBE. A subscription this
-//! endpoint opened with PUBLISH was answered `UnknownRequest`, so a
-//! conforming subscriber could not end it, the Track Alias it held stayed
-//! spent for the rest of the session, and an application was never told the
-//! subscriber had gone. The mirror half was there on all five: `unsubscribe`
-//! reaches the offers the peer made.
-//!
 //! # Which offers this endpoint publishes
 //!
 //! Only the ones it made itself. A PUBLISH the peer sent opens a subscription
@@ -372,8 +362,7 @@ macro_rules! unsubscribe_gates {
             /// # What it catches
             ///
             /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE, which is what all five drafts did. On 12
-            /// and 13 that is one branch:
+            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
             ///
             /// ```text
             /// the subscriber may end a subscription this endpoint publishes:
@@ -405,8 +394,7 @@ macro_rules! unsubscribe_gates {
             /// # What it catches
             ///
             /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE, which is what all five drafts did. On 12
-            /// and 13 that is one branch:
+            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
             ///
             /// ```text
             /// the first UNSUBSCRIBE: UnknownRequest(0)
@@ -457,8 +445,7 @@ macro_rules! unsubscribe_gates {
             /// # What it catches
             ///
             /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE, which is what all five drafts did. On 12
-            /// and 13 that is one branch:
+            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
             ///
             /// ```text
             /// the subscriber ends it: UnknownRequest(0)
@@ -491,8 +478,7 @@ macro_rules! unsubscribe_gates {
             /// # What it catches
             ///
             /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE, which is what all five drafts did. On 12
-            /// and 13 that is one branch:
+            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
             ///
             /// ```text
             /// the subscriber ends it: UnknownRequest(0)
@@ -533,8 +519,7 @@ macro_rules! unsubscribe_gates {
             /// # What it catches
             ///
             /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE, which is what all five drafts did. On 12
-            /// and 13 that is one branch:
+            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
             ///
             /// ```text
             /// the sentence names a subscription, and an unanswered offer is not
@@ -663,8 +648,7 @@ macro_rules! unsubscribe_gates {
             /// # What it catches
             ///
             /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE, which is what all five drafts did. On 12
-            /// and 13 that is one branch:
+            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
             ///
             /// ```text
             /// the peer's UNSUBSCRIBE: UnknownRequest(0)

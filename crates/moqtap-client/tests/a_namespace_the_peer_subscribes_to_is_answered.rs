@@ -29,17 +29,12 @@
 //! withdrawal - both the other way round from a namespace subscription it makes
 //! itself.
 //!
-//! # What was here before
-//!
-//! Nothing on any of the nine. An arriving SUBSCRIBE_ANNOUNCES or
-//! SUBSCRIBE_NAMESPACE had its Request ID counted against the peer's sequence
-//! from draft-11 on, and was then dropped; drafts 07 through 10, whose request
-//! carries no Request ID, dropped it outright. The withdrawal was dispatched
-//! nowhere on any of the nine. A peer that subscribed to a namespace here
-//! waited for an answer the crate had no record to build.
+//! # Why the range stops at 15
 //!
 //! Draft-16 already carries all of this, because there the request arrives on a
-//! bidirectional stream of its own, and drafts 17 through 20 keep it that way.
+//! bidirectional stream of its own — Section 9.25 has the subscriber send
+//! SUBSCRIBE_NAMESPACE "on a new bidirectional stream" — and drafts 17 through
+//! 20 keep it that way.
 //!
 //! # Why none of this ends the session
 //!
@@ -326,11 +321,10 @@ macro_rules! inbound_namespace_gates {
             /// the namespace subscription the peer made should be on record
             /// ```
             ///
-            /// Made by dropping the record instead of inserting it, which is what
-            /// all nine drafts did before. It reddens 103 tests: every gate in this
-            /// file on all nine drafts except the one naming a request that never
-            /// arrived, which an empty record refuses anyway, and all four loopback
-            /// gates.
+            /// Made by dropping the record instead of inserting it. It reddens 103
+            /// tests: every gate in this file on all nine drafts except the one
+            /// naming a request that never arrived, which an empty record refuses
+            /// anyway, and all four loopback gates.
             #[test]
             fn a_namespace_subscription_the_peer_makes_is_recorded() {
                 let ep = subscribed();
@@ -388,9 +382,8 @@ macro_rules! inbound_namespace_gates {
             /// ```
             ///
             /// Made by cutting the dispatch arm, which sends the message back to the
-            /// fall-through that accepts and ignores it - the state all nine drafts
-            /// were in. It reddens 13 tests: this gate on all nine, and all four
-            /// loopback gates.
+            /// fall-through that accepts and ignores it. It reddens 13 tests: this
+            /// gate on all nine, and all four loopback gates.
             #[test]
             fn a_namespace_subscription_arriving_on_the_control_stream_is_recorded() {
                 let mut ep = active();
@@ -506,11 +499,10 @@ macro_rules! inbound_namespace_gates {
             ///  right: "on_subscribe_namespace_ok_sent"
             /// ```
             ///
-            /// Made by leaving draft-13's namespace flow named for SUBSCRIBE_ANNOUNCES,
-            /// which is the message draft-12 carries and draft-13 renamed - the state
-            /// the file was in, doc header included. It reddens 1 test, on draft-13
-            /// alone, which is what a rename that reached only one draft should
-            /// redden.
+            /// Made by naming draft-13's namespace flow for SUBSCRIBE_ANNOUNCES,
+            /// which is the message draft-12 carries and draft-13 renames. It
+            /// reddens 1 test, on draft-13 alone, which is what a rename that
+            /// reaches only one draft should redden.
             #[test]
             fn the_refusal_names_the_message_this_draft_carries() {
                 let mut ep = accepted();

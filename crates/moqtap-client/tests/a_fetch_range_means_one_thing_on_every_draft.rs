@@ -44,8 +44,11 @@
 //! negotiated — so every gate here runs a real session and reads the FETCH off
 //! the wire at a peer that decodes it with the codec.
 //!
-//! The regression this pins is the drafts that were already wired: **drafts 14
-//! through 19 send exactly the bytes they sent before `FetchRange` existed**.
+//! What this pins for the drafts that carry the two fields inline: **drafts 14
+//! through 19 put that draft's own encoding of the range on the wire, and
+//! coming through `FetchRange` moves none of those bytes** — the "last Object,
+//! plus 1" convention is applied once, in the conversion, and nothing else
+//! changes.
 //! Every field asserted below is a value under 64, so its minimal varint
 //! encoding is the single byte holding that number — the value asserted and the
 //! byte on the wire are the same thing.

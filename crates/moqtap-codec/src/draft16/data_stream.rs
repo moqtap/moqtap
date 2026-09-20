@@ -303,10 +303,10 @@ const DATAGRAM_FORM_FORBIDDEN_BITS: u8 = 0xD0;
 ///   - "Type values that do not match the form 0b00X0XXXX (i.e., Type values
 ///     outside the ranges 0x00..0x0F and 0x20..0x2F)."
 ///
-/// That leaves 24 of the 256 byte values valid. Every other one was accepted
-/// before this check existed, and bit 4 is the bit that separates a datagram
-/// Type from a subgroup stream header Type — so an unchecked datagram Type could
-/// name a stream header and be parsed as a datagram anyway.
+/// That leaves 24 of the 256 byte values valid. Without this check every other
+/// one is accepted, and bit 4 is the bit that separates a datagram Type from a
+/// subgroup stream header Type — so an unchecked datagram Type could name a
+/// stream header and be parsed as a datagram anyway.
 ///
 /// The two lists are not the same failure. A Type outside the form is one no
 /// table assigns, and so is [`CodecError::UnknownDatagramType`]; a Type inside
@@ -402,6 +402,24 @@ impl SubgroupHeader {
     /// nothing about this one. Writing the field there was an artifact of
     /// reading `0x04` on its own, and it disagreed with every neighbouring
     /// draft — 15, 17, 18 and 19 all leave it off.
+    ///
+    /// Every field is driven by the Type byte, because that is the only thing
+    /// [`Self::decode`] and the peer have to go on — the Priority byte
+    /// included. Driving that one off `publisher_priority` being `Some`
+    /// instead desyncs the stream: a Type with DEFAULT_PRIORITY (`0x20`) set
+    /// beside a `Some` writes a stray byte the reader takes for the first
+    /// Object's Object ID Delta, and a Type with the bit clear beside a `None`
+    /// leaves the reader taking that Delta for the priority. Either way every
+    /// later field shifts — which is precisely the disagreement
+    /// [`Self::encode_checked`]'s doc comment says this pair must not have.
+    ///
+    /// A `None` under a Type whose bit is clear therefore writes 128 rather
+    /// than dropping the byte. Draft-16 Section 11.1.1.1: "A subscription has
+    /// Publisher Priorty 128 if this extension is omitted", so 128 is this
+    /// draft's own name for an unstated priority and not an invented filler.
+    /// Drafts 17-20 write the same value in the same place. Use
+    /// [`Self::encode_checked`] to be told about the disagreement rather than
+    /// having it resolved silently.
     pub fn encode(&self, buf: &mut impl BufMut) {
         VarInt::from_usize(self.header_type as usize).encode(buf);
         self.track_alias.encode(buf);
@@ -409,8 +427,8 @@ impl SubgroupHeader {
         if self.has_explicit_subgroup_id() {
             self.subgroup_id.encode(buf);
         }
-        if let Some(p) = self.publisher_priority {
-            buf.put_u8(p);
+        if self.has_priority() {
+            buf.put_u8(self.publisher_priority.unwrap_or(128));
         }
     }
 
@@ -425,8 +443,21 @@ impl SubgroupHeader {
     /// written by [`Self::encode`] cannot be read back by [`Self::decode`], and
     /// a codec used to rewrite captured traffic would emit a stream it could not
     /// then parse.
+    ///
+    /// That argument covers the Priority byte too. `publisher_priority`
+    /// disagreeing with the Type byte's DEFAULT_PRIORITY bit (`0x20`) is the
+    /// same failure one field along: a header that does not mean what it says,
+    /// whose bytes the peer reads under framing its writer never asked for.
+    /// [`Self::encode`] does not desync the stream over it — the byte follows
+    /// the Type byte — but resolving the disagreement is not the same as being
+    /// told about it, and the caller who set the wrong half is the only one who
+    /// can fix it. Same check, same reason, as draft-15 Section 10.4.2's
+    /// encoder.
     pub fn encode_checked(&self, buf: &mut impl BufMut) -> Result<(), CodecError> {
         validate_subgroup_type(self.header_type as u64)?;
+        if self.has_priority() != self.publisher_priority.is_some() {
+            return Err(CodecError::InvalidField);
+        }
         self.encode(buf);
         Ok(())
     }

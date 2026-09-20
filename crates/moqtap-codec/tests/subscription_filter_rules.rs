@@ -242,7 +242,7 @@ fn an_unassigned_filter_type_is_reported_as_a_filter_type() {
 /// ```text
 /// ---- an_end_before_the_start_is_carried_where_no_draft_answers_it stdout ----
 ///
-/// thread 'an_end_before_the_start_is_carried_where_no_draft_answers_it' (76568) panicked at crates\moqtap-codec\tests\subscription_filter_rules.rs:238:5:
+/// thread 'an_end_before_the_start_is_carried_where_no_draft_answers_it' (76568) panicked at crates\moqtap-codec\tests\subscription_filter_rules.rs:
 /// no draft states a consequence for a backwards range; refusing one closes sessions over a sentence that is not there: Err(SubscriptionFilterMalformed { detail: "its End Group is before its Start Location" })
 /// ```
 #[test]
@@ -405,7 +405,7 @@ fn an_unassigned_filter_type_is_one_the_writer_will_not_write() {
 /// ```text
 /// ---- the_overflow_rule_starts_at_draft_18 stdout ----
 ///
-/// thread 'the_overflow_rule_starts_at_draft_18' (45272) panicked at crates\moqtap-codec\tests\subscription_filter_rules.rs:339:5:
+/// thread 'the_overflow_rule_starts_at_draft_18' (45272) panicked at crates\moqtap-codec\tests\subscription_filter_rules.rs:
 /// draft-17 states no rule about the sum, so refusing one closes sessions a conforming peer may open: Err(FilterEndGroupOverflow { start_group: 18446744073709551615, delta: 1 })
 /// ```
 #[test]

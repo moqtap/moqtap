@@ -185,42 +185,64 @@ fn the_namespaces_it_asked_for_arrive_on_the_same_stream() {
     ep.receive_on_namespace_stream(id, &namespace_done()).expect("and its withdrawal");
 }
 
-/// A NAMESPACE on the control stream closes the session.
+/// A NAMESPACE on the control stream is refused, and the session runs on.
 ///
 /// It carries a suffix and no Request ID, so here it names nothing that could
-/// be looked up. Section 3.3 answers a message on a stream it does not belong
-/// on with a Protocol Violation.
+/// be looked up.
+///
+/// # Why neither of these asserts a close
+///
+/// The reading that invites one is that *Section 3.3 answers a message on a
+/// stream it does not belong on with a Protocol Violation*. Section 3.3 does
+/// not say that. Its sentence is "Bidirectional streams MUST NOT begin with any
+/// other message type unless negotiated. If they do, the peer MUST close the
+/// Session with a Protocol Violation." — a rule about what a stream may *begin*
+/// with, and a NAMESPACE arriving on the control stream begins nothing.
+///
+/// Read draft-16 for a sentence that closes a session over a message being in
+/// the wrong place and there is none. Section 9.25 says where a conforming
+/// publisher sends these — "the publisher will send matching NAMESPACE messages
+/// on the response stream if they are requested" — and attaches no consequence
+/// to a peer that does otherwise. A close here would be this crate's model of
+/// the protocol wearing a draft's authority, and a library that closes a
+/// session over its own model hands every consumer of it an accusation the
+/// draft will not support.
+///
+/// What survives is the refusal, which needs no sentence: this endpoint cannot
+/// place the message, so it will not act on it. Recovery is real rather than
+/// hoped for — a control message carries its own length, so the next boundary
+/// on the stream is known however this one was refused.
 ///
 /// Ablation: replacing the `Namespace` arm of `receive_message` with
 /// `Ok(())` fails with
 ///
 /// ```text
-/// a NAMESPACE on the control stream must close the session, got Ok(())
+/// a NAMESPACE on the control stream must be refused, got Ok(())
 /// ```
 #[test]
-fn a_namespace_on_the_control_stream_closes_the_session() {
+fn a_namespace_on_the_control_stream_is_refused_without_closing() {
     let mut ep = active(Role::Client);
     let outcome = ep.receive_message(namespace());
     let Err(e) = outcome else {
-        panic!("a NAMESPACE on the control stream must close the session, got {outcome:?}");
+        panic!("a NAMESPACE on the control stream must be refused, got {outcome:?}");
     };
-    assert_eq!(e.session_error_code(), Some(SessionErrorCode::ProtocolViolation));
-    assert_eq!(ep.session_state(), SessionState::Closed);
+    assert_eq!(e.session_error_code(), None, "draft-16 states no close for this");
+    assert_eq!(ep.session_state(), SessionState::Active);
 }
 
-/// And so does a NAMESPACE_DONE, for the same reason.
+/// And so is a NAMESPACE_DONE, for the same reason.
 ///
 /// Section 9.23: "All NAMESPACE_DONE messages are in response to a
 /// SUBSCRIBE_NAMESPACE".
 #[test]
-fn a_namespace_done_on_the_control_stream_closes_the_session() {
+fn a_namespace_done_on_the_control_stream_is_refused_without_closing() {
     let mut ep = active(Role::Client);
     let outcome = ep.receive_message(namespace_done());
     let Err(e) = outcome else {
-        panic!("a NAMESPACE_DONE on the control stream must close the session, got {outcome:?}");
+        panic!("a NAMESPACE_DONE on the control stream must be refused, got {outcome:?}");
     };
-    assert_eq!(e.session_error_code(), Some(SessionErrorCode::ProtocolViolation));
-    assert_eq!(ep.session_state(), SessionState::Closed);
+    assert_eq!(e.session_error_code(), None, "draft-16 states no close for this");
+    assert_eq!(ep.session_state(), SessionState::Active);
 }
 
 /// A NAMESPACE on a stream whose id no subscription carries is refused.

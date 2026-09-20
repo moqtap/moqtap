@@ -189,16 +189,25 @@ fn endpoint_request_update_is_correlated_by_the_stream_not_by_its_own_id() {
 }
 
 /// The control stream is not where a REQUEST_UPDATE belongs, and receiving one
-/// there ends the session.
+/// there is refused without ending the session.
 ///
 /// Section 9.10 gives the stream the job of naming the request being modified,
-/// so an update with no request stream around it identifies nothing. The gate is
-/// the consequence rather than the return value: the session must be Closed
-/// afterwards and the close code must be the one Section 3.5 assigns.
+/// so an update with no request stream around it identifies nothing.
+///
+/// # Why the refusal is not a close
+///
+/// Section 3.3's opener sentence does not reach this: it is about what a
+/// bidirectional stream may *begin* with, and a message on the control stream
+/// begins nothing. Draft-17 Section 9.10 says only where a conforming sender
+/// puts a REQUEST_UPDATE — "The sender of a request (SUBSCRIBE, PUBLISH, FETCH,
+/// PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE) can later send a REQUEST_UPDATE on
+/// the same bidi stream as the request to modify it." — and attaches no
+/// consequence to one that arrives elsewhere. Draft-19 is the first to add one.
+/// So a close here would be this crate's model of the protocol rather than
+/// draft-17's, and the refusal, which needs no sentence, is what is left.
 #[test]
-fn endpoint_request_update_on_the_control_stream_closes_the_session() {
+fn endpoint_request_update_on_the_control_stream_is_refused_without_closing() {
     use moqtap_client::draft17::endpoint::EndpointError;
-    use moqtap_codec::draft17::error_codes::SessionErrorCode;
 
     let mut ep = make_active_client();
     let (id, _) = ep.subscribe(ns(&[b"a"]), b"trk".to_vec(), vec![]).unwrap();
@@ -211,8 +220,8 @@ fn endpoint_request_update_on_the_control_stream_closes_the_session() {
     });
     let err = ep.receive_message(upd).unwrap_err();
     assert!(matches!(err, EndpointError::RequestUpdateOnControlStream), "got {err:?}");
-    assert_eq!(err.session_error_code(), Some(SessionErrorCode::ProtocolViolation));
-    assert_eq!(ep.session_state(), moqtap_client::draft17::session::state::SessionState::Closed);
+    assert_eq!(err.session_error_code(), None, "draft-17 states no close for this");
+    assert_eq!(ep.session_state(), moqtap_client::draft17::session::state::SessionState::Active);
 }
 
 #[test]
@@ -374,7 +383,7 @@ fn endpoint_request_ok_routes_to_correct_flow() {
 /// # What this catches, observed by making each change and running it
 ///
 /// Dropping the NAMESPACE arm from `Endpoint::receive_response_on_stream`, so
-/// the announcement falls through to the catch-all as it did before:
+/// the announcement falls through to the catch-all:
 ///
 /// ```text
 /// NAMESPACE belongs on the SUBSCRIBE_NAMESPACE stream: ResponseOnControlStream
@@ -487,17 +496,14 @@ fn endpoint_publish_blocked_is_informational() {
 ///
 /// # What this catches, observed by making the change and running it
 ///
-/// Restoring the control-stream arm that used to accept a NAMESPACE there
-/// (`ControlMessage::Namespace(ref m) => self.receive_namespace(m)`), which is
-/// the behaviour this file previously asserted:
+/// Adding a control-stream arm that accepts a NAMESPACE there
+/// (`ControlMessage::Namespace(ref m) => self.receive_namespace(m)`):
 ///
 /// ```text
 /// NAMESPACE must be refused on the control stream
 /// ```
 #[test]
-fn endpoint_namespace_announcements_on_the_control_stream_close_the_session() {
-    use moqtap_codec::draft17::error_codes::SessionErrorCode;
-
+fn endpoint_namespace_announcements_on_the_control_stream_are_refused() {
     // The name is the one the endpoint reports the refusal under, so each pair
     // also gates the message against the wrong name.
     let cases = [
@@ -528,8 +534,12 @@ fn endpoint_namespace_announcements_on_the_control_stream_close_the_session() {
             matches!(err, EndpointError::RequestMessageOnControlStream(m) if m == name),
             "{name} on the control stream gave {err}"
         );
-        assert_eq!(err.session_error_code(), Some(SessionErrorCode::ProtocolViolation));
-        assert_eq!(ep.session_state(), SessionState::Closed);
+        // Refused, and the session runs on: draft-17 states no close for a
+        // message arriving on a stream it does not belong on, so a close here
+        // would be this crate's reading rather than the draft's. See
+        // `endpoint_request_update_on_the_control_stream_is_refused_without_closing`.
+        assert_eq!(err.session_error_code(), None, "draft-17 states no close for this");
+        assert_eq!(ep.session_state(), SessionState::Active);
     }
 }
 

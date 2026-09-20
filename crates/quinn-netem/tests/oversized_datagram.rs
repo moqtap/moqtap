@@ -56,7 +56,7 @@ fn vulnerable_uplinks() -> Vec<(Preset, RateModel)> {
 ///
 /// ```text
 /// thread 'a_datagram_larger_than_the_burst_is_dropped_and_not_aborted_on' panicked at
-/// crates\quinn-netem\src\engine.rs:342:37:
+/// crates\quinn-netem\src\engine.rs:
 /// the token bucket can never grant a 65535-byte datagram at 5000000 bits per
 /// second with a 16384-byte burst; that is a refusal the profile validator owed
 /// the caller, not a datagram to dispose of

@@ -6,10 +6,10 @@
 //! 0x02 - add "Subsequent fields MUST be zero, and any other value is a
 //! malformed message".
 //!
-//! Nothing applied either half. The value went out and came back as an opaque
-//! varint, so a peer's 0xff was accepted and a "track does not exist" carrying
-//! a live location was accepted too - a message that says in one field that the
-//! track is absent and in the next where its newest object is.
+//! Both halves have to be applied. Carried as an opaque varint the Status Code
+//! admits a peer's 0xff, and admits a "track does not exist" that carries a
+//! live location - a message that says in one field that the track is absent
+//! and in the next where its newest object is.
 //!
 //! Both directions are gated. A malformed message is one this codec must not
 //! read and equally must not write: emitting an unassigned code hands a

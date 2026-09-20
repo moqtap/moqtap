@@ -1,0 +1,206 @@
+--- a/src/connection.rs
++++ b/src/connection.rs
+@@ -107,10 +107,58 @@
+ use crate::tls::HandshakeData;
+ use crate::SessionId;
+ use crate::VarInt;
++use std::collections::HashMap;
+ use std::net::SocketAddr;
+ use std::sync::Arc;
+ use std::time::Duration;
+ 
++/// PATCH: a server's answer to the CONNECT request that opened a session.
++///
++/// The client sends its request, the server answers with a `:status` and
++/// whatever fields it chose, and until this type existed that answer was parsed
++/// and then dropped. It carries the server's half of every negotiation that
++/// happens in the CONNECT exchange — most usefully `WT-Protocol`, the
++/// application protocol the server selected out of the client's
++/// `WT-Available-Protocols` offer, which has no other channel to arrive on.
++#[derive(Clone, Debug)]
++pub struct ConnectResponse {
++    status: u16,
++    headers: HashMap<String, String>,
++}
++
++impl ConnectResponse {
++    pub(crate) fn new(status: u16, headers: HashMap<String, String>) -> Self {
++        Self { status, headers }
++    }
++
++    /// The `:status` of the response.
++    pub fn status(&self) -> u16 {
++        self.status
++    }
++
++    /// Every field of the response, `:status` included, as received.
++    pub fn headers(&self) -> &HashMap<String, String> {
++        &self.headers
++    }
++
++    /// One field, matched without regard to case.
++    ///
++    /// HTTP/3 requires lower-case field names on the wire, so a conformant peer
++    /// needs no folding here — but a field that arrives mis-cased is still the
++    /// field the peer meant, and reading it is closer to correct than reporting
++    /// it absent.
++    pub fn get(&self, key: &str) -> Option<&str> {
++        self.headers
++            .iter()
++            .find(|(k, _)| k.eq_ignore_ascii_case(key))
++            .map(|(_, v)| v.as_str())
++    }
++
++    pub(crate) fn into_headers(self) -> HashMap<String, String> {
++        self.headers
++    }
++}
++
+ /// A WebTransport session connection.
+ ///
+ /// For more details, see the [module documentation](crate::connection).
+@@ -121,6 +169,7 @@
+     quic_connection: quinn::Connection,
+     driver: Arc<Driver>,
+     session_id: SessionId,
++    connect_response: Option<ConnectResponse>,
+ }
+ 
+ impl Connection {
+@@ -128,14 +177,25 @@
+         quic_connection: quinn::Connection,
+         driver: Driver,
+         session_id: SessionId,
++        connect_response: Option<ConnectResponse>,
+     ) -> Self {
+         Self {
+             quic_connection,
+             driver: Arc::new(driver),
+             session_id,
++            connect_response,
+         }
+     }
+ 
++    /// PATCH: the server's answer to the CONNECT request that opened this
++    /// session.
++    ///
++    /// `None` on a server connection, which sends that answer rather than
++    /// receiving one.
++    pub fn connect_response(&self) -> Option<&ConnectResponse> {
++        self.connect_response.as_ref()
++    }
++
+     /// Asynchronously accepts a unidirectional stream.
+     ///
+     /// This method is used to accept incoming unidirectional streams that have been initiated
+--- a/src/endpoint.rs
++++ b/src/endpoint.rs
+@@ -1,6 +1,7 @@
+ use crate::config::ClientConfig;
+ use crate::config::DnsResolver;
+ use crate::config::ServerConfig;
++use crate::connection::ConnectResponse;
+ use crate::connection::Connection;
+ use crate::driver::streams::session::StreamSession;
+ use crate::driver::streams::ProtoReadError;
+@@ -338,7 +339,12 @@
+         {
+             Ok(()) => {}
+             Err(ProtoWriteError::Stopped) => {
+-                return Err(ConnectingError::SessionRejected);
++                // PATCH: no response arrived — the peer stopped the stream
++                // while the request was still being written.
++                return Err(ConnectingError::SessionRejected {
++                    status: None,
++                    headers: HashMap::new(),
++                });
+             }
+             Err(ProtoWriteError::NotConnected) => {
+                 return Err(ConnectingError::with_no_connection(&quic_connection));
+@@ -382,6 +388,13 @@
+             }
+         };
+ 
++        // PATCH: taken from the frame's own fields, before the conversion below.
++        // `SessionResponse: TryFrom<Headers>` reads `:status` and rebuilds the
++        // value from that alone — every other field the server sent is dropped
++        // there, `WT-Protocol` included — so the response has to be read here or
++        // not at all.
++        let fields = headers.as_ref().clone();
++
+         let Ok(session_response) = SessionResponseProto::try_from(headers) else {
+             quic_connection.close(varint_w2q(ErrorCode::Message.to_code()), b"");
+             return Err(ConnectingError::ConnectionError(
+@@ -389,6 +402,11 @@
+             ));
+         };
+ 
++        // PATCH: the response is kept rather than dropped. Both branches below
++        // used to discard it, which lost the server's `WT-Protocol` selection on
++        // success and its `:status` on rejection.
++        let response = ConnectResponse::new(session_response.code().into_inner(), fields);
++
+         if session_response.code().is_successful() {
+             match driver.register_session(stream_session).await {
+                 Ok(()) => {}
+@@ -399,10 +417,18 @@
+                 }
+             }
+         } else {
+-            return Err(ConnectingError::SessionRejected);
++            return Err(ConnectingError::SessionRejected {
++                status: Some(response.status()),
++                headers: response.into_headers(),
++            });
+         }
+ 
+-        Ok(Connection::new(quic_connection, driver, session_id))
++        Ok(Connection::new(
++            quic_connection,
++            driver,
++            session_id,
++            Some(response),
++        ))
+     }
+ }
+ 
+@@ -761,10 +787,13 @@
+                 ConnectionError::with_driver_error(driver_error, &self.quic_connection)
+             })?;
+ 
++        // PATCH: `None` — this side *sent* the CONNECT response rather than
++        // receiving one, so there is nothing here a peer selected.
+         Ok(Connection::new(
+             self.quic_connection,
+             self.driver,
+             session_id,
++            None,
+         ))
+     }
+ 
+--- a/src/error.rs
++++ b/src/error.rs
+@@ -89,8 +89,21 @@
+     ConnectionError(ConnectionError),
+ 
+     /// Request rejected.
+-    #[error("server rejected WebTransport session request")]
+-    SessionRejected,
++    ///
++    /// PATCH: carries the rejecting response. The status is what says *why* a
++    /// server said no — a 404 names the path, a 4xx after a
++    /// `WT-Available-Protocols` offer names the protocol — and this variant used
++    /// to be a bare unit that threw all of it away.
++    #[error("server rejected WebTransport session request{}",
++            .status.map(|s| format!(" with status {s}")).unwrap_or_default())]
++    SessionRejected {
++        /// The `:status` the server answered with, or `None` where the request
++        /// was refused before any response arrived.
++        status: Option<u16>,
++        /// The fields of the rejecting response, `:status` included. Empty
++        /// where there was no response.
++        headers: std::collections::HashMap<String, String>,
++    },
+ 
+     /// Cannot use reserved key for additional headers.
+     #[error("additional header '{0}' is reserved")]

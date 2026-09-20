@@ -352,7 +352,7 @@ fn run_datagram_vectors(relative_path: &str) {
 ///
 /// ```text
 /// thread 'd18_data_stream_fetch'
-/// panicked at crates\moqtap-codec\tests\vectors_draft18.rs:380:17:
+/// panicked at crates\moqtap-codec\tests\vectors_draft18.rs:
 /// assertion `left == right` failed: [fetch-stream-two-objects] object_id mismatch
 ///   left: "0"
 ///  right: "1"

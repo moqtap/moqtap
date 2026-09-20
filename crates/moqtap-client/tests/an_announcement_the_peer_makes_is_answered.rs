@@ -31,21 +31,17 @@
 //! and receives the withdrawal - both the other way round from an announcement
 //! it makes itself.
 //!
-//! # What was here before
-//!
-//! Nothing on any of the ten. An arriving ANNOUNCE or PUBLISH_NAMESPACE had its
-//! Request ID counted against the peer's sequence from draft-11 on, and was
-//! then dropped; drafts 07 through 10, which have no Request ID on the message,
-//! dropped it outright. A peer that announced to this crate waited for an
-//! answer the crate had no record to build.
-//!
-//! The withdrawal was worse than absent on drafts 14 through 16, which did
-//! dispatch it: it walked the announcements this endpoint had made, because
-//! those were the only ones on record. Draft-14 advanced every one of them at
-//! once and ignored what they said about it.
+//! # Why the range stops at 16
 //!
 //! Drafts 17 through 20 already carry all of this, because a request there
-//! arrives on a stream of its own and one map holds both ends' announcements.
+//! arrives on a stream of its own — draft-17 Section 9.17 has the publisher
+//! send PUBLISH_NAMESPACE "as the first message on a new bidi stream" — and one
+//! map holds both ends' announcements.
+//!
+//! The withdrawal is the half worth watching on these ten. An announcement the
+//! peer made and one this endpoint made are two records, and a withdrawal that
+//! walked the wrong one would end this endpoint's own announcements instead of
+//! the peer's; the gates below hold the two apart.
 //!
 //! # Why none of this ends the session
 //!
@@ -292,10 +288,10 @@ macro_rules! inbound_announce_gates {
             /// the announcement the peer made should be on record
             /// ```
             ///
-            /// Made by dropping the record instead of inserting it, which is
-            /// what all ten drafts did before. It reddens 170 tests across all
-            /// four files: an announcement that is not kept is one no answer,
-            /// no withdrawal and no cancellation can find.
+            /// Made by dropping the record instead of inserting it. It reddens
+            /// 170 tests across all four files: an announcement that is not
+            /// kept is one no answer, no withdrawal and no cancellation can
+            /// find.
             #[test]
             fn an_announcement_the_peer_makes_is_recorded() {
                 let ep = announced();
@@ -323,9 +319,9 @@ macro_rules! inbound_announce_gates {
             /// ```
             ///
             /// Made by cutting the dispatch arm, which sends the message back
-            /// to the fall-through that accepts and ignores it - the state all
-            /// ten drafts were in. It reddens 20 tests: this gate on all ten
-            /// drafts, and both loopback gates on the five that have them.
+            /// to the fall-through that accepts and ignores it. It reddens 20
+            /// tests: this gate on all ten drafts, and both loopback gates on
+            /// the five that have them.
             #[test]
             fn an_announcement_arriving_on_the_control_stream_is_recorded() {
                 let mut ep = active();

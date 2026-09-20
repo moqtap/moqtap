@@ -182,11 +182,11 @@ fn invalid_type_bytes(flag_bits: &[u8]) -> Vec<u8> {
 ///
 /// # What these rows catch
 ///
-/// Drafts 17-19 held no field for the property block at all: `decode` read a
-/// length-prefixed block whenever the type byte set `0x01`, and `encode`
-/// never wrote one. Removing `properties` from
-/// `draft17::data_stream::DatagramHeader` again — leaving the decoder's skip
-/// in place — was run and gives, on each of the three drafts:
+/// The asymmetry these catch is a header with no field for the property block
+/// at all: a `decode` that reads a length-prefixed block whenever the type
+/// byte sets `0x01` beside an `encode` that never writes one. Removing
+/// `properties` from `draft17::data_stream::DatagramHeader` — leaving the
+/// decoder's skip in place — was run and gives, on each of the three drafts:
 ///
 /// ```text
 /// draft17: datagram type 0x01 encodes to [01, 01, 02, 03, 80], which its own decoder refuses: VarInt(UnexpectedEnd)
@@ -195,7 +195,7 @@ fn invalid_type_bytes(flag_bits: &[u8]) -> Vec<u8> {
 /// ```
 ///
 /// The draft-15 and draft-16 rows passed unchanged through that same run,
-/// which is what makes them the control: they already carried the field.
+/// which is what makes them the control: they carry the field.
 macro_rules! datagram_row {
     (ext_headers_fixed_priority $name:ident, $feat:literal, $draft:ident) => {
         #[cfg(feature = $feat)]
@@ -559,9 +559,9 @@ invalid_datagram_row!(
 ///
 /// # What these rows catch
 ///
-/// `write_object` used to copy `payload_length` to the wire as given.
-/// Removing the check at the top of it was run and gives, on every draft in
-/// the range:
+/// `write_object` checks `payload_length` against the payload it was handed
+/// rather than copying it to the wire as given. Removing that check was run
+/// and gives, on every draft in the range:
 ///
 /// ```text
 /// draft15: a length with no payload behind it (declared 4, payload 0) must be refused with InvalidField, got Ok(())

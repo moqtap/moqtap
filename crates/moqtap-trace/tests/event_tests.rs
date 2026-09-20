@@ -1230,7 +1230,8 @@ fn key_of(cbor: &Value, key: &str) -> Option<Value> {
 }
 
 /// Writers must emit `{}` when they decoded nothing, but files written before
-/// that rule simply have no `"msg"`, and this used to reject them. Event 0 is
+/// that rule simply have no `"msg"`, and a reader that requires the key rejects
+/// them. Event 0 is
 /// one of the types sampling MUST NOT drop, so the reader that treats the key
 /// as required throws away precisely the events the format guarantees — and
 /// throws them away without saying so, since the caller drops the event on the
@@ -1247,10 +1248,9 @@ fn a_control_event_missing_msg_reads_as_an_empty_map_rather_than_failing() {
 /// are readable, and the text must reach the caller byte for byte rather than
 /// being coerced into a map or discarded.
 ///
-/// This passed before the absent-`"msg"` fix as well: a *present* non-map value
-/// was always returned unchanged. It is here as a regression pin, not as
-/// evidence for that change — the obvious way to implement "`msg` is a map"
-/// would break it.
+/// It is here as a regression pin: a present non-map value is returned
+/// unchanged, and the obvious way to implement "`msg` is a map" would break
+/// that.
 #[test]
 fn a_msg_that_is_not_a_map_is_handed_back_verbatim() {
     let text = "Subscribe { request_id: 42, track_alias: 7 }";
@@ -1279,8 +1279,8 @@ fn an_event_read_without_msg_is_written_back_with_an_empty_map() {
 /// text and then a writer that dropped it would lose the only record of the
 /// message the older recorder had.
 ///
-/// Like the test above, this held before the absent-`"msg"` fix. Both pin the
-/// behaviour SPEC.md now requires rather than behaviour that changed.
+/// Like the test above, this pins behaviour SPEC.md requires rather than
+/// behaviour peculiar to one implementation.
 #[test]
 fn a_text_msg_survives_a_read_write_round_trip() {
     let text = "Subscribe { request_id: 42, track_alias: 7 }";
@@ -1392,7 +1392,7 @@ fn an_unusable_namespace_keeps_the_event_and_the_key() {
         ("d", Value::Array(vec![Value::Array(vec![Value::Text("peer-a".into()), uint(1)])])),
         ("kind", Value::Text("created".into())),
         // Not an array. Nothing a conformant writer emits, and exactly the
-        // shape that used to end the file here.
+        // shape a reader that assumed one would choke on.
         ("ns", uint(5)),
     ]);
     let decoded = TraceEvent::try_from(event).expect("an unusable 'ns' is not a malformed event");
@@ -1661,8 +1661,8 @@ fn tagged(bytes: &[u8]) -> Value {
 /// SPEC.md's two normative encoding rules (Interoperability) bind the bytes a
 /// writer emits, so they bind every value it emits and not only the ones it
 /// understood. `"msg"` is the largest opaque value an event carries: a reader
-/// hands it back whatever it holds, and the writer used to hand it straight
-/// back to the file.
+/// hands it back whatever it holds, so a writer that re-emitted it unchanged
+/// would put a non-conforming encoding straight into the file.
 ///
 /// The JavaScript side cannot produce either shape — `cbor-x` gives its code a
 /// plain number for an integral float and strips tag 64 on decode — so a Rust
@@ -1783,8 +1783,8 @@ fn annotation_cbor(data: Value) -> Value {
 
 /// `"data"` on an annotation is the second opaque value an event carries — any
 /// CBOR type, defined by whoever wrote the trace and never looked at here —
-/// and it was missed for the same reason `"msg"` was: it reaches the
-/// serializer as a `Value` and used to be handed straight to the file.
+/// and it needs the same guard `"msg"` does: it reaches the
+/// serializer as a `Value`, which is handed straight to the file.
 ///
 /// Event 7 is nine of the fifteen events in two `capture-*` cases of the
 /// shared corpus, so this is not a hypothetical write site.
@@ -2023,9 +2023,9 @@ fn text(s: &str) -> Value {
 /// that close that section), and seeing it means preserving it.
 ///
 /// Every getter here is a first-match search, so the field takes the first
-/// entry. The second used to be dropped along with it, because the store was
-/// filtered by key *name*: a value the file carried reached neither the field
-/// nor the store, and reading the file deleted it.
+/// entry. Filtering the store by key *name* would drop the second along with
+/// it: a value the file carried would reach neither the field nor the store,
+/// and reading the file would delete it.
 #[test]
 fn a_duplicate_key_on_input_keeps_the_entry_no_field_took() {
     let event = TraceEvent::try_from(cbor_map(&[

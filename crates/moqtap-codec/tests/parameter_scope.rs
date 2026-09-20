@@ -202,7 +202,7 @@ mod draft17 {
     /// ```text
     /// ---- draft17::an_out_of_scope_parameter_ends_the_session stdout ----
     ///
-    /// thread 'draft17::an_out_of_scope_parameter_ends_the_session' (8140) panicked at crates\moqtap-codec\tests\parameter_scope.rs:182:14:
+    /// thread 'draft17::an_out_of_scope_parameter_ends_the_session' (8140) panicked at crates\moqtap-codec\tests\parameter_scope.rs:
     /// EXPIRES is not named for SUBSCRIBE: Subscribe(Subscribe { request_id: VarInt(2), required_request_id_delta: VarInt(0), track_namespace: TrackNamespace([[108, 105, 118, 101]]), track_name: [118, 105, 100, 101, 111], parameters: [KeyValuePair { key: VarInt(8), value: Varint(VarInt(30)) }] })
     /// ```
     #[test]

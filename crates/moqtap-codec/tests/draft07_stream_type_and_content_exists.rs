@@ -1,6 +1,6 @@
 #![cfg(feature = "draft07")]
-//! Two draft-07 rules that used to arrive as `CodecError::InvalidField`, and the
-//! one case next to each of them that must not.
+//! Two draft-07 rules that each need an error variant of their own, and the one
+//! case next to each of them that must not be reported as one.
 //!
 //!   - Section 7: "An endpoint that receives an unknown stream type MUST close
 //!     the session." Every draft from 07 to 20 states this, in one of two
@@ -15,8 +15,8 @@
 //!
 //! `InvalidField` is shared by a dozen unrelated malformations, only some of
 //! which the draft answers with a close, so a session cannot be ended on it
-//! without ending sessions the draft does not ask to be ended. Each rule now has
-//! a variant of its own, which is what lets the connection answer it.
+//! without ending sessions the draft does not ask to be ended. Each rule has a
+//! variant of its own, which is what lets the connection answer it.
 //!
 //! The near-miss cases are the point of the file as much as the rules are. A
 //! split that reports too much is as wrong as one that reports too little, and

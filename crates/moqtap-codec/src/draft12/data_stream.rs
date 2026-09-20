@@ -12,6 +12,54 @@ use crate::varint::VarInt;
 use bytes::{Buf, BufMut};
 
 /// Stream type IDs for draft-12 data streams.
+///
+/// # Draft-12 contradicts itself about where the subgroup types sit
+///
+/// Three places in this draft name the SUBGROUP_HEADER Type range, and they do
+/// not agree. Two of them carry draft-11's answer:
+///
+///   - Section 9, Table 10, the table of unidirectional stream types, whose
+///     SUBGROUP_HEADER row reads 0x08-0x0D.
+///   - Section 9.4.2, Figure 35, the header's own layout:
+///     `Type (i) = 0x8..0xD`.
+///
+/// The third does not. Section 9.4.2 says "There are 12 defined Type values for
+/// SUBGROUP_HEADER" and Table 13, immediately under that figure, lists them:
+/// 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x18, 0x19, 0x1A, 0x1B, 0x1C and 0x1D.
+///
+/// **This enum implements Table 13**, so a stream opening with 0x08 through
+/// 0x0D is [`CodecError::UnknownStreamType`] and closes the session.
+///
+/// Table 13 is the surviving half, for the same reason and by the same
+/// mechanism as the datagram-status contradiction documented on
+/// [`DatagramType`] — a code-point update that missed a spot:
+///
+///   - The range 0x08-0x0D holds six values, and this draft defines twelve
+///     types. Draft-11 Section 9.4.2 Table 11 lists exactly six, at 0x08
+///     through 0x0D, and the twelve here are those six crossed with the End Of
+///     Group bit draft-12 added — its own change log says so: "Use bits in
+///     SUBGROUP_HEADER and DATAGRAM* types to compress subgroup ID and
+///     extensions". So 0x08-0x0D and `0x8..0xD` are draft-11's range left
+///     behind, and they cannot hold what this draft defines.
+///   - Table 13 is the only one of the three that says what each value *means*.
+///     The other two give a range and nothing else, so following either would
+///     leave every framing decision — whether a Subgroup ID field is on the
+///     wire, whether objects carry extensions, whether the stream ends the
+///     group — with nothing to read it from.
+///   - Draft-14 keeps Table 13 unchanged and corrects the other two to match:
+///     its Table 10 reads "0x10-0x1D" and its Figure reads
+///     `Type (i) = 0x10..0x1D`. That is the disagreement being resolved in
+///     favour of Table 13 by the working group, one draft later.
+///
+/// Draft-13 repeats all three halves unchanged, and carries the same note.
+///
+/// The cost of being wrong is asymmetric and points the same way. Accepting
+/// 0x08-0x0D as well would mean parsing a stream under framing no table
+/// assigns it, which is the failure this codebase refuses elsewhere — an
+/// out-of-range Type aliased onto a valid one produces objects with plausible,
+/// wrong contents. Refusing them closes a session with a peer that followed the
+/// stale half of its own draft, which is visible, reportable, and what
+/// draft-14 says the peer should not have done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u64)]
 pub enum StreamType {
@@ -56,9 +104,9 @@ pub enum StreamType {
 /// is the only carrier that cannot break the rule.
 ///
 /// Reported under [`CodecError::ExtensionsOnNonExistentObject`], which is this
-/// rule and nothing else. It was [`CodecError::InvalidField`] until now, shared
-/// with a dozen unrelated malformations the draft does not answer with a close,
-/// which left a caller unable to act on the sentence above.
+/// rule and nothing else. [`CodecError::InvalidField`] is too coarse for it:
+/// shared with a dozen unrelated malformations the draft does not answer with a
+/// close, it leaves a caller unable to act on the sentence above.
 fn check_extensions_against_status(
     status: ObjectStatus,
     extensions: &[u8],

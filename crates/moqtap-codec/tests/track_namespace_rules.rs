@@ -111,7 +111,7 @@ fn ns_outcome(got: &Result<TrackNamespace, CodecError>) -> String {
 /// ```text
 /// ---- draft_16_refuses_a_zero_length_namespace_field stdout ----
 ///
-/// thread 'draft_16_refuses_a_zero_length_namespace_field' (56344) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:124:5:
+/// thread 'draft_16_refuses_a_zero_length_namespace_field' (56344) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
 /// draft-16 NAMESPACE accepted a zero-length field: Ok(Namespace(Namespace { namespace_suffix: TrackNamespace([[]]) }))
 /// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 /// ```
@@ -156,7 +156,7 @@ fn draft_16_refuses_a_zero_length_namespace_field() {
 /// ```text
 /// ---- drafts_before_16_accept_a_zero_length_namespace_field stdout ----
 ///
-/// thread 'drafts_before_16_accept_a_zero_length_namespace_field' (12696) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:172:18:
+/// thread 'drafts_before_16_accept_a_zero_length_namespace_field' (12696) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
 /// draft-15 PUBLISH_NAMESPACE refused a zero-length field: Err(EmptyNamespaceField)
 /// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 /// ```
@@ -205,7 +205,7 @@ fn drafts_before_16_accept_a_zero_length_namespace_field() {
 /// ```text
 /// ---- draft_16_refuses_a_namespace_over_4096_bytes stdout ----
 ///
-/// thread 'draft_16_refuses_a_namespace_over_4096_bytes' (65036) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:214:5:
+/// thread 'draft_16_refuses_a_namespace_over_4096_bytes' (65036) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
 /// draft-16 accepted a 4097-byte namespace: Ok(1 fields, 4097 bytes)
 /// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 /// ```
@@ -259,7 +259,7 @@ fn draft_16_refuses_a_namespace_over_4096_bytes() {
 /// ```text
 /// ---- draft_16_accepts_a_namespace_suffix_of_no_fields stdout ----
 ///
-/// thread 'draft_16_accepts_a_namespace_suffix_of_no_fields' (12500) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:270:18:
+/// thread 'draft_16_accepts_a_namespace_suffix_of_no_fields' (12500) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
 /// draft-16 refused an empty namespace suffix: Err(InvalidNamespaceTupleSize(0))
 /// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 /// ```
@@ -303,7 +303,7 @@ fn draft_16_accepts_a_namespace_suffix_of_no_fields() {
 /// ```text
 /// ---- each_draft_gets_the_rules_that_draft_states stdout ----
 ///
-/// thread 'each_draft_gets_the_rules_that_draft_states' (10648) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:316:5:
+/// thread 'each_draft_gets_the_rules_that_draft_states' (10648) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
 /// draft-15 refused a zero-length field: Err(EmptyNamespaceField)
 /// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 /// ```

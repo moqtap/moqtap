@@ -48,7 +48,7 @@
 //!
 //! ```text
 //! thread 'the_rule_elides_the_object_it_names_and_leaves_its_neighbour' (52012)
-//! panicked at crates\moqtap-proxy\tests\draft_refinement.rs:391:5:
+//! panicked at crates\moqtap-proxy\tests\draft_refinement.rs:
 //! assertion `left == right` failed: the rule names object 1, so the relay must
 //! receive 0 and 2 and nothing between them
 //!   left: [0, 1, 2]
@@ -57,7 +57,7 @@
 //!
 //! ```text
 //! thread 'a_shaped_session_with_no_interests_charges_its_class_for_real_objects' (68468)
-//! panicked at crates\moqtap-proxy\tests\draft_refinement.rs:444:5:
+//! panicked at crates\moqtap-proxy\tests\draft_refinement.rs:
 //! assertion `left == right` failed: the shaper saw the three objects the client sent
 //!   left: 0
 //!  right: 3

@@ -488,7 +488,7 @@ impl ObjectFramer {
     /// That exception is the *only* one, and it is opt-in per stream: a
     /// framer used as a pure observer never calls `note_elided`, so its
     /// output stays byte-identical to its input. When `note_elided` has
-    /// been called on a drafts 14-19 subgroup stream, the next object the
+    /// been called on a drafts 14-20 subgroup stream, the next object the
     /// framer emits has its leading Object ID varint re-encoded against
     /// the last object actually forwarded — one field, in one object, and
     /// every byte after it copied verbatim. Everything else, on every
@@ -614,9 +614,9 @@ impl ObjectFramer {
 
     /// The reader and writer a fetch stream is parsed with, or why it is not.
     ///
-    /// Two drafts need an answer from off the stream and the other eleven do
-    /// not, which is [`fetch_group_order_is_needed`]. Where one is needed it
-    /// comes from the FETCH the session carried, filed under the Request ID
+    /// Three drafts need an answer from off the stream and the other eleven
+    /// do not, which is [`fetch_group_order_is_needed`]. Where one is needed
+    /// it comes from the FETCH the session carried, filed under the Request ID
     /// this header names; a stream naming a request that was never asked for
     /// is bypassed rather than guessed at, because the guess would decode.
     ///
@@ -1488,7 +1488,7 @@ mod tests {
     /// Eliding an object leaves a stream that still decodes to exactly the
     /// objects that survived, on every draft.
     ///
-    /// On drafts 14-19 that is only true because the framer rewrites the
+    /// On drafts 14-20 that is only true because the framer rewrites the
     /// next object's leading Object ID varint; on 07-13 the IDs are
     /// absolute and the surviving bytes already say the truth.
     ///
@@ -1665,28 +1665,26 @@ mod tests {
         }
     }
 
-    /// A draft-16 subgroup header cannot set both the explicit-subgroup-ID
-    /// bit and the first-object bit, so the proxy never has to choose
-    /// between them.
+    /// No draft-16 subgroup header the decoder accepts sets both the
+    /// explicit-subgroup-ID bit and the first-object bit, so the proxy
+    /// never has to choose between them.
     ///
-    /// This test used to pin the choice. Setting `0x04` (explicit subgroup
-    /// ID) and `0x02` (subgroup ID is the first object's) together puts
-    /// bits one and two at `0b11`, and draft-16 Section 10.4.2 reserves
-    /// that Subgroup ID mode. The decoder now refuses all eight bytes that
-    /// spell it, so a header asking the question can no longer be built.
+    /// Setting `0x04` (explicit subgroup ID) and `0x02` (subgroup ID is the
+    /// first object's) together puts bits one and two at `0b11`, and
+    /// draft-16 Section 10.4.2 reserves that Subgroup ID mode. The decoder
+    /// refuses all eight bytes that spell it, so no such header decodes,
+    /// and the sweep below covers the whole reserved mode rather than one
+    /// byte of it.
     ///
-    /// What the old test recorded is still worth keeping, because it
-    /// explains why the proxy reads the field through the uniform
-    /// accessor: the header's own `subgroup_id_from_first_object`
-    /// predicate used to look only at `0x02`, so a match asking only that
-    /// question reported `None` for a subgroup ID sitting on the wire.
-    /// That predicate reads the whole two-bit mode now, and the accessor
-    /// already let the explicit mode win, matching the decoder. That
-    /// behaviour is unchanged and is exercised by every valid
-    /// explicit-mode header; only the contradictory input is gone.
-    ///
-    /// The fence moved rather than vanished — this now sweeps the whole
-    /// reserved mode instead of pinning one byte of it.
+    /// Why the proxy reads the field through the uniform accessor rather
+    /// than off the header's bits: those two bits are one two-bit field,
+    /// and a predicate reading `0x02` alone answers `true` for the reserved
+    /// mode as well — at the same time as one reading `0x04` alone, for a
+    /// state one two-bit field cannot be in.
+    /// [`AnySubgroupHeader::subgroup_id`] reads the mode as a field
+    /// instead: it answers `None` for the reserved mode — the header
+    /// determines no Subgroup ID — and reads the explicit field only for
+    /// mode 2, which is the only mode the decoder reads one for.
     ///
     /// *Ablation:* accepting the reserved mode again — dropping the
     /// Subgroup ID mode arm from the draft-16 `validate_subgroup_type` —
@@ -1694,7 +1692,7 @@ mod tests {
     ///
     /// ```text
     /// thread 'framer::tests::draft16_refuses_the_reserved_subgroup_id_mode'
-    /// panicked at crates\moqtap-proxy\src\framer.rs:1436:13:
+    /// panicked at crates\moqtap-proxy\src\framer.rs:
     /// type 0x16 sets the reserved Subgroup ID mode and must be refused
     /// ```
     #[test]

@@ -26,20 +26,11 @@
 //! because there is no UNSUBSCRIBE for a request that owns a stream: "the
 //! subscriber cannot send REQUEST_UPDATE".
 //!
-//! # What was here before
+//! # Why draft-12 is not in this file
 //!
-//! The opposite, in writing, on six of the eight drafts that state the rule.
-//! Drafts 12 through 16 listed the track statuses this endpoint had asked for
-//! among the requests whose identifier had already existed within the session,
-//! which is the complement of the drafts' own "has not existed" test, and an
-//! update naming one was accepted on that ground. Drafts 17 and 18 went further
-//! and named `track_statuses` in the set of request kinds an update may modify,
-//! beside the five the draft actually lists. Drafts 19 and 20 left it out, and
-//! draft-19's comment says why.
-//!
-//! Draft-12 is not in this file. Its TRACK_STATUS_REQUEST is a different
-//! message with no such sentence attached, so an update naming one is answered
-//! by the rule about identifiers that never existed and by nothing else.
+//! Its TRACK_STATUS_REQUEST is a different message, Section 8.20, with no such
+//! sentence attached, so an update naming one is answered by the rule about
+//! identifiers that never existed and by nothing else.
 //!
 //! # Where the consequence changes
 //!
@@ -55,27 +46,26 @@
 //! sentence and closes on every draft here, which the last gate on each of the
 //! four control-stream drafts checks.
 //!
-//! ## What the range used to stop at 18
+//! ## Why the range does not stop at 18
 //!
-//! It stopped there because that is where the outcome changes, and a gate
-//! asserting a refusal would have failed on 19 and 20. The two drafts left out
-//! on that ground were the two the rule is stated most explicitly for, and the
-//! error they raise for it — `UnexpectedRequestUpdate` — turned out to be
-//! raised in twelve places in each of their endpoints and observed by nothing
-//! anywhere in the workspace. Not one test, in either crate.
+//! Eighteen is the tempting boundary, because that is where the outcome changes
+//! and a gate asserting a refusal fails on 19 and 20. But the two drafts that
+//! would be left out on that ground are the two the rule is stated most
+//! explicitly for.
 //!
 //! That is the shape worth naming. A range that stops where the behaviour
 //! changes looks like scoping and reads like a decision, and it leaves exactly
 //! the drafts whose behaviour is most particular with no gate at all. The
-//! divergence was the reason to write more, not less.
+//! divergence is the reason to write more, not less, which is what
+//! `closing_gates!` is for.
 //!
 //! # Ablations, measured
 //!
 //! Four cuts are recorded on the six drafts that refuse, each run and reverted,
-//! each on the gate it reddens. Two of them restore the earlier behaviour, on
-//! the four control-stream drafts and on the two stream-era ones; the other two
-//! are the guard cut in the withdrawal's handler and the guard widened past the
-//! one request kind the sentence is about.
+//! each on the gate it reddens. Two of them let an update name a track status,
+//! on the four control-stream drafts and on the two stream-era ones; the other
+//! two are the guard cut in the withdrawal's handler and the guard widened past
+//! the one request kind the sentence is about.
 //!
 //! One gate carries no cut. The rule about an identifier the session never
 //! carried is a different sentence with a close code of its own, and nothing
@@ -815,7 +805,7 @@ macro_rules! closing_gates {
             ///
             /// ```text
             /// thread 'draft19::an_update_naming_a_track_status_the_peer_asked_for_closes_the_session'
-            /// panicked at crates\moqtap-client\tests\a_track_status_is_not_a_subscription.rs:913:1:
+            /// panicked at crates\moqtap-client\tests\a_track_status_is_not_a_subscription.rs:
             /// a track status is not one of the six kinds an update may name: ()
             /// ```
             ///

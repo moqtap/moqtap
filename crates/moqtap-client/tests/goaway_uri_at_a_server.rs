@@ -190,8 +190,9 @@ macro_rules! goaway_uri_setup_for {
     }};
 }
 
-/// The request each gate makes after the refusal. ANNOUNCE was renamed
-/// PUBLISH_NAMESPACE at draft-14 and grew a parameter list at draft-15.
+/// The request each gate makes after the refusal. Drafts 08 through 13 call it
+/// ANNOUNCE and drafts 14 through 16 call it PUBLISH_NAMESPACE; the builder
+/// takes a parameter list from draft-12 on.
 #[macro_export]
 macro_rules! goaway_uri_next_for {
     (announce, $ep:ident) => {

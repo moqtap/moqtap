@@ -132,7 +132,7 @@ fn subscribe_ok_with_an_unassigned_alias_type() -> Vec<u8> {
 /// ```text
 /// ---- a_malformed_authorization_token_closes_the_quic_connection stdout ----
 ///
-/// thread 'a_malformed_authorization_token_closes_the_quic_connection' (65840) panicked at crates\moqtap-client\tests\draft12_malformed_auth_token_closes_the_session.rs:165:17:
+/// thread 'a_malformed_authorization_token_closes_the_quic_connection' (65840) panicked at crates\moqtap-client\tests\draft12_malformed_auth_token_closes_the_session.rs:
 /// assertion `left == right` failed: Section 8.2.1.1 answers a Token that cannot be decoded with Key-Value Formatting Error; the close carried 3 instead
 /// ```
 ///
@@ -141,7 +141,7 @@ fn subscribe_ok_with_an_unassigned_alias_type() -> Vec<u8> {
 /// ```text
 /// ---- a_malformed_authorization_token_closes_the_quic_connection stdout ----
 ///
-/// thread 'a_malformed_authorization_token_closes_the_quic_connection' (58284) panicked at crates\moqtap-client\tests\draft12_malformed_auth_token_closes_the_session.rs:186:35:
+/// thread 'a_malformed_authorization_token_closes_the_quic_connection' (58284) panicked at crates\moqtap-client\tests\draft12_malformed_auth_token_closes_the_session.rs:
 /// a Token that cannot be decoded must be refused: SubscribeOk(SubscribeOk { request_id: VarInt(0), track_alias: VarInt(4), expires: VarInt(0), group_order: Ascending, content_exists: NoLargestLocation, largest_location: None, parameters: [KeyValuePair { key: VarInt(3), value: Bytes([4, 1]) }] })
 /// ```
 #[tokio::test]

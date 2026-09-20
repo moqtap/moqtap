@@ -154,12 +154,12 @@ pub enum ProxyEvent {
     ///
     /// An **observation of what came in**, emitted where the decode happens
     /// — before any hook is consulted and before the datagram is handed to
-    /// the far transport. It is deliberately not a delivery receipt, and it
-    /// once said "was forwarded", which was wrong in two directions at
-    /// once: a hook that drops or replaces the datagram still produces this
-    /// event, and the forward itself can be refused, which is reported
-    /// separately as [`ImpairmentKind::DatagramNotSent`] or, when somebody
-    /// acted on it, as [`ProxyEvent::ActionFailed`].
+    /// the far transport. It is deliberately not a delivery receipt, and
+    /// calling it one would be wrong in two directions at once: a hook that
+    /// drops or replaces the datagram still produces this event, and the
+    /// forward itself can be refused, which is reported separately as
+    /// [`ImpairmentKind::DatagramNotSent`] or, when somebody acted on it,
+    /// as [`ProxyEvent::ActionFailed`].
     ///
     /// It sits with [`ProxyEvent::Object`] and
     /// [`ProxyEvent::ControlMessage`] rather than with the action events:
@@ -234,8 +234,7 @@ pub enum ProxyEvent {
     /// abandoned and any data on it may be truncated.
     ///
     /// Not emitted for streams the proxy itself tears down at session
-    /// shutdown — those still end with a FIN, as they did before this
-    /// event existed.
+    /// shutdown — those end with a FIN.
     StreamReset {
         /// The session identifier.
         session_id: SessionId,
@@ -549,7 +548,7 @@ pub enum ShapeOutcome {
     /// [`Overflow::DropTail`](crate::shape::Overflow::DropTail).
     ///
     /// The unit went through the framer's elide path, so absolute object
-    /// IDs on drafts 14-19 stay correct; a unit an elide guard refused was
+    /// IDs on drafts 14-20 stay correct; a unit an elide guard refused was
     /// admitted instead of dropped and is reported as a refusal, not here.
     Dropped,
     /// A queued unit outlived `max_hold` under
@@ -611,8 +610,8 @@ pub enum Effect {
     /// An object was removed. `renumbered_successor` is `true` when the next
     /// object on the stream has to be re-encoded against the one now in
     /// front of it: its leading ID varint rewritten on a subgroup stream of
-    /// drafts 14-19, its whole framing re-encoded on a fetch stream of
-    /// drafts 15-19.
+    /// drafts 14-20, its whole framing re-encoded on a fetch stream of
+    /// drafts 15-20.
     ///
     /// It says a fix-up is **owed**, not that the bytes moved. A survivor
     /// that already stated everything it needed comes through unchanged, and
@@ -1084,7 +1083,7 @@ pub enum ImpairmentKind {
     /// This is not a defect and not a refusal — it is what per-unit
     /// classification over a single per-stream FIFO *means*. Reordering the
     /// queue by class is forbidden outright: object IDs are delta-encoded on
-    /// the wire on drafts 14-19, and the framer's only re-encoding primitive
+    /// the wire on drafts 14-20, and the framer's only re-encoding primitive
     /// handles removal, not reordering. So the head gates everything behind
     /// it whatever class those units are, and this report is what keeps that
     /// from being mistaken for the shaping the author configured.

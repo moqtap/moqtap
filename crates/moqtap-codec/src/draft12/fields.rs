@@ -21,24 +21,92 @@ fn loc_to_json(loc: &Location) -> Value {
     Value::Map(o)
 }
 
+/// Parse an authorization_token byte value into JSON.
+///
+/// Draft-12 Section 8.2.1.1 Figure 4 gives the Token the same four fields
+/// draft-11 does, with the first deciding which of the others are on the wire:
+///
+/// ```text
+/// Token {
+///   Alias Type (i),
+///   [Token Alias (i),]
+///   [Token Type (i),]
+///   [Token Value (..)]
+/// }
+/// ```
+///
+/// So the second varint is the Token Alias on DELETE (0x0), REGISTER (0x1) and
+/// USE_ALIAS (0x2), and the Token Type only on USE_VALUE (0x3). See
+/// [`crate::auth_token::TokenAliasType`] for the table and draft-13's renderer
+/// for the branch this matches.
+///
+/// # What a value it cannot read renders as
+///
+/// The raw bytes, as `fields::params` and every other draft's renderer do.
+/// Field extraction runs on a message that has already decoded, so it has no
+/// refusal to give — and no guarantee the bytes are a Token. `setup_option_name`
+/// asks one draft to render a setup parameter that arrived under another, which
+/// is the whole point of that function and the one place nothing upstream has
+/// validated anything. `setup_option_name(12, &KeyValuePair { key: 0x03, value:
+/// KvpValue::Bytes(vec![]) })` is a public call with an empty value.
 fn auth_token_to_json(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let alias_type = VarInt::decode(&mut buf).unwrap();
-    let token_type = VarInt::decode(&mut buf).unwrap();
-    let token_value = buf;
+    let Ok(alias_type) = VarInt::decode(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
+    let at = alias_type.into_inner();
     let mut o = Map::new();
-    o.insert("alias_type".into(), vi(alias_type.into_inner()));
-    o.insert("token_type".into(), vi(token_type.into_inner()));
-    o.insert("token_value".into(), Value::Bytes(token_value.to_vec()));
+    o.insert("alias_type".into(), vi(at));
+    match at {
+        // DELETE, USE_ALIAS: an Alias and nothing else.
+        0 | 2 => {
+            if let Ok(ta) = VarInt::decode(&mut buf) {
+                o.insert("token_alias".into(), vi(ta.into_inner()));
+            }
+        }
+        // REGISTER: an Alias, a Type and a Value.
+        1 => {
+            if let Ok(ta) = VarInt::decode(&mut buf) {
+                o.insert("token_alias".into(), vi(ta.into_inner()));
+            }
+            if let Ok(tt) = VarInt::decode(&mut buf) {
+                o.insert("token_type".into(), vi(tt.into_inner()));
+            }
+            o.insert("token_value".into(), Value::Bytes(buf.to_vec()));
+        }
+        // USE_VALUE (0x3), and any Alias Type this draft does not assign: a
+        // Type and a Value. An unassigned code has no serialization at all —
+        // Section 8.2.1.1 calls the Alias Type "an integer defining both the
+        // serialization and the processing behavior of the receiver" — so this
+        // arm is a guess, chosen to show the most of an unreadable value rather
+        // than because the draft says so.
+        _ => {
+            if let Ok(tt) = VarInt::decode(&mut buf) {
+                o.insert("token_type".into(), vi(tt.into_inner()));
+            }
+            o.insert("token_value".into(), Value::Bytes(buf.to_vec()));
+        }
+    }
     Value::Map(o)
 }
 
-fn kvp_to_json_setup(params: &[KeyValuePair]) -> Value {
+/// The four Setup Parameter Types Section 8.3.2 defines.
+///
+/// 0x03 is here and is not here on draft-11: Section 8.3.2.4 adds AUTHORIZATION
+/// TOKEN to the setup namespace by reference to Section 8.2.1.1, and this
+/// draft's `decode_setup_parameters` already admits and structurally validates
+/// it. The table has to name every parameter that decoder accepts, or a
+/// renderer answers `None` for one the same file reads.
+pub(crate) fn kvp_to_json_setup(params: &[KeyValuePair]) -> Value {
     crate::fields::kvp_entries(params, |key, value| match (key, value) {
         (0x01, KvpValue::Bytes(b)) => {
             (Some("path"), Some(Value::Text(String::from_utf8_lossy(b).into_owned())))
         }
         (0x02, KvpValue::Varint(v)) => (Some("max_request_id"), Some(vi(v.into_inner()))),
+        (0x03, KvpValue::Bytes(b)) => (Some("authorization_token"), Some(auth_token_to_json(b))),
+        (0x04, KvpValue::Varint(v)) => {
+            (Some("max_auth_token_cache_size"), Some(vi(v.into_inner())))
+        }
         _ => (None, None),
     })
 }

@@ -94,19 +94,18 @@ fn datagram_bytes(ty: u8) -> Vec<u8> {
 /// The section names two ways a type is invalid — the reserved SUBGROUP_ID_MODE
 /// `0b11` and any byte outside the form `0b00X1XXXX` — and of both says the
 /// endpoint "MUST close the session with a PROTOCOL_VIOLATION". Reserved-mode
-/// values are the ones that used to get through: `0x16` decoded happily and
-/// reported a Subgroup ID of 0, indistinguishable from the 0 that mode `0b00`
-/// genuinely means, so a consumer had no way to tell a real subgroup from an
-/// invented one.
+/// values are the dangerous half: a `0x16` that decoded would report a Subgroup
+/// ID of 0, indistinguishable from the 0 that mode `0b00` genuinely means,
+/// leaving a consumer no way to tell a real subgroup from an invented one.
 ///
 /// # Ablation
 ///
-/// Restored the old check, `header_type & SUBGROUP_BASE_BIT == 0`, in
-/// `SubgroupHeader::decode`:
+/// Narrowed the check in `SubgroupHeader::decode` to
+/// `header_type & SUBGROUP_BASE_BIT == 0`:
 ///
 /// ```text
 /// thread 'subgroup_header_types_outside_the_draft_are_refused' (13236) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:118:21:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// type 0x16 is not one draft-17 defines, but decode accepted it
 /// ```
 #[test]
@@ -250,7 +249,7 @@ fn a_type_wider_than_one_byte_is_refused_by_what_it_is() {
 ///
 /// ```text
 /// thread 'the_checked_subgroup_encoder_refuses_a_type_the_decoder_would' (62756) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:166:13:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// encode_checked wrote type 0x00, which decode refuses
 /// ```
 ///
@@ -294,7 +293,7 @@ fn the_checked_subgroup_encoder_refuses_a_type_the_decoder_would() {
 ///
 /// ```text
 /// thread 'datagram_types_outside_the_draft_are_refused' (44368) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:208:21:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// type 0x10 is not one draft-17 defines, but decode accepted it
 /// ```
 ///
@@ -351,7 +350,7 @@ const PROPERTIES: &[u8] = &[0x3C, 0x02];
 ///
 /// ```text
 /// thread 'the_checked_datagram_encoder_refuses_a_type_the_decoder_would' (53440) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:253:13:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// encode_checked wrote type 0x10, which decode refuses
 /// ```
 ///
@@ -394,10 +393,10 @@ fn the_checked_datagram_encoder_refuses_a_type_the_decoder_would() {
 /// payload is delimited by the end of the transport datagram, not a length — so
 /// the refusal belongs to `decode_object`, which is handed the whole datagram.
 ///
-/// The Normal case is the one that used to slip through. `permits_payload` read
-/// only the status, so a datagram framed as carrying a status and carrying the
-/// code 0x0 reported that a payload was allowed, and four bytes the draft says
-/// are not part of the object reached the application as its content.
+/// The Normal case is the one that slips through a naive predicate. A
+/// `permits_payload` that reads only the status answers yes for a datagram
+/// framed as carrying a status and carrying the code 0x0, and four bytes the
+/// draft says are not part of the object reach the application as its content.
 ///
 /// # Ablation
 ///
@@ -406,13 +405,13 @@ fn the_checked_datagram_encoder_refuses_a_type_the_decoder_would() {
 ///
 /// ```text
 /// thread 'a_status_datagram_refuses_the_bytes_that_follow_it' (51796) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:299:14:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// a status datagram carrying 0x00 accepted a payload: (32, Some(Normal), [222, 173, 190, 239])
 /// ```
 ///
-/// The tuple is the datagram the old rule let through: type 0x20 with the
+/// The tuple is the datagram that rule lets through: type 0x20 with the
 /// STATUS bit set, a Normal status, and four payload bytes the draft says are
-/// not there. Codes 0x03 and 0x04 were already refused, which is why only the
+/// not there. Codes 0x03 and 0x04 are refused either way, which is why only the
 /// Normal one appears.
 #[test]
 fn a_status_datagram_refuses_the_bytes_that_follow_it() {
@@ -457,7 +456,7 @@ fn a_status_datagram_refuses_the_bytes_that_follow_it() {
 ///
 /// ```text
 /// thread 'the_status_bit_forbids_a_payload_even_for_the_normal_code' (67708) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:342:5:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// the STATUS bit did not forbid a payload
 /// ```
 #[test]
@@ -486,7 +485,7 @@ fn the_status_bit_forbids_a_payload_even_for_the_normal_code() {
 ///
 /// ```text
 /// thread 'object_framing_reports_the_payload_permission_of_its_status' (16444) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:383:9:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// assertion `left == right` failed: status 0x3
 ///   left: Some(Permitted)
 ///  right: Some(Forbidden)
@@ -549,7 +548,7 @@ fn object_framing_reports_the_payload_permission_of_its_status() {
 ///
 /// ```text
 /// thread 'fetch_object_fields_are_present_exactly_as_the_flags_say' (55148) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:470:9:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// assertion `left == right` failed: flags 0x04: group ID
 ///   left: Some(12)
 ///  right: None
@@ -674,7 +673,7 @@ fn fetch_object_body(flags: u64) -> Vec<u8> {
 ///
 /// ```text
 /// thread 'the_datagram_flag_overrides_the_subgroup_mode_bits' (55812) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:566:61:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// datagram-flagged object: VarInt(UnexpectedEnd)
 /// ```
 ///
@@ -709,7 +708,7 @@ fn the_datagram_flag_overrides_the_subgroup_mode_bits() {
 ///
 /// ```text
 /// thread 'fetch_serialization_flags_the_draft_does_not_define_are_refused' (32144) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:605:26:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// flags 0x080 are not defined, but decode accepted them
 /// ```
 #[test]
@@ -755,7 +754,7 @@ fn fetch_serialization_flags_the_draft_does_not_define_are_refused() {
 ///
 /// ```text
 /// thread 'the_end_of_range_markers_inherit_nothing' (57204) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:649:9:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// 808c: an end-of-range marker inherits nothing
 /// ```
 #[test]
@@ -802,7 +801,7 @@ fn the_end_of_range_markers_inherit_nothing() {
 ///
 /// ```text
 /// thread 'an_object_that_inherits_a_field_reports_it' (12736) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:688:5:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// flags 0x1c: inherits nothing
 /// ```
 #[test]
@@ -854,7 +853,7 @@ fn an_object_that_inherits_a_field_reports_it() {
 ///
 /// ```text
 /// thread 'the_fetch_encoder_refuses_fields_that_disagree_with_the_flags' (53584) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:751:5:
+/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
 /// encode wrote an object whose flags announce a group ID it does not have
 /// ```
 #[test]

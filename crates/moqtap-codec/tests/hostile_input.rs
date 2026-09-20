@@ -30,7 +30,7 @@ use moqtap_codec::kvp::KeyValuePair;
 ///
 /// ```text
 /// thread 'a_hostile_parameter_count_does_not_abort_the_process' panicked at
-/// library\alloc\src\raw_vec\mod.rs:28:5:
+/// library\alloc\src\raw_vec\mod.rs:
 /// capacity overflow
 /// ```
 #[test]
@@ -95,8 +95,8 @@ fn a_large_but_allocatable_count_still_fails_on_the_missing_items() {
 /// the types the draft in question defines as an integer. Field extraction runs
 /// on any `ControlMessage`, including one assembled in a program rather than
 /// read off a wire, and it reads the same parameter as an integer from a table
-/// of its own. Where the two disagree it used to reach `VarInt::decode(..)
-/// .unwrap()`, and an empty value is enough.
+/// of its own. Where the two disagree, an extractor that reaches an unchecked
+/// `VarInt::decode(..).unwrap()` panics, and an empty value is enough to do it.
 ///
 /// This builds the message rather than decoding one: draft-07 does define
 /// MAX_SUBSCRIBE_ID as an integer, so its own encoder and decoder both refuse

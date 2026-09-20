@@ -84,7 +84,7 @@ fn namespace_with_an_empty_field() -> Vec<u8> {
 /// ```text
 /// ---- an_empty_track_namespace_field_closes_the_quic_connection stdout ----
 ///
-/// thread 'an_empty_track_namespace_field_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft16_decoder_bound_closes_the_session.rs:115:14:
+/// thread 'an_empty_track_namespace_field_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft16_decoder_bound_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 #[tokio::test]

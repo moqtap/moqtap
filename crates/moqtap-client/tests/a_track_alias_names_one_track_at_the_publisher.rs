@@ -587,6 +587,95 @@ macro_rules! publisher_alias_gates {
                 );
                 still_running(&ep);
             }
+
+            /// The alias this endpoint offers a caller is the lowest one no
+            /// live binding holds.
+            ///
+            /// `AnyConnection::subscribe` spans all fourteen drafts with one
+            /// signature and no alias argument, because on these five it takes
+            /// the value from here. That only works if the offer is one the
+            /// endpoint would itself accept — the two gates above refuse a
+            /// duplicate, and an offer that had to be refused would make the
+            /// facade's SUBSCRIBE fail on its second call.
+            ///
+            /// # What it catches
+            ///
+            /// Offering one past the highest taken alias rather than the
+            /// lowest free one. That is not wrong on its own, but it drifts
+            /// upward forever in a long session and never reuses what a
+            /// finished subscription gave back:
+            ///
+            /// ```text
+            /// assertion `left == right` failed: a hole below the highest taken alias is still free
+            ///   left: 10
+            ///  right: 1
+            /// ```
+            #[test]
+            fn the_offered_alias_is_the_lowest_one_no_live_binding_holds() {
+                let mut ep = active();
+                assert_eq!(
+                    ep.next_free_track_alias().into_inner(),
+                    0,
+                    "a session holding no alias should offer the first one"
+                );
+
+                crate::our_subscribe!($oursub, ep, 0, ALPHA).expect("ALPHA under alias 0");
+                assert_eq!(
+                    ep.next_free_track_alias().into_inner(),
+                    1,
+                    "an alias this endpoint just used is not free"
+                );
+
+                crate::our_subscribe!($oursub, ep, 9, BETA).expect("BETA under alias 9");
+                assert_eq!(
+                    ep.next_free_track_alias().into_inner(),
+                    1,
+                    "a hole below the highest taken alias is still free"
+                );
+                still_running(&ep);
+            }
+
+            /// The offer is read off the same table the refusals are, so an
+            /// alias the *peer* holds is not offered, and one whose
+            /// subscription has ended is offered again.
+            ///
+            /// A Track Alias is "a session specific identifier" and there is
+            /// one space of them per session, so an offer that consulted only
+            /// this endpoint's own subscriptions would hand out an alias the
+            /// peer is using — and the gate that refuses it would then fire on
+            /// a value this endpoint had just recommended.
+            ///
+            /// # What it catches
+            ///
+            /// Reading the offer off anything but the live bindings:
+            ///
+            /// ```text
+            /// assertion `left == right` failed: the peer's alias is held against this endpoint's own choice too
+            ///   left: 0
+            ///  right: 1
+            /// ```
+            #[test]
+            fn an_offered_alias_comes_back_when_its_subscription_ends() {
+                let mut ep = active();
+                ep.receive_subscribe(&crate::peer_subscribe!($submsg, PEERS_FIRST, 0, ALPHA))
+                    .expect("the peer's SUBSCRIBE under alias 0");
+                ep.send_subscribe_ok(peer_id(), $crate::v(0), GroupOrder::Ascending, Vec::new())
+                    .expect("accept the subscription");
+                assert_eq!(
+                    ep.next_free_track_alias().into_inner(),
+                    1,
+                    "the peer's alias is held against this endpoint's own choice too"
+                );
+
+                ep.receive_unsubscribe(&crate::peer_unsubscribes!($unsub, peer_id()))
+                    .expect("the peer's UNSUBSCRIBE");
+                assert_eq!(
+                    ep.next_free_track_alias().into_inner(),
+                    0,
+                    "an alias whose subscription ended is free to offer again"
+                );
+                still_running(&ep);
+            }
         }
     };
 }

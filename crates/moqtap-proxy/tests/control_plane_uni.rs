@@ -1,4 +1,4 @@
-//! Drafts 17, 18 and 19: the control plane is a **pair of unidirectional
+//! Drafts 17 through 20: the control plane is a **pair of unidirectional
 //! streams**, and a bidirectional stream is a request stream.
 //!
 //! # What the drafts say
@@ -8,7 +8,7 @@
 //! exchange Setup messages (Section 9.3), followed by other messages defined
 //! in Section 9."
 //!
-//! Draft-17 Section 3.3, and word for word the same in draft-18 and draft-19:
+//! Draft-17 Section 3.3, word for word the same in drafts 18, 19 and 20:
 //! "MOQT uses a pair of unidirectional streams for creating the session and
 //! exchanging control messages. Each peer opens one control stream beginning
 //! with a SETUP message. Using a pair of unidirectional streams rather than a
@@ -617,7 +617,7 @@ async fn only_session(control: &ProxyControl) -> SessionId {
 ///
 /// ```text
 /// thread 'the_control_plane_is_the_uni_pair_and_a_bidi_is_a_request_stream_draft17'
-/// (55988) panicked at crates\moqtap-proxy\tests\control_plane_uni.rs:668:5:
+/// (55988) panicked at crates\moqtap-proxy\tests\control_plane_uni.rs:
 /// assertion `left == right` failed: [draft-17] the relay's control decoder
 /// produced SETUP and then the rewritten NAMESPACE_DONE: this is the stream
 /// the proxy must treat as the control plane (decode failure: None)
@@ -828,7 +828,7 @@ async fn topology_gate(draft: DraftVersion) {
 ///
 /// ```text
 /// thread 'an_injection_lands_on_the_uni_control_stream_and_not_on_a_request_stream_draft17'
-/// (46552) panicked at crates\moqtap-proxy\tests\control_plane_uni.rs:908:5:
+/// (46552) panicked at crates\moqtap-proxy\tests\control_plane_uni.rs:
 /// assertion `left == right` failed: [draft-17] the relay's control decoder
 /// produced the injected GOAWAY in sequence, between the messages written
 /// before and after it (decode failure: None)

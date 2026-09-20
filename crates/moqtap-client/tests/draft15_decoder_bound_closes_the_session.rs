@@ -2,12 +2,12 @@
 //! When draft-15 says a decoder bound MUST close the session, the client closes
 //! it on the wire — not just in its own state machine.
 //!
-//! # Why this draft needed the machinery at all
+//! # Why this draft needs the machinery at all
 //!
-//! `close_for_codec` and its mapping table arrived with draft-17. Drafts 15 and
-//! 16 state most of the same bounds and had neither, so every one of them
-//! stopped at refusing the frame while the peer, which is the one that broke
-//! the rule, saw a session that was still open and went on sending.
+//! Draft-15 states most of the same decoder bounds as the later drafts, so it
+//! needs a `close_for_codec` and a mapping table of its own. Without them a
+//! refusal stops at the frame, and the peer, which is the one that broke the
+//! rule, sees a session that is still open and goes on sending.
 //! That gap is invisible from inside the process: the decoder returns `Err`
 //! either way, and only something holding the other end of a real connection can
 //! tell the difference.
@@ -86,13 +86,13 @@ fn oversized_request_error(len: usize) -> Vec<u8> {
 ///
 /// # What it catches, observed by making the change and running it
 ///
-/// Reverting `recv_control` to `recv.read_control(capture_raw).await?` — the
-/// shape it had before `close_for_codec` existed on this draft:
+/// Replacing `recv_control`'s body with `recv.read_control(capture_raw).await?`,
+/// so the refusal never reaches `close_for_codec`:
 ///
 /// ```text
 /// ---- an_oversized_reason_phrase_closes_the_quic_connection stdout ----
 ///
-/// thread 'an_oversized_reason_phrase_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft15_decoder_bound_closes_the_session.rs:129:14:
+/// thread 'an_oversized_reason_phrase_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft15_decoder_bound_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 ///

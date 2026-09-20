@@ -340,6 +340,100 @@ impl AnyControlMessage {
         }
     }
 
+    /// This message's wire type ID and the name its own draft gives it.
+    ///
+    /// One match rather than two accessors' worth, because the two halves come
+    /// from the same `MessageType` and a build where they could disagree is one
+    /// nobody should be able to write.
+    #[allow(unreachable_code)]
+    fn message_type(&self) -> (u64, &'static str) {
+        // Invoked by every draft's arm and by nothing else, so the zero-draft
+        // build — `--no-default-features` with no `draftNN`, which
+        // `just test-features` and `just draft-matrix` each compile — defines
+        // it and calls it nowhere. That is the same build `#[allow]` on the
+        // function above is for, one lint later; `unused_macros` is not
+        // implied by `unreachable_code` and has to be said separately.
+        //
+        // Not a `cfg`, for the reason the fourteen arms below are not one
+        // either: the condition would be `any(feature = "draft07", …,
+        // feature = "draft20")`, a fifteenth copy of a list this file already
+        // carries twice, and a draft added to the arms and forgotten in the
+        // `cfg` would delete the macro out from under its own caller. The
+        // allow cannot be wrong about anything, because a build with any draft
+        // at all invokes the macro.
+        #[allow(unused_macros)]
+        macro_rules! named {
+            ($m:expr) => {{
+                let t = $m.message_type();
+                (t.id(), t.name())
+            }};
+        }
+        match self {
+            #[cfg(feature = "draft07")]
+            AnyControlMessage::Draft07(m) => named!(m),
+            #[cfg(feature = "draft08")]
+            AnyControlMessage::Draft08(m) => named!(m),
+            #[cfg(feature = "draft09")]
+            AnyControlMessage::Draft09(m) => named!(m),
+            #[cfg(feature = "draft10")]
+            AnyControlMessage::Draft10(m) => named!(m),
+            #[cfg(feature = "draft11")]
+            AnyControlMessage::Draft11(m) => named!(m),
+            #[cfg(feature = "draft12")]
+            AnyControlMessage::Draft12(m) => named!(m),
+            #[cfg(feature = "draft13")]
+            AnyControlMessage::Draft13(m) => named!(m),
+            #[cfg(feature = "draft14")]
+            AnyControlMessage::Draft14(m) => named!(m),
+            #[cfg(feature = "draft15")]
+            AnyControlMessage::Draft15(m) => named!(m),
+            #[cfg(feature = "draft16")]
+            AnyControlMessage::Draft16(m) => named!(m),
+            #[cfg(feature = "draft17")]
+            AnyControlMessage::Draft17(m) => named!(m),
+            #[cfg(feature = "draft18")]
+            AnyControlMessage::Draft18(m) => named!(m),
+            #[cfg(feature = "draft19")]
+            AnyControlMessage::Draft19(m) => named!(m),
+            #[cfg(feature = "draft20")]
+            AnyControlMessage::Draft20(m) => named!(m),
+            // The no-draft build, where the enum has no variants and no value
+            // of it can exist. `unreachable!` rather than the `#[cfg(not(any(…)))]`
+            // arm `is_setup` and `fields` use, because those two have an honest
+            // answer to give for a message that cannot exist and this has none:
+            // there is no id and no name to invent.
+            #[allow(unreachable_patterns)]
+            _ => unreachable!("AnyControlMessage has no enabled variants"),
+        }
+    }
+
+    /// This message's control message type ID, as its own draft assigns it.
+    ///
+    /// The ids are reused rather than retired across the drafts — 0x07 is
+    /// ANNOUNCE_OK through draft-13, PUBLISH_NAMESPACE_OK on draft-14 and
+    /// REQUEST_OK from draft-15 on — so this number means nothing without
+    /// [`draft`](Self::draft) beside it. [`message_type_name`](Self::message_type_name)
+    /// is the one that has already combined them.
+    pub fn message_type_id(&self) -> u64 {
+        self.message_type().0
+    }
+
+    /// The name this message's own draft gives its type, in the corpus's
+    /// snake_case spelling — `subscribe`, `publish_namespace`, `request_error`.
+    ///
+    /// The same string
+    /// [`message_type_name`](crate::message_type_name) answers for this
+    /// message's draft and id, and the same one that draft's
+    /// `codec/messages/*.json` vectors carry, so a message named here reads the
+    /// same way as one named from a trace.
+    ///
+    /// Never `None`: the free function has to allow for an id no draft assigns
+    /// and for a draft this build left out, and a decoded message can be
+    /// neither.
+    pub fn message_type_name(&self) -> &'static str {
+        self.message_type().1
+    }
+
     /// The Request ID and Group Order of a FETCH, on the drafts where the
     /// FETCH settles the order by itself.
     ///
@@ -781,23 +875,17 @@ impl AnySubgroupHeader {
         /// the header does not determine one.
         ///
         /// `None` covers two cases. The first is the *subgroup ID is the first
-        /// object's ID* stream, which **every draft from 11 on** defines and
-        /// this codec never resolves — ten of the fourteen, not the eight
-        /// this said, and the miscount is worth naming because draft-15 spent
-        /// a long time excluded from lists elsewhere on exactly that reading.
+        /// object's ID* stream, which **every draft from 11 on** defines — ten
+        /// of the fourteen, draft-15 included — and this codec never resolves.
         /// The second is a header whose type the draft does not assign at all:
         /// drafts 17-20 mode 3, and the same fourth combination of the `0x06`
         /// bits on drafts 15 and 16. In every one of them the codec stores a
         /// placeholder zero that a caller must not report.
         ///
         /// Imposes draft-14's `!has_subgroup_id_field()` guard uniformly. Every
-        /// per-draft accessor it reaches through now reads the Subgroup ID
-        /// carrier the way that draft's own decoder does, so there is no longer
-        /// a disagreement here for this accessor to paper over. Draft-16 used to
-        /// read its two mode bits one at a time and so reported a first-object
-        /// carrier for a Type whose mode is reserved, which made reaching for
-        /// its per-draft accessor directly a way to resolve such a header to the
-        /// wrong subgroup.
+        /// per-draft accessor it reaches through reads the Subgroup ID carrier
+        /// the way that draft's own decoder does, so there is no disagreement
+        /// here for this accessor to paper over.
         subgroup_id -> Option<u64>;
         [
             Draft07 @ "draft07", Draft08 @ "draft08", Draft09 @ "draft09",
@@ -846,9 +934,9 @@ impl AnySubgroupHeader {
         //
         // `None` is the first-object carrier: the ID is not on the wire and
         // only the stream reader, which has seen the first object, can supply
-        // it. Answering `Some(0)` there — which the draft-15 arm used to do —
-        // collapses every first-object subgroup onto subgroup zero, and two
-        // subgroups of one group must never share a stream.
+        // it. Answering `Some(0)` there collapses every first-object subgroup
+        // onto subgroup zero, and two subgroups of one group must never share a
+        // stream.
         //
         // `None` is also the fourth combination, which neither draft assigns:
         // draft-16 reserves those type values by name, draft-15 reaches the
@@ -863,9 +951,9 @@ impl AnySubgroupHeader {
             // The unassigned combination has to be tested somewhere. With the
             // mode reserved neither carrier predicate answers `true`, so the
             // fall-through would report subgroup zero for a stream no draft
-            // defines. It is tested first for legibility only: the ordering was
-            // load-bearing while draft-16 read its two mode bits one at a time
-            // and claimed an explicit Subgroup ID here, and is not any more.
+            // defines. It is tested first for legibility only; neither carrier
+            // predicate answers `true` for the reserved mode, so the ordering
+            // is not load-bearing.
             if h.header_type & 0x06 == 0x06 {
                 None
             } else if h.has_explicit_subgroup_id() {
@@ -1023,10 +1111,9 @@ dispatch_enum! {
     /// asking for one is answered with [`CodecError::InvalidField`] and
     /// nothing is written.
     ///
-    /// The per-draft `encode` methods are unchanged and still infallible; they
-    /// take the framing the value names as the authority and silently discard
-    /// whatever does not fit it. Reach for one of those only when that is what
-    /// you want.
+    /// The per-draft `encode` methods are infallible; they take the framing the
+    /// value names as the authority and silently discard whatever does not fit
+    /// it. Reach for one of those only when that is what you want.
     #[derive(Debug, Clone)]
     pub enum AnyDatagramHeader {
         #[cfg(feature = "draft07")]
@@ -1303,8 +1390,8 @@ impl AnyDatagramHeader {
     /// datagram permitted a payload may still carry none; a zero-length Normal
     /// object is legal everywhere.
     ///
-    /// Before this, a caller had to match the concrete per-draft variant to ask
-    /// at all, which is why the client carries an arm per draft to do it.
+    /// Without it a caller has to match the concrete per-draft variant to ask
+    /// at all.
     #[allow(unreachable_patterns)]
     pub fn permits_payload(&self) -> bool {
         match self {
@@ -1644,12 +1731,10 @@ mod tests {
     /// The draft-neutral entry point carries each draft's refusal out to the
     /// caller instead of resolving it the way the per-draft `encode` does.
     ///
-    /// This is what changed for a caller holding an [`AnyDatagramHeader`]:
-    /// [`AnyDatagramHeader::encode`] used to return `()` on every one of the
-    /// drafts, so a header whose Object Status its framing could not carry went
-    /// out with the status quietly removed. It now dispatches to each draft's
-    /// `encode_checked` and answers [`CodecError::InvalidField`] without
-    /// writing a byte.
+    /// [`AnyDatagramHeader::encode`] dispatches to each draft's
+    /// `encode_checked`, so a header whose Object Status its framing cannot
+    /// carry is answered with [`CodecError::InvalidField`] and not a byte is
+    /// written, rather than going out with the status quietly removed.
     ///
     /// Three drafts are driven here, one per shape they fall into.
     /// Draft-07 hangs the status field off a zero Object Payload Length;
@@ -1739,8 +1824,8 @@ mod tests {
         }
     }
 
-    /// The draft-neutral predicates answer the two questions that previously
-    /// required matching the concrete per-draft variant.
+    /// The draft-neutral predicates answer the two questions that otherwise
+    /// require matching the concrete per-draft variant.
     ///
     /// The same three drafts stand for the three eras of the extensions rule.
     /// Draft-07 has no extension block and no rule, and must answer `None`

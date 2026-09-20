@@ -394,7 +394,7 @@ async fn both_frames_are_forwarded_counted_and_reported_once(interest: Interest)
 ///
 /// ```text
 /// ---- the_passthrough_pipe_forwards_counts_and_reports_a_refused_frame stdout ----
-/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:243:9:
+/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:
 /// timed out waiting for the first refusal to be reported
 /// ```
 ///
@@ -418,7 +418,7 @@ async fn the_passthrough_pipe_forwards_counts_and_reports_a_refused_frame() {
 ///
 /// ```text
 /// ---- the_mutating_pipe_forwards_counts_and_reports_a_refused_frame stdout ----
-/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:304:10:
+/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:
 /// the relay saw a control stream; one exists only once a byte is forwarded: Elapsed(())
 /// ```
 ///
@@ -435,7 +435,7 @@ async fn the_passthrough_pipe_forwards_counts_and_reports_a_refused_frame() {
 ///
 /// ```text
 /// ---- the_mutating_pipe_forwards_counts_and_reports_a_refused_frame stdout ----
-/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:243:9:
+/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:
 /// timed out waiting for the first refusal to be reported
 /// ```
 ///

@@ -106,7 +106,7 @@ fn fetch_with_an_unassigned_type() -> Vec<u8> {
 /// ```text
 /// ---- an_unassigned_fetch_type_closes_the_quic_connection stdout ----
 ///
-/// thread 'an_unassigned_fetch_type_closes_the_quic_connection' (43892) panicked at crates\moqtap-client\tests\draft15_fetch_type_closes_the_session.rs:134:14:
+/// thread 'an_unassigned_fetch_type_closes_the_quic_connection' (43892) panicked at crates\moqtap-client\tests\draft15_fetch_type_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 #[tokio::test]

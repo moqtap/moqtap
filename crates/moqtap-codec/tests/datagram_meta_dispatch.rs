@@ -15,7 +15,7 @@
 //! built here fourteen times is fourteen chances to build it in the shape the
 //! code already has. The corpus's datagrams are bytes nothing in this crate
 //! produced, and each states its own decoded fields, so the comparison is
-//! against something written before this function existed.
+//! against something written independently of this function.
 //!
 //! # How the corpus says a datagram states a status
 //!
@@ -127,35 +127,33 @@ enum MissingCase {
 /// [`the_named_corpus_gaps_are_exactly_the_real_ones`] fails the day a vector
 /// arrives or a draft loses one.
 ///
-/// # How it emptied, which is the part worth keeping
+/// # What an entry here has to clear
 ///
-/// Three entries left in two days, and **not one of them was answered with
-/// bytes from this crate's own encoder**. That is the rule the next entry is
-/// held to as well: these gates compare against bytes the crate did not
-/// produce, so a vector generated from the decoder under test would leave
-/// every gate green while making the premise false.
+/// **A gap is closed with bytes this crate's own encoder did not produce.**
+/// These gates compare against bytes the crate did not write, so a vector
+/// generated from the decoder under test would leave every gate green while
+/// making the premise false.
 ///
-/// **Two were never gaps.** Drafts 09 and 10 were named here as having no
-/// datagram that states an Object Status. They have five each. What they do
-/// not have is one in `datagram.json`, which was the only file the loader read
-/// — both drafts dropped the status field from the payload datagram, so their
-/// status datagrams are all the 0x02 form and all of them sit in
-/// `datagram-status.json`. The corpus was answering a question nothing asked
-/// it. So: **before a gap is recorded here, check that the reader reaches
-/// everywhere the corpus keeps the case**, because an entry that blames the
-/// corpus for the reader's reach is a gate switched off and a request for work
-/// nobody needs to do.
+/// **A gap is the corpus's and not the loader's.** Drafts 09 and 10 hold no
+/// datagram that states an Object Status in `datagram.json`: neither draft's
+/// payload datagram carries a status field, so every status datagram of theirs
+/// is the 0x02 form and all of them sit in `datagram-status.json`. A loader
+/// that reads only `datagram.json` sees two gaps the corpus does not have. So:
+/// **before a gap is recorded here, check that the reader reaches everywhere
+/// the corpus keeps the case**, because an entry that blames the corpus for
+/// the reader's reach is a gate switched off and a request for work nobody
+/// needs to do.
 ///
-/// **The third was real, and a vector closed it.** Draft-15 introduced the
-/// default-priority bit and carried no datagram that used it, so its
-/// default-priority decode path had no positive vector on any build and the
-/// per-draft half of
-/// [`the_priority_is_absent_only_where_a_draft_lets_a_datagram_omit_it`] was
-/// not made for it at all. The bytes come from draft-15 Section 10.3.1: Table
-/// 5 gives type `0x08` as no end of group, no extensions, Object ID present,
-/// Priority Present "No", payload; Figure 26 orders the fields Type, Track
-/// Alias, Group ID, Object ID, Publisher Priority, Extensions, Object Status,
-/// Object Payload. Between them the vector is this file's own
+/// **A real gap is a decode path no vector reaches.** Draft-15 is where the
+/// default-priority bit arrives, and its default-priority decode path is
+/// reached by exactly one vector: without a `datagram-default-priority`
+/// derived from the draft rather than from this crate, the per-draft half of
+/// [`the_priority_is_absent_only_where_a_draft_lets_a_datagram_omit_it`] is
+/// never made for draft-15 at all. The bytes come from draft-15 Section 10.3.1:
+/// Table 5 gives type `0x08` as no end of group, no extensions, Object ID
+/// present, Priority Present "No", payload; Figure 26 orders the fields Type,
+/// Track Alias, Group ID, Object ID, Publisher Priority, Extensions, Object
+/// Status, Object Payload. Between them the vector is this file's own
 /// `datagram-4byte-payload` with the type byte changed and the one byte that
 /// column names removed, and nothing else moved.
 const CORPUS_GAPS: &[(DraftVersion, MissingCase)] = &[];
@@ -314,12 +312,12 @@ fn every_datagram_field_matches_the_corpus() {
 /// A datagram reports no priority exactly on the drafts that let it omit one,
 /// and the claim is made **per draft**.
 ///
-/// The per-draft shape is the whole of the gate, and the first version of it
-/// did not have it. Counting how many drafts from 15 on showed an omission and
-/// asserting the count is non-zero passes while any one of the five still
-/// reports correctly — measured, by cutting draft-19's arm alone and watching
-/// this test stay green while its neighbour reddened. A cohort claim asserted
-/// as a total is a claim about the cohort's best member.
+/// The per-draft shape is the whole of the gate. Counting how many drafts
+/// from 15 on show an omission and asserting the count is non-zero passes
+/// while any one of the five still reports correctly — measured, by cutting
+/// draft-19's arm alone and watching this test stay green while its neighbour
+/// reddened. A cohort claim asserted as a total is a claim about the cohort's
+/// best member.
 ///
 /// Two-sided as well: a draft below 15 must report `Some` for every datagram
 /// it has, or an `Option` that is simply always empty would pass the first
@@ -336,11 +334,11 @@ fn every_datagram_field_matches_the_corpus() {
 ///  right: 1
 /// ```
 /// A draft with no such vector is named in [`CORPUS_GAPS`] rather than skipped
-/// by the count. `if corpus_omits > 0` read as a guard against a thin corpus
-/// and was really a hole in this claim: draft-15 had no such vector, so the
-/// per-draft assertion was never made for it, and the cohort count below was
-/// satisfied by drafts 16 through 19 without it. The table is empty now and
-/// the assertion is made for all six.
+/// by the count. An `if corpus_omits > 0` guard reads as protection against a
+/// thin corpus and is really a hole in this claim: a draft with no such vector
+/// never has the per-draft assertion made for it at all, while the cohort
+/// count below is satisfied by its neighbours. The table is empty, so the
+/// assertion is made for every draft in the cohort.
 ///
 /// *Second ablation (measured):* report a priority on every draft-15 datagram,
 /// by giving the draft-15 arm of `AnyDatagramHeader::meta` a
@@ -489,9 +487,9 @@ fn a_stated_status_and_a_carried_payload_are_told_apart() {
 /// the count says which of the three things moved — the table, the loader, or
 /// the corpus.
 ///
-/// *Ablation (measured):* name draft-15 here again, now that it has a
-/// default-priority datagram — the table used to exempt a draft that does not
-/// need exempting:
+/// *Ablation (measured):* name draft-15 here, though the corpus carries a
+/// default-priority datagram for it — an entry exempting a draft that does
+/// not need exempting:
 ///
 /// ```text
 /// assertion `left == right` failed: CORPUS_GAPS and the corpus disagree about whether Draft15 has a datagram omitting its priority: the corpus has 1 of them
@@ -510,9 +508,9 @@ fn a_stated_status_and_a_carried_payload_are_told_apart() {
 /// ```
 ///
 /// *Third ablation (measured):* narrow [`DATAGRAM_FILES`] back to
-/// `datagram.json` alone, which is the state the file was in while drafts 09
-/// and 10 were named above. The table is untouched and the count goes to zero,
-/// because what moved is how much of the corpus the loader can see:
+/// `datagram.json` alone, which is what a loader sees when it reads one file of
+/// the two. The table is untouched and the count goes to zero, because what
+/// moved is how much of the corpus the loader can see:
 ///
 /// ```text
 /// assertion `left == right` failed: CORPUS_GAPS and the corpus disagree about whether Draft09 has a status datagram: the corpus has 0 of them

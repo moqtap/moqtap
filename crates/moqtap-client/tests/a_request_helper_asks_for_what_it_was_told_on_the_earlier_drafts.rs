@@ -19,14 +19,14 @@
 //! request asking for something the caller did not ask for: the session stays
 //! up, the peer answers, and nothing returns an error.
 //!
-//! # Why these eight had nothing
+//! # Why these eight need a sweep of their own
 //!
 //! Surveyed rather than assumed. Every draft here has tests that drive a real
 //! `Connection`, between eight and twenty files each, and on all eight of them
 //! those tests drive a helper to get a session into a state and then read the
 //! answer. Reading the answer proves a request of the right *type* arrived,
-//! because a type is all the peer needed in order to reply. The one exception
-//! was `a_malformed_track_is_withdrawn_from.rs`, which checks the Request ID an
+//! because a type is all the peer needs in order to reply. The one exception is
+//! `a_malformed_track_is_withdrawn_from.rs`, which checks the Request ID an
 //! UNSUBSCRIBE names on drafts 12 through 15 — one field of one withdrawal
 //! helper.
 //!
@@ -89,8 +89,7 @@
 //! drop; the count is rendered all the same, wherever the message has the
 //! field, and on those five drafts it is the claim that a helper given nothing
 //! attaches nothing of its own. The one message with no such field to render
-//! is TRACK_STATUS_REQUEST on drafts 07 through 10 — draft-11 gave it one, and
-//! this file's first run found that out by disagreeing with the peer about it.
+//! is TRACK_STATUS_REQUEST on drafts 07 through 10 — draft-11 gives it one.
 //! And drafts 07 through 10 give SUBSCRIBE_ANNOUNCES, ANNOUNCE and
 //! TRACK_STATUS_REQUEST no Request ID at all, so those three helpers return
 //! nothing and the rendering has no id to carry.
@@ -750,8 +749,8 @@ fn a_rendering_that_dropped_a_field_would_hide_a_helper_asking_for_the_wrong_thi
     assert_ne!(
         subscribe_request(&Subscription { parameters: Some(1), ..plain() }),
         subscribe_request(&Subscription { parameters: Some(0), ..plain() }),
-        "the parameter count has to reach the rendering: a helper that dropped \
-         the caller's list is the defect this file was opened for"
+        "the parameter count has to reach the rendering: a helper that drops \
+         the caller's list is the defect this file exists to catch"
     );
     assert_ne!(
         subscribe_request(&Subscription { parameters: Some(0), ..plain() }),

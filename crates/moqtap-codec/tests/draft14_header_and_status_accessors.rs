@@ -1,4 +1,4 @@
-//! Two things draft-14 was the only draft in its range not to have.
+//! Two entry points draft-14 must offer, and what a caller gets wrong without them.
 //!
 //! # The header that could disagree with its own type byte
 //!
@@ -11,8 +11,9 @@
 //! describing something else.
 //!
 //! Every draft from 15 on refuses that shape at an `encode_checked`. Draft-14
-//! had the same shape and no such entry point, so its header was the one a
-//! caller could get silently wrong.
+//! has the same shape, so it refuses it at the same entry point: without
+//! `SubgroupHeader::encode_checked` its header is the one a caller can get
+//! silently wrong.
 //!
 //! # The object that could not say whether it may carry a payload
 //!
@@ -20,8 +21,8 @@
 //! empty payload." Drafts 15 through 19 answer that question on the object and
 //! on its meta, so a relay forwarding an object verbatim can ask without
 //! restating the rule. Draft-14's `SubgroupObject`, `SubgroupObjectMeta`,
-//! `FetchObject` and `FetchObjectMeta` had no accessor at all, and a caller
-//! holding one had to re-derive that non-zero means forbidden — which is the step
+//! `FetchObject` and `FetchObjectMeta` answer it as well, so no caller holding
+//! one has to re-derive that non-zero means forbidden — which is the step
 //! that goes wrong on a code the draft does not assign, where the answer is that
 //! there is no rule rather than that the payload is forbidden.
 

@@ -10,21 +10,20 @@
 //! MAX_REQUEST_ID message with an equal or smaller Request ID it MUST close
 //! the session with a PROTOCOL_VIOLATION."
 //!
-//! Drafts 17, 18 and 19 have no gate here because they have no rule: they
+//! Drafts 17 through 20 have no gate here because they have no rule: they
 //! removed the message. Their own change logs say so in one line — "Remove
-//! MAX_REQUEST_ID/REQUESTS_BLOCKED" — and a search of all three finds the name
-//! nowhere else.
+//! MAX_REQUEST_ID/REQUESTS_BLOCKED" — and outside that change log the name
+//! appears nowhere in any of the four.
 //!
 //! # Why one of these is a loopback test
 //!
-//! The endpoint refused the second ceiling long before this file existed, and
-//! every in-process test of that refusal passed. What none of them could see is
-//! that the refusal stopped inside the process: the connection layer returned
-//! the error to its caller and left the QUIC connection open, so the peer —
-//! which is the one that broke the rule — saw a session that was still running
-//! and could repeat the message forever. A rule whose consequence is a session
-//! termination code is a statement about the wire, and only something holding
-//! the other end can check it.
+//! An endpoint can refuse the second ceiling and pass every in-process test of
+//! that refusal while the refusal stops inside the process: the connection layer
+//! returns the error to its caller and leaves the QUIC connection open, so the
+//! peer — which is the one that broke the rule — sees a session that is still
+//! running and can repeat the message forever. A rule whose consequence is a
+//! session termination code is a statement about the wire, and only something
+//! holding the other end can check it.
 //!
 //! The second gate is in-process because it observes the other half: the
 //! endpoint's own session ends too. Without that, a caller that ignored the
@@ -44,9 +43,9 @@
 //! the same routing need ten separate measurements and one run with
 //! `--no-fail-fast` produces all of them.
 //!
-//! Reverting each `Connection::recv_and_dispatch` to
-//! `self.endpoint.receive_message(msg.clone())?` — the shape all ten shipped
-//! with — leaves the endpoint refusing the frame and the connection open, and
+//! Reducing each `Connection::recv_and_dispatch` to
+//! `self.endpoint.receive_message(msg.clone())?`
+//! leaves the endpoint refusing the frame and the connection open, and
 //! fails the loopback gate on every one of the ten, each on its own draft's
 //! line and none of the in-process ten.
 //!
@@ -140,7 +139,7 @@ macro_rules! ceiling_gates {
             ///
             /// # What it catches, observed by making the change and running it
             ///
-            /// Reverting the intake to `self.endpoint.receive_message(msg
+            /// Reducing the intake to `self.endpoint.receive_message(msg
             /// .clone())?`:
             ///
             /// ```text

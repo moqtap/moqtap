@@ -189,10 +189,10 @@ fn a_client_takes_the_migration_uri() {
 /// messages" - asserted here beside the first so the two halves of one
 /// paragraph are held in one place.
 ///
-/// The refusal used to arrive as a state machine transition from Draining to
-/// Draining, which is the same error a dozen unrelated illegal transitions
-/// produce and so could not be answered with a code. It is now a rule of its
-/// own, and the code and the wire close it reaches are gated in
+/// The refusal is a rule of its own, `EndpointError::RepeatedGoAway`, rather
+/// than a Draining-to-Draining transition - that generic error is what a dozen
+/// unrelated illegal transitions produce, and no close code could be routed
+/// from it. The code and the wire close this reaches are gated in
 /// `repeated_goaway_closes_the_session.rs`.
 #[test]
 fn a_client_refuses_a_second_goaway() {
@@ -207,12 +207,10 @@ fn a_client_refuses_a_second_goaway() {
 
 /// The refusal *is* the close, so there is nothing left to close afterwards.
 ///
-/// This gate used to assert the opposite - that the session survived a refused
-/// GOAWAY and could still be closed normally - which is what the endpoint did
-/// before the close was routed. Section 6.3 says the server terminates the
-/// session, so a second close is a close of something already over, and a
-/// server that could still be shut down cleanly is a server that never ended
-/// the session the way the sentence requires.
+/// Section 6.3 says the server terminates the session, so a second close is a
+/// close of something already over, and a server that could still be shut down
+/// cleanly is a server that never ended the session the way the sentence
+/// requires.
 #[test]
 fn a_refused_goaway_is_itself_the_close() {
     let mut endpoint = established(Role::Server);

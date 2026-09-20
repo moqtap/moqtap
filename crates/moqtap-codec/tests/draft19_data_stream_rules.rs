@@ -456,8 +456,7 @@ fn the_checked_datagram_encoder_refuses_a_type_the_decoder_refuses() {
 /// data stream, so both are refused; but neither is *unknown*, and reporting
 /// them so would end the session — over the peer's control stream in the first
 /// case, and over traffic Section 11.5.1 explicitly permits in the second.
-/// Draft-19 had no name for the padding Types at all until this was written,
-/// though its Table 3 assigns them exactly as draft-18's does.
+/// Draft-19's Table 3 assigns both of those Types exactly as draft-18's does.
 ///
 /// The last case is why a Type is decoded rather than narrowed. A two-byte
 /// 0x8010 carries the value 0x10, an assigned subgroup Type, and its low octet
@@ -471,7 +470,7 @@ fn the_checked_datagram_encoder_refuses_a_type_the_decoder_refuses() {
 ///
 /// ```text
 /// thread 'a_type_wider_than_one_byte_is_refused_by_what_it_is' (7580) panicked at
-/// crates\moqtap-codec\tests\draft19_data_stream_rules.rs:491:23:
+/// crates\moqtap-codec\tests\draft19_data_stream_rules.rs:
 /// SETUP is a Type Table 3 assigns, so a subgroup reader must refuse it without naming the unknown-stream-type rule that would end the session, got UnknownStreamType(175)
 /// ```
 ///

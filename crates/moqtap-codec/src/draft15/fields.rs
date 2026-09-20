@@ -44,24 +44,65 @@ fn d15_msg_param_name(key: u64) -> Option<&'static str> {
     }
 }
 
+/// Render a SUBSCRIPTION FILTER (0x21) parameter value: a Filter Type and the
+/// Start Location and End Group that type promises.
+///
+/// # Nothing has checked that the value holds the fields its Filter Type names
+///
+/// 0x21 is an odd Type, so `KeyValuePair::decode` keeps whatever
+/// length-prefixed bytes arrived and the value reaches here unexamined. None of
+/// `decode_parameters`' own checks looks at the *contents* of a filter value,
+/// and `crate::dispatch::AnyControlMessage::fields` renders every message that
+/// decoded — so a peer's bytes reach this function directly. That is the chain
+/// `tests/hostile_parameter_values.rs` sets out in full.
+///
+/// The truncation that follows an AbsoluteStart or AbsoluteRange Filter Type is
+/// the nastier shape, because the value looks well formed right up to the point
+/// where it is not: the Filter Type decodes cleanly and the Start Location it
+/// promises is simply not there.
+///
+/// # What a value it cannot read renders as
+///
+/// The raw bytes, as `fields::params` and `decode_largest_object` do. Field
+/// extraction runs on a message that has already decoded, so it has no refusal
+/// to give: what a peer sent is what there is to show, and no read below may
+/// panic on it.
 fn decode_subscription_filter(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let filter_type = VarInt::decode(&mut buf).unwrap().into_inner();
+    let Ok(filter_type) = VarInt::decode(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
+    let filter_type = filter_type.into_inner();
     let mut obj = Map::new();
     obj.insert("filter_type".into(), vi(filter_type));
     match filter_type {
         3 => {
             // AbsoluteStart
-            let start_group = VarInt::decode(&mut buf).unwrap().into_inner();
-            let start_object = VarInt::decode(&mut buf).unwrap().into_inner();
+            let Ok(start_group) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_group = start_group.into_inner();
+            let Ok(start_object) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_object = start_object.into_inner();
             obj.insert("start_group".into(), vi(start_group));
             obj.insert("start_object".into(), vi(start_object));
         }
         4 => {
             // AbsoluteRange
-            let start_group = VarInt::decode(&mut buf).unwrap().into_inner();
-            let start_object = VarInt::decode(&mut buf).unwrap().into_inner();
-            let end_group = VarInt::decode(&mut buf).unwrap().into_inner();
+            let Ok(start_group) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_group = start_group.into_inner();
+            let Ok(start_object) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_object = start_object.into_inner();
+            let Ok(end_group) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let end_group = end_group.into_inner();
             obj.insert("start_group".into(), vi(start_group));
             obj.insert("start_object".into(), vi(start_object));
             obj.insert("end_group".into(), vi(end_group));
@@ -170,7 +211,7 @@ fn kvp_to_json_d15(params: &[KeyValuePair]) -> Value {
     kvp_to_json_d15_inner(params, d15_msg_param_name)
 }
 
-fn kvp_to_json_d15_setup(params: &[KeyValuePair]) -> Value {
+pub(crate) fn kvp_to_json_d15_setup(params: &[KeyValuePair]) -> Value {
     kvp_to_json_d15_inner(params, d15_setup_param_name)
 }
 

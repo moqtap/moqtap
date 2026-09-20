@@ -2440,7 +2440,8 @@ mod tests {
     /// the loss this gate exists for. What arrives is an ordinary payload
     /// object with no marker at all, indistinguishable from one that never
     /// carried a status, and the middle of this test observes exactly that, so
-    /// the gate states the old behaviour as well as the new.
+    /// the gate states `encode`'s silent drop as well as `encode_checked`'s
+    /// refusal.
     ///
     /// The statuses come from `ObjectStatus::ALL` rather than a list written
     /// here, so the sweep follows the draft's set instead of a copy of it.
@@ -2453,7 +2454,7 @@ mod tests {
     /// # What this catches, observed by making each change and running it
     ///
     /// Dropping the check from `encode_checked`, leaving the type byte to
-    /// decide on its own as it did before:
+    /// decide on its own:
     ///
     /// ```text
     /// encode_checked must refuse EndOfGroup under a type byte with no STATUS bit; got Ok(())

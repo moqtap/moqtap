@@ -60,14 +60,14 @@ fn vi(v: u64) -> VarInt {
 /// The two namespace acknowledgements carry a Request ID and stop.
 ///
 /// Figures 23 and 28 give both messages the same three fields: Type, Length,
-/// Request ID. This codec used to append a parameter list, so
-/// PUBLISH_NAMESPACE_OK for request 1 went out as `07 00 02 01 00` — a declared
-/// payload of two bytes where the draft calls for one. A conforming peer reads
-/// the Request ID, finds the message over, and has a spare byte it must treat
-/// as a protocol violation.
+/// Request ID, and nothing else. A codec that appends a parameter list sends
+/// PUBLISH_NAMESPACE_OK for request 1 as `07 00 02 01 00` — a declared payload
+/// of two bytes where the draft calls for one. A conforming peer reads the
+/// Request ID, finds the message over, and has a spare byte it must treat as a
+/// protocol violation.
 ///
 /// Both directions of a namespace handshake pass through these two messages, so
-/// the failure is symmetric: this codec could not accept a conforming peer's
+/// the failure is symmetric: such a codec cannot accept a conforming peer's
 /// acknowledgement either.
 ///
 /// # What this catches, observed by making each change and running it
@@ -121,11 +121,11 @@ fn the_namespace_acknowledgements_carry_only_a_request_id() {
 
 /// A control message whose fields end before its declared Length does is refused.
 ///
-/// The old five-byte PUBLISH_NAMESPACE_OK is the case that matters here, because
-/// it is what a peer built against the previous version of this codec sends. Its
-/// Length says two bytes of payload; the Request ID accounts for one. Silently
-/// keeping the message would let two implementations disagree about a message's
-/// shape forever without either noticing.
+/// The five-byte PUBLISH_NAMESPACE_OK is the case that matters here, because it
+/// is what a peer that appends a parameter list sends. Its Length says two bytes
+/// of payload; the Request ID accounts for one. Silently keeping the message
+/// would let two implementations disagree about a message's shape forever
+/// without either noticing.
 ///
 /// # What this catches, observed by making each change and running it
 ///
@@ -137,8 +137,8 @@ fn the_namespace_acknowledgements_carry_only_a_request_id() {
 #[test]
 fn a_control_message_with_bytes_left_over_is_refused() {
     for wire in [
-        // The shape this codec used to emit: Length 2, one byte of Request ID,
-        // one byte of parameter count.
+        // A declared Length of 2 over one byte of Request ID and one byte of
+        // parameter count: what a codec that appends a parameter list emits.
         hex("07 00 02 01 00"),
         hex("12 00 02 01 00"),
         // A Request ID followed by three bytes of nothing in particular.
@@ -503,8 +503,8 @@ fn a_non_existent_object_cannot_carry_extensions() {
 ///
 /// # What this catches, observed by making each change and running it
 ///
-/// Restoring the old `if let Some(status)` branch in `write_object`, which took
-/// the status and wrote a payload length of 0:
+/// Giving `write_object` an `if let Some(status)` branch that takes the status
+/// and writes a payload length of 0:
 ///
 /// ```text
 /// a payload beside ObjectDoesNotExist must be refused, got Ok(())

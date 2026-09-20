@@ -1,7 +1,7 @@
 #![cfg(any(feature = "draft12", feature = "draft13", feature = "draft14"))]
 
-//! A namespace subscription carries the parameters the caller gave it, on the
-//! three drafts that used to fill the field in for them.
+//! A namespace subscription carries the parameters the caller gave it, on
+//! drafts 12, 13 and 14.
 //!
 //! The last of the row's builders, after SUBSCRIBE, FETCH, the track-status
 //! request and the announcement. It is also the one where the drafts name the
@@ -22,8 +22,8 @@
 //!
 //! Each of the three lists this very message by name, so an endpoint that
 //! cannot attach a parameter to it cannot subscribe to a namespace on a peer
-//! that requires a token - and none of the three could until the builder
-//! took an argument to attach one with.
+//! that requires a token - and it can only attach one if the builder takes the
+//! caller's list rather than writing its own.
 //!
 //! # Two names for one request
 //!
@@ -42,9 +42,9 @@
 //! # Ablations, measured
 //!
 //! One cut, run against the two crates a change to `moqtap-client` can reach
-//! and then reverted: the builder sends an empty list whatever it was given,
-//! which all three drafts did before it forwarded them. It reddens three
-//! tests of the 3,464 in those crates - the first gate on each draft here -
+//! and then reverted: the builder sends an empty list whatever it was given.
+//! It reddens three tests of the 3,464 in those crates - the first gate on
+//! each draft here -
 //! and leaves the other 165 test binaries green. The control on each draft
 //! stays green under the cut, which is what a control is for.
 
@@ -109,13 +109,12 @@ macro_rules! namespace_subscription_parameter_gates {
             ///
             /// # What it catches
             ///
-            /// Sending an empty list whatever the caller passed, which is
-            /// what all three drafts did:
+            /// Sending an empty list whatever the caller passed:
             ///
             /// ```text
             /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, and this call used to send an
-            /// empty list whatever it was given
+            /// attached must reach the peer, not the empty list a call that
+            /// ignores its argument sends
             ///   left: 0
             ///  right: 1
             /// ```
@@ -136,8 +135,8 @@ macro_rules! namespace_subscription_parameter_gates {
                 assert_eq!(
                     carried.len(),
                     1,
-                    "the parameter the caller attached must reach the peer, and this call \
-                     used to send an empty list whatever it was given"
+                    "the parameter the caller attached must reach the peer, not the empty \
+                     list a call that ignores its argument sends"
                 );
                 assert_eq!(
                     carried[0].key.into_inner(),

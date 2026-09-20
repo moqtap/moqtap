@@ -79,12 +79,14 @@ pub mod subscription_filter;
 
 pub mod range_filter;
 
+mod draft_table;
 /// Codec error types and size limits.
 pub mod error;
 pub mod fields;
 /// Key-value parameter pair encoding and decoding.
 pub mod kvp;
 pub mod message_names;
+pub mod setup_option_names;
 /// Core protocol types shared across drafts.
 pub mod types;
 /// QUIC variable-length integer encoding and decoding.
@@ -92,3 +94,4 @@ pub mod varint;
 pub mod version;
 
 pub use message_names::message_type_name;
+pub use setup_option_names::setup_option_name;

@@ -1,11 +1,10 @@
 //! A fetch stream opens with its stream type, and the codec can write one.
 //!
 //! `data_stream_type_field.rs` covers datagrams and subgroup streams. Fetch is
-//! the third carrier that opens a unidirectional stream, and it had no case
-//! there — which is how `FetchHeader` kept a `decode_stream` with nothing on
-//! the other side of it for a whole round spent on exactly this defect. The
-//! read side pinned the type; the write side wrote the body alone; and no test
-//! put the two together.
+//! the third carrier that opens a unidirectional stream, and it needs a case of
+//! its own: a `FetchHeader` whose `decode_stream` has nothing on the other side
+//! of it is a defect no other test sees. The read side pins the type; the write
+//! side writes the body alone; and nothing puts the two together.
 //!
 //! So the gate is the round trip, driven on every draft: what
 //! `encode_stream` writes, `decode_stream` reads. The second half is the one

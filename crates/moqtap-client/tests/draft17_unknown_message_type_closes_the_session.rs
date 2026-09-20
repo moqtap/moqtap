@@ -104,7 +104,7 @@ fn frame_of_an_unassigned_type() -> Vec<u8> {
 /// ```text
 /// ---- an_unassigned_control_message_type_closes_the_quic_connection stdout ----
 ///
-/// thread 'an_unassigned_control_message_type_closes_the_quic_connection' (3252) panicked at crates\moqtap-client\tests\draft17_unknown_message_type_closes_the_session.rs:144:14:
+/// thread 'an_unassigned_control_message_type_closes_the_quic_connection' (3252) panicked at crates\moqtap-client\tests\draft17_unknown_message_type_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 ///

@@ -129,32 +129,30 @@
 //! delivery order — holding object N and then N+1 preserves a guarantee the
 //! protocol makes, where holding two datagrams would manufacture one.
 //!
-//! There is no seam a datagram never reaches. There was one — a report a
-//! `Fetch`-aimed class made on drafts 18 and 19, where the framer bypassed
-//! every fetch stream before any `ObjectMeta` existed — and it went when
-//! those streams became readable. Every unmatchable rule now reports from a
-//! unit that arrived, through `Scheduler::classify` or its datagram sibling.
+//! There is no seam a datagram never reaches: every unmatchable rule reports
+//! from a unit that arrived, through `Scheduler::classify` or its datagram
+//! sibling.
 //!
 //! # What is still owed
 //!
 //! [`BucketConfig::ceil_bps`] is accepted and never borrowed against: a
 //! profile setting it above `rate_bps` measures a flat `rate_bps`.
 //!
-//! Nothing else, and there used to be more: five reported fields here
-//! snapshotted as a constant zero. Two of them counted what a **hook** does,
-//! which needs no profile at all while every figure on this page is gated on
-//! one, and they are
+//! Nothing else. What a **hook** does is not reported here and cannot be:
+//! every figure on this page is gated on a configured profile while a hook
+//! needs none, so a unit a hook delayed and an object it truncated are
+//! counted on
 //! [`Counters::units_delayed`](crate::instrument::Counters::units_delayed)
 //! and
 //! [`Counters::objects_truncated`](crate::instrument::Counters::objects_truncated)
-//! now. The other three were `Duration` totals; [`ClassStats`] says why this
-//! page carries no duration at all.
+//! instead. No figure here is a `Duration` either; [`ClassStats`] says why
+//! this page carries no duration at all.
 //!
-//! Separately, and not the same kind of zero: of the five figures a
+//! Separately, and not a figure this page owes: of the five figures a
 //! [`DirectionStats`] carries, only `objects_seen` and `bytes_shaped` are
 //! measured at both crossings, so the three event figures read zero in a
-//! **departure** cell of [`ProxyStats::per_leg`]. [`LegStats`] says which
-//! cell is which.
+//! **departure** cell of [`ProxyStats::per_leg`] — a zero with no producer
+//! rather than one waiting on work. [`LegStats`] says which cell is which.
 
 mod bucket;
 mod matcher;
@@ -378,7 +376,7 @@ pub enum ShapeError {
     /// [`crate::shape::ShapeStats`] distinguishes it from a profile whose
     /// classes never matched.
     ///
-    /// # It also used to reach further than the session that carried it
+    /// # It would also reach further than the session that carried it
     ///
     /// A proxy sizes its class rows once, from the first shaped session it
     /// accepts, because a class is an index into the class list of the
@@ -404,7 +402,7 @@ pub enum ShapeError {
     /// A [`Matcher`] key names an **empty set of values**, so the class can
     /// never claim a unit — on any draft, from any traffic.
     ///
-    /// The three shapes this catches, all of which were accepted before:
+    /// The three shapes this catches:
     /// a [`RangeSet`] built from an inverted range (`RangeSet::new` drops
     /// `start > end`, leaving an empty set whose `contains` is always
     /// `false`), an empty [`Matcher::priority`] range such as `200..=100`,
@@ -534,7 +532,7 @@ impl Default for QueueConfig {
 ///
 /// There is deliberately no `DropHead`. Dropping an *already queued* unit
 /// happens after the framer's positional cursor has moved past it, so the
-/// elide fix-up can no longer be armed — and on drafts 14-19 object IDs are
+/// elide fix-up can no longer be armed — and on drafts 14-20 object IDs are
 /// delta-encoded, so the result is not a gap but every successor decoding
 /// with a wrong absolute ID. [`Overflow::DropTail`] is sound for exactly
 /// the reason `DropHead` is not: it discards the *arriving* unit, at
@@ -553,7 +551,7 @@ pub enum Overflow {
     #[default]
     Block,
     /// Discard the *arriving* unit. Renumbers via the framer's own elide
-    /// fix-up, so absolute object IDs stay correct on drafts 14-19.
+    /// fix-up, so absolute object IDs stay correct on drafts 14-20.
     ///
     /// When an elide guard refuses the fix-up the unit is admitted anyway —
     /// the queue overshoots by one — and the refusal is reported. A shaper
@@ -574,7 +572,7 @@ pub enum Overflow {
 ///
 /// There is deliberately **no** `Drop` variant. An expiry is decided at
 /// release time, long after the framer's positional cursor has advanced
-/// past the object, so the elide fix-up cannot be armed; on drafts 14-19
+/// past the object, so the elide fix-up cannot be armed; on drafts 14-20
 /// that corrupts every successor's absolute ID. A variant that is
 /// constructible and always refused is worse than an absent one.
 ///
@@ -1048,6 +1046,217 @@ mod tests {
         let json = serde_json::to_string(&before).expect("a profile serializes");
         let after: ShapeProfile = serde_json::from_str(&json).expect("and reads back");
         assert_eq!(before, after, "round trip through {json}");
+    }
+
+    /// One profile per corner of the written form, each valid by
+    /// construction.
+    ///
+    /// `profile()` above is one ordinary configuration, which is the right
+    /// fixture for *does the round trip work at all* and reaches almost none
+    /// of the values a file can hold. These rows are picked for the rest: both
+    /// ends of every integer, every optional field once present and once
+    /// absent, and every variant of every enum in the written form at least
+    /// once — [`Discipline`] across the four rows, [`Overflow`] and
+    /// [`Expiry`] within them, [`MatchKind`] and both ingress sides in the
+    /// last.
+    #[cfg(feature = "serde")]
+    fn corners() -> Vec<(&'static str, ShapeProfile)> {
+        let build = |buckets, classes, queue, discipline| {
+            ShapeProfile::try_new(buckets, classes, queue, discipline)
+                .expect("every row here must be a profile or it proves nothing about writing one")
+        };
+
+        // Every field at the smallest value `try_new` accepts, which is not
+        // the same as `Default`: a zero queue depth is `EmptyQueue`, so the
+        // floor is one. The zero weight is legal here and only here — it is
+        // refused under `WeightedRoundRobin`, which the third row uses.
+        let minima = build(
+            vec![BucketConfig { name: "b".to_owned(), burst_bytes: 0, ..Default::default() }],
+            vec![ClassRule {
+                name: String::new(),
+                bucket: "b".to_owned(),
+                priority: 0,
+                weight: 0,
+                matcher: Matcher::default(),
+            }],
+            QueueConfig {
+                depth_bytes: 1,
+                depth_objects: 1,
+                max_hold: None,
+                overflow: Overflow::Block,
+                on_expiry: Expiry::Deliver,
+            },
+            Discipline::Fifo,
+        );
+
+        let maxima = build(
+            vec![BucketConfig {
+                name: "b".to_owned(),
+                rate_bps: Some(u64::MAX),
+                burst_bytes: u64::MAX,
+                ceil_bps: Some(u64::MAX),
+            }],
+            vec![ClassRule {
+                name: "everything".to_owned(),
+                bucket: "b".to_owned(),
+                priority: u8::MAX,
+                weight: u16::MAX,
+                matcher: Matcher {
+                    side: Some(ProxySide::RelayToProxy),
+                    track_alias: Some(RangeSet::new([0..=u64::MAX])),
+                    group_id: Some(RangeSet::new([u64::MAX..=u64::MAX])),
+                    subgroup_id: Some(RangeSet::new([0..=0])),
+                    object_id: Some(RangeSet::new([1..=2, 5..=9])),
+                    priority: Some(0..=u8::MAX),
+                    stream_kind: Some(MatchKind::Subgroup),
+                    every_nth: Some((u64::MAX, u64::MAX)),
+                },
+            }],
+            QueueConfig {
+                depth_bytes: usize::MAX,
+                depth_objects: usize::MAX,
+                max_hold: Some(Duration::MAX),
+                overflow: Overflow::ResetStream { code: u64::MAX },
+                on_expiry: Expiry::ResetStream { code: u64::MAX },
+            },
+            Discipline::StrictPriority,
+        );
+
+        // A deliberately stopped class: `rate_bps: Some(0)` is legal and is
+        // not `None`, and a `max_hold` of zero is not an absent one.
+        let stopped = build(
+            vec![BucketConfig {
+                name: "b".to_owned(),
+                rate_bps: Some(0),
+                burst_bytes: 1,
+                ceil_bps: None,
+            }],
+            vec![ClassRule {
+                name: "stopped".to_owned(),
+                bucket: "b".to_owned(),
+                priority: 1,
+                weight: 1,
+                matcher: Matcher { every_nth: Some((1, 0)), ..Default::default() },
+            }],
+            QueueConfig {
+                max_hold: Some(Duration::ZERO),
+                overflow: Overflow::DropTail,
+                ..Default::default()
+            },
+            Discipline::WeightedRoundRobin,
+        );
+
+        // One class per stream kind, and the ingress side the first two rows
+        // do not name.
+        let kinds = build(
+            vec![
+                BucketConfig { name: "a".to_owned(), burst_bytes: 8, ..Default::default() },
+                BucketConfig { name: "b".to_owned(), burst_bytes: 8, ..Default::default() },
+            ],
+            [MatchKind::Subgroup, MatchKind::Fetch, MatchKind::Datagram]
+                .into_iter()
+                .enumerate()
+                .map(|(n, kind)| ClassRule {
+                    name: format!("k{n}"),
+                    bucket: if n == 0 { "a".to_owned() } else { "b".to_owned() },
+                    matcher: Matcher {
+                        side: Some(ProxySide::ClientToProxy),
+                        stream_kind: Some(kind),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .collect(),
+            QueueConfig::default(),
+            Discipline::Fifo,
+        );
+
+        vec![
+            ("every field at its floor", minima),
+            ("every field at its ceiling", maxima),
+            ("a stopped class and a zero hold", stopped),
+            ("one class per stream kind", kinds),
+        ]
+    }
+
+    /// Every value the written form can hold survives being written and read.
+    ///
+    /// The two directions share no code — `Serialize` is a derive over
+    /// `ShapeProfile`'s private fields and `Deserialize` goes through
+    /// `ShapeProfileSpec`'s public ones — so nothing but a test holds them
+    /// together, and `shape_profile_round_trips_through_json` above holds them
+    /// together over one configuration. These rows are the values that one
+    /// does not reach.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn every_corner_of_the_written_form_round_trips() {
+        for (label, before) in corners() {
+            let json = serde_json::to_string(&before).expect("a profile serializes");
+            let after: ShapeProfile =
+                serde_json::from_str(&json).expect("and what it wrote is readable");
+            assert_eq!(before, after, "{label}: round trip through {json}");
+        }
+    }
+
+    /// A profile and its mirror write the same document.
+    ///
+    /// [`ShapeProfileSpec`]'s own `Serialize` is the half of this pair that no
+    /// code path in this crate runs: everything here reads a profile and
+    /// nothing writes one, so the derive is compiled and unproven. It matters
+    /// because the mirror is what a caller edits — take a profile apart,
+    /// change a bucket, write it back out — and a document the mirror writes
+    /// that the profile cannot read would be a file that had round-tripped
+    /// through this crate and come out unusable.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn the_mirror_writes_what_a_profile_writes() {
+        for (label, profile) in corners() {
+            let spec = ShapeProfileSpec::from(&profile);
+            assert_eq!(
+                serde_json::to_value(&spec).expect("the mirror serializes"),
+                serde_json::to_value(&profile).expect("and so does the profile it came from"),
+                "{label}: two writers of one format"
+            );
+
+            let json = serde_json::to_string(&spec).expect("the mirror serializes");
+            assert_eq!(
+                serde_json::from_str::<ShapeProfile>(&json)
+                    .expect("and what the mirror wrote is a profile"),
+                profile,
+                "{label}: taking a profile apart and writing it back has to be lossless, or the \
+                 documented way to edit one loses the edit's neighbours"
+            );
+        }
+    }
+
+    /// The one written form that is **not** a round trip, stated as itself.
+    ///
+    /// `ShapeProfileSpec::default()` is the construction path
+    /// `#[non_exhaustive]` leaves open outside this crate, so it is a value a
+    /// caller holds; it serializes, and reading what it wrote back as a
+    /// `ShapeProfile` is [`ShapeError::NoClasses`]. That is the mirror working
+    /// rather than failing — a spec is a builder and the constructor is the
+    /// only thing that turns one into a profile — but it means *serialize then
+    /// deserialize* is not total over this pair, and the refusal is the useful
+    /// half to pin: it proves reading goes through `try_new` and not around it.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_default_mirror_writes_a_document_that_is_not_a_profile() {
+        let json = serde_json::to_string(&ShapeProfileSpec::default())
+            .expect("the mirror writes whatever it holds, valid or not");
+
+        let err = serde_json::from_str::<ShapeProfile>(&json)
+            .expect_err("a profile with no classes shapes nothing and is not one");
+        assert!(
+            err.to_string().contains("shapes nothing"),
+            "the refusal has to be the constructor's own, or reading is going around it: {err}"
+        );
+
+        assert_eq!(
+            serde_json::from_str::<ShapeProfileSpec>(&json).expect("the mirror reads its own back"),
+            ShapeProfileSpec::default(),
+            "the asymmetry is between the two types and not inside the mirror"
+        );
     }
 
     /// A `RangeSet` is written as a plain list of ranges and read back through

@@ -156,9 +156,31 @@ impl IntoIterator for FieldMap {
 /// * `raw_hex` — the value's bytes, when it does not.
 ///
 /// An unnamed varint parameter gets `value` rather than `raw_hex`, because a
-/// varint's value *is* its content and there are no bytes to show. That case
-/// used to be written as `length`, which was the varint's value under a key
-/// naming something else entirely.
+/// varint's value *is* its content and there are no bytes to show. `length` is
+/// the key that does not belong here: it would hold the varint's value under a
+/// name that promises the byte count of something else.
+///
+/// # Why the `allow`, and what it cannot hide
+///
+/// Every caller is a parameter renderer, and every parameter renderer belongs
+/// to a draft: `fields::params` for drafts 07 through 10, `draftNN::fields` for
+/// 11 through 20. So the build that compiled **no** draft has this function and
+/// nothing that calls it, and that build is a standing CI row twice over —
+/// `just test-features`'s `no drafts` clippy, and the two zero-draft rows of
+/// `just draft-matrix`, all three under `-D warnings`.
+///
+/// A `cfg` here would have to name all fourteen drafts, and it would then have
+/// to be repeated on this module's own unit tests, which call this function and
+/// name no draft at all: `--all-targets` compiles them, so gating the function
+/// without gating them turns a dead-code warning into a build failure in the
+/// very row it was meant to fix. The `allow` is one line and has no second copy
+/// to fall out of step with.
+///
+/// It conceals nothing in a build that has a draft. One draft is enough to give
+/// this a caller, so the lint is live on all fourteen single-draft rows and on
+/// every build a user will ever make; the allow is inert everywhere except the
+/// build where the function is *correctly* unused.
+#[allow(dead_code)]
 pub(crate) fn kvp_entries<F>(params: &[crate::kvp::KeyValuePair], mut render: F) -> FieldValue
 where
     F: FnMut(u64, &crate::kvp::KvpValue) -> (Option<&'static str>, Option<FieldValue>),
@@ -264,8 +286,9 @@ mod tests {
 
     /// An unnamed *varint* gets `value`, because there are no bytes to show.
     ///
-    /// This case used to be written as `length`, holding the varint's value
-    /// under a key naming something else entirely.
+    /// `length` is the key that must not appear: it would hold the varint's
+    /// value under a name that promises the byte count of something else, which
+    /// is why the absence assertion below names that key in particular.
     #[test]
     fn an_unknown_varint_reports_its_value_rather_than_a_length() {
         let params = vec![pair(0xf0, KvpValue::Varint(VarInt::from_u64(4).unwrap()))];

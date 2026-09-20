@@ -140,7 +140,7 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// ```text
 /// ---- extension_headers_on_a_non_normal_status_are_refused_and_close stdout ----
 ///
-/// thread 'extension_headers_on_a_non_normal_status_are_refused_and_close' panicked at crates\moqtap-client\tests\draft15_extensions_on_non_normal_status.rs:205:10:
+/// thread 'extension_headers_on_a_non_normal_status_are_refused_and_close' panicked at crates\moqtap-client\tests\draft15_extensions_on_non_normal_status.rs:
 /// extension headers on End of Group must be refused: SubgroupObject { object_id: VarInt(0), extension_headers: [1, 2, 3, 4], payload_length: VarInt(0), object_status: Some(EndOfGroup), payload: [] }
 /// ```
 #[tokio::test]

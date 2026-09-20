@@ -1,16 +1,15 @@
 //! A fetch stream this client writes is one that comes back off the wire.
 //!
 //! The four data-stream writers on `FramedSendStream` are async and want a
-//! transport, so nothing in the suite drove them until a loopback pair was
-//! available. The subgroup pair got one; the fetch pair did not, and what that
-//! hid was not a subtle framing bug but an absence: on drafts 15 through 19
-//! there was no `write_fetch_object` at all. A caller could open a fetch stream
-//! through this type and had no way to put an object on it.
+//! transport, so a loopback pair is the only thing that drives them. Without one
+//! the failure that hides is not a subtle framing bug but an absence: a draft
+//! with no `write_fetch_object` at all looks exactly like a draft whose writer
+//! nothing happens to call, and a caller can open a fetch stream through this
+//! type with no way to put an object on it.
 //!
-//! Draft-14's was there and went out through the unchecked encoder, so an
-//! object carrying a payload beside a status that forbids one, or a status the
-//! draft leaves unassigned, was written rather than refused. Every other draft's
-//! fetch writer had used the checked encoder since it was written.
+//! Drafts 07 through 14 put a fetch object out through the checked encoder, so
+//! an object carrying a payload beside a status that forbids one is refused
+//! rather than written.
 //!
 //! # What each half covers
 //!
@@ -162,9 +161,10 @@ fetch_round_trip!(draft13, "draft13", draft13, Draft13, Draft13, request_id, {
     extensions: Vec::new(),
 });
 
-// -- draft-14, whose writer had a different problem --------------------------
+// -- draft-14, whose object is shaped differently ----------------------------
 
-/// The one draft whose fetch object writer used the unchecked encoder.
+/// The one draft whose fetch object carries its status and its payload in one
+/// value.
 ///
 /// Draft-14 also gives `FramedSendStream::new` a draft argument and hands the
 /// codec's own `FetchObject` to the writer rather than a client-side event type,
@@ -245,12 +245,15 @@ mod draft14 {
     /// An object the draft forbids does not reach the wire.
     ///
     /// Section 10.2.1.1: "Any object with a status code other than zero MUST
-    /// have an empty payload." This writer used the unchecked encoder, so the
-    /// object went out; the peer that receives it is required to close the
-    /// session, and the sender's first sign of trouble is the session going.
+    /// have an empty payload." `FetchObject::encode` resolves that contradiction
+    /// rather than reporting it: the status is taken as the authority on
+    /// framing, so the payload beside it is dropped and what goes out is a
+    /// well-formed status object. The caller's bytes are gone and nothing on the
+    /// wire says so, which is why this writer encodes through `encode_checked`
+    /// and refuses the pairing instead.
     ///
-    /// Ablation: putting `object.encode(&mut buf)` back in place of
-    /// `encode_checked` fails with
+    /// Ablation: writing the object with `object.encode(&mut buf);` in place of
+    /// `encode_checked` in `write_fetch_object` fails with
     ///
     /// ```text
     /// an object whose status forbids a payload must be refused rather than
@@ -338,8 +341,7 @@ mod draft15 {
     ///
     /// # What it catches
     ///
-    /// Ablation: renaming `FramedRecvStream::read_fetch_object` out of the way,
-    /// which is the state the five drafts were in:
+    /// Ablation: renaming `FramedRecvStream::read_fetch_object` out of the way:
     ///
     /// ```text
     /// error[E0599]: no method named `read_fetch_object` found for struct

@@ -8,17 +8,21 @@
 //! that feature set left out, gets a configuration that looks entirely
 //! ordinary.
 //!
-//! # What such a session used to do
+//! # What such a session does without the check
 //!
 //! Run. The codec's dispatch enums fall through to their catch-all arm and
 //! answer `CodecError::UnsupportedDraft`, which is not an incomplete-input
 //! error, so the object framer takes its terminal arm, latches
 //! `BypassReason::DecodeError` and pumps the stream through as bytes. No
 //! object surfaces to a hook, no shaping class claims anything, no
-//! `ProxyEvent::Object` is emitted, and the control parser skips every frame
-//! it cannot decode without a word. The run then completes and reports
-//! success. That artifact — zero objects, zero shaped bytes, a clean exit —
-//! is byte for byte what a session nobody sent anything on produces.
+//! `ProxyEvent::Object` is emitted, and the control parser refuses every
+//! frame it cannot decode — handing each one back rather than swallowing
+//! it, for one `ImpairmentKind::ControlFrameNotDecodable` per control-stream
+//! direction and a rising `control_frames_not_decodable`. The run then
+//! completes and reports success, on zero objects and zero shaped bytes.
+//! What separates that run from a session nobody sent anything on is the
+//! impairment log beside it: every bypassed stream files its one
+//! `ImpairmentKind::FramerBypass`, and a quiet session files none.
 //!
 //! # How this file measures it
 //!
@@ -164,7 +168,7 @@ const EVERY_DRAFT: [DraftVersion; 14] = [
 ///
 /// ```text
 /// thread 'a_session_is_admitted_exactly_when_this_build_carries_its_draft'
-/// (21564) panicked at crates\moqtap-proxy\tests\draft_admission.rs:192:13:
+/// (21564) panicked at crates\moqtap-proxy\tests\draft_admission.rs:
 /// Draft08 was never compiled into this build, so a session on it forwards
 /// every stream uninterpreted and reports success: it must be refused by
 /// name, got upstream connection failed: invalid socket address syntax
@@ -181,7 +185,7 @@ const EVERY_DRAFT: [DraftVersion; 14] = [
 ///
 /// ```text
 /// thread 'a_session_is_admitted_exactly_when_this_build_carries_its_draft'
-/// (53496) panicked at crates\moqtap-proxy\tests\draft_admission.rs:196:13:
+/// (53496) panicked at crates\moqtap-proxy\tests\draft_admission.rs:
 /// this build compiled Draft07, so a session on it must be admitted and fail
 /// on the address instead, got this session is configured for Draft07, which
 /// this build did not compile: it would forward every stream uninterpreted,

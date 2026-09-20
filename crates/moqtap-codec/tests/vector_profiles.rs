@@ -30,7 +30,7 @@
 //!
 //! ```text
 //! thread 'the_profile_field_is_read_and_not_merely_declared' panicked at
-//! crates\moqtap-codec\tests\vector_profiles.rs:104:5:
+//! crates\moqtap-codec\tests\vector_profiles.rs:
 //! no vector in the whole corpus parsed a `profiles` field, though 4 of them
 //! carry one in their JSON. The parser and the corpus disagree about the key
 //! name, and every vector is being treated as binding every profile.
@@ -41,7 +41,7 @@
 //!
 //! ```text
 //! thread 'nothing_in_the_corpus_is_left_out_of_these_runs' panicked at
-//! crates\moqtap-codec\tests\vector_profiles.rs:182:5:
+//! crates\moqtap-codec\tests\vector_profiles.rs:
 //! assertion `left == right` failed: these runners answer "endpoint", so every
 //! vector on the left is one no suite in this crate reads. Each needs a reason
 //! recorded here, or the corpus is asserting something this crate cannot.
@@ -53,7 +53,7 @@
 //!
 //! ```text
 //! thread 'a_profile_narrows_a_refusal_and_never_a_decode' panicked at
-//! crates\moqtap-codec\tests\vector_profiles.rs:124:13:
+//! crates\moqtap-codec\tests\vector_profiles.rs:
 //! transport/draft19/codec/messages/fetch-ok.json [more-data] names profiles and
 //! decodes. Bytes decode to the same value for every reader, so a profile on a
 //! positive vector claims something the corpus cannot mean.

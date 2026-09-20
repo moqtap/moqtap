@@ -298,6 +298,79 @@ bounded, `moqtap-proxy/src/capability.rs` prescribes the
 independent-restatement discipline in bold: "Nothing that checks this list may
 read it."
 
+### The prose no gate reads
+
+The three constructs above fail in code. The fourth fails in **English**, and
+nothing here reads English. A doc comment saying "all thirteen drafts" or
+"drafts 15-19" compiles, passes, and gets quoted by the next person who greps
+for it. `shape/matcher.rs` declaring `[DraftVersion; 13]` under a doc comment
+reading "All fourteen" is this defect with one half gated and the other not.
+
+Run these after the mechanical port, reading **19** as the draft the tree had
+before yours. Each is a **to-do list, not a defect list** — the draft-20 port
+left 86 range hits alone because draft-20 really did delete the Filter Type and
+Fetch Type fields. A range ending at N-1 is a question.
+
+A range that stops at the previous draft:
+
+```sh
+grep -rn "[0-9]\{2\}-19" --include=*.rs crates/
+```
+
+A count word one short, and a hard-coded length:
+
+```sh
+grep -rn "eleven drafts\|twelve drafts\|thirteen drafts\|all thirteen" --include=*.rs crates/
+grep -rn "DraftVersion; [0-9]\+\]" --include=*.rs crates/
+```
+
+A `matches!` that answers "no" for a draft nobody read (see (c) above), and a
+literal draft span in a gate script:
+
+```sh
+grep -rn "matches!(draft\|matches!(d\.number()\|matches!(self\.draft" --include=*.rs crates/
+grep -rn "range(7," scripts/*.py
+```
+
+A recorded panic transcript pinned to a line number — see below:
+
+```sh
+grep -rn "panicked at .*\.rs:[0-9]\+:[0-9]\+:" --include=*.rs crates/
+```
+
+At draft-20 those read 56 / 76 / 7 / 4 / 7 / 0. The counts are not the
+point; a count that has not moved after a port is.
+
+**The fastest way to a real defect is a file that fails two of them at once.** A
+file saying "all thirteen drafts" *and* "drafts 15-19" states two things that
+cannot both be current, so one is wrong before any draft is opened:
+
+```sh
+for f in $(grep -rl "thirteen drafts\|all thirteen" --include=*.rs crates/); do
+  grep -q "[0-9]\{2\}-19" "$f" && echo "$f"
+done
+```
+
+Eight files, the day this was written.
+
+**Check a range against the exhaustive `match`, never against another comment.**
+Every bounded draft predicate is written as a total `match` so that it cannot go
+stale — `fetch_group_order_is_needed`, `has_implicit_subgroup_id_mode`,
+`subgroup_id_mode_must_be_consulted`, `ObjectFramer::delta_encodes_object_ids`,
+`control_plane_is_unidirectional`. The prose around them rots; they cannot. When
+the two disagree the `match` wins. Three times the prose had already disproved
+itself and a reader could have stopped there: "Nine drafts do: every one from 11
+on" over a match running 11 through 20, and "Two drafts need an answer and the
+other eleven do not" where two and eleven make thirteen.
+
+**Recorded panics keep their message and lose their line.** The transcript is
+evidence of an ablation, and the ablation moves the lines, so the `:LINE:COL` it
+printed was never reproducible — 33 of them pointed at a blank line or a comment
+before they were removed. Write the path and stop; the anchor that survives is
+already there in `thread '<name>' panicked at`. The message body stays verbatim,
+because `check-drafts.py` relies on being able to skip it.
+
+
 ### What no gate covers
 
 Stated so nobody mistakes a green run for a complete one:

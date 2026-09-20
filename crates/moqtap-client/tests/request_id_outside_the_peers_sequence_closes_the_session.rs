@@ -10,9 +10,9 @@
 //!
 //! Drafts 07 through 10 have no gate because they have no rule: they have
 //! Subscribe IDs rather than Request IDs, and the sentence enters at 11.
-//! Drafts 17, 18 and 19 have one already — they state the rule as a least
-//! significant bit and a duplicate, and their close table has carried both
-//! since it was written.
+//! Drafts 17 through 20 have one already — they state the rule as an incorrect
+//! least significant bit and a duplicate Request ID, and their close tables
+//! carry both.
 //!
 //! # Two conditions, two gates
 //!
@@ -52,15 +52,16 @@
 //! need six measurements and a single `--no-fail-fast` run produces all of
 //! them. They fail in three different places.
 //!
-//! Deleting the new arm from each `EndpointError::session_error_code` leaves
-//! the endpoint refusing the request and ending its own session, and leaves
-//! the connection layer with no code to close with: all twelve loopback gates
-//! fail and all twelve in-process gates pass. Changing that arm's code to
+//! Deleting the `InvalidRequestId` arm from each
+//! `EndpointError::session_error_code` leaves the endpoint refusing the
+//! request and ending its own session, and leaves the connection layer with
+//! no code to close with: all twelve loopback gates fail and all twelve
+//! in-process gates pass. Changing that arm's code to
 //! PROTOCOL_VIOLATION instead leaves the close going out with the wrong number
 //! on it, which is the failure only a peer can see.
 //!
-//! Reverting either `fail_session` call in `validate_peer_request_id` to the
-//! plain `?` the six shipped with is the other way round, and each reverts one
+//! Reducing either `fail_session` call in `validate_peer_request_id` to a
+//! plain `?` is the other way round, and each cut reaches one
 //! of the two conditions: the close still goes out, because the connection
 //! layer reads the same table, and the endpoint's own session is left running.
 //!
@@ -290,8 +291,8 @@ macro_rules! wrong_request_id_gates {
             ///
             /// # What it catches, observed by making the change and running it
             ///
-            /// Reverting the parity check in `validate_peer_request_id` to the
-            /// plain `?` it shipped with:
+            /// Reducing the parity check in `validate_peer_request_id` to a
+            /// plain `?`:
             ///
             /// ```text
             /// assertion `left == right` failed: the violation was reported but
@@ -371,8 +372,8 @@ macro_rules! wrong_request_id_gates {
             ///
             /// # What it catches, observed by making the change and running it
             ///
-            /// Reverting the sequence check in `validate_peer_request_id` to
-            /// the plain `?` it shipped with:
+            /// Reducing the sequence check in `validate_peer_request_id` to
+            /// a plain `?`:
             ///
             /// ```text
             /// assertion `left == right` failed: the violation was reported but

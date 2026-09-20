@@ -3,16 +3,12 @@
 //! Two numbers are easy to confuse and this gate keeps them apart. The ceiling
 //! a peer's ids are measured against is the one **this** endpoint advertised.
 //! The ceiling this endpoint's own ids are measured against is the one the peer
-//! granted it. They are different values, either may be the larger, and the
-//! code measured against the wrong one.
+//! granted it. They are different values, and either may be the larger.
 //!
-//! The other half is that the check had no call site at all. On drafts 11
-//! through 16 the validator existed and was called from nowhere; on drafts 07
-//! through 10 the only implementation of it was the wrong-ceiling one, also
-//! called from nowhere. So each draft below has a gate that goes through
-//! `receive_message` - the path a message off the wire actually takes - as well
-//! as gates on the boundary itself. A rule that is implemented and reachable
-//! from nothing is not enforced.
+//! So each draft below has a gate that goes through `receive_message` - the
+//! path a message off the wire actually takes - as well as gates on the
+//! boundary itself. A rule that is implemented and reachable from nothing is
+//! not enforced, and a boundary test alone cannot tell the two apart.
 
 #![allow(clippy::items_after_test_module)]
 

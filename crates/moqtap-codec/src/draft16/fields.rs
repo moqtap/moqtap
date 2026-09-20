@@ -26,19 +26,37 @@ fn d16_setup_param_name(key: u64) -> Option<&'static str> {
     }
 }
 
+/// The nine Message Parameter Types draft-16 Section 13.2 Table 8 assigns.
+///
+/// Exactly the nine, and the same nine `message.rs`'s `KNOWN_MESSAGE_PARAMETERS`
+/// holds. Three more are easy to carry here by mistake — `0x04` as
+/// `max_cache_duration`, `0x0e` as `publisher_priority` and `0x30` as
+/// `dynamic_groups` — because draft-15's Table 10 really does have all three in
+/// this namespace.
+///
+/// Draft-16 did not delete those three; it moved them. 0x04 and 0x0e are
+/// MAX_CACHE_DURATION and DEFAULT_PUBLISHER_PRIORITY in Table 9's Extension
+/// Header registry and 0x30 is DYNAMIC_GROUPS there, which is
+/// [`d16_track_ext_name`]'s table and not this one. PUBLISHER_PRIORITY as a
+/// Message Parameter is gone outright.
+///
+/// So the three names would be not merely unused but unreachable *and*
+/// wrong: draft-16 answers an unknown Message Parameter with a session close —
+/// Section 9.2, "An endpoint that receives an unknown Message Parameter MUST
+/// close the session with PROTOCOL_VIOLATION" — and `decode_parameters` applies
+/// it, so no decoded draft-16 message can carry one of these three keys in a
+/// Message Parameter list. A name this table gave them could only ever be read
+/// about a parameter the same file had already refused.
 fn d16_msg_param_name(key: u64) -> Option<&'static str> {
     match key {
         0x02 => Some("delivery_timeout"),
         0x03 => Some("authorization_token"),
-        0x04 => Some("max_cache_duration"),
         0x08 => Some("expires"),
         0x09 => Some("largest_object"),
-        0x0e => Some("publisher_priority"),
         0x10 => Some("forward"),
         0x20 => Some("subscriber_priority"),
         0x21 => Some("subscription_filter"),
         0x22 => Some("group_order"),
-        0x30 => Some("dynamic_groups"),
         0x32 => Some("new_group_request"),
         _ => None,
     }
@@ -78,22 +96,62 @@ fn auth_token_to_json_d16(bytes: &[u8]) -> Value {
     Value::Map(o)
 }
 
+/// Render a SUBSCRIPTION FILTER (0x21) parameter value: a Filter Type and the
+/// Start Location and End Group that type promises.
+///
+/// # Nothing has checked that the value holds the fields its Filter Type names
+///
+/// 0x21 is an odd Type, so `KeyValuePair::decode` keeps whatever
+/// length-prefixed bytes arrived and the value reaches here unexamined. None of
+/// `decode_parameters`' own checks looks at the *contents* of a filter value,
+/// and `crate::dispatch::AnyControlMessage::fields` renders every message that
+/// decoded — so a peer's bytes reach this function directly. That is the chain
+/// `tests/hostile_parameter_values.rs` sets out in full.
+///
+/// The truncation that follows an AbsoluteStart or AbsoluteRange Filter Type is
+/// the nastier shape, because the value looks well formed right up to the point
+/// where it is not: the Filter Type decodes cleanly and the Start Location it
+/// promises is simply not there.
+///
+/// # What a value it cannot read renders as
+///
+/// The raw bytes, as `fields::params` and `decode_largest_object` do. Field
+/// extraction runs on a message that has already decoded, so it has no refusal
+/// to give: what a peer sent is what there is to show.
 fn decode_subscription_filter(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let filter_type = VarInt::decode(&mut buf).unwrap().into_inner();
+    let Ok(filter_type) = VarInt::decode(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
+    let filter_type = filter_type.into_inner();
     let mut obj = Map::new();
     obj.insert("filter_type".into(), vi(filter_type));
     match filter_type {
         3 => {
-            let start_group = VarInt::decode(&mut buf).unwrap().into_inner();
-            let start_object = VarInt::decode(&mut buf).unwrap().into_inner();
+            let Ok(start_group) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_group = start_group.into_inner();
+            let Ok(start_object) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_object = start_object.into_inner();
             obj.insert("start_group".into(), vi(start_group));
             obj.insert("start_object".into(), vi(start_object));
         }
         4 => {
-            let start_group = VarInt::decode(&mut buf).unwrap().into_inner();
-            let start_object = VarInt::decode(&mut buf).unwrap().into_inner();
-            let end_group = VarInt::decode(&mut buf).unwrap().into_inner();
+            let Ok(start_group) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_group = start_group.into_inner();
+            let Ok(start_object) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let start_object = start_object.into_inner();
+            let Ok(end_group) = VarInt::decode(&mut buf) else {
+                return Value::Bytes(bytes.to_vec());
+            };
+            let end_group = end_group.into_inner();
             obj.insert("start_group".into(), vi(start_group));
             obj.insert("start_object".into(), vi(start_object));
             obj.insert("end_group".into(), vi(end_group));
@@ -165,18 +223,35 @@ fn kvp_to_json_d16(params: &[KeyValuePair]) -> Value {
     kvp_to_json_d16_inner(params, d16_msg_param_name)
 }
 
-fn kvp_to_json_d16_setup(params: &[KeyValuePair]) -> Value {
+pub(crate) fn kvp_to_json_d16_setup(params: &[KeyValuePair]) -> Value {
     kvp_to_json_d16_inner(params, d16_setup_param_name)
 }
 
-/// Track-extension parameter names. `default_publisher_priority` shares key
-/// 0x0e with the message-level `publisher_priority`, so a separate table is
-/// used when rendering `track_extensions` blocks.
+/// Every Track-scoped Extension Header Type draft-16 Section 13.3 Table 9
+/// assigns.
+///
+/// A separate table from [`d16_msg_param_name`] because the two registries
+/// reuse numbers for different things: 0x22 is GROUP_ORDER as a Message
+/// Parameter and DEFAULT_PUBLISHER_GROUP_ORDER as an Extension Header, and 0x02
+/// is DELIVERY_TIMEOUT in both while meaning one endpoint's request in one and a
+/// property of the track in the other.
+///
+/// 0x0B, 0x22 and 0x30 are the whole of what an Original Publisher puts in an
+/// Immutable Extensions block, and both of the Track Extensions draft-16 gives
+/// a value range to. They are the ones worth naming: the two with ranges are
+/// exactly the two `message.rs` closes the session over, so an unnamed type
+/// number here is the one a trace most needs named.
+///
+/// 0x3C and 0x3E are deliberately absent. Table 9 scopes both to Object, and the
+/// only caller of this table renders a `track_extensions` field.
 fn d16_track_ext_name(key: u64) -> Option<&'static str> {
     match key {
         0x02 => Some("delivery_timeout"),
         0x04 => Some("max_cache_duration"),
+        0x0b => Some("immutable_extensions"),
         0x0e => Some("default_publisher_priority"),
+        0x22 => Some("default_publisher_group_order"),
+        0x30 => Some("dynamic_groups"),
         _ => None,
     }
 }

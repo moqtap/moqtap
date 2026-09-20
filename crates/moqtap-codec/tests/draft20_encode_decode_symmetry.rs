@@ -86,8 +86,8 @@ fn encode(msg: &ControlMessage) -> Result<Vec<u8>, CodecError> {
 /// Values outside a uint8 parameter's range are refused by the encoder, not
 /// just by the decoder.
 ///
-/// Restoring the truncating one-liner the encoder used to have
-/// (`buf.put_u8(v.into_inner() as u8)`, no range check) fails this test with:
+/// Replacing the encoder's range check with a truncating one-liner
+/// (`buf.put_u8(v.into_inner() as u8)`) fails this test with:
 ///
 /// ```text
 /// assertion `left == right` failed: GROUP_ORDER = 7: the encoder said Ok("ok")
@@ -232,7 +232,7 @@ fn datagram(datagram_type: u8, object_status: Option<ObjectStatus>) -> DatagramH
 ///
 /// ```text
 /// ---- a_datagram_status_the_framing_cannot_carry_is_refused_rather_than_dropped stdout ----
-/// thread '...' panicked at crates\moqtap-codec\tests\draft20_encode_decode_symmetry.rs:232:14:
+/// thread '...' panicked at crates\moqtap-codec\tests\draft20_encode_decode_symmetry.rs:
 /// a status with no field on the wire must be refused: ()
 /// ```
 #[test]

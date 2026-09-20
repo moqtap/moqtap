@@ -55,9 +55,9 @@ pub enum StreamType {
 /// is the only carrier that cannot break the rule.
 ///
 /// Reported under [`CodecError::ExtensionsOnNonExistentObject`], which is this
-/// rule and nothing else. It was [`CodecError::InvalidField`] until now, shared
-/// with a dozen unrelated malformations the draft does not answer with a close,
-/// which left a caller unable to act on the sentence above.
+/// rule and nothing else. [`CodecError::InvalidField`] is too coarse for it:
+/// shared with a dozen unrelated malformations the draft does not answer with a
+/// close, it leaves a caller unable to act on the sentence above.
 fn check_extensions_against_status(
     status: ObjectStatus,
     extensions: &[u8],

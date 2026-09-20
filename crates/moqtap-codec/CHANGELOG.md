@@ -5,6 +5,30 @@ All notable changes to moqtap-codec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.0] - 2026-09-20
+
+### Added
+
+- `setup_option_names`, with `setup_option_name(draft, &KeyValuePair)` re-exported at the crate root: names a setup parameter as a given draft would. It takes the whole pair because drafts 11-13 name from the key and the value's shape together.
+- `CodecError::is_incomplete()` — true for the four spellings of input running out mid-value, so a caller waiting for more bytes no longer keeps its own list of them.
+- `AnyControlMessage::message_type_id()` and `::message_type_name()`.
+- Setup parameter names completed: draft-11 gains `0x04`, draft-12 gains `0x03` and `0x04`. Both decoders already accepted what their renderers could not name.
+
+### Changed
+
+- **Breaking.** `draft14::error_codes::RequestErrorCode` is now `SubscribeErrorCode`. Draft-14 has no REQUEST_ERROR message — that arrives at draft-15 — and the registry this type transcribes is SUBSCRIBE_ERROR. The old name had no callers outside this crate's own tests.
+- **Breaking.** `draft16::data_stream::SubgroupHeader::encode` drives the Publisher Priority byte off the Type byte's DEFAULT_PRIORITY bit rather than off `publisher_priority` being `Some`: a `None` under a clear bit writes 128, a `Some` under a set bit writes no byte. Either mismatch shifted every later field and desynced the stream. `encode_checked` refuses the disagreement with `InvalidField`.
+- **Breaking.** `fields()` on draft-16 names three types differently. `0x04`, `0x0E` and `0x30` are no longer named as Message Parameters, and `0x0B`, `0x22` and `0x30` are now named as Track Extensions. The two registries reuse numbers for different things, and `0x30` belongs to the second.
+- **Breaking.** On drafts 16-20 an out-of-range track property or extension sitting after an unparseable Immutable block is now caught. The walk skips the block it cannot read instead of ending, so an unparseable block no longer shields its neighbours from the range rules.
+
+### Fixed
+
+- **No field renderer panics on a peer's bytes.** Every `unwrap` in the per-draft renderers is gone; a value that will not parse renders as the raw bytes. Reachable from the public `fields()` on auth tokens (drafts 11-13), subscription and location filters (15-19) and `largest_object` (17-20).
+- **Auth-token rendering on drafts 11 and 12.** The second varint is the Token Alias on DELETE, REGISTER and USE_ALIAS and the Token Type only on USE_VALUE. It was labelled `token_type` on all four, so `token_alias` was never emitted and REGISTER swallowed the real Token Type into `token_value`.
+- **Draft-17 token values** are no longer read behind an inner length the draft does not define, matching the corrected test vectors. Drafts 18-20 were already right.
+
 ## [0.5.0] - 2026-09-03
 
 Draft-20 support. One new draft module, and a breaking change to two public
@@ -47,6 +71,17 @@ default, an advertised-preferred version or an auto-selected draft.
   integer encoding unchanged.
 - `tools/registries/draft-20.json`, and `tools/extract-registries.py` extended
   to draft-20. `--check` over all fourteen drafts confirms 07-19 are unmoved.
+- **A `fields` module, and a `fields.rs` in every draft**, moved into the crate
+  from the vector test harness. `draftNN::fields::message_fields` renders a
+  decoded `ControlMessage` as a `fields::FieldMap`: an ordered list of
+  `fields::FieldValue`s — `Uint`, `Bool`, `Text`, `Bytes`, `Array`, or a
+  nested `Map`. `AnyControlMessage::fields()` picks the arm for the draft in
+  hand, so a reader can render a message it has never heard of without knowing
+  which draft decoded it. Each draft keeps its own field names in the order
+  that draft defines them, and an optional field the wire did not carry is
+  absent from the map rather than given a zero. The tree stops short of
+  rendering itself, so a consumer spells the leaves in whatever its own format
+  has types for.
 
 ### Changed
 

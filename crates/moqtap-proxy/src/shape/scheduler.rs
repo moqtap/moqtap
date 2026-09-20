@@ -56,7 +56,7 @@
 //! `note_elided` is legal: at admission, on the *arriving* unit, before the
 //! framer's positional cursor has moved past it. Dropping an
 //! already-queued unit at release time would not leave a gap in absolute
-//! object IDs on drafts 14-19 — it would leave every successor decoding a
+//! object IDs on drafts 14-20 — it would leave every successor decoding a
 //! *wrong* ID. That single fact is why [`Overflow::DropTail`] exists and
 //! `DropHead` does not.
 
@@ -91,12 +91,12 @@ pub(crate) enum Class {
     /// `ShapeStats::default_class.objects_delivered > 0` knows their rule
     /// did not fire, and the `ShapeRuleUnmatchable` impairment says why.
     ///
-    /// **`objects_delivered`, not `objects_dropped`** — the counter this
-    /// doc used to name has a producer only under [`Overflow::DropTail`],
-    /// so under the default [`Overflow::Block`] it is permanently zero and
-    /// an author following the instruction would read a zero and conclude
-    /// their rule had fired. `objects_delivered` has a producer under every
-    /// overflow policy. (The drop row is still the right one to read in a
+    /// **`objects_delivered`, not `objects_dropped`** — `objects_dropped`
+    /// has a producer only under [`Overflow::DropTail`], so under the
+    /// default [`Overflow::Block`] it is permanently zero and an author
+    /// told to read it would read a zero and conclude their rule had fired.
+    /// `objects_delivered` has a producer under every overflow policy.
+    /// (The drop row is still the right one to read in a
     /// `DropTail` fixture, which is why
     /// `a_datagram_rule_says_so_instead_of_matching_nothing` asserts it.)
     Default,
@@ -123,7 +123,7 @@ pub(crate) enum Admission {
     /// Forward it, exactly as an unshaped session would.
     Admit,
     /// Discard it. The caller must run it through the framer's elide path
-    /// so absolute object IDs on drafts 14-19 stay correct, and must admit
+    /// so absolute object IDs on drafts 14-20 stay correct, and must admit
     /// it anyway if an elide guard refuses.
     DropTail,
     /// Abandon the destination stream with `code`.
@@ -251,8 +251,8 @@ pub(crate) struct Scheduler {
     /// Shared with every other scheduler built from the same proxy, which is
     /// what makes turning pacing off a single act rather than a walk over
     /// the sessions. A scheduler built with no switch of its own owns one
-    /// that is set and never cleared, so a session driven without a proxy
-    /// behaves exactly as it did before this field existed.
+    /// that is set and never cleared, so pacing is never switched off under
+    /// a session driven without a proxy.
     ///
     /// Read in [`Self::acquire`] and nowhere else. Everything a shaper does
     /// *besides* pacing — classification, the per-stream queue depth, the
@@ -933,15 +933,14 @@ mod tests {
     /// Three assertions because the middle one is what the first would
     /// otherwise be satisfied by: a `stream_kind` key that had stopped being
     /// read would claim both, and a rule that claimed neither would fall to
-    /// default on both. The third is the inversion a live `Datagram` rule
-    /// brings — the silence such a rule used to report is not silence any
-    /// more, because it is live and simply did not claim *this* unit.
+    /// default on both. The third is what a live `Datagram` rule turns the
+    /// silence into: not a rule that can never fire, but one that is live
+    /// and simply did not claim *this* unit.
     ///
     /// *Ablation (measured):* have `MatchKind::is_matchable_on` answer
-    /// `false` for `Datagram` again, which is where this started. The first
-    /// run of it left this test **green** and reddened two others, which is
-    /// what put the fresh scheduler below in: an assertion above it had
-    /// already consumed the report.
+    /// `false` for `Datagram`. The first run of it left this test **green**
+    /// and reddened two others, which is what put the fresh scheduler below
+    /// in: an assertion above it had already consumed the report.
     ///
     /// ```text
     /// ---- shape::scheduler::tests::a_datagram_rule_claims_a_datagram stdout ----
@@ -1056,7 +1055,7 @@ mod tests {
         );
 
         // The control leg: the same two rules in the other order, which
-        // reported before the fix and must still report exactly once.
+        // must also report, and exactly once.
         let ordered = scheduler(vec![by_alias(), catch_all()], QueueConfig::default());
         assert_eq!(reports(&ordered, &m)(0), vec![(0, MatcherField::TrackAlias)]);
         assert_eq!(reports(&ordered, &m)(1), vec![], "still once per session per pair");
@@ -1115,8 +1114,8 @@ mod tests {
         // passing because this scheduler never reports: a rule against a
         // unit it does *not* claim, keyed on something that unit could not
         // have carried, reports at once. The key rather than the kind,
-        // because naming a kind is no longer something a rule can be dead
-        // for — see `Matcher::unmatchable_fields`.
+        // because naming a kind is not something a rule can be dead for —
+        // see `Matcher::unmatchable_fields`.
         let s = scheduler(
             vec![class(
                 "aliased",

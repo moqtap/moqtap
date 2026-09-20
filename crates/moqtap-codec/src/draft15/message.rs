@@ -222,7 +222,8 @@ pub struct PublishOk {
     pub parameters: Vec<KeyValuePair>,
 }
 
-/// PUBLISH_DONE (0x0B). Replaces SubscribeDone.
+/// PUBLISH_DONE (0x0B). Drafts 13 and earlier name this codepoint
+/// SUBSCRIBE_DONE.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishDone {
     pub request_id: VarInt,
@@ -232,7 +233,7 @@ pub struct PublishDone {
 }
 
 // ============================================================
-// Publish Namespace Messages (renamed from Announce)
+// Publish Namespace Messages (ANNOUNCE on drafts 13 and earlier)
 // ============================================================
 
 /// PUBLISH_NAMESPACE (0x06). request_id + namespace + params.

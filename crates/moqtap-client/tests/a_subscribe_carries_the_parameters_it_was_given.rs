@@ -1,14 +1,23 @@
 #![cfg(any(feature = "draft12", feature = "draft13", feature = "draft14"))]
 
-//! A SUBSCRIBE carries the parameters the caller gave it, on the three drafts
-//! that used to fill the field in for them.
+//! A SUBSCRIBE carries the parameters the caller gave it, on drafts 12, 13
+//! and 14.
 //!
-//! # What was here before
+//! # Why the range is these three
 //!
-//! `Endpoint::subscribe` and `Endpoint::subscribe_range` sent an empty list on
-//! drafts 12, 13 and 14 whatever the caller wanted, and there was no argument
-//! to pass one through. On drafts 15 and up both have taken the caller's since
-//! the parameters row was closed there.
+//! `Endpoint::subscribe` takes the caller's parameter list on drafts 15 and up
+//! already, so these three are where the claim has to be held.
+//!
+//! `Endpoint::subscribe_range` is the second builder carrying that list on
+//! these three: it hands its `parameters` argument to the same
+//! `subscribe_inner` `subscribe` does, so a gate on `subscribe` covers the
+//! shape both write. It is a per-draft entry point drafts 07 through 14 have
+//! and drafts 15 and up do not. The draft-neutral
+//! `AnyConnection::subscribe_range` reaches every draft, but the list it passes
+//! is never the caller's: drafts 07 through 11 take no parameter list at all,
+//! the arms for 12, 13 and 14 pass an empty one, and from draft-15 it passes a
+//! single parameter holding the filter it built. So it is not where this claim
+//! lives either.
 //!
 //! # Why this is a gap and not a matter of taste
 //!
@@ -16,7 +25,7 @@
 //! and MAX CACHE DURATION as message parameters. A subscriber that cannot put
 //! an authorization token on a SUBSCRIBE cannot subscribe to a track that
 //! requires one, and no rewording of the API makes that reachable — the field
-//! was being written by the crate rather than by the application.
+//! has to be the application's to write and not the crate's.
 //!
 //! DELIVERY TIMEOUT is what these gates attach. It is an even key, so its
 //! value is a varint, and it is registered on all three drafts, which makes it
@@ -89,14 +98,12 @@ macro_rules! subscribe_parameter_gates {
             ///
             /// # What it catches
             ///
-            /// Sending an empty list whatever the caller passed, which is
-            /// what all three drafts did and what there was no argument to
-            /// change:
+            /// Sending an empty list whatever the caller passed:
             ///
             /// ```text
             /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, and this call used to send an
-            /// empty list whatever it was given left: 0 right: 1
+            /// attached must reach the peer, not the empty list a call that
+            /// ignores its argument sends left: 0 right: 1
             /// ```
             ///
             /// It reddens three, this gate on each draft in the range and
@@ -125,8 +132,8 @@ macro_rules! subscribe_parameter_gates {
                 assert_eq!(
                     back.parameters.len(),
                     1,
-                    "the parameter the caller attached must reach the peer, and this call \
-                     used to send an empty list whatever it was given"
+                    "the parameter the caller attached must reach the peer, not the empty \
+                     list a call that ignores its argument sends"
                 );
                 assert_eq!(
                     back.parameters[0].key.into_inner(),

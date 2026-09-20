@@ -825,12 +825,18 @@ fn check_track_property_values(properties: &[KeyValuePair]) -> Result<(), CodecE
             }
             KvpValue::Bytes(bytes) if key == IMMUTABLE_PROPERTIES => {
                 let mut inner = &bytes[..];
-                match decode_kvp_delta(&mut inner) {
-                    Ok(nested) => check_track_property_values(&nested)?,
-                    // Not a Key-Value-Pair run. See the note above: reading the
-                    // block is a permission, so one that cannot be read is
-                    // carried rather than refused.
-                    Err(_) => return Ok(()),
+                // A block that is not a Key-Value-Pair run is skipped rather
+                // than refused. See the note above: reading inside it is a
+                // permission, so one that cannot be read is carried.
+                //
+                // Skipped means this block and only this block. The rule the
+                // draft states here is about the block whose pairs will not
+                // parse, and says nothing about its neighbours; ending the
+                // whole walk would let a peer keep an out-of-range property
+                // from being looked at by putting an unparseable block in
+                // front of it.
+                if let Ok(nested) = decode_kvp_delta(&mut inner) {
+                    check_track_property_values(&nested)?;
                 }
             }
             KvpValue::Bytes(_) => {}
@@ -947,7 +953,8 @@ pub enum MessageType {
     SubscribeOk = 0x04,
     RequestError = 0x05,
     PublishNamespace = 0x06,
-    /// REQUEST_OK (0x07). PUBLISH_OK is now an alias of this type.
+    /// REQUEST_OK (0x07). Draft-20 Section 10.5 uses PUBLISH_OK as a shorthand
+    /// for a REQUEST_OK sent in response to a PUBLISH.
     RequestOk = 0x07,
     Namespace = 0x08,
     PublishDone = 0x0B,
@@ -1034,8 +1041,10 @@ pub struct Setup {
     pub options: Vec<KeyValuePair>,
 }
 
-/// GOAWAY (0x10). In draft-20 the Request ID field is removed, so the
+/// GOAWAY (0x10). Draft-20's GOAWAY has no Request ID field, so the
 /// control-stream and request-stream forms are identical on the wire.
+/// Draft-18 is the one draft that carries the field, and only when the
+/// message is sent on the control stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoAway {
     pub new_session_uri: Vec<u8>,
@@ -1078,8 +1087,10 @@ pub struct RequestError {
 
 /// REQUEST_ERROR error codes with dedicated meaning.
 ///
-/// Note: DUPLICATE_SUBSCRIPTION (0x19) is removed in draft-20, as multiple
-/// concurrent subscriptions per Track are now allowed.
+/// Drafts 16 through 18 define DUPLICATE_SUBSCRIPTION (0x19) among these
+/// codes; drafts 19 and 20 do not, because Section 5.1 lets an endpoint hold
+/// multiple concurrent subscriptions to the same Track, each under its own
+/// Request ID.
 pub mod request_error_codes {
     /// A Mandatory Track Property the receiver does not understand.
     pub const UNSUPPORTED_EXTENSION: u64 = 0x33;
@@ -1186,12 +1197,12 @@ pub mod publish_done_codes {
     /// leading-ones-length prefix reaching a full 64 bits in nine bytes, so
     /// this value is encodable at all — as `ff` followed by eight `ff` bytes.
     ///
-    /// **The sentinel is now indistinguishable from a well-formed exact
-    /// count.** With `2^62 - 1` there was headroom above the marker; there is
-    /// none above this one, so a publisher that really opened `2^64 - 1`
-    /// streams cannot say so and a receiver cannot tell the two apart. The
-    /// draft does not remark on it. Not a practical problem, and worth knowing
-    /// before writing a comparison against this constant.
+    /// **In draft-20 the sentinel is indistinguishable from a well-formed
+    /// exact count.** Draft-19's `2^62 - 1` leaves headroom above the marker;
+    /// there is none above this one, so a publisher that really opened
+    /// `2^64 - 1` streams cannot say so and a receiver cannot tell the two
+    /// apart. The draft does not remark on it. Not a practical problem, and
+    /// worth knowing before writing a comparison against this constant.
     pub const STREAM_COUNT_UNKNOWN: u64 = u64::MAX;
 }
 
@@ -1225,9 +1236,9 @@ pub struct NamespaceDone {
 // ============================================================
 
 /// SUBSCRIBE_NAMESPACE (0x50). Subscribes to NAMESPACE / NAMESPACE_DONE
-/// advertisements for namespaces matching `namespace_prefix`. The
-/// `subscribe_options` byte from draft-17 is removed; namespace subscriptions
-/// only produce NAMESPACE / NAMESPACE_DONE.
+/// advertisements for namespaces matching `namespace_prefix`. Only drafts 16
+/// and 17 carry a `subscribe_options` varint here; on draft-20 a namespace
+/// subscription only produces NAMESPACE / NAMESPACE_DONE.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeNamespace {
     pub request_id: VarInt,
@@ -1236,8 +1247,9 @@ pub struct SubscribeNamespace {
 }
 
 /// SUBSCRIBE_TRACKS (0x51, new in draft-18). Subscribes to PUBLISH messages
-/// for tracks whose namespace matches `namespace_prefix`. Carries the
-/// FORWARD parameter (which previously lived on SUBSCRIBE_NAMESPACE).
+/// for tracks whose namespace matches `namespace_prefix`. Carries the FORWARD
+/// parameter (Section 10.2.18), which on drafts 15 through 17 may appear on
+/// SUBSCRIBE_NAMESPACE instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeTracks {
     pub request_id: VarInt,
@@ -1283,7 +1295,7 @@ pub struct TrackStatus {
 /// pair — and a Joining Fetch of two varints. Draft-20 deleted the field, both
 /// structures, the Fetch Type registry and the whole joining mechanism, and
 /// promoted the namespace and the name to fields of FETCH itself, in the
-/// positions they held inside the old Standalone Fetch. What is left is
+/// positions they hold inside draft-19's Standalone Fetch. What is left is
 /// byte-identical to [`Subscribe`] apart from the type code.
 ///
 /// The range now travels in the `LOCATION_FILTER` parameter (Section 5.1.2). A
@@ -1341,7 +1353,8 @@ pub struct FetchOk {
     /// are identical between the two drafts and the meaning is not, and nothing
     /// on the wire distinguishes them — an encoder ported forward with its
     /// arithmetic intact fetches one object too many, and one whose end lands
-    /// on object 0 fetches a single object where it used to fetch a group.
+    /// on object 0 fetches a single object where the same bytes cover a whole
+    /// group on draft-19.
     ///
     /// **Ambiguous, and the draft leaves it so.** When the request's filter
     /// omitted `EndObject`, so the
@@ -1403,8 +1416,9 @@ pub struct PublishStateNotify {
 // Publish Skipped
 // ============================================================
 
-/// PUBLISH_SKIPPED (0x0F, renamed from PUBLISH_BLOCKED in draft-20; wire
-/// layout is unchanged).
+/// PUBLISH_SKIPPED (0x0F). Drafts 17 and 18 name this codepoint
+/// PUBLISH_BLOCKED; the wire layout — track namespace suffix then track name —
+/// is the same on all four drafts that carry the message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishSkipped {
     pub namespace_suffix: TrackNamespace,
@@ -2422,8 +2436,8 @@ mod tests {
     /// LARGEST_OBJECT carries no length of its own — that is the whole point
     /// of the encoding — so `encode_parameters` writes its bytes verbatim. A
     /// value built in memory rather than decoded is under no obligation to be
-    /// two varints, and before this check the codec answered `Ok(())` and put
-    /// a frame on the wire that `ControlMessage::decode` then refused. One
+    /// two varints, and without this check the codec answers `Ok(())` and puts
+    /// a frame on the wire that `ControlMessage::decode` then refuses. One
     /// varint short and one varint long are the two ways to get it wrong.
     ///
     /// # What it catches
@@ -2432,7 +2446,7 @@ mod tests {
     /// run:
     ///
     /// ```text
-    /// panicked at crates\moqtap-codec\src\draft20\message.rs:1382:13:
+    /// panicked at crates\moqtap-codec\src\draft20\message.rs:
     /// LARGEST_OBJECT of one varint must not encode: the decoder cannot read it back
     ///
     /// test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 108 filtered out

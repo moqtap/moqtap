@@ -60,7 +60,7 @@ enum ParamEncoding {
 
 fn param_encoding(key: u64) -> Option<ParamEncoding> {
     match key {
-        // 0x02 = OBJECT_DELIVERY_TIMEOUT (renamed from DELIVERY_TIMEOUT)
+        // 0x02 = OBJECT_DELIVERY_TIMEOUT (DELIVERY_TIMEOUT on drafts 11-17)
         // 0x04 = RENDEZVOUS_TIMEOUT (draft-19 Section 10.2.6). Not
         //        MAX_CACHE_DURATION: that is Property Type 0x04 in the
         //        separate Properties registry (Section 15.8), a different
@@ -81,7 +81,7 @@ fn param_encoding(key: u64) -> Option<ParamEncoding> {
         //        Namespace encoding described in Section 2.4.1".
         0x34 => Some(ParamEncoding::TrackNamespaceValue),
         // 0x03 = AUTHORIZATION_TOKEN
-        // 0x21 = LOCATION_FILTER (renamed from SUBSCRIPTION_FILTER)
+        // 0x21 = LOCATION_FILTER (SUBSCRIPTION_FILTER on drafts 15-18)
         // 0x25 = SUBGROUP_FILTER, 0x26 = OBJECTID_FILTER, 0x27 = PRIORITY_FILTER,
         // 0x28 = OBJECT_PROPERTY_FILTER, 0x29 = TRACK_PROPERTY_FILTER
         //        (Range Filters, new in draft-19)
@@ -635,12 +635,18 @@ fn check_track_property_values(properties: &[KeyValuePair]) -> Result<(), CodecE
             }
             KvpValue::Bytes(bytes) if key == IMMUTABLE_PROPERTIES => {
                 let mut inner = &bytes[..];
-                match decode_kvp_delta(&mut inner) {
-                    Ok(nested) => check_track_property_values(&nested)?,
-                    // Not a Key-Value-Pair run. See the note above: reading the
-                    // block is a permission, so one that cannot be read is
-                    // carried rather than refused.
-                    Err(_) => return Ok(()),
+                // A block that is not a Key-Value-Pair run is skipped rather
+                // than refused. See the note above: reading inside it is a
+                // permission, so one that cannot be read is carried.
+                //
+                // Skipped means this block and only this block. The rule the
+                // draft states here is about the block whose pairs will not
+                // parse, and says nothing about its neighbours; ending the
+                // whole walk would let a peer keep an out-of-range property
+                // from being looked at by putting an unparseable block in
+                // front of it.
+                if let Ok(nested) = decode_kvp_delta(&mut inner) {
+                    check_track_property_values(&nested)?;
                 }
             }
             KvpValue::Bytes(_) => {}
@@ -840,8 +846,10 @@ pub struct Setup {
     pub options: Vec<KeyValuePair>,
 }
 
-/// GOAWAY (0x10). In draft-19 the Request ID field is removed, so the
+/// GOAWAY (0x10). Draft-19's GOAWAY has no Request ID field, so the
 /// control-stream and request-stream forms are identical on the wire.
+/// Draft-18 is the one draft that carries the field, and only when the
+/// message is sent on the control stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoAway {
     pub new_session_uri: Vec<u8>,
@@ -996,8 +1004,9 @@ pub struct SubscribeNamespace {
 }
 
 /// SUBSCRIBE_TRACKS (0x51, new in draft-18). Subscribes to PUBLISH messages
-/// for tracks whose namespace matches `namespace_prefix`. Carries the
-/// FORWARD parameter (which previously lived on SUBSCRIBE_NAMESPACE).
+/// for tracks whose namespace matches `namespace_prefix`. Carries the FORWARD
+/// parameter (Section 10.2.17), which on drafts 15 through 17 may appear on
+/// SUBSCRIBE_NAMESPACE instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeTracks {
     pub request_id: VarInt,
@@ -1078,8 +1087,8 @@ pub struct FetchOk {
 // Publish Skipped
 // ============================================================
 
-/// PUBLISH_SKIPPED (0x0F, renamed from PUBLISH_BLOCKED in draft-19; wire
-/// layout is unchanged).
+/// PUBLISH_SKIPPED (0x0F). Drafts 17 and 18 name the same codepoint
+/// PUBLISH_BLOCKED, with the same two fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishSkipped {
     pub namespace_suffix: TrackNamespace,
@@ -2071,8 +2080,8 @@ mod tests {
     /// LARGEST_OBJECT carries no length of its own — that is the whole point
     /// of the encoding — so `encode_parameters` writes its bytes verbatim. A
     /// value built in memory rather than decoded is under no obligation to be
-    /// two varints, and before this check the codec answered `Ok(())` and put
-    /// a frame on the wire that `ControlMessage::decode` then refused. One
+    /// two varints, and without this check the codec answers `Ok(())` and puts
+    /// a frame on the wire that `ControlMessage::decode` then refuses. One
     /// varint short and one varint long are the two ways to get it wrong.
     ///
     /// # What it catches
@@ -2081,7 +2090,7 @@ mod tests {
     /// run:
     ///
     /// ```text
-    /// panicked at crates\moqtap-codec\src\draft19\message.rs:1382:13:
+    /// panicked at crates\moqtap-codec\src\draft19\message.rs:
     /// LARGEST_OBJECT of one varint must not encode: the decoder cannot read it back
     ///
     /// test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 108 filtered out

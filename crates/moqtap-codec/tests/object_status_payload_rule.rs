@@ -205,7 +205,7 @@ fn read_19(bytes: &[u8]) -> d19::SubgroupObject {
 ///
 /// ```text
 /// thread 'the_registry_decides_which_draft19_statuses_may_carry_a_payload'
-/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:297:30:
+/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:
 /// draft-19 status 0x3 is registered "Payload: No", so write_object must refuse
 /// it a payload; it wrote [00, 03, 61, 62, 63]
 /// ```
@@ -217,7 +217,7 @@ fn read_19(bytes: &[u8]) -> d19::SubgroupObject {
 ///
 /// ```text
 /// thread 'the_registry_decides_which_draft19_statuses_may_carry_a_payload'
-/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:248:9:
+/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:
 /// assertion `left == right` failed: draft-19 Table 16 marks 0x3 "Payload: no",
 /// ObjectStatus::permits_payload disagrees
 ///   left: true
@@ -476,7 +476,7 @@ mod d18 {
 ///
 /// ```text
 /// thread 'draft18_reads_the_same_rule_off_the_payload_length_and_draft19_off_the_registry'
-/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:501:17:
+/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:
 /// draft-18 has no per-status Payload column, so its encoder cannot be refusing
 /// status 0x3 a payload on the registry's authority: invalid field value
 /// ```
@@ -570,10 +570,10 @@ fn draft18_reads_the_same_rule_off_the_payload_length_and_draft19_off_the_regist
 /// whether a Normal object may carry a payload.
 ///
 /// `data_dispatch::conv::status_to_write` is the conversion every draft's
-/// subgroup writer goes through, and it used to refuse any explicit status
-/// beside a non-empty payload — draft-18's blanket rule, applied to all
-/// thirteen drafts. That put it in direct disagreement with draft-19's
-/// registry, which marks `0x0` Normal "Payload: Yes": a caller could ask
+/// subgroup writer goes through. Refusing any explicit status beside a
+/// non-empty payload there — draft-18's blanket rule, applied to every
+/// draft — puts it in direct disagreement with draft-19's registry, which
+/// marks `0x0` Normal "Payload: Yes": a caller could ask
 /// `permits_payload()` about Normal, be told yes, and then have the write
 /// refused by the layer above.
 ///

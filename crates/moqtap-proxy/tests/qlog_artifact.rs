@@ -98,17 +98,17 @@
 //!
 //! The two fixtures above attach the sink to a `quinn::TransportConfig`
 //! and hand that to the leg as its raw config, which is one of the two
-//! ways to reach a capture and the only one that existed first. The other
-//! is `ProxySessionConfig::upstream_qlog`, where the leg builds the config
-//! and attaches the sink itself, and it brings two claims of its own:
+//! ways to reach a capture. The other is
+//! `ProxySessionConfig::upstream_qlog`, where the leg builds the config and
+//! attaches the sink itself, and it brings two claims of its own:
 //!
 //! * [`a_relay_leg_carrying_only_a_spec_still_captures_what_it_sent`] — a
 //!   leg naming a spec and *neither* of the two transport fields still
 //!   installs a config for the sink to go on. This is the case most likely
-//!   to be silently wrong, because a leg that named neither of those fields
-//!   used to install nothing at all, and a sink on a config nobody installs
-//!   produces a file that exists, parses, names a qlog version and holds no
-//!   event.
+//!   to be silently wrong, because "install nothing" is the right answer
+//!   for a leg naming neither of those fields and no spec either, and a
+//!   sink on a config nobody installs produces a file that exists, parses,
+//!   names a qlog version and holds no event.
 //! * [`a_leg_given_both_a_raw_config_and_a_spec_is_refused_and_captures_nothing`]
 //!   — the pair that cannot be honoured, refused where the leg is built.
 //!   quinn installs a sink by mutating a `quinn::TransportConfig`, and a
@@ -1056,12 +1056,12 @@ async fn a_spec_with_no_writer_is_refused_and_its_leg_captures_nothing() {
 
 /// A leg that names a spec and nothing else still captures what it sent.
 ///
-/// The case most likely to be silently wrong, and the reason is historical:
-/// a leg naming neither a raw config nor a profile used to install nothing,
-/// and "install nothing" is a perfectly good answer for a leg with no
-/// transport opinion. It is the wrong answer for a leg with a capture. A
+/// The case most likely to be silently wrong: "install nothing" is a
+/// perfectly good answer for a leg with no transport opinion, which is what
+/// a leg naming neither a raw config nor a profile otherwise looks like,
+/// and it is the wrong answer for a leg whose one opinion is a capture. A
 /// sink attached to a `quinn::TransportConfig` that no connection is made
-/// with still writes its preamble, so that build produces a file which
+/// with still writes its preamble, so such a build produces a file which
 /// exists, parses, names a qlog version and can never hold an event — the
 /// one failure a caller watching their disk cannot see.
 ///
@@ -1083,10 +1083,9 @@ async fn a_spec_with_no_writer_is_refused_and_its_leg_captures_nothing() {
 /// sent.
 ///
 /// *Ablation, and the failure this test exists for:* answer a leg carrying a
-/// spec and neither transport field with "install nothing" — which is what
-/// this crate did before the field existed, and is a one-arm change. The
-/// 100 000 bytes still cross the proxy and the relay still confirms every
-/// one, and this fails with
+/// spec and neither transport field with "install nothing" — a one-arm
+/// change. The 100 000 bytes still cross the proxy and the relay still
+/// confirms every one, and this fails with
 ///
 /// ```text
 /// no capture at C:\Users\...\Temp\moqtap-qlog-64612-spec-alone-0\relay-leg.qlog: The

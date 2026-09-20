@@ -20,8 +20,8 @@ Add the crates you need to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-moqtap-codec = "0.5"
-moqtap-client = "0.5"
+moqtap-codec = "0.6"
+moqtap-client = "0.6"
 ```
 
 Each draft is a separate feature flag on both crates (`draft07`..`draft20`), and both default to `all-drafts`. Turn default features off and name only the drafts you need to build a smaller subset; a draft that is not enabled cannot be negotiated at runtime.

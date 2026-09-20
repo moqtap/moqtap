@@ -16,43 +16,31 @@
 //! holds: the field is the caller's, and a FETCH is a request. It survives
 //! draft-20 rebuilding the message around it.
 //!
-//! # What was here before
-//!
-//! `Endpoint::fetch` sent an empty list on all five drafts. Its four siblings
-//! on the same drafts — `subscribe`, `track_status`, `publish_namespace` and
-//! `publish` — all took the caller's, which made FETCH the one request an
-//! application could not attach anything to.
-//!
-//! What it could not attach is the point. Draft-14's FETCH carried a
-//! Subscriber Priority field of its own; drafts 15 and up dropped the field
-//! and moved it into the parameters, where draft-17 Section 9.3.5 says it "MAY
-//! appear in a SUBSCRIBE, FETCH, REQUEST_UPDATE (for a subscription or FETCH),
-//! or PUBLISH_OK message". So a fetch on these five drafts had no way to say
-//! what priority it wanted, and the field had not gone away — it had moved
-//! somewhere the crate did not follow it. An authorization token, which
-//! Section 9.3.2 puts in the same list, is the other thing no fetch could
-//! carry.
+//! What a fetch cannot otherwise attach is the point. Draft-14's FETCH carries
+//! a Subscriber Priority field of its own; drafts 15 and up have no such field
+//! and put the priority in the parameters, where draft-17 Section 9.3.5 says it
+//! "MAY appear in a SUBSCRIBE, FETCH, REQUEST_UPDATE (for a subscription or
+//! FETCH), or PUBLISH_OK message". A fetch that sent an empty list here would
+//! have no way to say what priority it wanted — not because no field carries
+//! it, but because the field these drafts use is a parameter, and the
+//! parameters are the caller's. An authorization token, which Section 9.3.2
+//! puts in the same list, is the other thing such a fetch could not carry.
 //!
 //! # Why the range starts at 15
 //!
-//! It used to stop there. Drafts 12, 13 and 14 filled in the parameters of
-//! nearly every request they built, not only the fetch, so on those three the
-//! FETCH was not the odd one out and fixing it alone would have made it so.
-//! Their builders are being given the argument one at a time now, and the
-//! fetch has had its turn; the gates for those three are in
+//! Drafts 12, 13 and 14 have gates of their own, in
 //! `a_fetch_carries_the_parameters_it_was_given_on_the_earlier_drafts.rs`,
-//! which needs its own call shape because a fetch draws a Subscriber Priority
-//! and a Group Order of its own until draft-15 moves them into the
-//! parameters.
+//! because they need their own call shape: on those three the FETCH message
+//! draws a Subscriber Priority and a Group Order field of its own, and
+//! draft-15 deletes both fields and moves them into the parameters.
 //!
 //! # Both kinds of FETCH
 //!
 //! A Joining Fetch is the same message under a different Fetch Type, with one
-//! Parameters field and the same registered parameters to put in it. It sent
-//! an empty list on all five of these drafts after the standalone form had
-//! stopped, because the change that gave FETCH the caller's parameters
-//! reached only the call it was looking at. So the third gate on each draft
-//! is the joining one.
+//! Parameters field and the same registered parameters to put in it. It is
+//! built by a call of its own on every draft that has one, so a change that
+//! reached only the standalone call would leave the joining one sending an
+//! empty list. That is why the third gate on each draft is the joining one.
 //!
 //! # Where draft-20 parts company
 //!
@@ -125,14 +113,14 @@ macro_rules! fetch_parameter_gates {
             /// The parameter the caller attaches, chosen so that an empty
             /// list cannot be mistaken for it.
             ///
-            /// It is SUBSCRIBER PRIORITY (0x20), which is the parameter
-            /// that makes this a fix rather than a tidy-up. Draft-14's FETCH
-            /// carried a Subscriber Priority field; drafts 15 and up dropped
-            /// the field and made it a parameter, and draft-17 Section 9.3.5
-            /// says it "MAY appear in a SUBSCRIBE, FETCH, REQUEST_UPDATE (for
-            /// a subscription or FETCH), or PUBLISH_OK message". With the
-            /// parameter list filled in as empty, a fetch on these five drafts
-            /// could not carry a priority at all.
+            /// It is SUBSCRIBER PRIORITY (0x20), which is the parameter that
+            /// makes this claim load-bearing. Draft-14's FETCH carries a
+            /// Subscriber Priority field of its own; drafts 15 and up drop the
+            /// field and make it a parameter, and draft-17 Section 9.3.5 says
+            /// it "MAY appear in a SUBSCRIBE, FETCH, REQUEST_UPDATE (for a
+            /// subscription or FETCH), or PUBLISH_OK message". A fetch sending
+            /// an empty parameter list on these five drafts could not carry a
+            /// priority at all.
             ///
             /// Three things the codec enforces had to line up for this to be a
             /// usable choice, and each would have failed the gate for its own
@@ -148,13 +136,12 @@ macro_rules! fetch_parameter_gates {
             ///
             /// # What it catches
             ///
-            /// Sending an empty parameter list whatever the caller passed, which is
-            /// what all five drafts did:
+            /// Sending an empty parameter list whatever the caller passed:
             ///
             /// ```text
             /// assertion `left == right` failed: the parameter the caller attached
-            /// must reach the peer, and this call used to send an empty list
-            /// whatever it was given left: 0 right: 1 failures:
+            /// must reach the peer, not the empty list a call that ignores its
+            /// argument sends left: 0 right: 1 failures:
             /// draft15::the_parameters_a_fetch_is_given_reach_the_peer
             /// ```
             ///
@@ -186,8 +173,8 @@ macro_rules! fetch_parameter_gates {
                 assert_eq!(
                     back.parameters.len(),
                     1,
-                    "the parameter the caller attached must reach the peer, and this call \
-                     used to send an empty list whatever it was given"
+                    "the parameter the caller attached must reach the peer, not the empty \
+                     list a call that ignores its argument sends"
                 );
                 assert_eq!(
                     back.parameters[0].key.into_inner(),
@@ -249,7 +236,7 @@ macro_rules! fetch_parameter_gates {
             /// # What it catches
             ///
             /// A joining fetch that sends an empty list whatever the caller
-            /// passed, which is what all five drafts did:
+            /// passed:
             ///
             /// ```text
             /// assertion `left == right` failed: a Joining Fetch is a FETCH,
@@ -360,7 +347,7 @@ fetch_parameter_gates!(draft19, "draft19", options);
 /// is not a restatement of the first.
 ///
 /// Then `fetch` itself sending an empty list whatever it was given, which is
-/// the defect the five drafts above shipped:
+/// the cut the five drafts above record:
 ///
 /// ```text
 /// assertion `left == right` failed: the parameter the caller attached must

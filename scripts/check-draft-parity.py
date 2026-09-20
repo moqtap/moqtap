@@ -834,9 +834,17 @@ KNOWN = {
         "The arm fuses two cases - \"this message is not a FETCH\", which is "
         "right, and \"this is a draft I do not know\", which is not.",
 
-    ("crates/moqtap-codec/src/message_names.rs", "message_type_name", "quiet catch-all"):
-        "REAL DEFECT, owned by moqtap-codec. Fourteen arms and `_ => None`: an "
-        "unknown draft's message has no name rather than an unrecognised one.",
+    # `message_type_name` and `setup_option_name` are not baselined here, and
+    # this rule does not see them at all. They share
+    # `moqtap_codec::draft_table::by_draft`, which writes an arm per draft under
+    # `#[cfg(feature)]` and another under `#[cfg(not(feature))]` and so leaves no
+    # `_` to fall into: a fifteenth `DraftVersion` variant stops that crate
+    # compiling instead of being answered quietly. The macro invocation writes
+    # `Draft07` rather than `DraftVersion::Draft07`, which is the "anything a
+    # macro spells by token concatenation" this file's own summary already excludes.
+    #
+    # That is a smaller census and a stronger guarantee, and it is the shape the
+    # three entries above should be fixed into rather than made louder in place.
 
     ("crates/moqtap-proxy/src/session.rs", "datagram_is_status", "quiet catch-all"):
         "REAL DEFECT, owned by moqtap-proxy, and the sharpest of the set "

@@ -178,9 +178,8 @@ fn endpoint_subscribe_error_via_dispatch() {
 
 /// Section 9.10 sends a SUBSCRIBE_UPDATE from the subscriber to the publisher,
 /// so one that arrives names a subscription the peer opened. The peer opens
-/// one here first; this test used to feed an update naming a subscription
-/// this endpoint had opened itself, which is the message no peer following
-/// the draft sends.
+/// one here first, because an update naming a subscription this endpoint
+/// opened itself is a message no peer following the draft sends.
 #[test]
 fn endpoint_subscribe_update_via_dispatch() {
     let mut ep = make_active_client();
@@ -920,7 +919,7 @@ fn endpoint_mixed_flows_allocate_distinct_even_ids() {
 /// because the claim is not that the helper returned `Ok`, it is that a peer
 /// can read what it returned.
 ///
-/// # What breaking the fix does, observed by making the change and running
+/// # What it catches, observed by making the change and running it
 ///
 /// Dropping the guard from `Endpoint::subscribe`:
 ///

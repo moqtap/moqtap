@@ -1,7 +1,7 @@
 #![cfg(any(feature = "draft12", feature = "draft13", feature = "draft14"))]
 
-//! An announcement carries the parameters the caller gave it, on the three
-//! drafts that used to fill the field in for them.
+//! An announcement carries the parameters the caller gave it, on drafts 12, 13
+//! and 14.
 //!
 //! The fourth of the row's builders, after SUBSCRIBE, FETCH and the
 //! track-status request. The same claim and the same reason: each of these
@@ -18,9 +18,9 @@
 //! # Ablations, measured
 //!
 //! One cut, run against the two crates a change to `moqtap-client` can reach
-//! and then reverted: the builder sends an empty list whatever it was given,
-//! which all three drafts did before it forwarded them. It reddens three
-//! tests of the 3,458 in those crates - the first gate on each draft here -
+//! and then reverted: the builder sends an empty list whatever it was given.
+//! It reddens three tests of the 3,458 in those crates - the first gate on
+//! each draft here -
 //! and leaves the other 164 test binaries green. The second gate on each draft
 //! is the control, and it stays green under the cut, which is the point of
 //! it.
@@ -84,13 +84,12 @@ macro_rules! announce_parameter_gates {
             ///
             /// # What it catches
             ///
-            /// Sending an empty list whatever the caller passed, which is
-            /// what all three drafts did:
+            /// Sending an empty list whatever the caller passed:
             ///
             /// ```text
             /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, and this call used to send an
-            /// empty list whatever it was given
+            /// attached must reach the peer, not the empty list a call that
+            /// ignores its argument sends
             ///   left: 0
             ///  right: 1
             /// ```
@@ -111,8 +110,8 @@ macro_rules! announce_parameter_gates {
                 assert_eq!(
                     carried.len(),
                     1,
-                    "the parameter the caller attached must reach the peer, and this call \
-                     used to send an empty list whatever it was given"
+                    "the parameter the caller attached must reach the peer, not the empty \
+                     list a call that ignores its argument sends"
                 );
                 assert_eq!(
                     carried[0].key.into_inner(),

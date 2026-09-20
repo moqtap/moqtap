@@ -3,20 +3,20 @@
 //! Drafts 11, 12 and 13 put an Extensions Present column on the SUBGROUP_HEADER
 //! type table, so whether each object carries an Extension Headers Length field
 //! is fixed once, by the header, for the whole stream. The read side of
-//! `FramedRecvStream` has always kept that answer and handed it to every
-//! object decode. The write side did not keep it: it encoded each object header
-//! on its own, and an object header encoded on its own writes the framing that
-//! has no extension block.
+//! `FramedRecvStream` keeps that answer and hands it to every object decode.
+//! The write side has to keep it too, because an object header encoded on its
+//! own writes the framing that has no extension block.
 //!
-//! On a stream opened with an extension-bearing type the two halves therefore
-//! disagreed, and the interesting part is what that looked like. The reader
-//! goes looking for an Extension Headers Length, finds the Object Payload
-//! Length in its place, and reads that many bytes of payload as the extension
-//! block. With nothing after the object it runs out and reports a short read.
-//! With another object behind it - which is the ordinary case on a stream -
-//! there are bytes to take, so it does not fail at all: it returns an object
-//! whose extension headers are the previous object's payload, and carries on
-//! misframing everything after. The write returned `Ok` each time.
+//! On a stream opened with an extension-bearing type a write side that does not
+//! keep it disagrees with the read side, and the interesting part is what that
+//! disagreement looks like. The reader goes looking for an Extension Headers
+//! Length, finds the Object Payload Length in its place, and reads that many
+//! bytes of payload as the extension block. With nothing after the object it
+//! runs out and reports a short read. With another object behind it - which is
+//! the ordinary case on a stream - there are bytes to take, so it does not fail
+//! at all: it returns an object whose extension headers are the previous
+//! object's payload, and carries on misframing everything after. The write
+//! returns `Ok` each time.
 //!
 //! # Why the assertion is a read and not an encoder check
 //!
@@ -29,20 +29,20 @@
 //! Drafts 07 through 10 have no such disagreement to test: draft-07 has no
 //! extension block and drafts 08 through 10 give every object one
 //! unconditionally. Drafts 14 and later thread the framing through a reader
-//! object on the write path, so they were never guessing.
+//! object on the write path, so the framing is never guessed there.
 //!
 //! # Recorded failures
 //!
-//! Restoring the old write - `header.encode_checked(&mut buf)?` in place of
-//! `encode_checked_with_extensions` - while the codec keeps its guard, on
-//! draft-11. The object no longer reaches the wire at all:
+//! Writing the header with `header.encode_checked(&mut buf)?` in place of
+//! `encode_checked_with_extensions`, while the codec keeps its guard, on
+//! draft-11. The object does not reach the wire at all:
 //!
 //! ```text
 //! write first object: Codec(InvalidField)
 //! ```
 //!
-//! Restoring the old write *and* dropping the codec's guard, which is what
-//! shipped. Nothing fails at the writer, nothing fails at the reader, and the
+//! The same substitution *and* dropping the codec's guard. Nothing fails at
+//! the writer, nothing fails at the reader, and the
 //! object comes back with the payload sitting in its extension headers:
 //!
 //! ```text
@@ -239,8 +239,8 @@ extension_stream_round_trip!(draft13, "draft13", draft13, Draft13, Draft13);
 ///
 /// # Recorded failure
 ///
-/// Produced by putting `header.encode_stream(&mut buf);` back in
-/// `write_subgroup_header`:
+/// Produced by writing the header with `header.encode_stream(&mut buf);` in
+/// place of `encode_stream_checked` in `write_subgroup_header`:
 ///
 /// ```text
 /// a header whose Subgroup ID disagrees with its own type must not open a

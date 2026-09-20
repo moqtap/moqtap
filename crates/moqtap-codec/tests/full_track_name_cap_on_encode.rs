@@ -14,11 +14,12 @@
 //! on **every** message that carries a Full Track Name, not on the one that
 //! happened to get a test.
 //!
-//! That was the gap. `full_track_name_cap.rs` drives the decode side of
-//! SUBSCRIBE on six drafts. Every other call site — the encode side of all of
-//! them, and both sides of TRACK_STATUS, FETCH, PUBLISH, PUBLISH_BLOCKED,
-//! PUBLISH_SKIPPED and the Redirect inside REQUEST_ERROR — could have its check
-//! deleted with the suite still green.
+//! That is the gap this file closes. `full_track_name_cap.rs` drives the decode
+//! side of SUBSCRIBE on drafts 11 through 20 and nothing else; without the cases
+//! here, every other call site — the encode side of all of them, and both sides of
+//! TRACK_STATUS, FETCH, PUBLISH, PUBLISH_BLOCKED, PUBLISH_SKIPPED and the
+//! Redirect inside REQUEST_ERROR — could have its check deleted with the suite
+//! still green.
 //!
 //! # The shape of each case
 //!

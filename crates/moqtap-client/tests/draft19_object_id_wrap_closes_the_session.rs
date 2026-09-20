@@ -142,7 +142,7 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// ```text
 /// ---- a_wrapped_object_id_delta_closes_the_quic_connection stdout ----
 ///
-/// thread 'a_wrapped_object_id_delta_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft19_object_id_wrap_closes_the_session.rs:229:5:
+/// thread 'a_wrapped_object_id_delta_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft19_object_id_wrap_closes_the_session.rs:
 /// the wrap is a rule draft-19 answers with a close, but close_for_data_stream declined to close
 /// ```
 #[tokio::test]

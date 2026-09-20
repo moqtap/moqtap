@@ -5,6 +5,20 @@ All notable changes to moqtap-proxy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.0] - 2026-09-20
+
+No public item was added, removed or renamed. The number moves because `moqtap-codec` and `moqtap-client` both carry breaking changes this cycle and this crate's published manifest requires them, and because the change below is breaking for anyone reading profiles through the `serde` feature.
+
+### Changed
+
+- **Breaking, behind the non-default `serde` feature: a `TransportProfile` or `AckFrequency` is validated when it is read rather than when it is installed.** Deserializing now runs `validate()`, so a non-finite `time_threshold` or an `initial_mtu` below 1200 is a parse error. A consumer that read a profile and never installed it — a dry run, a linter — reported it valid. The written form is unchanged.
+
+### Fixed
+
+- **An object or header that ran out inside a Key-Value-Pair is treated as incomplete rather than malformed.** `parser::data::is_incomplete_error` asks `CodecError::is_incomplete()` instead of keeping its own list, which had drifted to two of the four spellings. Such a stream latched `BypassReason::DecodeError` and was forwarded uninterpreted, so no object on it reached `ProxyHook::on_object`.
+
 ## [0.5.0] - 2026-09-03
 
 Draft-20 support. Additive at this crate's own API — nothing public was removed

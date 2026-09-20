@@ -2726,17 +2726,15 @@ mod tests {
     /// Which statuses may carry a payload is decided by the registry, not by a
     /// payload length.
     ///
-    /// Draft-18 said an Object with any status other than Normal has an empty
-    /// payload, so the rule could be read off the status number — and this
-    /// encoder read it off the length instead, which came to the same thing: a
-    /// zero length was what put a status on the wire, and a status handed in
-    /// alongside a payload was dropped on the floor. Draft-20 Section 11.2.1.1
-    /// replaces the blanket rule with "an Object MUST have an empty payload
-    /// unless its Object Status value is registered as permitting a payload",
-    /// the permission being a column of the Object Status registry in
-    /// Section 15.9. The three rows assigned today give the same answers
-    /// draft-18's rule gave; what this gate observes is that the answers now
-    /// come from the rows.
+    /// Draft-18 states one blanket rule — an Object with any status other than
+    /// Normal has an empty payload — so under it the answer can be read off the
+    /// status number, or equivalently off a zero payload length. Draft-20
+    /// Section 11.2.1.1 replaces the blanket rule with "an Object MUST have an
+    /// empty payload unless its Object Status value is registered as permitting
+    /// a payload", the permission being a column of the Object Status registry
+    /// in Section 15.9. The three rows assigned today give the same answers
+    /// draft-18's rule gives; what this gate observes is that the answers come
+    /// from the rows.
     ///
     /// Each row is driven both ways. A zero-length object with that status must
     /// encode and read back — Normal included, since it permits a payload
@@ -2747,7 +2745,7 @@ mod tests {
     /// # What this catches, observed by making each change and running it
     ///
     /// Dropping the registry check from `write_object`, leaving the length to
-    /// decide as it did before — an End of Group object with a payload is then
+    /// decide on its own — an End of Group object with a payload is then
     /// written as a plain payload object and its status is gone:
     ///
     /// ```text

@@ -842,8 +842,8 @@ fn the_encoding_rules_reach_into_custom_too() {
 // ── one key, never twice ───────────────────────────────────
 
 /// A store is an ordered list of pairs and not a map, so a caller can build
-/// one holding a key twice — and both entries used to go into the file. RFC
-/// 8949 calls that map invalid, the JavaScript reader silently collapses it,
+/// one holding a key twice — and without the dedup pass both go into the file.
+/// RFC 8949 calls that map invalid, the JavaScript reader silently collapses it,
 /// and SPEC.md forbids emitting one at all.
 ///
 /// The first entry is the one written: every read in this crate goes through

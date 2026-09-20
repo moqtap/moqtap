@@ -42,7 +42,7 @@ fn ns(parts: &[&[u8]]) -> TrackNamespace {
 /// ```text
 /// ---- a_goaway_uri_at_a_server_closes_the_session stdout ----
 ///
-/// thread 'a_goaway_uri_at_a_server_closes_the_session' (6868) panicked at crates\moqtap-client\tests\draft17_18_session_rules.rs:64:14:
+/// thread 'a_goaway_uri_at_a_server_closes_the_session' (6868) panicked at crates\moqtap-client\tests\draft17_18_session_rules.rs:
 /// draft-17 accepted a client-supplied migration URI at a server: ()
 /// ```
 #[test]
@@ -130,7 +130,7 @@ fn a_goaway_uri_at_a_server_closes_the_session() {
 /// ```text
 /// ---- a_goaway_on_a_request_stream_migrates_only_that_request stdout ----
 ///
-/// thread 'a_goaway_on_a_request_stream_migrates_only_that_request' (46112) panicked at crates\moqtap-client\tests\draft17_18_session_rules.rs:163:47:
+/// thread 'a_goaway_on_a_request_stream_migrates_only_that_request' (46112) panicked at crates\moqtap-client\tests\draft17_18_session_rules.rs:
 /// a per-request GOAWAY was refused: ResponseOnControlStream
 /// ```
 #[test]
@@ -337,7 +337,6 @@ fn a_request_update_is_correlated_by_its_stream_and_refused_on_the_control_strea
     use moqtap_client::draft18::endpoint::{Endpoint, EndpointError};
     use moqtap_client::draft18::session::request_id::Role;
     use moqtap_client::draft18::session::state::SessionState;
-    use moqtap_codec::draft18::error_codes::SessionErrorCode;
     use moqtap_codec::draft18::message::{ControlMessage, RequestUpdate, Setup, SubscribeOk};
 
     fn active_with_subscription() -> (Endpoint, VarInt) {
@@ -373,6 +372,21 @@ fn a_request_update_is_correlated_by_its_stream_and_refused_on_the_control_strea
         .receive_message(update)
         .expect_err("a REQUEST_UPDATE was accepted on the control stream");
     assert!(matches!(err, EndpointError::RequestUpdateOnControlStream), "got {err:?}");
-    assert_eq!(err.session_error_code(), Some(SessionErrorCode::ProtocolViolation));
-    assert_eq!(ep.session_state(), SessionState::Closed);
+
+    // Refused, and the session runs on. This asserted
+    // `Some(ProtocolViolation)` and `SessionState::Closed` until 2026-09-10,
+    // on the reading that Section 3.3's opener sentence reaches a message
+    // arriving on the control stream. It does not — that sentence is about
+    // what a bidirectional stream may *begin* with. Draft-18 Section 10.9
+    // describes where a REQUEST_UPDATE travels and attaches no consequence to
+    // one that arrives elsewhere; draft-19 is the first to add
+    // "An endpoint that receives a REQUEST_UPDATE other than in the two cases
+    // above MUST close the session with a PROTOCOL_VIOLATION." So on this
+    // draft the close was this build's model, and it is gone.
+    assert_eq!(
+        err.session_error_code(),
+        None,
+        "draft-18 states no close for a REQUEST_UPDATE on the control stream"
+    );
+    assert_eq!(ep.session_state(), SessionState::Active);
 }

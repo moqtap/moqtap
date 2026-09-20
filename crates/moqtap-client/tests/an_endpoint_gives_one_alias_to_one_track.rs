@@ -38,22 +38,15 @@
 //! that alias to a second track is what the sentence forbids, whether or not
 //! the PUBLISH has been answered yet.
 //!
-//! # Why draft-14 is in the range
+//! # Why drafts 12, 13 and 14 are in the range
 //!
-//! Its PUBLISH has a Track Alias field like the rest, but this crate had no
-//! way to say which alias it meant: the field went out as zero every time. Two
-//! tracks published in one session therefore shared an alias by construction,
-//! which is the thing the sentence forbids. The caller chooses it now, and
-//! since 12 and 13 gained an outbound PUBLISH, so does it choose
-//! the delivery order, the largest location and the parameters that used to be
-//! filled in for it. All three drafts build the message the same way.
-//!
-//! # Why drafts 12 and 13 arrived late
-//!
-//! They state the sentence in the same words as 14, and their PUBLISH carries
-//! the same Track Alias field, but this endpoint had no way to send one: the
-//! message existed only as something the peer offered. The four gates below
-//! could not be written for them until it had one.
+//! All three state the sentence in the same words, and all three draw a Track
+//! Alias field in the PUBLISH the endpoint sends. The caller names that alias
+//! on the call, along with the delivery order, the largest location and the
+//! parameters, and all three build the message with the same call — so the four
+//! gates below are the same four gates on each of them. An endpoint that could
+//! not say which alias it meant would give two tracks one alias by
+//! construction, which is exactly what the sentence forbids.
 //!
 //! Drafts 07 through 11 are outside the range because there the alias is
 //! chosen in SUBSCRIBE - that half is in

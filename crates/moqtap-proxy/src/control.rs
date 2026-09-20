@@ -21,8 +21,8 @@
 //!
 //! # Two pieces of shared state, both released by a guard
 //!
-//! The handle reads two things the proxy used to keep as stack locals of
-//! `run()`: the bound listener, and the set of sessions that are live right
+//! The handle reads two things `run()` would otherwise keep as stack
+//! locals: the bound listener, and the set of sessions that are live right
 //! now. Both are published into this module when they come into existence
 //! and removed when they go, and in both cases the removal is a `Drop`
 //! rather than a call at each exit site.
@@ -1890,9 +1890,9 @@ pub(crate) struct StreamRegistry {
 /// What the registry keeps for one live stream.
 ///
 /// Two things, and they are here for two different callers. The [`Gate`] is
-/// what a `SerializeAfter` waits on and has always been the whole of an
-/// entry. The inbox is how a request that arrives from *outside* the
-/// session reaches the task that owns the stream's write half.
+/// what a `SerializeAfter` waits on. The inbox is how a request that
+/// arrives from *outside* the session reaches the task that owns the
+/// stream's write half.
 ///
 /// The inbox is a channel rather than a shared handle because
 /// `SendStream::write_all` and `SendStream::reset` both take `&mut self`

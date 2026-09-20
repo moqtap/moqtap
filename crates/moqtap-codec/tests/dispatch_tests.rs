@@ -97,6 +97,61 @@ fn any_control_message_draft14_max_request_id() {
     }
 }
 
+/// A message names itself the same way the draft-and-id table names it.
+///
+/// The two are separate transcriptions of the same fact —
+/// `AnyControlMessage::message_type_name` reads the message's own
+/// `MessageType`, `message_type_name` looks the id up — and this is what stops
+/// them drifting apart.
+///
+/// Type 0x07 is the case that makes the pairing necessary rather than tidy: it
+/// is ANNOUNCE_OK on draft-07, PUBLISH_NAMESPACE_OK on draft-14 and REQUEST_OK
+/// on draft-20. An accessor answering from the id alone would have to pick one
+/// of the three and be wrong about the other two.
+#[cfg(all(feature = "draft07", feature = "draft14", feature = "draft20"))]
+#[test]
+fn a_message_names_itself_as_its_own_draft_names_the_id() {
+    use moqtap_codec::message_type_name;
+    use moqtap_codec::types::TrackNamespace;
+
+    let announce_ok =
+        AnyControlMessage::Draft07(moqtap_codec::draft07::message::ControlMessage::AnnounceOk(
+            moqtap_codec::draft07::message::AnnounceOk {
+                track_namespace: TrackNamespace(vec![b"example".to_vec()]),
+            },
+        ));
+    let publish_namespace_ok = AnyControlMessage::Draft14(
+        moqtap_codec::draft14::message::ControlMessage::PublishNamespaceOk(
+            moqtap_codec::draft14::message::PublishNamespaceOk {
+                request_id: VarInt::from_u64(1).unwrap(),
+            },
+        ),
+    );
+    let request_ok =
+        AnyControlMessage::Draft20(moqtap_codec::draft20::message::ControlMessage::RequestOk(
+            moqtap_codec::draft20::message::RequestOk {
+                parameters: Vec::new(),
+                track_properties: Vec::new(),
+            },
+        ));
+
+    for (message, expected) in [
+        (&announce_ok, "announce_ok"),
+        (&publish_namespace_ok, "publish_namespace_ok"),
+        (&request_ok, "request_ok"),
+    ] {
+        assert_eq!(message.message_type_id(), 0x07, "{expected} is type 0x07 on its draft");
+        assert_eq!(message.message_type_name(), expected);
+        assert_eq!(
+            Some(message.message_type_name()),
+            message_type_name(message.draft().number(), message.message_type_id()),
+            "the accessor and the table disagree about draft-{} {:#04x}",
+            message.draft().number(),
+            message.message_type_id(),
+        );
+    }
+}
+
 // ============================================================
 // AnyControlMessage — Draft-07
 // ============================================================
@@ -205,12 +260,12 @@ fn any_subgroup_header_draft07_round_trip() {
 /// not about the wire.
 ///
 /// `None` is the answer that keeps the accessor's stated contract, that it
-/// answers `None` when the header does not determine a Subgroup ID. Both
-/// drafts used to answer `Some(0)`, which hands a caller subgroup zero for a
-/// stream no draft defines — and a caller believing an ID is pinned is a
-/// caller that will elide the first object of it. Drafts 17-20 already
-/// answered `None` for the same combination, so the old behaviour also split
-/// the answer across drafts that agree on the bytes.
+/// answers `None` when the header does not determine a Subgroup ID.
+/// Answering `Some(0)` would hand a caller subgroup zero for a stream no draft
+/// defines — and a caller believing an ID is pinned is a caller that will
+/// elide the first object of it. Drafts 17-20 answer `None` for the same
+/// combination, so it would also split the answer across drafts that agree on
+/// the bytes.
 ///
 /// *Ablation (measured):* drop the unassigned arm, so both drafts reach
 /// `Some(0)` again:
@@ -762,15 +817,14 @@ mod subgroup_accessors_draft14 {
 /// Subgroup ID mode at `0x06` and an end-of-group marker at `0x08` — the same
 /// layout as draft-14 below it and draft-16 above it.
 ///
-/// This module previously asserted that `0x02` was the end-of-group marker and
-/// that draft-15 had no first-object mode. Both halves of that were wrong, and
-/// the wire consequence is subtle enough to have survived: field presence is
-/// unaffected, so every frame still decodes to the right number of bytes and
-/// only the *meaning* of two accessors changes. `0x12` is first-object mode,
-/// where the ID is not on the wire and `subgroup_id()` must answer `None`;
-/// `0x18` is the real end-of-group type.
+/// Reading `0x02` as the end-of-group marker, or draft-15 as having no
+/// first-object mode, is wrong in a way subtle enough to survive a suite:
+/// field presence is unaffected, so every frame still decodes to the right
+/// number of bytes and only the *meaning* of two accessors changes. `0x12` is
+/// first-object mode, where the ID is not on the wire and `subgroup_id()` must
+/// answer `None`; `0x18` is the end-of-group type.
 ///
-/// *Ablation:* read the end-of-group marker at `0x02` again; the `first object`
+/// *Ablation:* read the end-of-group marker at `0x02`; the `first object`
 /// case reports `Some(0)` where it must report `None`, and fails with:
 ///
 /// ```text
@@ -905,8 +959,8 @@ mod subgroup_accessors_draft15 {
     /// exists for.
     ///
     /// *Ablation (measured):* answer `None` from the drafts 15-16 arm of
-    /// `subgroup_id_mode` — that is, leave the two drafts in the arm that
-    /// reports nothing, which is where they were until this test was written:
+    /// `subgroup_id_mode` — that is, put the two drafts in the arm that
+    /// reports nothing:
     ///
     /// ```text
     /// assertion `left == right` failed: the first-object carrier must be distinguishable from the combination the draft assigns nothing
@@ -956,14 +1010,14 @@ mod subgroup_accessors_draft15 {
     }
 }
 
-/// Draft-16 is the draft whose own `subgroup_id_from_first_object()` once
-/// disagreed with its own decoder: for a header type with **both** `0x02` and
-/// `0x04` set, the decoder read the explicit varint while the per-draft
-/// accessor still claimed the ID came from the first object. This module used
-/// to pin that discrepancy on type `0x16`, and the uniform accessor following
-/// the decoder was the fence.
+/// Draft-16 is where a per-draft accessor and its own decoder could disagree:
+/// for a header type with **both** `0x02` and `0x04` set, a decoder reading the
+/// explicit varint and a `subgroup_id_from_first_object()` claiming the ID
+/// comes from the first object give two answers about one set of bytes. Type
+/// `0x16` is where that discrepancy would sit, and a uniform accessor that
+/// follows the decoder is one fence against it.
 ///
-/// The discrepancy is now unreachable, and why is worth keeping. Those two bits
+/// The discrepancy is unreachable, and why is worth keeping. Those two bits
 /// are not independent flags on draft-16 but a two-bit SUBGROUP_ID_MODE field,
 /// and both of them set is mode `0b11`, which Section 10.4.2 reserves. It names
 /// the eight type bytes that carry it — `0x16`, `0x17`, `0x1E`, `0x1F`, `0x36`,
@@ -972,12 +1026,12 @@ mod subgroup_accessors_draft15 {
 /// refuses all eight, so no header reaches the accessors with both bits set and
 /// the two have nothing left to disagree about.
 ///
-/// So the fence moved rather than went away. The refusal sweep is what now
-/// keeps a both-bits header from reaching an accessor at all, and the case list
-/// keeps the accessors and the decoder agreeing across the three modes that
-/// remain. Dropping either half leaves the other unable to see a regression in
-/// it: refusals say nothing about what a valid header reports, and the case
-/// list cannot name a type the decoder will not return.
+/// So the fence sits at the refusal rather than at the accessor. The refusal
+/// sweep is what keeps a both-bits header from reaching an accessor at all, and
+/// the case list keeps the accessors and the decoder agreeing across the three
+/// modes that remain. Dropping either half leaves the other unable to see a
+/// regression in it: refusals say nothing about what a valid header reports,
+/// and the case list cannot name a type the decoder will not return.
 ///
 /// *Ablation:* drop the reserved-mode arm from `subgroup_type_is_valid`, so
 /// mode `0b11` decodes again. The refusal sweep fails on the first of the

@@ -49,9 +49,9 @@ fn skip(buf: &mut impl Buf, len: u64) -> Result<(), CodecError> {
 /// streams and status datagrams each pair a status with an extension block.
 ///
 /// Reported under [`CodecError::ExtensionsOnNonExistentObject`], which is this
-/// rule and nothing else. It was [`CodecError::InvalidField`] until now, shared
-/// with a dozen unrelated malformations the draft does not answer with a close,
-/// which left a caller unable to act on the sentence above.
+/// rule and nothing else. [`CodecError::InvalidField`] is too coarse for it:
+/// shared with a dozen unrelated malformations the draft does not answer with a
+/// close, it leaves a caller unable to act on the sentence above.
 fn check_extensions_against_status(
     status: Option<u64>,
     extension_headers_len: u64,
@@ -1643,8 +1643,8 @@ mod tests {
     /// [`DatagramObject`] can hold both at once, and [`DatagramObject::encode`]
     /// resolves that by writing whichever the type byte announces and
     /// discarding the other — the loss this gate exists for. The middle of each
-    /// half observes the discard directly, so the gate states the old behaviour
-    /// as well as the new.
+    /// half observes the discard directly, so the gate states `encode`'s silent
+    /// discard as well as `encode_checked`'s refusal.
     ///
     /// Normal beside a payload is exempt and checked at the end. Section
     /// 10.2.1.1 says "Any object with a status code other than zero MUST have
@@ -1654,7 +1654,7 @@ mod tests {
     /// # What this catches, observed by making each change and running it
     ///
     /// Dropping the status half of the check, leaving the type byte to decide
-    /// as it did before:
+    /// on its own:
     ///
     /// ```text
     /// encode_checked must refuse ObjectDoesNotExist under a payload type; got Ok(())

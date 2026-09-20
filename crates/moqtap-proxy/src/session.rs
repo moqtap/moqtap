@@ -90,9 +90,13 @@ pub struct ProxySessionConfig {
     /// dialled. A profile the installer refuses is
     /// [`ProxyError::TransportProfile`], and no connection is attempted.
     ///
-    /// `None` is the behaviour callers had before this field existed. It is
-    /// the *only* alternative to `upstream_transport_config`, never a
-    /// companion to it.
+    /// `None` installs no profile: the leg then takes
+    /// `upstream_transport_config` if it names one, and quinn's defaults
+    /// otherwise. It is the *only* alternative to that field, never a
+    /// companion to it. Neither field is *installed* on a WebTransport
+    /// upstream, which builds its endpoint through `wtransport`; the
+    /// refusals above are answered there all the same, before the
+    /// transport is dispatched on.
     pub upstream_transport_profile: Option<TransportProfile>,
     /// How `upstream_transport_profile` becomes the config the relay leg
     /// installs.
@@ -172,13 +176,12 @@ pub struct ProxySessionConfig {
     /// The socket every datagram of the **upstream** connection is sent
     /// on and received from.
     ///
-    /// `None` binds an ephemeral `0.0.0.0:0` socket, which is what this
-    /// session has always done. `Some(_)` builds the upstream endpoint
-    /// over the caller's socket instead, so a decorating implementation —
-    /// a tap, a counter, a network-impairment shim — sees and can alter
-    /// the whole relay leg. Ownership is shared, so the caller keeps its
-    /// handle on the socket while the session runs, and the relay sees the
-    /// supplied socket's address as this proxy's.
+    /// `None` binds an ephemeral `0.0.0.0:0` socket. `Some(_)` builds the
+    /// upstream endpoint over the caller's socket instead, so a decorating
+    /// implementation — a tap, a counter, a network-impairment shim — sees
+    /// and can alter the whole relay leg. Ownership is shared, so the
+    /// caller keeps its handle on the socket while the session runs, and
+    /// the relay sees the supplied socket's address as this proxy's.
     ///
     /// This is the relay leg only. The client-facing leg is a separate
     /// endpoint over a separate socket, supplied — or not — when the
@@ -1127,7 +1130,7 @@ impl SessionShaper {
             }
             // No proxy, so no switch to share and no generation to watch.
             // Pacing is on and stays on, which is what a session driven
-            // directly has always done.
+            // directly does.
             None => (0, Scheduler::new(profile)),
         };
         Self {
@@ -2836,21 +2839,21 @@ async fn forward_request_streams(
          no request stream to forward",
     );
     loop {
-        // No cancellation branch, which is deliberate and is the shape
-        // `forward_control_stream` has always had: this loop is ended by the
+        // No cancellation branch, which is deliberate and matches
+        // `forward_control_stream`'s own accept: this loop is ended by the
         // session aborting it, and by `accept_bi` failing when the
         // connection goes, not by returning on its own.
         //
-        // Measured rather than assumed. An earlier version raced this accept
-        // against `ctx.cancel`, and returning first on cancellation moved
+        // Measured rather than assumed. Racing this accept against
+        // `ctx.cancel` and returning first on cancellation moves
         // `run_with_transport` past `tasks.shutdown()` and into
         // `client.close()` / `relay.close()` before the *per-stream* tasks
-        // had run their own teardown drains — the drain in
+        // have run their own teardown drains — the drain in
         // `pipe_data_framed`'s cancel branch that writes what a hook was
         // holding and fires a queued terminal. On a current-thread runtime
         // that reordering is deterministic, and
         // `actions_timing::cancelling_while_an_object_is_held_tears_down_promptly`
-        // failed on it every run: no `RESET_STREAM` at the relay within a
+        // fails on it every run: no `RESET_STREAM` at the relay within a
         // second, the connection closing out from under the drain instead.
         // A task the session has to abort is a task whose abort yields, and
         // the drains get their turn.
@@ -4340,13 +4343,13 @@ fn control_event(
 /// so this is the only shape available. `source` stays a borrow: nothing is
 /// ever done with it outside the loop.
 ///
-/// # The two open topologies, and why the default one did not move
+/// # The two open topologies, and why the default one stays in the loop
 ///
 /// [`StreamAction::Open`](crate::action::StreamAction::Open)
 /// — and therefore every session that never returns
 /// `OpenAfter` — keeps `dest.open_uni()` **in the accept loop**, between the
-/// `Site::StreamOpen` decision and the spawn, exactly where it has always
-/// been. That is what keeps the two reject sites observably different: a
+/// `Site::StreamOpen` decision and the spawn. That is what keeps the two
+/// reject sites observably different: a
 /// reject at the open site creates no peer stream at all, while a reject at
 /// the header site resets a peer stream that already exists having carried
 /// nothing. Opening lazily for every stream would collapse that difference
@@ -5497,18 +5500,15 @@ async fn pipe_data_framed(
                                         draft,
                                         reason,
                                     });
-                                    // `FramerBypass` is the whole report, and
-                                    // that is a change. A fetch stream on
-                                    // drafts 18, 19 and 20 used to bypass on
-                                    // every session, so a `Fetch`-aimed class
-                                    // there could never fire and was told so
-                                    // once per session as
-                                    // `ShapeRuleUnmatchable`. Such a stream
-                                    // is framed now whenever the session
-                                    // carried its FETCH, so the same report
-                                    // would claim a working class is dead on
-                                    // the strength of one stream that named a
-                                    // request nobody made.
+                                    // `FramerBypass` is the whole report. A
+                                    // fetch stream is framed whenever the
+                                    // session carried its FETCH, so a
+                                    // `Fetch`-aimed class is not dead merely
+                                    // because one stream bypassed:
+                                    // `ShapeRuleUnmatchable` here would call
+                                    // a working class dead on the strength
+                                    // of one stream that named a request
+                                    // nobody made.
                                     if fixup_owed {
                                         // An elide fix-up was still owed when
                                         // parsing stopped, so every later

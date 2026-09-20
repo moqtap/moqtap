@@ -2,13 +2,18 @@
 //! configuration that leg silently drops.
 //!
 //! `impair_e2e.rs::webtransport_ingress` covers the other direction: a real
-//! `wtransport` client reaching this proxy's listener. Nothing in this
-//! workspace stood a `wtransport::Endpoint::server` up, so nothing had ever
-//! watched the proxy *dial* WebTransport — every WebTransport-upstream test
-//! before this one pointed at a port that answered with raw QUIC or with
-//! nothing at all, and asserted on the error that came back. This file
-//! completes the session against a server that speaks the protocol, and
-//! compares the forwarded payload byte for byte at the far end.
+//! `wtransport` client reaching this proxy's listener. Of the suite's other
+//! WebTransport-upstream rows, `impair_e2e.rs` dials a WebTransport URL at a
+//! port answering raw QUIC and asserts on the error that comes back, and
+//! `control_reconfigure.rs`'s `relay.invalid` row never dials at all — it
+//! asserts that `ProxyControl::set_transport` refuses a profile on a
+//! WebTransport upstream before any session exists. The one other row that
+//! stands a `wtransport::Endpoint::server` up, `control_reconfigure.rs`'s
+//! live relay leg, does forward a payload across that leg and compare it at
+//! the far end, but as a side-check that a refused profile left the session
+//! as it was: its subject is the control plane's answer. This file's subject
+//! is the dial-and-forward path itself, and the `upstream_transport_config`
+//! that disappears somewhere along it.
 //!
 //! # Why the fixture exists, which is not the handshake
 //!
@@ -21,14 +26,14 @@
 //! * `upstream_transport_config` is **dropped**, in silence, and the session
 //!   connects anyway.
 //!
-//! The asymmetry was argued rather than overlooked: a dropped transport
+//! The asymmetry is deliberate rather than an oversight: a dropped transport
 //! config yields a working connection whose windows the caller did not pick,
 //! while a dropped socket yields a relay leg that bypasses the caller's
 //! decorator entirely — every impairment armed on it reported and applied to
 //! nothing, and a run that looks clean because it *is* clean.
 //!
-//! Nothing observed the second half of that argument. A transport config
-//! handed to a WebTransport upstream disappears between
+//! Nothing else in the suite observes the second half of that argument. A
+//! transport config handed to a WebTransport upstream disappears between
 //! `ProxySessionConfig` and `wtransport::ClientConfig`, and no counter, no
 //! event and no error says so. This file is where that silence is written
 //! down, so that the day it stops being silent is a red test with an
@@ -455,7 +460,7 @@ async fn a_transport_config_on_a_webtransport_upstream_is_dropped() {
     if let Some(ended) = run.gave_up {
         panic!(
             "the session finished with {ended:?} instead of connecting. A transport config on a \
-             WebTransport upstream used to be dropped in silence, as this test asserts; if it is \
+             WebTransport upstream is dropped in silence, as this test asserts; if it is \
              now refused — as a supplied socket already is — then this is the intended new \
              behaviour and this test is the one that has to change: assert the refusal and its \
              rendered message, the way impair_e2e.rs asserts \

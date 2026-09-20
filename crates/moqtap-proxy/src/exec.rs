@@ -881,7 +881,7 @@ pub(crate) fn execute_stream(
 /// unit anyway** — the queue overshoots its depth by one. A shaper may not
 /// corrupt a stream to honour a depth limit: eliding an object the framer
 /// cannot renumber around does not lose one object, it makes every
-/// successor decode with a wrong absolute ID on drafts 14-19.
+/// successor decode with a wrong absolute ID on drafts 14-20.
 ///
 /// The refusal is reported as an ordinary
 /// [`ProxyEvent::ActionRefused`] and bumps `Counters::actions_refused`,
@@ -1289,12 +1289,11 @@ fn admit_conditional(precondition: Precondition) -> Result<(), Refusal> {
 /// The four legal inner actions are [`Action::Pass`],
 /// [`Action::Replace`], [`Action::ReplacePayload`] and [`Action::Drop`].
 /// [`Action::Drop`] belongs on it, and the fact that it does is worth one
-/// sentence here because the `Action` rustdoc once said the opposite: a
-/// deferred drop is **not** a no-op, because it holds an ordering slot for
-/// the whole of its delay and [`PendingQueue::pop_next_due`] only ever
-/// considers the front. The unit is deleted *and* the rest of the stream
-/// is head-of-line-blocked, which is the impairment the composition exists
-/// to express.
+/// sentence here because a deferred drop reads as inert and is not: it
+/// holds an ordering slot for the whole of its delay and
+/// [`PendingQueue::pop_next_due`] only ever considers the front. The unit
+/// is deleted *and* the rest of the stream is head-of-line-blocked, which
+/// is the impairment the composition exists to express.
 /// `a_delayed_drop_is_admitted_and_blocks_the_stream_behind_it` is the
 /// falsifiable form of that claim — it asserts the successor's clamp, not
 /// merely the admission, so a revision that queued the drop without an
@@ -1826,14 +1825,21 @@ mod tests {
     /// Every draft the vocabulary names, whether or not this build compiled
     /// a codec for it.
     ///
-    /// The axis for the assertions that do not need one: the control site,
-    /// the stream-end and datagram sites answer for a [`DraftVersion`]
-    /// value, not for a decoder, and they answer the same way in every
-    /// build — so restricting *those* sweeps to the compiled set would drop
-    /// rows for nothing. Anything that reaches the **object** or **control**
-    /// site sweeps [`COMPILED_DRAFTS`] instead: both are behind a decoder
-    /// this build may not carry, and on a draft it does not carry the hook
-    /// is never invoked at either.
+    /// The axis for the assertions that do not need one: the stream-end and
+    /// datagram sites answer for a [`DraftVersion`] value, not for a
+    /// decoder, and they answer the same way in every build — so
+    /// restricting *those* sweeps to the compiled set would drop rows for
+    /// nothing. Anything that asserts a verdict at the **object** or
+    /// **control** site sweeps [`COMPILED_DRAFTS`] instead: both are behind
+    /// a decoder this build may not carry, and on a draft it does not carry
+    /// the hook is never invoked at either.
+    ///
+    /// Some whole-vocabulary sweeps below keep a control cell on this
+    /// axis anyway. Neither asserts *which* verdict that cell earns — one
+    /// counts decision events and checks that a refused unit is forwarded
+    /// unchanged, the other only that no refusal collected is the framer's
+    /// `StreamNotFramed` — and the `Unreachable` an uncompiled draft earns
+    /// satisfies both.
     const ALL_DRAFTS: [DraftVersion; 14] = [
         DraftVersion::Draft07,
         DraftVersion::Draft08,
@@ -1862,13 +1868,18 @@ mod tests {
     /// refusal: StreamNotFramed { reason: DecodeError } }`, see
     /// [`crate::capability::draft_is_compiled`]. Sweeping the whole
     /// vocabulary through `execute` therefore measures that guard rather
-    /// than this module's executor, which is what a `--features draft07`
-    /// build used to turn twenty-seven of the tests below red.
+    /// than this module's executor: hardcode the axis and a `--features
+    /// draft07` build turns twenty-seven of the tests below red.
     ///
-    /// The **control** site joined it later, and for the same reason one
-    /// decoder along: `AnyControlMessage::decode` has no arm for an
-    /// uncompiled draft, so `ControlStreamParser::feed` refuses every frame
-    /// and `ProxyHook::on_control_message` is never offered one.
+    /// Every row that asserts a **control** verdict sweeps it too, for the
+    /// same reason one decoder along: `AnyControlMessage::decode` has no arm
+    /// for an uncompiled draft, so `ControlStreamParser::feed` refuses every
+    /// frame and `ProxyHook::on_control_message` is never offered one.
+    /// `classify` publishes that as `Support::Unreachable { refusal:
+    /// ControlFrameNotDecodable }`, so a control cell left on [`ALL_DRAFTS`]
+    /// measures the build guard on every draft this one skipped — which is
+    /// why the only control cells still on that axis are the two whose
+    /// assertions hold whichever refusal comes back.
     ///
     /// Under the default (all-drafts) build this is all fourteen and every
     /// object test below runs on all of them. Under `--no-default-features`
@@ -2004,10 +2015,14 @@ mod tests {
         let mut applied_cells = 0usize;
         for draft in ALL_DRAFTS {
             let m = meta(draft);
-            // The control, stream-end and datagram cells answer for every
-            // draft in the vocabulary; the object cell only for one this
-            // build compiled (`COMPILED_DRAFTS`), because on the rest the
-            // hook is never invoked there at all.
+            // The stream-end and datagram cells answer for every draft in
+            // the vocabulary; the object cell only for one this build
+            // compiled (`COMPILED_DRAFTS`), because on the rest the hook is
+            // never invoked there at all. The control cell stays on every
+            // draft even though it is decoder-gated too: on an uncompiled
+            // one it comes back refused as `ControlFrameNotDecodable`, and
+            // this test asserts only that there is one decision event and
+            // that the unit goes out unchanged — true of any refusal.
             let object_site_is_reachable = COMPILED_DRAFTS.contains(&draft);
             let actions = || {
                 vec![
@@ -2361,17 +2376,16 @@ mod tests {
         }
     }
 
-    /// The composition ruling that the `Action` rustdoc used to state
-    /// backwards, and the measurement behind it.
+    /// The composition ruling for `Delay { then: Drop(_) }`, and the
+    /// measurement behind it.
     ///
-    /// `Drop` is one of the four legal inner actions, and so says the
-    /// sentence directly above the one that used to call
-    /// `Delay { then: Drop(_) }` "unobservable" and name it as refused. It
-    /// is admitted, and it is not unobservable: the drop takes an ordering
-    /// slot for the whole of its delay, so the undelayed `Pass` pushed
-    /// behind it is clamped to the drop's release instead of going out
-    /// inline. Deleting the unit and stalling the stream behind it is one
-    /// impairment with two effects, both on the wire.
+    /// `Drop` is one of the four legal inner actions, and the `Action`
+    /// rustdoc says so. It is admitted, and it is not unobservable: the
+    /// drop takes an ordering slot for the whole of its delay, so the
+    /// undelayed `Pass` pushed behind it is clamped to the drop's release
+    /// instead of going out inline. Deleting the unit and stalling the
+    /// stream behind it is one impairment with two effects, both on the
+    /// wire.
     ///
     /// *Ablation, both ways:*
     /// * refuse `Drop` in `check_composition` — the first assertion fails
@@ -2821,11 +2835,10 @@ mod tests {
     /// A deferral is counted where it is decided, and a forwarded unit is
     /// not counted at all.
     ///
-    /// The figure `Action::Delay` did not used to have. The one that was
-    /// meant to answer for a deferral sat on the shaping statistics, where
-    /// every figure is gated on a configured profile — so on the sessions a
-    /// hook alone impairs, which need no profile whatever, it could only
-    /// ever have read zero.
+    /// The figure sits on the instrument counters rather than on the
+    /// shaping statistics, where every figure is gated on a configured
+    /// profile — so a deferral counted there would read zero on the
+    /// sessions a hook alone impairs, which need no profile whatever.
     ///
     /// *Ablation, run:* delete the `ActionKind::Delay` arm from
     /// `Reporter::applied`.

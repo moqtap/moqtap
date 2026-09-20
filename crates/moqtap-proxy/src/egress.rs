@@ -1172,8 +1172,8 @@ impl PendingQueue {
     /// per `select!` iteration from a hoisted local, so a debit here would
     /// be charged per read-wake rather than per byte written.
     ///
-    /// **The FIN drain *is* on `pop_next_due`'s path**, and this sentence
-    /// used to deny it. [`drain_honouring_release_times`] —
+    /// **The FIN drain *is* on `pop_next_due`'s path.**
+    /// [`drain_honouring_release_times`] —
     /// the read arm's `None` branch — loops `pop_next_due`, debits the
     /// bucket, and applies the clamp and the expiry, which is why it takes
     /// an `on_shape` callback and reports them. The control pipes really

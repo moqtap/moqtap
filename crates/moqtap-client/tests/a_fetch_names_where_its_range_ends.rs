@@ -10,38 +10,42 @@
 //! They do not word the end field the same way, and the difference is worth
 //! having straight before reading the gates. Drafts 12 and 13 continue: "End
 //! Location MUST specify the same or a larger Location than Start Location."
-//! Draft-14 drops that sentence and defines the field instead, in Section
-//! 9.16.1: "End Location: The end Location, plus 1. A Location.Object value of
-//! 0 means the entire group is requested." So the two pairs disagree about
-//! what the number in the field is, and agree that the caller is the one who
-//! knows it.
+//! Draft-14 keeps that sentence and narrows it to the fetch types it can be
+//! about — "... for Standalone and Absolute Joining Fetches" — and words the
+//! field itself in its own terms, in Section 9.16.1: "End Location: The end
+//! Location, plus 1. A Location.Object value of 0 means the entire group is
+//! requested", where 12 and 13 write "plus 1 Object ID" and "An Object ID
+//! value of 0". The wording moved and the number in the field did not, and on
+//! all three the caller is the one who knows it.
 //!
 //! The end is the caller's for the same reason the start is. A fetch is a
 //! request for a range, and one that cannot say where it stops is not a
 //! smaller request but a different one.
 //!
-//! # What was here before
+//! # Why the range is these three
 //!
-//! Draft-14's `fetch` took a namespace, a name and the start, and sent
-//! `end_group: 0, end_object: 0` for every fetch it built. Every standalone
-//! FETCH this crate could produce on that draft therefore named group 0 as the
-//! end of its range. It also filled in the subscriber priority and the group
-//! order, which are fields of draft-14's FETCH and of no later draft's, so
-//! drafts 12 and 13 took them from the caller and draft-14 did not.
+//! They are the drafts whose per-draft `Endpoint::fetch` takes the whole
+//! request as arguments: the range, the Subscriber Priority and Group Order
+//! FETCH draws as fields of its own, and a parameter list beside them. Drafts
+//! 07 through 11 draw those two fields as well but take no parameter list, and
+//! draft-15 deletes both fields and moves them into the parameters, so its
+//! `fetch` takes neither. The gates below read the priority and the order off
+//! the wire beside the range.
 //!
-//! The draft-neutral `Connection::fetch` had taken an end of the range all
-//! along and passed it to every draft from 15 onward. Draft-14's arm dropped
-//! it on the floor, because draft-14's own `fetch` had nowhere to put it.
+//! The draft-neutral `AnyConnection::fetch` reaches every draft; the range it
+//! writes through `FetchRange` is gated in
+//! `a_fetch_range_means_one_thing_on_every_draft.rs`, on drafts 14 through 20.
 //!
 //! # What this file does not cover
 //!
-//! The `parameters` field, which all three drafts still fill in as empty. That
-//! is the same shape of gap, left to a change of its own because it reaches
-//! every draft in the family rather than draft-14 alone.
+//! The `parameters` field, which the gates below pass empty because the range
+//! is what they are about. It is the caller's on all three drafts and is gated
+//! in `a_fetch_carries_the_parameters_it_was_given_on_the_earlier_drafts.rs`,
+//! over this same range, with drafts 15 through 20 in the file beside it.
 //!
 //! # Ablations, measured
 //!
-//! Four cuts were made, one per field the caller now names, run
+//! Four cuts were made, one per field the caller names, run
 //! against the two crates a change to `moqtap-client` can reach, and
 //! reverted. Drafts 12 and 13 build a joining fetch beside the
 //! standalone one and draft-14 does not, so the two cuts that fall on
@@ -130,14 +134,16 @@ macro_rules! fetch_range_gates {
 
             /// The end of the range the caller asked for reaches the peer.
             ///
-            /// This is the gate the fix exists for: the end used to be group
-            /// 0, object 0 on draft-14 whatever the caller wanted, so every
-            /// fetch it built asked for a range that stopped before it started.
+            /// This is the gate the range's end rests on: Section 8.16 on
+            /// drafts 12 and 13, and Section 9.16.1 on draft-14, make both ends
+            /// the caller's, and against the group 3, object 4 start this gate
+            /// asks for, an end of group 0, object 0 names a range that stops
+            /// before it starts.
             ///
             /// # What it catches
             ///
-            /// Sending group 0, object 0 as the end of every range, which is what
-            /// draft-14's `fetch` did for every fetch it built:
+            /// Sending group 0, object 0 as the end of every range, whatever
+            /// the caller asked for:
             ///
             /// ```text
             /// the fetch encodes: InvalidRange(3, 4, 0, 0)
@@ -181,7 +187,7 @@ macro_rules! fetch_range_gates {
                 assert_eq!(
                     (end_group.into_inner(), end_object.into_inner()),
                     (END_GROUP, END_OBJECT),
-                    "Section {} makes the end the caller's too, and it used to be group 0",
+                    "Section {} makes the end the caller's too, not group 0",
                     $sec
                 );
             }
@@ -189,13 +195,13 @@ macro_rules! fetch_range_gates {
             /// The priority and the delivery order reach the peer.
             ///
             /// Both are fields of the FETCH on these three drafts and of no
-            /// later one, which is why draft-14 filling them in went unnoticed
-            /// while drafts 12 and 13 took them.
+            /// later one, which is why the call takes them as arguments here
+            /// and why the gate for them lives in this range alone.
             ///
             /// # What it catches
             ///
-            /// Sending group 0, object 0 as the end of every range, which is what
-            /// draft-14's `fetch` did for every fetch it built:
+            /// Sending group 0, object 0 as the end of every range, whatever
+            /// the caller asked for:
             ///
             /// ```text
             /// the fetch encodes: InvalidRange(3, 4, 0, 0)
@@ -241,19 +247,19 @@ macro_rules! fetch_range_gates {
 
             /// A zero the caller chose reaches the peer as a zero.
             ///
-            /// The value draft-14's `fetch` used to send for every request is
-            /// a meaningful one when the caller means it: Section 9.16.1 there
-            /// says "A Location.Object value of 0 means the entire group is
-            /// requested." Drafts 12 and 13 state no such reading, so what
-            /// this gate holds on all three is narrower and is the part that
-            /// matters once the crate stopped filling the field in:
-            /// a default value is still reachable, and reaching it is now the
-            /// caller saying so rather than the crate deciding.
+            /// An end object of 0 is a meaningful value when the caller means
+            /// it, and all three drafts read it the same way: drafts 12 and 13
+            /// Section 8.16 say "An Object ID value of 0 means the entire group
+            /// is requested", and draft-14 Section 9.16.1 says "A
+            /// Location.Object value of 0 means the entire group is requested."
+            /// So what this gate holds is that a default value is still
+            /// reachable, and reaching it is the caller saying so rather than
+            /// the crate deciding.
             ///
             /// # What it catches
             ///
-            /// Sending group 0, object 0 as the end of every range, which is what
-            /// draft-14's `fetch` did for every fetch it built:
+            /// Sending group 0, object 0 as the end of every range, whatever
+            /// the caller asked for:
             ///
             /// ```text
             /// assertion `left == right` failed: the group after the one asked for

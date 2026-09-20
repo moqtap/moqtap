@@ -91,7 +91,7 @@ fn filter_parameter(value: &[u8]) -> KeyValuePair {
 /// ```text
 /// ---- draft16_answers_the_malformation_with_protocol_violation stdout ----
 ///
-/// thread 'draft16_answers_the_malformation_with_protocol_violation' (96584) panicked at crates\moqtap-client\tests\draft16_17_filter_length_closes_the_session.rs:136:17:
+/// thread 'draft16_answers_the_malformation_with_protocol_violation' (96584) panicked at crates\moqtap-client\tests\draft16_17_filter_length_closes_the_session.rs:
 /// assertion `left == right` failed: Section 9.2.2.5 answers this parameter's own malformation with PROTOCOL_VIOLATION; the close carried 6, and KEY_VALUE_FORMATTING_ERROR (6) here would mean the general rule was applied where the specific one governs
 ///   left: 6
 ///  right: 3
@@ -195,7 +195,7 @@ async fn draft16_answers_the_malformation_with_protocol_violation() {
 /// ```text
 /// ---- draft17_answers_the_malformation_with_a_key_value_formatting_error stdout ----
 ///
-/// thread 'draft17_answers_the_malformation_with_a_key_value_formatting_error' (105332) panicked at crates\moqtap-client\tests\draft16_17_filter_length_closes_the_session.rs:243:17:
+/// thread 'draft17_answers_the_malformation_with_a_key_value_formatting_error' (105332) panicked at crates\moqtap-client\tests\draft16_17_filter_length_closes_the_session.rs:
 /// assertion `left == right` failed: this draft states no sentence of its own about the filter's length, so the general key-value rule answers it; the close carried 3, and PROTOCOL_VIOLATION (3) here would mean draft-16's deleted sentence was carried forward
 ///   left: 3
 ///  right: 6

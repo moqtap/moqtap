@@ -1,11 +1,12 @@
 //! A Track Namespace this codec writes must be one this codec will read.
 //!
 //! Section 2.4.1 "Track Naming" bounds the field count, and every reader in
-//! this crate applies it. The writers did not: eight drafts encoded a namespace
-//! without looking at it at all, so a namespace of 33 fields - or of none -
-//! went out on the wire and the codec's own decoder then refused it. A
-//! conforming peer closes the session with a Protocol Violation, and the
-//! sender's only symptom is the close.
+//! this crate applies it; these gates require every writer to apply it too. A
+//! writer that encodes a namespace without looking at it puts a namespace of 33
+//! fields on the wire on any draft - and on drafts 07 through 16, where the
+//! bound is 1 to 32, a namespace of none as well - which the codec's own
+//! decoder then refuses. A conforming peer closes the session with a Protocol
+//! Violation, and the sender's only symptom is the close.
 //!
 //! The bound is not the same on every draft, which is why this is driven on all
 //! fourteen rather than on one. Drafts 07 through 16 define a Track Namespace
@@ -13,8 +14,8 @@
 //! states only the upper half as a violation, so an empty namespace is legal
 //! there and refusing it would be the same defect pointing the other way.
 //!
-//! Each gate drives `ControlMessage::encode`, not the check underneath it: the
-//! defect was never that the rule was wrong, it was that nothing called it.
+//! Each gate drives `ControlMessage::encode`, not the check underneath it: what
+//! matters is not whether the rule is right but whether anything calls it.
 
 #![allow(clippy::items_after_test_module)]
 

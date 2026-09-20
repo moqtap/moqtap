@@ -196,8 +196,8 @@ fn fetch_cannot_fetch_error_from_receiving() {
 ///
 /// # Ablation, run
 ///
-/// Deleting the `FetchState::Pending` arm of `on_stream_fin`, which is
-/// the graph this file used to pin as narrower than the draft:
+/// Deleting the `FetchState::Pending` arm of `on_stream_fin`, which narrows
+/// the graph past what the draft allows:
 ///
 /// ```text
 /// on_stream_fin from Pending should succeed: InvalidTransition {

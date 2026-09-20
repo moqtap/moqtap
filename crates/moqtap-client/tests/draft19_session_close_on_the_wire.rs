@@ -4,12 +4,12 @@
 //!
 //! # Why a loopback test and not a unit test
 //!
-//! The endpoint already had all the parts. `EndpointError::session_error_code`
+//! The endpoint holds all the parts on its own. `EndpointError::session_error_code`
 //! returns `Some(ProtocolViolation)` for exactly the errors the draft answers
 //! with a close, and the endpoint moves its own session state to Closed as it
-//! raises one. Every unit test that asserted "this is fatal" was satisfied by
-//! those two facts, and every one of them passed while the connection layer
-//! dropped the error on the floor and left the QUIC connection open.
+//! raises one. A unit test that asserts "this is fatal" is satisfied by those
+//! two facts alone, and stays green against a connection layer that drops the
+//! error on the floor and leaves the QUIC connection open.
 //!
 //! That gap is invisible from inside the process. The local endpoint refuses to
 //! start new requests either way; what differs is what the *peer* sees, and the
@@ -21,12 +21,24 @@
 //!
 //! # The violation used
 //!
-//! NAMESPACE on the control stream. Draft-19 Table 5 gives NAMESPACE (0x8) the
-//! Stream value "Request" — it belongs on the SUBSCRIBE_NAMESPACE request
-//! stream whose namespace it reports — so one arriving on the control stream
-//! names no request. Any of the four errors `session_error_code` answers `Some`
-//! to would do; this one is reachable with a single message and no prior
+//! REQUEST_UPDATE on the control stream. Draft-19 Section 10.9 states the rule
+//! as two permitted cases and closes over everything else: "The sender of a
+//! request (SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE,
+//! SUBSCRIBE_TRACKS) can later send a REQUEST_UPDATE on the same bidi stream as
+//! the request to modify it. A subscriber can also send REQUEST_UPDATE to
+//! modify parameters of a subscription established with PUBLISH." and "An
+//! endpoint that receives a REQUEST_UPDATE other than in the two cases above
+//! MUST close the session with a PROTOCOL_VIOLATION." One on the control stream
+//! is in neither case, and it is reachable with a single message and no prior
 //! request state.
+//!
+//! A misplaced NAMESPACE would not do. Table 5's Stream column says where each
+//! message is sent and attaches no consequence to a peer that sends one
+//! elsewhere, so closing over that would be this crate's model of the protocol
+//! rather than draft-19's. What this test is *for* — that a close the draft does
+//! require reaches the wire and is not merely recorded in this endpoint's own
+//! state — needs a rule the draft states in a sentence that can be quoted, and
+//! Section 10.9 is one.
 
 mod common;
 
@@ -34,8 +46,7 @@ use std::time::Duration;
 
 use moqtap_client::draft19::connection::{ClientConfig, Connection, TransportType};
 use moqtap_codec::dispatch::AnyControlMessage;
-use moqtap_codec::draft19::message::{ControlMessage, Namespace, Setup};
-use moqtap_codec::types::TrackNamespace;
+use moqtap_codec::draft19::message::{ControlMessage, RequestUpdate, Setup};
 use moqtap_codec::version::DraftVersion;
 
 /// Session termination code PROTOCOL_VIOLATION, draft-19 Section 15.11.1.
@@ -49,12 +60,12 @@ fn encode(msg: ControlMessage) -> Vec<u8> {
     buf
 }
 
-/// A NAMESPACE arriving on the control stream closes the QUIC connection with
-/// PROTOCOL_VIOLATION.
+/// A REQUEST_UPDATE arriving on the control stream closes the QUIC connection
+/// with PROTOCOL_VIOLATION.
 ///
 /// # What it catches
 ///
-/// Reverting `recv_and_dispatch` to propagate the endpoint's error with `?`
+/// Propagating the endpoint's error out of `recv_and_dispatch` with `?`
 /// instead of routing it through `close_if_session_fatal` fails this test with:
 ///
 /// ```text
@@ -88,18 +99,20 @@ async fn a_control_stream_violation_closes_the_quic_connection() {
         assert!(!seen.is_empty(), "the client sent no SETUP");
 
         // Answer with our own SETUP, then commit the violation on the same
-        // stream: a NAMESPACE, which Table 5 places on a request stream.
+        // stream: a REQUEST_UPDATE, which Section 10.9 permits only on the
+        // request's own bidi stream and closes the session over anywhere else.
         let mut our_control = conn.open_uni().await.expect("open_uni");
         our_control
             .write_all(&encode(ControlMessage::Setup(Setup { options: Vec::new() })))
             .await
             .expect("write SETUP");
         our_control
-            .write_all(&encode(ControlMessage::Namespace(Namespace {
-                namespace_suffix: TrackNamespace(vec![b"live".to_vec()]),
+            .write_all(&encode(ControlMessage::RequestUpdate(RequestUpdate {
+                request_id: moqtap_codec::varint::VarInt::from_usize(0),
+                parameters: Vec::new(),
             })))
             .await
-            .expect("write NAMESPACE");
+            .expect("write REQUEST_UPDATE");
 
         // The close is the observable. Waiting on it is the whole test.
         let reason = tokio::time::timeout(PATIENCE, conn.closed())
@@ -120,7 +133,7 @@ async fn a_control_stream_violation_closes_the_quic_connection() {
                 // can tell which rule was broken.
                 let text = String::from_utf8_lossy(&frame.reason).to_string();
                 assert!(
-                    text.contains("NAMESPACE"),
+                    text.contains("REQUEST_UPDATE"),
                     "the close reason should name the offending message; got {text:?}"
                 );
             }
@@ -137,15 +150,15 @@ async fn a_control_stream_violation_closes_the_quic_connection() {
     };
     let mut conn = Connection::connect(&addr.to_string(), config).await.expect("client connect");
 
-    // Reading the NAMESPACE is what raises the violation. The error is
+    // Reading the REQUEST_UPDATE is what raises the violation. The error is
     // expected; the close it triggers is what the peer above asserts on.
     let err = conn
         .recv_and_dispatch()
         .await
-        .expect_err("a NAMESPACE on the control stream must be refused");
+        .expect_err("a REQUEST_UPDATE on the control stream must be refused");
     let text = err.to_string();
     assert!(
-        text.contains("NAMESPACE"),
+        text.contains("REQUEST_UPDATE"),
         "the error should name the offending message; got {text:?}"
     );
 
@@ -162,25 +175,25 @@ async fn a_control_stream_violation_closes_the_quic_connection() {
 /// The test above proves the path from an `EndpointError` the draft calls fatal
 /// to a CONNECTION_CLOSE. This one proves the other half: the bounds the decoder
 /// enforces are stated in the draft with the same "MUST close the session"
-/// consequence, and until now every one of them stopped at refusing the frame
-/// while the peer went on sending.
+/// consequence, and a decoder that stops at refusing the frame leaves the peer
+/// free to go on sending.
 ///
 /// The violation used is a GOAWAY declaring a New Session URI of 9,000 bytes.
 /// Draft-19 Section 10.4: "The maximum length of the New Session URI is 8,192
 /// bytes. If an endpoint receives a length exceeding the maximum, it MUST close
 /// the session with a PROTOCOL_VIOLATION." The frame is built by hand because
-/// the encoder refuses to write one — which is the point: the two directions now
+/// the encoder refuses to write one — which is the point: the two directions
 /// agree, and only a hand-made frame can reach the decode-side check.
 ///
 /// # What it catches
 ///
-/// Reverting `recv_control` to `recv.read_control(capture_raw).await?` — the
-/// shape it had before `close_for_codec` existed — fails this test with:
+/// Replacing `recv_control`'s body with `recv.read_control(capture_raw).await?`,
+/// so the refusal never reaches `close_for_codec`, fails this test with:
 ///
 /// ```text
 /// ---- a_decoder_bound_violation_closes_the_quic_connection stdout ----
 ///
-/// thread 'a_decoder_bound_violation_closes_the_quic_connection' (57204) panicked at crates\moqtap-client\tests\draft19_session_close_on_the_wire.rs:234:14:
+/// thread 'a_decoder_bound_violation_closes_the_quic_connection' (57204) panicked at crates\moqtap-client\tests\draft19_session_close_on_the_wire.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 ///

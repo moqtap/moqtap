@@ -104,7 +104,7 @@ fn subscribe_ok_with_group_order_zero() -> Vec<u8> {
 /// ```text
 /// ---- a_group_order_outside_its_range_closes_the_quic_connection stdout ----
 ///
-/// thread 'a_group_order_outside_its_range_closes_the_quic_connection' (74772) panicked at crates\moqtap-client\tests\draft16_parameter_value_range_closes_the_session.rs:158:35:
+/// thread 'a_group_order_outside_its_range_closes_the_quic_connection' (74772) panicked at crates\moqtap-client\tests\draft16_parameter_value_range_closes_the_session.rs:
 /// a Group Order outside its range must be refused: SubscribeOk(SubscribeOk { request_id: VarInt(0), track_alias: VarInt(4), parameters: [KeyValuePair { key: VarInt(34), value: Varint(VarInt(0)) }], track_extensions: [] })
 /// ```
 ///
@@ -114,7 +114,7 @@ fn subscribe_ok_with_group_order_zero() -> Vec<u8> {
 /// the decoder refusing the frame and the session open:
 ///
 /// ```text
-/// thread 'a_group_order_outside_its_range_closes_the_quic_connection' (89880) panicked at crates\moqtap-client\tests\draft16_parameter_value_range_closes_the_session.rs:133:14:
+/// thread 'a_group_order_outside_its_range_closes_the_quic_connection' (89880) panicked at crates\moqtap-client\tests\draft16_parameter_value_range_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 #[tokio::test]

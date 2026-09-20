@@ -267,36 +267,36 @@ pub fn vector_files() -> Vec<String> {
 /// Every committed **message** vector this codec refuses on purpose: `(draft
 /// directory, file, vector id)`.
 ///
-/// The list is empty, and `known_wrong_vectors.rs` holds all three of drafts
-/// 17, 18 and 19 to that: every message vector claiming a successful decode
-/// must decode, on every one of them.
+/// The list is empty, and `known_wrong_vectors.rs` holds drafts 17 through 20
+/// to that: every message vector claiming a successful decode must decode, on
+/// every one of them.
 ///
 /// # What the empty list means
 ///
-/// Fourteen rows have stood here. Ten were a parameter written with an outer
-/// length its own definition does not give it, and they went when the bytes
-/// were corrected — a Location is "Two consecutive varints (Group, Object)"
-/// whether or not a vector says otherwise.
+/// Neither shape that could populate it survives as a row.
 ///
-/// The last four could not be corrected that way, because nothing was wrong
-/// with their bytes. Each carried a Message Parameter in a message its own
-/// definition does not name — EXPIRES in a FETCH_OK on all three drafts, and
-/// LARGEST_OBJECT in a draft-17 PUBLISH_OK, which is a message type of its own
-/// there rather than a REQUEST_OK. Draft-17 Section 9.3.1 and drafts 18 and 19
-/// Section 10.2.1: "Each Message Parameter definition indicates the message
-/// types in which it can appear. If it appears in some other type of message,
-/// the receiving endpoint MUST close the connection with a
-/// PROTOCOL_VIOLATION." Every draft before them ends that sentence "it MUST be
-/// ignored", so the rule and its four vectors belong to the three newest
-/// drafts and to no older one.
+/// One is a parameter written with an outer length its own definition does not
+/// give it, which is simply wrong bytes — draft-17 Section 9.3 defines a
+/// Location as "Two consecutive varints (Group, Object)", whether or not a
+/// vector says otherwise — and the answer is to correct the bytes rather than
+/// to record the vector here.
+///
+/// The other is a vector whose bytes are right and whose message is wrong: a
+/// Message Parameter in a message its own definition does not name — EXPIRES in
+/// a FETCH_OK, or LARGEST_OBJECT in a draft-17 PUBLISH_OK, which is a message
+/// type of its own there rather than a REQUEST_OK. Draft-17 Section 9.3.1 and
+/// drafts 18 through 20 Section 10.2.1: "Each Message Parameter definition
+/// indicates the message types in which it can appear. If it appears in some
+/// other type of message, the receiving endpoint MUST close the connection with
+/// a PROTOCOL_VIOLATION." Drafts 07 through 16 end that sentence "it MUST be
+/// ignored", so the rule belongs to draft-17 and later and to no older draft.
 ///
 /// A vector like that has two honest futures: drop the parameter and keep a
-/// positive vector, or keep the parameter and say what it is. The second was
-/// unavailable while the corpus had no error category for parameter scope, and
-/// is what the four took once it had one. They are negative vectors now,
-/// asserting `parameter_out_of_scope`, and they run in the ordinary suites
-/// rather than being stepped over — which is the difference between a rule
-/// being tested and a rule being tolerated.
+/// positive vector, or keep the parameter and say what it is. The second needs
+/// an error category for parameter scope in the corpus; with one, such a vector
+/// is a negative vector asserting `parameter_out_of_scope` and runs in the
+/// ordinary suites rather than being stepped over — which is the difference
+/// between a rule being tested and a rule being tolerated.
 ///
 /// A row comes back only to record a disagreement this repository has decided
 /// to keep, and never to quiet one.
@@ -308,21 +308,21 @@ pub const KNOWN_WRONG_MESSAGE_VECTORS: &[(&str, &str, &str)] = &[];
 /// permits — and equally empty for a vector carrying no status at all, which is
 /// why [`statuses_in`] exists and names the JSON keys this reads.
 ///
-/// Six draft-11 and draft-12 data-stream files used to carry status 0x5, seeded
-/// from the draft-08 numbering where 0x4 is End of Track and Group and 0x5 is
-/// End of Track. Draft-11 Section 9.1.1.1 and draft-12 Section 9.2.1.1 assign
-/// 0x0, 0x1, 0x3 and 0x4 only, name 0x4 "End of Track", and say every other
-/// value SHOULD be treated as a protocol error and terminate the session. All
-/// six carry 0x4 now, and no vector on any draft carries a status its own draft
-/// leaves unassigned.
+/// Draft-11 Section 9.1.1.1 and draft-12 Section 9.2.1.1 assign 0x0, 0x1, 0x3
+/// and 0x4 only, name 0x4 "End of Track", and say every other value SHOULD be
+/// treated as a protocol error and terminate the session. A data-stream vector
+/// seeded from the draft-08 numbering, where 0x4 is End of Track and Group and
+/// 0x5 is End of Track, carries 0x5 on those drafts and is exactly what this
+/// reports. No vector on any draft carries a status its own draft leaves
+/// unassigned.
 ///
 /// So this reports rather than excuses. `known_wrong_vectors.rs` sweeps every
 /// draft's data-stream corpus through it and asserts the row set is empty, with
 /// a list of documented exceptions that is itself empty — a disagreement has to
 /// be written down with a reason before it can be tolerated, and writing one
-/// down is what makes it visible. The runners themselves no longer skip
-/// anything: a vector carrying an unassigned status now fails its own suite as
-/// well, which is the outcome a skip was quietly preventing.
+/// down is what makes it visible. The runners themselves skip nothing: a vector
+/// carrying an unassigned status fails its own suite as well, which is what a
+/// skip would quietly prevent.
 ///
 /// `assigned` should be the draft module's own `ObjectStatus::ALL` mapped
 /// through `as_u64`, so this never becomes a second, drifting copy of the

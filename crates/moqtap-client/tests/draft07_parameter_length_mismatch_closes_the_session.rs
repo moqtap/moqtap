@@ -149,7 +149,7 @@ fn announce_with_a_mismatched_parameter() -> Vec<u8> {
 /// ```text
 /// ---- a_mismatched_parameter_length_closes_the_quic_connection stdout ----
 ///
-/// thread 'a_mismatched_parameter_length_closes_the_quic_connection' (58952) panicked at crates\moqtap-client\tests\draft07_parameter_length_mismatch_closes_the_session.rs:192:14:
+/// thread 'a_mismatched_parameter_length_closes_the_quic_connection' (58952) panicked at crates\moqtap-client\tests\draft07_parameter_length_mismatch_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 ///
@@ -160,7 +160,7 @@ fn announce_with_a_mismatched_parameter() -> Vec<u8> {
 /// ```text
 /// ---- a_mismatched_parameter_length_closes_the_quic_connection stdout ----
 ///
-/// thread 'a_mismatched_parameter_length_closes_the_quic_connection' (49976) panicked at crates\moqtap-client\tests\draft07_parameter_length_mismatch_closes_the_session.rs:197:17:
+/// thread 'a_mismatched_parameter_length_closes_the_quic_connection' (49976) panicked at crates\moqtap-client\tests\draft07_parameter_length_mismatch_closes_the_session.rs:
 /// assertion `left == right` failed: Section 6.1 names the code for this rule; the close carried Protocol Violation (0x3) instead
 ///   left: 3
 ///  right: 5

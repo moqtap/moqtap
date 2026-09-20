@@ -10,19 +10,19 @@
 //!
 //! # Two defects meet on this stream
 //!
-//! The codec reported the violation as `CodecError::InvalidField`, which a dozen
-//! unrelated malformations share. A caller could see that something was wrong
-//! and could not tell *what*, so the rule could not be routed to a close without
-//! closing sessions the draft says nothing about. It has its own variant now.
+//! The violation needs a `CodecError` variant of its own. Reported as
+//! `InvalidField`, which a dozen unrelated malformations share, a caller can see
+//! that something is wrong and cannot tell *what*, so the rule cannot be routed
+//! to a close without closing sessions the draft says nothing about.
 //!
-//! And the client could not reach the rule on a subgroup stream at all.
-//! Whether an object carries an extension block is a property of the stream's
-//! Type; `read_subgroup_object` did not remember the Type and always decoded as
-//! though there were none. On a stream whose Type announces extensions that is
-//! not a conservative default — the Extension Headers Length is read as the
-//! Object Payload Length, and every object on the stream comes back wrong rather
-//! than being refused. Fixing the variant alone would have left this rule
-//! unreachable here.
+//! And the client has to reach the rule on a subgroup stream at all. Whether an
+//! object carries an extension block is a property of the stream's Type, so
+//! `read_subgroup_object` hands that Type to `decode_with_extensions`. A reader
+//! that always decoded as though there were none would not be choosing a
+//! conservative default: on a stream whose Type announces extensions the
+//! Extension Headers Length is read as the Object Payload Length, and every
+//! object on the stream comes back wrong rather than being refused. The variant
+//! on its own would leave this rule unreachable here.
 //!
 //! Neither defect is visible from the other end. A codec test decodes the object
 //! directly and never touches the framed reader; a framing test reads a stream
@@ -132,16 +132,16 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 ///
 /// # What it catches, observed by making the change and running it
 ///
-/// Reverting `read_subgroup_object` to `ObjectHeader::decode`, which is
-/// `decode_with_extensions(false, ..)` — the shape it had before it remembered
-/// the stream Type. The four extension bytes are then read as the payload
+/// Decoding with `ObjectHeader::decode`, which is
+/// `decode_with_extensions(false, ..)`, so `read_subgroup_object` ignores the
+/// stream Type. The four extension bytes are then read as the payload
 /// length and what follows, and the object that comes back is not the one on the
 /// wire:
 ///
 /// ```text
 /// ---- a_non_existent_object_with_extensions_is_refused_and_closes stdout ----
 ///
-/// thread 'a_non_existent_object_with_extensions_is_refused_and_closes' (43812) panicked at crates\moqtap-client\tests\draft11_extensions_on_a_non_existent_object.rs:211:10:
+/// thread 'a_non_existent_object_with_extensions_is_refused_and_closes' (43812) panicked at crates\moqtap-client\tests\draft11_extensions_on_a_non_existent_object.rs:
 /// a non-existent object carrying extension headers must be refused: SubgroupObject { header: ObjectHeader { object_id: VarInt(0), extension_headers_length: VarInt(0), extensions: [], payload_length: VarInt(4), object_status: Normal }, payload: [1, 2, 3, 4] }
 /// ```
 ///
@@ -149,13 +149,13 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// as a payload, on an object reported Normal. Nothing is refused, and nothing
 /// downstream has any way to know.
 ///
-/// And with that fix kept but the codec still reporting the rule as
+/// And with `read_subgroup_object` left alone but the codec reporting the rule as
 /// `CodecError::InvalidField`:
 ///
 /// ```text
 /// ---- a_non_existent_object_with_extensions_is_refused_and_closes stdout ----
 ///
-/// thread 'a_non_existent_object_with_extensions_is_refused_and_closes' (24272) panicked at crates\moqtap-client\tests\draft11_extensions_on_a_non_existent_object.rs:220:18:
+/// thread 'a_non_existent_object_with_extensions_is_refused_and_closes' (24272) panicked at crates\moqtap-client\tests\draft11_extensions_on_a_non_existent_object.rs:
 /// expected an extensions-on-a-non-existent-object refusal, got Codec(InvalidField)
 /// ```
 #[tokio::test]

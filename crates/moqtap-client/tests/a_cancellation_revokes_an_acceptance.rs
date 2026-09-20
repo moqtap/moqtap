@@ -32,11 +32,11 @@
 //! are the only ones it can revoke an acceptance of. Its own announcements are
 //! cancelled by the peer, and that arrives the other way.
 //!
-//! That distinction is the reason this file exists at all. Drafts 07 through 13
-//! could not send a cancellation, and drafts 14 through 16 sent one that named
-//! an announcement this endpoint had made - reading the only map there was.
-//! Draft-14's built the message with an empty namespace and a zero code
-//! whatever it was asked for.
+//! That distinction is the reason this file exists at all. The two directions
+//! are two records, and a cancellation read out of this endpoint's own
+//! announcements would name one it made rather than one it responded OK to.
+//! Every field of such a message is well-formed, so nothing about the message
+//! itself says the wrong map was read.
 //!
 //! # Why none of this ends the session
 //!

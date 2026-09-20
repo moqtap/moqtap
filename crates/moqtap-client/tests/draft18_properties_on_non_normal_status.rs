@@ -150,7 +150,7 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// ```text
 /// ---- properties_on_a_non_normal_status_are_refused_and_close stdout ----
 ///
-/// thread 'properties_on_a_non_normal_status_are_refused_and_close' (62108) panicked at crates\moqtap-client\tests\draft18_properties_on_non_normal_status.rs:228:10:
+/// thread 'properties_on_a_non_normal_status_are_refused_and_close' (62108) panicked at crates\moqtap-client\tests\draft18_properties_on_non_normal_status.rs:
 /// properties on End of Group must be refused: SubgroupObject { object_id: VarInt(0), extension_headers: [1, 2, 3, 4], payload_length: VarInt(0), object_status: Some(EndOfGroup), payload: [] }
 /// ```
 #[tokio::test]

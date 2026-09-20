@@ -27,8 +27,9 @@ pub struct ListenerConfig {
     /// keep-alive, congestion control — applied to every client
     /// connection this listener accepts.
     ///
-    /// `None` leaves quinn's defaults in place, which is the behaviour
-    /// callers had before this field existed.
+    /// `None` installs no parameters of its own: the leg then takes
+    /// [`ListenerConfig::transport_profile`] if it names one, and quinn's
+    /// defaults otherwise.
     ///
     /// Setting this **and** [`ListenerConfig::transport_profile`] is
     /// refused by [`Listener::bind`] rather than merged, with
@@ -44,9 +45,11 @@ pub struct ListenerConfig {
     /// before the endpoint exists. A profile the installer refuses is
     /// [`ProxyError::TransportProfile`], and nothing is bound.
     ///
-    /// `None` is the behaviour callers had before this field existed. It is
-    /// the *only* alternative to `transport_config`, never a companion to
-    /// it: a leg naming both is refused at bind time.
+    /// `None` installs no profile: the leg then takes
+    /// [`ListenerConfig::transport_config`] if it names one, and quinn's
+    /// defaults otherwise. It is the *only* alternative to
+    /// `transport_config`, never a companion to it: a leg naming both is
+    /// refused at bind time.
     pub transport_profile: Option<TransportProfile>,
     /// How [`ListenerConfig::transport_profile`] becomes the config this
     /// leg installs.
@@ -91,9 +94,8 @@ pub struct ListenerConfig {
     /// sink to go on and installs it, rather than installing nothing and
     /// leaving the capture attached to a config no connection uses.
     ///
-    /// `None` is the behaviour callers had before this field existed, and
-    /// is how a leg says it does not want a capture. A spec that names no
-    /// writer is not that: it is refused with
+    /// `None` is how a leg says it does not want a capture. A spec that
+    /// names no writer is not that: it is refused with
     /// [`ProxyError::Qlog`], because a spec is how a caller *asks* for a
     /// capture.
     ///

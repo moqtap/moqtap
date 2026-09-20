@@ -57,14 +57,72 @@ pub enum ConnectionError {
     /// Object ID that does not advance on the last one written.
     #[error("data stream state error: {0}")]
     DataStreamState(&'static str),
+    /// A control message this build decoded for draft-12 and then could not
+    /// narrow to draft-12's own message type.
+    ///
+    /// Unreachable, and that is not the same as harmless. `read_control`
+    /// decodes with this connection's own draft, so the `AnyControlMessage` it
+    /// hands back can only carry this draft's variant — but the narrowing arm
+    /// is compiled in every configuration anyway, under
+    /// `#[allow(unreachable_patterns)]` rather than a `cfg` naming the other
+    /// thirteen drafts, because such a list has to be edited in every draft
+    /// module whenever a draft is added, and a copy that omits one leaves the
+    /// match non-exhaustive.
+    ///
+    /// Spelled as `CodecError::UnknownMessageType(0)` it would not stay inert:
+    /// every draft's
+    /// [`codec_session_error_code`](Connection::codec_session_error_code)
+    /// answers that variant `Some(PROTOCOL_VIOLATION)`. So the day the
+    /// narrowing did fail, this build's own defect would reach a caller as *the
+    /// peer sent a control message type this draft does not assign, and the
+    /// session must be closed with a Protocol Violation* — carrying `0x00` as
+    /// the codepoint that proved it. A conformance report reading that
+    /// publishes a named, well-evidenced accusation against a relay for
+    /// something no relay did.
+    ///
+    /// A variant of its own is what stops that.
+    /// [`draft_specific_cause`](Connection::draft_specific_cause) answers it
+    /// [`LocalRefusal`], the facade turns that into [`ErrorCause::Facade`], and
+    /// nothing downstream can read a rule out of a cause that says nothing
+    /// reached the wire. What is pinned is the consequence rather than the
+    /// unreachability: nothing pins the arm's reachability, which is exactly
+    /// why the consequence must not be an accusation.
+    ///
+    /// [`LocalRefusal`]: crate::above_codec_rules::DraftSpecificCause::LocalRefusal
+    /// [`ErrorCause::Facade`]: crate::dispatch::ErrorCause::Facade
+    #[error(
+        "a control message decoded for draft-12 did not narrow to draft-12: a defect in this          build, and evidence about nothing the peer did"
+    )]
+    ControlMessageNarrowing,
 }
 
 impl From<crate::transport::DialError> for ConnectionError {
-    /// Preserves the variants this error had when the dial was inlined here,
-    /// so a caller matching on `InvalidAddress` or `TlsConfig` sees no change.
+    /// Maps a dial failure onto the variants this error already has, so a
+    /// caller matches `InvalidAddress` or `TlsConfig`.
+    ///
+    /// # `LocalSocket` joins `InvalidAddress`, and that is the answer being kept
+    ///
+    /// A socket this machine would not open has a variant of its own on
+    /// [`DialError`](crate::transport::DialError), and it still arrives here.
+    /// Not laziness about the churn — `InvalidAddress` is one of the
+    /// variants the facade reads as
+    /// [`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade), which
+    /// `is_local` answers **true** for, and a failed bind is this side's by
+    /// definition. Routing it to `Transport` would read better in prose and
+    /// would publish this machine's missing IPv6 stack as the relay's doing.
+    ///
+    /// The phase is not lost, only unread on this path. A caller measuring
+    /// which stage of a dial died reads
+    /// [`DialError::phase`](crate::transport::DialError::phase) off the dial
+    /// itself; a caller who arrived at this type named a `host:port` and asked
+    /// for a connection, not for a measurement, and a public variant here for
+    /// a distinction nothing on this path reads is churn with no reader, which
+    /// is why this impl stays flat.
     fn from(e: crate::transport::DialError) -> Self {
         match e {
-            crate::transport::DialError::InvalidAddress(s) => ConnectionError::InvalidAddress(s),
+            // Two variants, one arm, deliberately — see above.
+            crate::transport::DialError::InvalidAddress(s)
+            | crate::transport::DialError::LocalSocket(s) => ConnectionError::InvalidAddress(s),
             crate::transport::DialError::TlsConfig(s) => ConnectionError::TlsConfig(s),
             crate::transport::DialError::Transport(e) => ConnectionError::Transport(e),
         }
@@ -136,9 +194,10 @@ pub struct FramedSendStream {
 ///
 /// Two facts, and neither is recoverable from an object on its own: the
 /// Object ID it has to advance past, and whether the stream's type puts an
-/// extension block on each object. The second is the one that used to be
-/// guessed - always "absent" - which wrote a stream a reader could not follow
-/// whenever the header said otherwise.
+/// extension block on each object. The second has to be remembered rather than
+/// guessed: a header type whose Extensions Present column reads Yes puts an
+/// Extension Headers Length on every object of the subgroup, so assuming
+/// "absent" would write a stream a reader could not follow.
 #[derive(Debug, Clone, Copy)]
 struct SubgroupStreamState {
     /// The last Object ID written, or `None` before the first object.
@@ -311,8 +370,8 @@ pub struct FramedRecvStream {
     /// One group for the whole stream: a subgroup header names it once and no
     /// object header repeats it. `None` on a stream that was never given one —
     /// a stream for an alias no live binding names, and every stream built
-    /// outside [`Connection::accept_subgroup_stream`] — and such a stream reads
-    /// exactly as it did before this existed.
+    /// outside [`Connection::accept_subgroup_stream`] — and on such a stream
+    /// the objects are read without being measured against the track at all.
     tracking: Option<(TrackObjects, u64)>,
     /// Whether the subgroup stream this reader is on carries an extension block
     /// on every object.
@@ -454,14 +513,15 @@ impl FramedRecvStream {
                         // draft `AnySubgroupHeader` has a single variant, the arm above is
                         // exhaustive and this one unreachable. Compiled in every configuration with
                         // the lint allowed, rather than gated on a `cfg` naming the other thirteen
-                        // drafts: that list had to be edited in every draft module whenever a draft
-                        // was added, and a copy that omitted one left this match non-exhaustive.
+                        // drafts: such a list has to be edited in every draft module whenever a
+                        // draft is added, and a copy that omits one leaves this match
+                        // non-exhaustive.
                         #[allow(unreachable_patterns)]
                         _ => {}
                     }
                     return Ok(header);
                 }
-                Err(CodecError::UnexpectedEnd) => {
+                Err(e) if e.is_incomplete() => {
                     if !self.fill().await? {
                         return Err(ConnectionError::UnexpectedEnd);
                     }
@@ -482,7 +542,7 @@ impl FramedRecvStream {
                     self.buf.advance(consumed);
                     return Ok(header);
                 }
-                Err(CodecError::UnexpectedEnd) => {
+                Err(e) if e.is_incomplete() => {
                     if !self.fill().await? {
                         return Err(ConnectionError::UnexpectedEnd);
                     }
@@ -524,7 +584,7 @@ impl FramedRecvStream {
                     self.note_subgroup_object(&header)?;
                     return Ok(SubgroupObject { header, payload });
                 }
-                Err(CodecError::UnexpectedEnd) => {
+                Err(e) if e.is_incomplete() => {
                     if !self.fill().await? {
                         return Err(ConnectionError::UnexpectedEnd);
                     }
@@ -553,7 +613,7 @@ impl FramedRecvStream {
                     self.buf.advance(total);
                     return Ok(FetchObject { header, payload });
                 }
-                Err(CodecError::UnexpectedEnd) => {
+                Err(e) if e.is_incomplete() => {
                     if !self.fill().await? {
                         return Err(ConnectionError::UnexpectedEnd);
                     }
@@ -582,6 +642,15 @@ pub struct Connection {
     /// observer attaches via `set_observer` — without this, an observer
     /// attached after `connect` returns would never see the handshake.
     pending_events: Vec<ClientEvent>,
+    /// The server's half of the setup handshake, kept whole.
+    ///
+    /// The endpoint acts on the parameters it recognises and retains none of
+    /// them, and which parameters a server sends — in what order, with what
+    /// values — is the sharpest thing a session says about the implementation
+    /// behind it.
+    server_setup: AnyControlMessage,
+    /// The framed wire bytes of [`Self::server_setup`].
+    server_setup_raw: Option<Vec<u8>>,
 }
 
 impl Connection {
@@ -620,6 +689,26 @@ impl Connection {
         transport: Transport,
         config: ClientConfig,
     ) -> Result<Self, ConnectionError> {
+        Self::adopt_offering(transport, config, None).await
+    }
+
+    /// [`Self::adopt`], offering exactly `versions` in CLIENT_SETUP.
+    ///
+    /// `None` offers what `config` implies, which is what [`Self::adopt`]
+    /// passes. `Some` replaces the list outright, and takes raw varints rather
+    /// than [`DraftVersion`]s because the reason to reach for this is to offer
+    /// a version no draft assigns — which an enum of drafts cannot name.
+    ///
+    /// A server MUST answer with a version the client offered and MUST
+    /// otherwise close the session; from draft-11 the code for that is
+    /// `VERSION_NEGOTIATION_FAILED` (0x15). How a relay spells the refusal is
+    /// a conformance measurement, and offering a version deliberately outside
+    /// the negotiable set is the only way to ask for it.
+    pub async fn adopt_offering(
+        transport: Transport,
+        config: ClientConfig,
+        versions: Option<Vec<VarInt>>,
+    ) -> Result<Self, ConnectionError> {
         // PATH is for native QUIC only, and the transport is known here and
         // nowhere further in. Refusing before dialling means a session that
         // the server would close on sight is never opened.
@@ -637,8 +726,10 @@ impl Connection {
         // Perform setup handshake
         let mut endpoint = Endpoint::new(Role::Client);
         endpoint.connect()?;
-        let setup_msg = endpoint
-            .send_client_setup(config.supported_versions(), config.setup_parameters.clone())?;
+        let setup_msg = endpoint.send_client_setup(
+            versions.unwrap_or_else(|| config.supported_versions()),
+            config.setup_parameters.clone(),
+        )?;
         let any_setup = AnyControlMessage::Draft12(setup_msg);
         let raw_setup = control_send.write_control(&any_setup).await?;
 
@@ -660,8 +751,8 @@ impl Connection {
         });
         pending_events.push(ClientEvent::ControlMessage {
             direction: Direction::Receive,
-            message: server_setup,
-            raw: raw_server_setup,
+            message: server_setup.clone(),
+            raw: raw_server_setup.clone(),
         });
         if let Some(v) = endpoint.negotiated_version() {
             pending_events.push(ClientEvent::SetupComplete { negotiated_version: v.into_inner() });
@@ -674,6 +765,8 @@ impl Connection {
             control_recv: Some(control_recv),
             observer: None,
             pending_events,
+            server_setup,
+            server_setup_raw: raw_server_setup,
         })
     }
 
@@ -687,7 +780,7 @@ impl Connection {
             &crate::transport::QuicDialOptions {
                 skip_cert_verification: config.skip_cert_verification,
                 ca_certs: config.ca_certs.clone(),
-                alpn: config.alpn(),
+                ..crate::transport::QuicDialOptions::new(config.alpn())
             },
         )
         .await?;
@@ -695,31 +788,31 @@ impl Connection {
     }
 
     /// Establish a WebTransport connection.
+    ///
+    /// [`crate::transport::dial_webtransport`] holds the TLS and endpoint
+    /// setup, exactly as `connect_quic` above defers its own. That is not
+    /// only deduplication: both dials hand the same `QuicDialOptions` to the
+    /// same config constructor in `transport::quic`, so the bundled roots and
+    /// `config.ca_certs` are what each of them trusts and one relay gets one
+    /// verdict whichever transport carries it. Settling trust at this call site
+    /// instead — from `wtransport`'s own builder settings, or from a second
+    /// config of this draft's own — puts the decision in two places, and a
+    /// caller's private CA then reaches only the dials whose call site
+    /// installed it.
     #[cfg(feature = "webtransport")]
     async fn connect_webtransport(
         url: &str,
         config: &ClientConfig,
     ) -> Result<Transport, ConnectionError> {
-        use crate::transport::webtransport::WebTransportTransport;
-
-        let wt_config = if config.skip_cert_verification {
-            wtransport::ClientConfig::builder()
-                .with_bind_default()
-                .with_no_cert_validation()
-                .build()
-        } else {
-            wtransport::ClientConfig::builder().with_bind_default().with_native_certs().build()
-        };
-
-        let endpoint = wtransport::Endpoint::client(wt_config)
-            .map_err(|e| ConnectionError::Transport(TransportError::Connect(e.to_string())))?;
-
-        let connection = endpoint
-            .connect(url)
-            .await
-            .map_err(|e| ConnectionError::Transport(TransportError::Connect(e.to_string())))?;
-
-        Ok(Transport::WebTransport(WebTransportTransport::new(connection)))
+        Ok(crate::transport::dial_webtransport(
+            url,
+            &crate::transport::QuicDialOptions {
+                skip_cert_verification: config.skip_cert_verification,
+                ca_certs: config.ca_certs.clone(),
+                ..crate::transport::QuicDialOptions::new(config.alpn())
+            },
+        )
+        .await?)
     }
 
     /// Stub for when the webtransport feature is not enabled.
@@ -795,11 +888,11 @@ impl Connection {
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 12 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
-            // naming the other thirteen drafts: that list had to be edited in every draft module
-            // whenever a draft was added, and a copy that omitted one left this match
+            // naming the other thirteen drafts: such a list has to be edited in every draft
+            // module whenever a draft is added, and a copy that omits one leaves this match
             // non-exhaustive.
             #[allow(unreachable_patterns)]
-            _ => Err(ConnectionError::Codec(CodecError::UnknownMessageType(0))),
+            _ => Err(ConnectionError::ControlMessageNarrowing),
         }
     }
 
@@ -1560,9 +1653,69 @@ impl Connection {
         &mut self.endpoint
     }
 
+    /// The SETUP message the server answered the handshake with.
+    ///
+    /// `SERVER_SETUP` through draft-16, the server's half of the unified
+    /// `SETUP` from draft-17. [`AnyControlMessage::fields`] renders it under
+    /// this draft's own parameter names, in the order they arrived.
+    pub fn server_setup(&self) -> &AnyControlMessage {
+        &self.server_setup
+    }
+
+    /// The framed wire bytes of [`Self::server_setup`], as they arrived.
+    ///
+    /// Kept beside the decoded form because the encoding is evidence the
+    /// decoding discards: two relays sending the same parameter can still
+    /// disagree on how wide a varint they wrote it in.
+    pub fn server_setup_raw(&self) -> Option<&[u8]> {
+        self.server_setup_raw.as_deref()
+    }
+
     /// Get the negotiated MoQT version.
     pub fn negotiated_version(&self) -> Option<VarInt> {
         self.endpoint.negotiated_version()
+    }
+
+    /// Which of this draft's *own* `ConnectionError` variants this error is,
+    /// and which kind of thing it says.
+    ///
+    /// Draft-12 adds none. Every variant of its [`ConnectionError`] is one of the
+    /// ten every draft carries, and [`AnyConnectionError`] classifies those
+    /// itself — so `None` here is this draft's answer rather than a stub, and it
+    /// stays right for exactly as long as that list does.
+    ///
+    /// Matched exhaustively, with no wildcard arm and deliberately so: a
+    /// variant added to this draft's error type has to arrive here as a compile
+    /// error, beside the doc comment that quotes the sentence it enforces,
+    /// rather than as a silent [`ErrorCause::Unclassified`] in the facade.
+    ///
+    /// [`AnyConnectionError`]: crate::dispatch::AnyConnectionError
+    /// [`ErrorCause::Unclassified`]: crate::dispatch::ErrorCause::Unclassified
+    pub fn draft_specific_cause(
+        err: &ConnectionError,
+    ) -> Option<crate::above_codec_rules::DraftSpecificCause> {
+        match err {
+            ConnectionError::Endpoint(_)
+            | ConnectionError::Codec(_)
+            | ConnectionError::Transport(_)
+            | ConnectionError::VarInt(_)
+            | ConnectionError::NoControlStream
+            | ConnectionError::UnexpectedEnd
+            | ConnectionError::StreamFinished
+            | ConnectionError::InvalidAddress(_)
+            | ConnectionError::TlsConfig(_)
+            | ConnectionError::DataStreamState(_) => None,
+            // This build decoding a message and then failing to narrow it to
+            // its own draft. Nothing reached the wire and no peer is
+            // implicated, which is the whole reason it is not
+            // `ConnectionError::Codec`: under that name it would carry
+            // `Some(PROTOCOL_VIOLATION)` out of `codec_session_error_code` and
+            // publish a relay for this build's defect. See the variant's own
+            // doc.
+            ConnectionError::ControlMessageNarrowing => {
+                Some(crate::above_codec_rules::DraftSpecificCause::LocalRefusal)
+            }
+        }
     }
 
     /// The code to close the session with when a message could not be decoded
@@ -1627,9 +1780,10 @@ impl Connection {
     /// the draft answers with a close, so a session cannot be ended on it
     /// without ending sessions the draft does not ask to be ended. Splitting it
     /// is the way to bring the rest of those rules under this function;
-    /// widening the match is not - the extension-header rule above reached this
-    /// table by being split out of it.
-    fn codec_session_error_code(
+    /// widening the match is not - the extension-header rule above is
+    /// answerable here because it has a variant of its own rather than being
+    /// one more reading of `InvalidField`.
+    pub fn codec_session_error_code(
         err: &CodecError,
     ) -> Option<moqtap_codec::draft12::error_codes::SessionErrorCode> {
         use moqtap_codec::draft12::error_codes::SessionErrorCode;
@@ -1687,11 +1841,11 @@ impl Connection {
             // by a wildcard. The arm is exhaustive deliberately: a new
             // `CodecError` variant will not compile until it has been placed on
             // one side or the other, on this draft, which is the decision a `_`
-            // arm makes silently and invisibly on all thirteen at once.
+            // arm makes silently and invisibly in every draft module at once.
             //
-            // Adding one variant to `CodecError` was tried, and produces
-            // thirteen `E0004`s, one per draft, each naming the variant that has
-            // nowhere to go. That is the whole mechanism.
+            // Adding one variant to `CodecError` produces an `E0004` in every
+            // draft module that matches it exhaustively, each naming the
+            // variant that has nowhere to go. That is the whole mechanism.
             //
             // The nesting stops at `VarInt`, whose variants report how the bytes
             // ran out rather than a rule an endpoint states, so there is nothing
@@ -1766,10 +1920,6 @@ impl Connection {
             // sentence before it, which is about a status value this draft does
             // not assign — so an object carrying a payload it may not is refused
             // and the session stays open.
-            //
-            // That was already the answer. The bytes used to arrive as
-            // `InvalidField`, which is on this side too; naming the rule changes
-            // nothing a peer can observe and makes the decision legible.
             | CodecError::PayloadNotPermitted { .. }
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(
@@ -1915,6 +2065,39 @@ fn varint_len(first_byte: u8) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// This build failing to narrow a message it decoded is never a finding
+    /// about the peer.
+    ///
+    /// The arm that raises `ControlMessageNarrowing` is unreachable — this
+    /// draft's decoder can only hand back this draft's variant — and nothing
+    /// pins that. What is pinned here is the half that matters.
+    /// `CodecError::UnknownMessageType(0)` is what the arm must not raise:
+    /// `codec_session_error_code` answers it `Some(PROTOCOL_VIOLATION)` on
+    /// every draft in range, so the day the narrowing failed a conformance
+    /// probe would publish a relay for sending a control message type this
+    /// draft does not assign — with `0x00` attached as the codepoint that
+    /// proved it, which is an accusation better evidenced than any real one
+    /// this build makes. The section stating that rule is renumbered several
+    /// times across drafts 07 through 20, and the point does not turn on the
+    /// number.
+    ///
+    /// Ablated by putting the arm back to
+    /// `ConnectionError::Codec(CodecError::UnknownMessageType(0))`: this test
+    /// reddens on the cause, and so does the probe's own
+    /// `violation::a_message_this_build_could_not_narrow_names_nobody`.
+    #[test]
+    fn a_message_this_build_could_not_narrow_names_nobody() {
+        use crate::dispatch::{AnyConnectionError, ErrorCause};
+
+        let err: AnyConnectionError = ConnectionError::ControlMessageNarrowing.into();
+        assert!(err.is_local(), "a narrowing this build could not do is this build's");
+        assert_eq!(
+            err.cause(),
+            &ErrorCause::Facade,
+            "nothing reached the wire, so there is no rule and no close code to read"
+        );
+    }
 
     #[test]
     fn client_config_supported_versions_default() {

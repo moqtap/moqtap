@@ -1,11 +1,10 @@
 //! The control-message fields the drafts draw as `(8)`, on drafts 11 through 16.
 //!
 //! Group Order, Forward, Content Exists and End Of Track are each drawn as a
-//! single octet, and each was read and written as a variable-length integer.
-//! Nothing about that is visible while both ends agree, because every legal
-//! value of all four is below 64 — the range where a one-byte QUIC varint and a
-//! bare octet are the same byte. The corpus was generated from those encoders,
-//! so it agrees too.
+//! single octet. Reading or writing one as a variable-length integer is
+//! invisible while both ends agree, because every legal value of all four is
+//! below 64 — the range where a one-byte QUIC varint and a bare octet are the
+//! same byte, so a corpus generated from such encoders agrees too.
 //!
 //! Where the two readings part company is on a value a peer may put on the wire
 //! that this codec would never write. `0x40 0x01` is a lawful two-byte varint

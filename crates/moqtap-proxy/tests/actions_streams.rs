@@ -625,11 +625,6 @@ async fn streams_alone_frames_the_stream_and_fires_the_header_hook() {
 /// control path. A hook that asked for `Interest::CONTROL` therefore sees
 /// SETUP here, exactly as it does on the drafts that put control on a
 /// bidirectional stream.
-///
-/// While the engine took the first bidirectional stream to be the control
-/// stream on every draft, this row asserted the opposite — an empty log and
-/// one `ControlStreamMisidentified` per session — and that impairment kind
-/// no longer exists.
 #[tokio::test]
 #[cfg(feature = "draft19")]
 async fn a_draft19_setup_on_a_uni_stream_is_shown_to_the_control_hook() {

@@ -65,11 +65,11 @@
 //!
 //! ```text
 //! thread 'draft16_object_status_through_the_encoder' (39200) panicked at
-//! crates\moqtap-codec\tests\object_status_encode.rs:171:32:
+//! crates\moqtap-codec\tests\object_status_encode.rs:
 //! draft-16: write_object accepted status 0x1, which the draft does not assign
 //!
 //! thread 'draft15_object_status_through_the_encoder' (28912) panicked at
-//! crates\moqtap-codec\tests\object_status_encode.rs:171:32:
+//! crates\moqtap-codec\tests\object_status_encode.rs:
 //! draft-15: write_object accepted status 0x2, which the draft does not assign
 //!
 //! test result: FAILED. 8 passed; 5 failed
@@ -86,7 +86,7 @@
 //!
 //! ```text
 //! thread 'draft16_object_status_through_the_encoder' (67152) panicked at
-//! crates\moqtap-codec\tests\object_status_encode.rs:185:17:
+//! crates\moqtap-codec\tests\object_status_encode.rs:
 //! assertion `left == right` failed: draft-16: write_object was handed status 0x3 and wrote something else
 //!   left: Some(0)
 //!  right: Some(3)
@@ -98,7 +98,7 @@
 //!
 //! ```text
 //! thread 'draft15_object_status_through_the_encoder' (48544) panicked at
-//! crates\moqtap-codec\tests\object_status_encode.rs:167:35:
+//! crates\moqtap-codec\tests\object_status_encode.rs:
 //! draft-15: write_object refused status 0x1, which the draft assigns: InvalidField
 //! ```
 

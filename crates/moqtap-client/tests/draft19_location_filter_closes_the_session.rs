@@ -127,7 +127,7 @@ fn subscribe_with_an_unassigned_filter_type() -> Vec<u8> {
 /// ```text
 /// ---- an_unassigned_filter_type_closes_the_quic_connection stdout ----
 ///
-/// thread 'an_unassigned_filter_type_closes_the_quic_connection' (92560) panicked at crates\moqtap-client\tests\draft19_location_filter_closes_the_session.rs:188:41:
+/// thread 'an_unassigned_filter_type_closes_the_quic_connection' (92560) panicked at crates\moqtap-client\tests\draft19_location_filter_closes_the_session.rs:
 /// an unassigned Filter Type must be refused: Subscribe(Subscribe { request_id: VarInt(1), track_namespace: TrackNamespace([[108, 105, 118, 101]]), track_name: [118, 105, 100, 101, 111], parameters: [KeyValuePair { key: VarInt(33), value: Bytes([7]) }] })
 /// ```
 ///
@@ -137,7 +137,7 @@ fn subscribe_with_an_unassigned_filter_type() -> Vec<u8> {
 /// a variant every table ignores:
 ///
 /// ```text
-/// thread 'an_unassigned_filter_type_closes_the_quic_connection' (101768) panicked at crates\moqtap-client\tests\draft19_location_filter_closes_the_session.rs:162:14:
+/// thread 'an_unassigned_filter_type_closes_the_quic_connection' (101768) panicked at crates\moqtap-client\tests\draft19_location_filter_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 #[tokio::test]

@@ -113,12 +113,11 @@
 //! * "the source read rate matches the bucket rate" → an ordering and a
 //!   count ([`block_loses_nothing_and_stalls_the_reader`],
 //!   [`block_admits_at_most_depth_objects`]).
-//! * a blocked total and a hold total → their companion counts. Those two
-//!   `Duration` fields were on [`ClassStats`] and have since been removed.
-//!   No gate in this file ever asserted either of them, and none anywhere
-//!   else did either, which is what a load-dependent figure comes to:
-//!   `blocked_episodes` and `tokens_exhausted_episodes` are what is
-//!   asserted, and they are now the whole of what the row offers for the
+//! * a blocked total and a hold total → their companion counts.
+//!   [`ClassStats`] carries no `Duration` for either, and nothing here or
+//!   anywhere else asserts one, which is what a load-dependent figure comes
+//!   to: `blocked_episodes` and `tokens_exhausted_episodes` are what is
+//!   asserted, and they are the whole of what the row offers for the
 //!   question.
 //! * how *long* the low class stays starved → [`a_zero_rate_class_starves_and_the_other_flows`]
 //!   gates the zero, [`strict_priority_decides_who_gets_a_shared_bucket`] the
@@ -1178,24 +1177,19 @@ async fn a_shape_profile_arms_without_a_hook() {
 /// them to reach the relay. A producer that fired once per *stream* reports
 /// 1 and reddens here.
 ///
-/// `bytes_shaped` was bounded on both sides while the `unshapeable` row had
-/// no producer — below `3 * 16` some payload went unaccounted, at or above
-/// `stream_len` the five-byte subgroup *stream header* had been counted as
-/// object bytes. **That bound is now an equality**, and its sense turned
-/// around with it: the header is now counted, on the `unshapeable`
+/// `bytes_shaped` is an **equality**, not a bound: the subgroup *stream
+/// header* is charged to the `unshapeable` row and the payload to the class
 /// row, so `bytes_shaped == stream_len` exactly. That is the stronger claim
 /// — a bound admits any implementation inside it, an equality admits one —
 /// and it is exact without copying the codec's framing, because the fixture
 /// already knows the wire length of what it wrote.
 ///
-/// # The per-class row, and what it now claims
+/// # The per-class row, and what it claims
 ///
-/// Until the release path landed this row was asserted **zero**, because
-/// per-class attribution needs a classifier and there was none to attribute
-/// with. There is one now, and the assertion has been turned over rather than
-/// deleted twice: first to "the one class holds every byte `bytes_shaped`
-/// counted", and now — since `bytes_shaped` counts the header too — to the
-/// full conservation identity over this fixture's three rows.
+/// Per-class attribution needs a classifier, and this fixture has one, so
+/// the row is asserted rather than waived: since `bytes_shaped` counts the
+/// header too, the claim is the full conservation identity over this
+/// fixture's three rows.
 /// [`bytes_are_conserved_across_classes`] gates
 /// the general form on a fixture that has a wholly unshapeable *stream*;
 /// what this row adds is that the identity is already exact on the simplest
@@ -1248,9 +1242,8 @@ async fn a_shape_profile_arms_without_a_hook() {
 ///
 /// **(c) Count only what a rule saw.** Empty the body of
 /// `ShapeRecorder::note_unshapeable_seen`, so the header is charged on
-/// release and never entered on the left. The equality that replaced the old
-/// two-sided bound is exactly what catches it, and the shortfall is the
-/// header:
+/// release and never entered on the left. The equality against `stream_len`
+/// is exactly what catches it, and the shortfall is the header:
 ///
 /// ```text
 /// assertion `left == right` failed: bytes_shaped accounts for every byte of
@@ -1259,7 +1252,8 @@ async fn a_shape_profile_arms_without_a_hook() {
 ///  right: 59
 /// ```
 ///
-/// The old bound `bytes_shaped < stream_len` would have called `54` a pass.
+/// A bound would not: `54` passes `bytes_shaped < stream_len`, and passes it
+/// with a `3 * ONE_STREAM_PAYLOAD` floor under it as well.
 ///
 /// **(d) Merge the two unnamed rows.** In `ShapeRecorder::row`, send
 /// `Class::Unshapeable` to `&self.default_class`. The identity still holds —
@@ -1395,9 +1389,9 @@ const ADMIT_DEPTH: usize = 4;
 /// floor((S - 1 + B) / S)  =  1 + floor((B - 1) / S)
 /// ```
 ///
-/// objects. An earlier revision assumed that overshoot and wrote the bound
-/// as `depth_objects + 1`. **Measured, that bound cannot detect an
-/// off-by-one**: at `S = 5004` the formula gives 2 objects per read, so a
+/// objects. A bound of `depth_objects + 1` allows that overshoot, and
+/// **measured, such a bound cannot detect an off-by-one**: at `S = 5004`
+/// the formula gives 2 objects per read, so a
 /// correct queue and one built with `q.len() <= depth` are both `<= 5` and
 /// the ablation "off-by-one the object test" ran green.
 ///
@@ -2040,13 +2034,11 @@ async fn reset_stream_overflow_abandons_the_stream() {
 /// A rule aimed at datagrams claims **no framed object**, and says nothing
 /// about the ones that go past it.
 ///
-/// Both halves matter and they used to be one claim. Before datagrams were
-/// policed, a `MatchKind::Datagram` class could never fire at all, so every
-/// subgroup object walking past it produced an
-/// `ImpairmentKind::ShapeRuleUnmatchable` — the report existing was the
-/// whole point of the kind. It is live now, so the same traffic is an
-/// ordinary non-match: the units still fall to the default row, and the
-/// silence is correct rather than the defect.
+/// Both halves matter. A `MatchKind::Datagram` class is live — datagrams
+/// are policed — so a subgroup object walking past one is an ordinary
+/// non-match rather than an `ImpairmentKind::ShapeRuleUnmatchable`: the
+/// units fall to the default row, and the silence is correct rather than
+/// the defect.
 ///
 /// The default-row assertion is what makes "the class claimed nothing" a
 /// claim with a producer. Delivery counters are the release side's, so the
@@ -3699,9 +3691,9 @@ fn fin_class(run: &PacedRun) -> ClassStats {
 /// # Why the counters are asserted too
 ///
 /// `objects_delivered == FIN_OBJECTS` on both legs is what makes the failure
-/// *silent-noop* rather than *broken*. Pre-fix the bucket was consulted, the
-/// clamp was applied and every byte was held for `max_hold` and then
-/// released — the shaping unambiguously happened — and the run's output said
+/// this guards *silent-noop* rather than *broken*: the bucket is consulted,
+/// the clamp applied and every byte held for `max_hold` and then released
+/// — the shaping unambiguously happens — while the run's output says
 /// nothing about it. A capability that can decline must say so in the run's
 /// own output, or its absence is indistinguishable from its success.
 ///
@@ -3709,14 +3701,14 @@ fn fin_class(run: &PacedRun) -> ClassStats {
 ///
 /// Delete the `on_shape` call from the release loop in
 /// `egress::drain_honouring_release_times` (leave the `pop_next_due` loop
-/// otherwise untouched — this restores exactly the pre-fix code). The
+/// otherwise untouched, so the report is the only thing removed). The
 /// bytes still arrive, `objects_delivered` is still 4 on both legs, and the
 /// open leg still reports its four clamps. Only the FIN leg goes quiet:
 ///
 /// ```text
 /// ---- shaping_reports_do_not_depend_on_a_fin stdout ----
 /// thread 'shaping_reports_do_not_depend_on_a_fin' (9800) panicked at
-/// crates\moqtap-proxy\tests\actions_shaping.rs:3307:5:
+/// crates\moqtap-proxy\tests\actions_shaping.rs:
 /// a source that FINs is the ordinary MoQT subgroup shape: header, a few
 /// objects, FIN. Every one of its 4 objects was held to max_hold and released
 /// by the clamp, and the run reported no clamp at all
@@ -3736,7 +3728,7 @@ async fn shaping_reports_do_not_depend_on_a_fin() {
     );
 
     // The shaping happened, identically, on both legs — this is the half
-    // that was already green before the fix.
+    // the ablation above leaves green.
     for (label, run) in [("source stays open", &open), ("source FINs", &finished)] {
         assert_eq!(
             run.rx.wait_for_bytes(run.stream.len()).await,
@@ -3811,7 +3803,7 @@ async fn shaping_reports_do_not_depend_on_a_fin() {
 /// ```text
 /// ---- expiry_reports_do_not_depend_on_a_fin stdout ----
 /// thread 'expiry_reports_do_not_depend_on_a_fin' (12420) panicked at
-/// crates\moqtap-proxy\tests\actions_shaping.rs:3382:9:
+/// crates\moqtap-proxy\tests\actions_shaping.rs:
 /// assertion `left == right` failed: the shaper abandoned this stream and the
 /// run must say so, on both legs (source FINs)
 ///   left: []
@@ -3863,9 +3855,8 @@ async fn expiry_reports_do_not_depend_on_a_fin() {
 ///
 /// # Why the 0-bps class is not the fixture
 ///
-/// An earlier form of this row used one. With a 0-bps class every byte is
-/// still in
-/// `PendingQueue` and nothing was ever handed to quinn, so "the bytes already
+/// With a 0-bps class every byte stays in
+/// `PendingQueue` and nothing is ever handed to quinn, so "the bytes already
 /// written still arrive" is zero bytes by construction and the row is
 /// unfalsifiable. A non-zero rate puts a real prefix on the wire first.
 ///
@@ -4058,10 +4049,10 @@ const UNADDRESSED_FETCH_DRAFTS: &[DraftVersion] = &[
 /// The drafts on which `publisher_priority` is **`Option`** and the header
 /// may omit it — the `0x20` DEFAULT_PRIORITY bit.
 ///
-/// Written out rather than aliased to [`UNADDRESSED_FETCH_DRAFTS`], which it
-/// used to be. The two sets were equal for as long as every draft from 15 on
-/// was bypassed on a fetch stream, and they were never the same claim: this
-/// one is about a bit in a *subgroup* header.
+/// Written out rather than aliased to [`UNADDRESSED_FETCH_DRAFTS`]: that
+/// list is drafts 18 through 20 and this one starts at 15, and they are not
+/// the same claim in any case — this one is about a bit in a *subgroup*
+/// header.
 const OPTIONAL_PRIORITY_DRAFTS: &[DraftVersion] = &[
     #[cfg(feature = "draft15")]
     DraftVersion::Draft15,
@@ -4168,7 +4159,7 @@ const CONS_DEPTH: usize = 6;
 ///
 /// Every subgroup stream contributes its header to `unshapeable`, so the row
 /// is non-zero on any fixture at all. What a fetch stream adds is a stream
-/// that is unshapeable **all the way down**: on drafts 18 and 19 a fetch
+/// that is unshapeable **all the way down**: on drafts 18, 19 and 20 a fetch
 /// object's Group ID is a difference the fetch's Group Order gives a
 /// direction to, nothing on the data stream states it, and this fixture
 /// sends no FETCH for the session to have read it off — so the framer
@@ -4723,11 +4714,12 @@ async fn a_mixed_class_stream_says_so() {
 // ── the publisher-priority partition ───────────────────────────────────
 
 /// The header-type bit that omits the Publisher Priority field on drafts
-/// 15-20 (`draft19/data_stream.rs:46`, and the same value on 15-18).
+/// 15-20 (`draft19/data_stream.rs`'s `SUBGROUP_DEFAULT_PRIORITY_BIT`, and
+/// the same value on every other draft in that range).
 ///
 /// This is a bit in the **stream type byte**, not a value of the priority
-/// field, which is the fact an earlier revision of this row got wrong: a
-/// priority *byte* of `0x80` decodes as `Some(128)` on every draft 07-20.
+/// field, and the two are easy to confuse: a priority *byte* of `0x80`
+/// decodes as `Some(128)` on every draft 07-20.
 /// `None` is only reachable by setting this bit and omitting the byte, and
 /// `None` is what the whole row is about.
 const DEFAULT_PRIORITY_BIT: u8 = 0x20;
@@ -5073,7 +5065,7 @@ const ACCEPTANCE_OBJECTS: u64 = 8;
 /// (`session.rs:2202`) catches it first, in the forwarding task:
 ///
 /// ```text
-/// panicked at crates\moqtap-proxy\src\session.rs:2202:5:
+/// panicked at crates\moqtap-proxy\src\session.rs:
 /// a session with a ShapeProfile must be framed: shaping cannot classify a byte pump
 /// ```
 ///
@@ -5083,7 +5075,7 @@ const ACCEPTANCE_OBJECTS: u64 = 8;
 /// only while broken:
 ///
 /// ```text
-/// panicked at crates\moqtap-proxy\tests\actions_shaping.rs:4297:6:
+/// panicked at crates\moqtap-proxy\tests\actions_shaping.rs:
 /// both destination streams were opened and their headers forwarded: Elapsed(())
 /// ```
 ///
@@ -5440,15 +5432,16 @@ async fn blocked_run(overflow: Overflow) -> BlockedRun {
 
 /// **A peer's `RESET_STREAM` is mirrored while the queue is blocked.**
 ///
-/// The defect, exactly: `pipe_data_framed` hoisted
-/// `let can_read = pending.accepts_more()` and spent it as the read branch's
-/// precondition, `result = recv.read(&mut buf), if can_read`. A peer reset
-/// surfaces **only** as `Err` from that `recv.read`, so with the branch shut
-/// the reset was not observed at all and `propagate_reset` was unreachable.
-/// Under `Overflow::Block` — the `QueueConfig` default — a dry bucket holds
-/// the queue at its depth until `max_hold`, so the shipped default posture
-/// delayed a mirrored reset by up to **30 s**. Measured before the fix, at
-/// `QueueConfig::default()`: 29.80 s. Nothing else in the `select!` covers
+/// The failure mode, exactly, and the ablation below reproduces it: let the
+/// read branch be the only observer of the source. `pipe_data_framed`
+/// computes `let can_read = pending.accepts_more()` and spends it as that
+/// branch's precondition, `result = recv.read(&mut buf), if can_read`, and a
+/// peer reset surfaces **only** as `Err` from that `recv.read` — so with the
+/// branch shut the reset goes unobserved and `propagate_reset` is
+/// unreachable. Under `Overflow::Block` — the `QueueConfig` default — a dry
+/// bucket holds the queue at its depth until `max_hold`, so that posture
+/// delays a mirrored reset by up to **30 s**: measured at
+/// `QueueConfig::default()`, 29.80 s. Nothing else in the `select!` covers
 /// it: `StopWatcher` watches the *destination's* `stopped()`, the release
 /// branch watches this proxy's own clock, and `cancel` is session teardown.
 ///
@@ -5459,17 +5452,17 @@ async fn blocked_run(overflow: Overflow) -> BlockedRun {
 /// only clock in the body is [`BLOCKED_MIRROR_WINDOW`], and it is a failure
 /// ceiling — the thing that turns "hangs for the harness's 10 s" into a
 /// sentence naming what was awaited. What makes that ceiling
-/// load-independent is [`BLOCKED_HOLD`]: the defect cannot answer inside
-/// 30 s, the fix answers in microseconds, and the ceiling sits 20× from one
-/// and 20 000× from the other.
+/// load-independent is [`BLOCKED_HOLD`]: a read-only observer cannot answer
+/// inside 30 s, the reset observer answers in microseconds, and the ceiling
+/// sits 20× from one and 20 000× from the other.
 ///
 /// **Both overflow policies, one body.** `DropTail` installs no blocking
-/// depth, so its read branch never shuts and it mirrors the reset with or
-/// without the fix — it is the control, and it is in the same body so the
-/// claim is *"the queue policy does not get to decide whether a peer reset
-/// is mirrored"* rather than two separate claims about two fixtures that
-/// might have drifted apart. The rows are also ordered `Block` first, so a
-/// failure reports the interesting leg.
+/// depth, so its read branch never shuts and it mirrors the reset whether
+/// or not the reset observer is there — it is the control, and it is in the
+/// same body so the claim is *"the queue policy does not get to decide
+/// whether a peer reset is mirrored"* rather than two separate claims about
+/// two fixtures that might have drifted apart. The rows are also ordered
+/// `Block` first, so a failure reports the interesting leg.
 ///
 /// **The order is asserted as a prefix, not as a byte count.** The fixture
 /// waits for the destination stream's header to arrive *before* resetting
@@ -5491,7 +5484,7 @@ async fn blocked_run(overflow: Overflow) -> BlockedRun {
 ///
 /// ```text
 /// thread 'a_peer_reset_is_mirrored_while_the_queue_is_blocked' panicked at
-/// crates\moqtap-proxy\tests\actions_shaping.rs:4781:17:
+/// crates\moqtap-proxy\tests\actions_shaping.rs:
 /// a peer reset must be mirrored whatever the queue is doing, and under Block
 /// it was not: nothing ended the destination stream within 1.5s, against a
 /// 30s max_hold
@@ -5563,11 +5556,11 @@ async fn a_peer_reset_is_mirrored_while_the_queue_is_blocked() {
 /// The count is the mechanism, not a proxy for it. QUIC re-advertises
 /// `MAX_STREAM_DATA` as the application *consumes* its receive buffer, so
 /// "the shaper saw `n` objects" is the same statement as "`n` objects' worth
-/// of credit was granted". The fix parks a blocked stream on
+/// of credit was granted". A blocked stream parks on
 /// `RecvStream::received_reset`, which reads no bytes and therefore grants
-/// no credit — so the bound below is the same bound the pre-fix code had,
-/// and that is the point of asserting it: the observer was added *without*
-/// moving it.
+/// no credit — so the bound below is the bound a stream parked on nothing
+/// sits under, and that is the point of asserting it: watching for a reset
+/// does not move it.
 ///
 /// `objects_seen` rather than a hook's call count, deliberately.
 /// `note_object_seen` runs before admission, before the hook and before any
@@ -5597,7 +5590,7 @@ async fn a_peer_reset_is_mirrored_while_the_queue_is_blocked() {
 ///
 /// ```text
 /// thread 'a_blocked_reader_still_refuses_to_read' panicked at
-/// crates\moqtap-proxy\tests\actions_shaping.rs:4877:5:
+/// crates\moqtap-proxy\tests\actions_shaping.rs:
 /// a reset observer must not read the source: with the drain shut by a dry
 /// bucket the shaper may see at most the 4 objects the queue has room for,
 /// and it saw 12 of 12 offered
@@ -5637,13 +5630,13 @@ async fn a_blocked_reader_still_refuses_to_read() {
 
 // ── two silent ways to miss a configured rate ──────────────────────────
 //
-// Both rows below are about a rate that was written down and then not
-// applied, and both were invisible before: the wire looked exactly like a
-// class that was genuinely being held back, and the only signals — one
-// `HoldClamped` per unit and a rising `tokens_exhausted_episodes` — are the
-// ones a *working* rate limit produces. So each row drives the fault **and**
-// the innocent case it used to be indistinguishable from, in one body, and
-// asserts the difference rather than the presence of a report.
+// Both rows below are about a rate that is written down and then not
+// applied, and neither shows on the wire: it looks exactly like a class that
+// is genuinely being held back, and the only signals — one `HoldClamped` per
+// unit and a rising `tokens_exhausted_episodes` — are the ones a *working*
+// rate limit produces. So each row drives the fault **and** the innocent case
+// it is otherwise indistinguishable from, in one body, and asserts the
+// difference rather than the presence of a report.
 
 /// Every `ShapeBurstBelowUnit` a run reported, as `(class, burst, unit)`.
 fn burst_reports(run: &PacedRun) -> Vec<(String, u64, u64)> {

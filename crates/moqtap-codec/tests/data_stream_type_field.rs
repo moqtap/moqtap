@@ -174,8 +174,8 @@ fn a_datagram_type_is_read_as_a_type_and_not_as_a_track_alias() {
 /// Both writers are driven. `AnyDatagramHeader::encode` dispatches to
 /// `encode_checked`, so a gate that goes only through it says nothing about the
 /// infallible `encode` beside it — which is the writer a caller reaches for
-/// when it has no refusal to handle, and which would keep the old headerless
-/// behaviour to itself.
+/// when it has no refusal to handle, and which could keep a headerless framing
+/// to itself.
 ///
 /// # What breaking the fix does, observed by making the change and running
 ///
@@ -228,10 +228,10 @@ fn a_datagram_is_written_with_the_type_field_it_was_read_with() {
 /// A status datagram reaches the draft-neutral entry point at all.
 ///
 /// Drafts 08 through 13 each define a second datagram message that states an
-/// Object Status and carries no payload. Before the type field was read, that
-/// message had no way through this entry point: every datagram was decoded as
-/// the payload-bearing one, so a status datagram arrived as an ordinary object
-/// whose status octet had become part of its payload.
+/// Object Status and carries no payload. The type field is what gives that
+/// message a way through this entry point: without it every datagram decodes
+/// as the payload-bearing one, so a status datagram arrives as an ordinary
+/// object whose status octet has become part of its payload.
 ///
 /// # What breaking the fix does, observed by making the change and running
 ///

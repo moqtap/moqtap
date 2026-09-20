@@ -79,8 +79,8 @@
 //! the datagram status as a varint, drafts 17-20 as a single byte — so both are
 //! ablated below.
 //!
-//! Taking the check away on draft-16 — its datagram status put back to the raw
-//! `Option<VarInt>` it used to be, written verbatim with `if let Some(s) =
+//! Taking the check away on draft-16 — its datagram status held as a raw
+//! `Option<VarInt>` instead, written verbatim with `if let Some(s) =
 //! &self.object_status { s.encode(buf) }` and read back into the raw field —
 //! stops this gate compiling, which is the check being enforced at the earliest
 //! possible moment:
@@ -122,7 +122,7 @@
 //! Draft-16, whose datagram status is a varint:
 //!
 //! ```text
-//! thread 'draft16_datagram_status' (47776) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:296:31:
+//! thread 'draft16_datagram_status' (47776) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:
 //! draft16 datagram header: decode refused the encoder's own output for status 0x1: InvalidField
 //!
 //! test result: FAILED. 9 passed; 1 failed
@@ -131,7 +131,7 @@
 //! and draft-18, whose datagram status is one octet:
 //!
 //! ```text
-//! thread 'draft18_datagram_status' (26244) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:296:31:
+//! thread 'draft18_datagram_status' (26244) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:
 //! draft18 datagram header: decode refused the encoder's own output for status 0x1: InvalidField
 //!
 //! test result: FAILED. 9 passed; 1 failed
@@ -143,7 +143,7 @@
 //! full read refuses:
 //!
 //! ```text
-//! thread 'draft15_subgroup_status' (18096) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:319:38:
+//! thread 'draft15_subgroup_status' (18096) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:
 //! draft15 subgroup object: read_object_meta accepted status 0x2 as Some(2), which the draft does not assign
 //!
 //! test result: FAILED. 9 passed; 1 failed

@@ -644,9 +644,8 @@ pub fn insert_parameter(parameters: &mut Vec<KeyValuePair>, parameter: KeyValueP
 mod tests {
     use super::*;
 
-    /// The empty fill is one byte, and that byte is the count. Decision D1 in
-    /// the repository's `DECISIONS.md`: `Length = 1` carrying `0x00`, not
-    /// `Length = 0`.
+    /// The empty fill is one byte, and that byte is the count: `Length = 1`
+    /// carrying `0x00`, not `Length = 0`.
     ///
     /// Encoding it as `Length = 0` instead fails with a decode error from the
     /// codec, because a block with no count is a block whose first parameter

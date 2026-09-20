@@ -6,15 +6,15 @@
 //! the framer stopped framing one. Twenty-eight `use` edges from fourteen
 //! modules reach for them.
 //!
-//! Before this module existed each lived wherever it was first needed, so those
-//! edges ran upward: `framer` took a field of its own output type from
-//! `parser::data`, and `event` took two fields of an event from `framer` and
-//! `transport`. Nothing here imports anything from this crate, which is the
-//! property that makes those edges disappear rather than reverse.
+//! Nothing here imports anything from this crate, which is the property that
+//! keeps those edges pointing one way. A leaf type living wherever it was
+//! first needed reverses them instead: `framer` taking a field of its own
+//! output type from `parser::data`, `event` taking two fields of an event
+//! from `framer` and `transport`.
 //!
-//! **Every one of the five is still re-exported where it used to live**, so
-//! `event::ProxySide`, `transport::Leg`, `framer::ObjectMeta`,
-//! `framer::BypassReason` and `parser::data::DataStreamType` all still resolve.
+//! **Every one of the five is also re-exported from the module that owns its
+//! subject**, so `event::ProxySide`, `transport::Leg`, `framer::ObjectMeta`,
+//! `framer::BypassReason` and `parser::data::DataStreamType` all resolve.
 //! A downstream match on `ProxySide` with no wildcard arm keeps compiling, and
 //! nothing outside this crate has to move.
 
@@ -89,10 +89,9 @@ pub struct ObjectMeta {
     /// Subgroup ID. `None` when the frame has none to report, which
     /// happens two ways.
     /// On a subgroup stream, when the stream type encodes an implicit subgroup
-    /// ID that this draft never resolves — eight drafts (11, 12, 13, 14, 16,
-    /// 17, 18 and 19) define a *subgroup ID is the first object's ID* mode that
-    /// the codec stores as zero, and reporting that zero would mis-key any
-    /// matcher.
+    /// ID that this draft never resolves — ten drafts (11 through 20) define a
+    /// *subgroup ID is the first object's ID* mode that the codec stores as
+    /// zero, and reporting that zero would mis-key any matcher.
     ///
     /// On a fetch stream, when the frame carried no Subgroup ID at all:
     /// from draft-15 a fetch object may be marked as having been forwarded
@@ -102,7 +101,7 @@ pub struct ObjectMeta {
     /// a subgroup ID field that holds a placeholder — the same zero, and
     /// the same mis-keying if it were forwarded.
     pub subgroup_id: Option<u64>,
-    /// Absolute Object ID, resolved from delta encoding on drafts 14-19.
+    /// Absolute Object ID, resolved from delta encoding on drafts 14-20.
     pub object_id: u64,
     /// Publisher priority. `None` when the header set a default-priority
     /// flag and omitted the field (drafts 15+).
@@ -143,11 +142,6 @@ pub enum BypassReason {
     /// [`Self::DecodeError`], so a session reaches this only if the header
     /// dispatch and the object-reader dispatch ever disagree about which
     /// drafts this binary speaks.
-    ///
-    /// It used to mean something else and much more common: a fetch stream
-    /// on any of drafts 15-19, none of which this crate would address. Three
-    /// of those five are now framed, and the two that are not report
-    /// [`Self::FetchGroupOrderUnknown`], which says why.
     NoFetchObjectCodec,
     /// A fetch stream on draft-18, draft-19 or draft-20 naming a request this
     /// session never saw asked for.

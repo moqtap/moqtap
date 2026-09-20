@@ -8,12 +8,13 @@
 pub use crate::types::DataStreamType;
 
 /// Check if a codec error indicates incomplete data (need more bytes).
+///
+/// The list of spellings this admits lives on the error rather than here. It
+/// was written out twice — once here and once in `moqtap-client`'s framed
+/// readers — and the two copies disagreed: this one admitted a truncated
+/// varint and that one did not, so an object still arriving read as a
+/// malformed stream on every draft. One answer, in the crate that defines the
+/// error.
 pub(crate) fn is_incomplete_error(e: &moqtap_codec::error::CodecError) -> bool {
-    matches!(e, moqtap_codec::error::CodecError::UnexpectedEnd)
-        || matches!(
-            e,
-            moqtap_codec::error::CodecError::VarInt(
-                moqtap_codec::varint::VarIntError::UnexpectedEnd
-            )
-        )
+    e.is_incomplete()
 }

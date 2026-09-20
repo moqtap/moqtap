@@ -38,11 +38,10 @@
 //! non-repeatable type may not be repeated, which is true, and never put the
 //! question the carve-out raises.
 //!
-//! This is written down rather than left implicit because the file was green
-//! and wrong at the same time: the drafts 11 through 13 checks passed while
-//! this docstring claimed no draft below 17 had an exemption at all, and their
-//! passing was no evidence either way. A later edit that reads that green as
-//! coverage of the carve-out would put the same gap back.
+//! This is written down rather than left implicit because the file is green
+//! either way: the drafts 11 through 16 checks pass without ever putting the
+//! carve-out's question, so their passing is no evidence about it. An edit that
+//! reads that green as coverage of the carve-out puts the gap back.
 //!
 //! The failure messages recorded below are draft-09's. Every draft fails the
 //! same way; the frames differ because the field lists in front of the

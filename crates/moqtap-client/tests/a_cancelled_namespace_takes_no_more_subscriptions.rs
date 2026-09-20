@@ -35,7 +35,7 @@
 //! can reach and then reverted. They partition the five gates one apiece,
 //! with nothing outside this file reddened and the other 167 binaries green.
 //!
-//! Removing the check, which leaves the behaviour draft-07 had without it:
+//! Removing the check, so a subscription for a cancelled namespace is taken:
 //!
 //! ```text
 //! the peer cancelled this namespace and then subscribed to it: ()
@@ -124,8 +124,7 @@ fn subscribe(id: u64, namespace: TrackNamespace) -> Subscribe {
 ///
 /// # What it catches
 ///
-/// A SUBSCRIBE that is never judged against the cancel, which is what this
-/// draft shipped before the sentence was read:
+/// A SUBSCRIBE that is never judged against the cancel:
 ///
 /// ```text
 /// the peer cancelled this namespace and then subscribed to it: ()

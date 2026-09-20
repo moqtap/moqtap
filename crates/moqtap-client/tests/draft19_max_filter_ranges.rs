@@ -347,9 +347,8 @@ fn a_filter_that_does_not_read_is_a_rejection_too() {
 ///
 /// # What it catches
 ///
-/// Ablation: dropping the ceiling from `receive_request_update`, which is where
-/// the endpoint stood before — the request was held to its budget and everything
-/// it was later changed into was not:
+/// Ablation: dropping the ceiling from `receive_request_update`, so the request
+/// is held to its budget and nothing an update changes it into is:
 ///
 /// ```text
 /// assertion `left == right` failed: six ranges in force against a budget of four

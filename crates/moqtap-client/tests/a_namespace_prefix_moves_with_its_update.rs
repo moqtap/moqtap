@@ -245,8 +245,7 @@ macro_rules! gates {
             ///
             /// # What it catches
             ///
-            /// Reading nothing from an update's parameters, which is what both
-            /// drafts did before this file existed:
+            /// Reading nothing from an update's parameters:
             ///
             /// ```text
             /// Section 10.9.2 answers this update with REQUEST_ERROR, not Ok(())
@@ -291,8 +290,7 @@ macro_rules! gates {
             ///
             /// # What it catches
             ///
-            /// Reading nothing from an update's parameters, which is what both
-            /// drafts did before this file existed:
+            /// Reading nothing from an update's parameters:
             ///
             /// ```text
             /// the code the sentence names is not optional: Ok(())
@@ -341,8 +339,7 @@ macro_rules! gates {
             ///
             /// # What it catches
             ///
-            /// Reading nothing from an update's parameters, which is what both
-            /// drafts did before this file existed:
+            /// Reading nothing from an update's parameters:
             ///
             /// ```text
             /// the prefix the first subscription left is free for the second to
@@ -383,8 +380,7 @@ macro_rules! gates {
             ///
             /// # What it catches
             ///
-            /// Reading nothing from an update's parameters, which is what both
-            /// drafts did before this file existed:
+            /// Reading nothing from an update's parameters:
             ///
             /// ```text
             /// the moved subscription holds that prefix now: Ok(())
@@ -559,8 +555,7 @@ macro_rules! gates {
             ///
             /// # What it catches
             ///
-            /// Reading nothing from an update's parameters, which is what both
-            /// drafts did before this file existed:
+            /// Reading nothing from an update's parameters:
             ///
             /// ```text
             /// SUBSCRIBE_TRACKS has an overlap space of its own: Ok(())
@@ -620,8 +615,7 @@ macro_rules! gates {
             ///
             /// # What it catches
             ///
-            /// Reading nothing from an update's parameters, which is what both
-            /// drafts did before this file existed:
+            /// Reading nothing from an update's parameters:
             ///
             /// ```text
             /// the first subscription is still at the sibling: PeerPrefixOverlap {
@@ -689,8 +683,7 @@ macro_rules! gates {
             ///
             /// # What it catches
             ///
-            /// Reading nothing from an update's parameters, which is what both
-            /// drafts did before this file existed:
+            /// Reading nothing from an update's parameters:
             ///
             /// ```text
             /// the last prefix is where it went: Ok(())

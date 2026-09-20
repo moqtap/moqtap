@@ -28,16 +28,12 @@
 //! that range: TRACK_STATUS_OK and TRACK_STATUS_ERROR on 13 and 14, and
 //! REQUEST_OK and REQUEST_ERROR from 15.
 //!
-//! # What was here before
-//!
-//! Nothing on any of the ten. A TRACK_STATUS_REQUEST or a TRACK_STATUS that
-//! arrived had its Request ID counted against the peer's sequence from draft-11
-//! on and was then dropped; drafts 07 through 10, whose request carries no
-//! Request ID, dropped it outright. A peer that asked this crate about a track
-//! waited for an answer the crate had no record to build.
+//! # Why the range stops at 16
 //!
 //! Drafts 17 through 20 already carry all of this, because a request there
-//! arrives on a stream of its own and one map holds both ends' requests.
+//! arrives on a stream of its own — draft-17 Section 9.16 has the subscriber
+//! send TRACK_STATUS "as the first and only message on a new bidi stream" — and
+//! one map holds both ends' requests.
 //!
 //! # Why none of this ends the session
 //!
@@ -372,10 +368,10 @@ macro_rules! single_answer_gates {
             /// the request the peer sent should be on record
             /// ```
             ///
-            /// Made by dropping the record instead of inserting it, which is what
-            /// all ten drafts did before. It reddens 87 tests across all three
-            /// files: a request that is not kept is one no answer can find, and
-            /// nothing that names it can be refused for the right reason either.
+            /// Made by dropping the record instead of inserting it. It reddens
+            /// 87 tests across all three files: a request that is not kept is
+            /// one no answer can find, and nothing that names it can be refused
+            /// for the right reason either.
             #[test]
             fn a_track_status_the_peer_asks_for_is_recorded() {
                 let ep = asked();
@@ -411,9 +407,9 @@ macro_rules! single_answer_gates {
             /// ```
             ///
             /// Made by cutting the dispatch arm, which sends the message back to
-            /// the fall-through that accepts and ignores it - the state all ten
-            /// drafts were in. It reddens 15 tests: this gate on all ten drafts,
-            /// and the loopback gate on the five that have one.
+            /// the fall-through that accepts and ignores it. It reddens 15 tests:
+            /// this gate on all ten drafts, and the loopback gate on the five
+            /// that have one.
             #[test]
             fn a_request_arriving_on_the_control_stream_is_recorded() {
                 let mut ep = active();
@@ -720,9 +716,8 @@ macro_rules! two_answer_gates {
             /// the request the peer sent should be on record
             /// ```
             ///
-            /// Made by dropping the record instead of inserting it, which is what
-            /// all ten drafts did before. It reddens 87 tests across all three
-            /// files.
+            /// Made by dropping the record instead of inserting it. It reddens
+            /// 87 tests across all three files.
             #[test]
             fn a_track_status_the_peer_asks_for_is_recorded() {
                 let ep = asked();

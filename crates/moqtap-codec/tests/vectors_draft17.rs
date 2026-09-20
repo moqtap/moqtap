@@ -503,18 +503,17 @@ fn d17_data_stream_datagram() {
 /// Every committed fetch vector, decoded through the draft-17 fetch object
 /// codec and rebuilt byte for byte.
 ///
-/// The objects used to be parsed by a copy of the layout written inline here.
-/// They now go through `FetchObjectHeader`, so the vectors check the shipped
-/// codec rather than a second reading of the same figure, and the re-encode
-/// closes the loop: the values the codec produced have to serialize back to the
-/// vector's own bytes.
+/// The objects go through `FetchObjectHeader` rather than a copy of the layout
+/// written inline here, so the vectors check the shipped codec rather than a
+/// second reading of the same figure, and the re-encode closes the loop: the
+/// values the codec produced have to serialize back to the vector's own bytes.
 ///
 /// *Ablation:* swapped the Subgroup ID and Object ID reads in
 /// `FetchObjectHeader::decode`, so the fields come off the wire in the wrong
 /// order:
 ///
 /// ```text
-/// thread 'd17_data_stream_fetch' (64216) panicked at crates\moqtap-codec\tests\vectors_draft17.rs:381:21:
+/// thread 'd17_data_stream_fetch' (64216) panicked at crates\moqtap-codec\tests\vectors_draft17.rs:
 /// assertion `left == right` failed: [fetch-with-subgroup-id-present] subgroup_id mismatch
 ///   left: "0"
 ///  right: "7"

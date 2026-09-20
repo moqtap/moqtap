@@ -13,7 +13,7 @@
 //! 17 through 20 call it properties — so it is the first draft on the later side
 //! of a rename that touched the variant name, the error text and the section
 //! number all at once. A gate on draft-19 alone would not notice draft-17
-//! keeping the old spelling, or losing the check entirely.
+//! keeping the extension-headers spelling, or losing the check entirely.
 //!
 //! The peer is raw quinn plus `moqtap-codec`'s own writer, so it never calls the
 //! framing helpers under test and cannot agree with them by construction. The
@@ -142,12 +142,12 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 ///
 /// Deleting the `properties_permitted` check from draft-17's
 /// `FramedRecvStream::read_subgroup_object`, so the object is handed to the
-/// caller like any other — the state this draft was in until recently:
+/// caller like any other:
 ///
 /// ```text
 /// ---- properties_on_a_non_normal_status_are_refused_and_close stdout ----
 ///
-/// thread 'properties_on_a_non_normal_status_are_refused_and_close' (27452) panicked at crates\moqtap-client\tests\draft17_properties_on_non_normal_status.rs:225:10:
+/// thread 'properties_on_a_non_normal_status_are_refused_and_close' (27452) panicked at crates\moqtap-client\tests\draft17_properties_on_non_normal_status.rs:
 /// properties on End of Group must be refused: SubgroupObject { object_id: VarInt(0), extension_headers: [1, 2, 3, 4], payload_length: VarInt(0), object_status: Some(EndOfGroup), payload: [] }
 /// ```
 #[tokio::test]

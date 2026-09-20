@@ -58,17 +58,17 @@
 //! connection can see, and a subgroup object is read off a stream handle the
 //! caller owns. So one gate per draft runs the whole thing on datagrams.
 //!
-//! It runs on datagrams *entirely*, and the first cut of it did not: it settled
-//! where the track had reached with a subgroup stream and then sent the
-//! end-of-track object as a datagram, which is the crossing the two paths could
-//! differ on. That traffic cannot happen. These same six drafts state that
-//! "Every Track has a single 'Object Forwarding Preference' and the Original
-//! Publisher MUST NOT mix different forwarding preferences within a single
-//! track", so a datagram for a track whose objects have used a subgroup stream
-//! is refused before this rule is reached — the gate failed with a
-//! mixed-framing report rather than a placement one. **A track's record is only
-//! ever fed by one framing**, on every draft that has a record at all, and the
-//! crossing is unreachable rather than untested.
+//! It runs on datagrams *entirely*, and it has to. Settling where the track has
+//! reached with a subgroup stream and then sending the end-of-track object as a
+//! datagram is the one crossing the two paths could differ on, and that traffic
+//! cannot happen. These same six drafts state that "Every Track has a single
+//! 'Object Forwarding Preference' and the Original Publisher MUST NOT mix
+//! different forwarding preferences within a single track", so a datagram for a
+//! track whose objects have used a subgroup stream is refused before this rule
+//! is reached, and what the gate would see is a mixed-framing report rather than
+//! a placement one. **A track's record is only ever fed by one framing**, on
+//! every draft that has a record at all, and the crossing is unreachable rather
+//! than untested.
 //!
 //! # Drafts 07 and 14 through 20
 //!

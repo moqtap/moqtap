@@ -91,9 +91,9 @@ fn enabled_drafts() -> Vec<DraftVersion> {
 /// them.
 ///
 /// Kept as its own list rather than folded into [`enabled_drafts`] because the
-/// two answered different sets for as long as drafts 15-19 had no fetch object
-/// codec, and the fetch tests below are the ones that would have to change
-/// again if a future draft arrived without one.
+/// two answer the same set only while every draft has a fetch object codec, and
+/// the fetch tests below are the ones that would have to change if a future
+/// draft arrived without one.
 fn drafts_with_fetch_objects() -> Vec<DraftVersion> {
     enabled_drafts()
 }

@@ -32,14 +32,6 @@
 //! session carried for some other request existed too, whatever kind of
 //! request it was, so that one is accepted and nothing moves.
 //!
-//! # What was here before
-//!
-//! The update was looked for among the subscriptions this endpoint had opened.
-//! With Request ID parity in force from draft-11 those are exactly the
-//! identifiers a subscriber's update never names, so every conforming update
-//! was refused, and none of these five had any record of the peer's SUBSCRIBE
-//! to look in.
-//!
 //! # Ablations, measured
 //!
 //! Five cuts were made, run and reverted, each recorded on the gate it belongs
@@ -442,15 +434,16 @@ macro_rules! update_gates {
             /// # What it catches, observed by making the change and running it
             ///
             /// Looking the update up among the subscriptions this endpoint
-            /// opened, which is what every draft used to do:
+            /// opened rather than among the peer's:
             ///
             /// ```text
             /// the peer's update of its own subscription: UpdateForUnknownRequest(1)
             /// ```
             ///
             /// It reddens forty-eight tests across both update files and the draft-14
-            /// dispatch test. From draft-11 the parity rule makes this a miss rather
-            /// than a hit on the wrong record, so every conforming update was refused.
+            /// dispatch test. From draft-11 the parity rule makes the lookup a miss
+            /// rather than a hit on the wrong record, so under the cut every
+            /// conforming update is refused.
             #[test]
             fn an_update_for_the_peers_subscription_is_accepted() {
                 let mut ep = publishing();
@@ -468,9 +461,9 @@ macro_rules! update_gates {
             ///
             /// # What it catches
             ///
-            /// Answering it with a plain error, which is what these five did
-            /// and what drafts 07 through 11 still do - their sentence says
-            /// SHOULD and this one says MUST:
+            /// Answering it with a plain error, which is what drafts 07
+            /// through 11 do - their sentence says SHOULD and this one says
+            /// MUST:
             ///
             /// ```text
             /// assertion `left == right` failed: a MUST-terminate rule leaves the session closed

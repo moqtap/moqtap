@@ -10,7 +10,7 @@ rather than as a test that quietly starts agreeing with something new.
 
 ## What is in them
 
-Two families, counted separately and never summed.
+Three families, counted separately and never summed.
 
 **Outcome codes** — the registries that report how a request or a session
 ended. Four of them in drafts 15-20 (Session Termination, REQUEST_ERROR,
@@ -40,6 +40,33 @@ than zero MUST have an empty payload", and `blanket-rule-complement` means it
 was inferred from that sentence's silence about status zero. Consumers that
 will only accept a value the draft states can filter on that field.
 
+**Parameters, properties, setup options and auth tokens** — the code points a
+control message parameter, an object or track property, a setup option or an
+AUTHORIZATION TOKEN alias carries. They live under `parameters` and are totalled
+in `totals.parameter_rows`. They are not outcome codes and have nothing to do
+with Object Status, so they are a third family rather than an addition to
+either; the tool's docstring states the rule under `PARAMETERS, PROPERTIES,
+SETUP OPTIONS AND AUTH TOKENS`.
+
+Two things about this family a consumer has to know. Rows carry no description
+except in drafts 11-14, whose AUTHORIZATION TOKEN table prints a
+`Serialization and behavior` column — the sections the other tables point at are
+prose rather than the definition lists the error-code sections use, so
+`description_source` is `null` there as a fact about the drafts rather than a
+gap. And registries within one family share a code space: in drafts 18 and 19
+Property Type `0x06` is `SUBGROUP_DELIVERY_TIMEOUT` in the Properties table and
+`TIMESTAMP` in the provisional one beside it, and in draft 20 all eight
+`FILL PARAMETERS` codes are also Message Parameters. Join by
+(`registry_id`, `code`), never by `code` alone;
+`totals.parameter_codes_registered_more_than_once_in_a_family` counts where it
+matters.
+
+Drafts 07-10 have `parameters.present` false. That is not the same fact as those
+drafts assigning no parameters: they assign them inside the prose sentence that
+introduces each one ("AUTHORIZATION INFO parameter (Parameter Type 0x02)
+identifies a track's authorization information"), with no table for a
+table-anchored extraction to read. `reason_absent` says so in the file.
+
 Per draft, as committed:
 
 | draft | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
@@ -48,10 +75,16 @@ Per draft, as committed:
 | outcome rows | 21 | 40 | 40 | 40 | 65 | 71 | 71 | 73 | 47 | 49 | 59 | 62 | 64 | 61 |
 | object status rows | 5 | 5 | 5 | 5 | 4 | 4 | 4 | 4 | 4 | 3 | 3 | 3 | 3 | 3 |
 | object status form | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | table | table |
+| parameter registries | 0 | 0 | 0 | 0 | 1 | 1 | 1 | 1 | 2 | 3 | 4 | 6 | 6 | 7 |
+| parameter rows | 0 | 0 | 0 | 0 | 4 | 4 | 4 | 4 | 16 | 21 | 25 | 40 | 47 | 60 |
 
 `\*` is `prose-list`: bullets under the section that defines the field, no
 IANA registry. Drafts 19 and 20 are the only drafts of the fourteen with an
 IANA table for Object Status, and the only ones with a `Payload` column.
+
+The three row counts are never added. 763 outcome rows, 55 object statuses and
+225 parameter rows are three answers to three questions, and a single number for
+all three would mean something different on draft 09 than on draft 20.
 
 ## Where the input comes from
 
@@ -94,11 +127,14 @@ partial copy of the drafts overwrites the committed JSON next to this file. Use
 `--out-dir` to send experimental output somewhere else, or `--check`, which
 writes nothing at all.
 
-`--check` is not wired into CI, because the input lives outside this
-repository. What CI does cover is the other half — see
-`tests/registry_extraction_health.rs` below — so an extraction that silently
-degraded fails a Rust test even though the document that degraded it is not
-here.
+CI runs `--check` in the `drafts` job, against drafts it downloads from the IETF
+archive itself (`.github/workflows/ci.yml`, and `just drafts` locally), so the
+committed files are verified against the published documents rather than against
+whatever copy a contributor has. It fails closed if the archive cannot be
+reached: an unverifiable extraction is not a verified one. The other half is
+covered without the drafts at all — see `tests/registry_extraction_health.rs`
+below — so an extraction that silently degraded fails a Rust test even where the
+document that degraded it is not available.
 
 ## What the tests do with these files
 
@@ -107,9 +143,12 @@ here.
   crate refuses, and one the crate accepts and the draft does not assign, are
   separate failures with separate messages — and compares names as well as code
   points, which is what catches a row copied forward from the previous draft.
-  Each draft's list of registries is required to name every registry its
-  extraction carries, so a file here cannot grow a registry that nothing
-  compares. The names it compares change source partway through the range:
+  Each draft's `registries` list is required to name every registry it carries,
+  so that array cannot grow an entry that nothing compares. That requirement is
+  scoped to `registries`: the `parameters` family is extracted and committed but
+  is not yet compared against anything in this crate, so a row there is a
+  transcription of the draft and not a claim that the crate agrees with it.
+  The names it compares change source partway through the range:
   drafts 14 and later print a symbolic name per code and the extraction records
   it, drafts 07 through 13 print only a Reason column and the name is
   normalized from that, and which drafts do which is asserted rather than

@@ -368,7 +368,7 @@ fn first_byte_arrived_at(rx: &TimedReceiver) -> Option<Instant> {
 ///
 /// ```text
 /// thread 'open_after_at_the_open_site_delivers_the_deferred_stream_last'
-/// (53576) panicked at crates\moqtap-proxy\tests\open_after_ordering.rs:420:5:
+/// (53576) panicked at crates\moqtap-proxy\tests\open_after_ordering.rs:
 /// the deferred stream's first byte reached the relay 594µs BEFORE the
 /// trigger stream's header, so the peer stream was opened at once: OpenAfter
 /// was admitted at the open site and changed nothing on the wire
@@ -484,7 +484,7 @@ async fn open_after_at_the_open_site_delivers_the_deferred_stream_last() {
 ///
 /// ```text
 /// thread 'open_after_at_the_header_site_is_refused_by_name_and_defers_nothing'
-/// (14280) panicked at crates\moqtap-proxy\tests\open_after_ordering.rs:541:5:
+/// (14280) panicked at crates\moqtap-proxy\tests\open_after_ordering.rs:
 /// assertion `left == right` failed: the header site refused OpenAfter by
 /// name, exactly once
 ///   left: []

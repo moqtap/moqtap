@@ -26,10 +26,13 @@
 //! # Track Properties share the wire shape and not the rule
 //!
 //! Setup Options and Track Properties are both delta-encoded key-value lists,
-//! and before this they went through one pair of helpers. Only Setup Options
-//! carry the rule; nothing in these drafts forbids a repeated Track Property. So
-//! `a_repeated_track_property_is_not_this_rules_business` holds the shared path
-//! where it was.
+//! and only Setup Options carry the rule; nothing in these drafts forbids a
+//! repeated Track Property. Both lists go through the same delta codec -
+//! `decode_kvp_delta` / `encode_kvp_delta` - and the rule lives in the Setup
+//! Option wrappers above it, so
+//! `a_repeated_track_property_is_not_this_rules_business` holds that shared
+//! codec to exactly this: a repeat reaching it through the Track Property
+//! wrappers is carried, not refused.
 //!
 //! # Recorded failures
 //!

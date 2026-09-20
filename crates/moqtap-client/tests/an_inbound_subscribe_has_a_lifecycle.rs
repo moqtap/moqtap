@@ -23,15 +23,14 @@
 //! SUBSCRIBE_DONE - every message the other way round from a subscription it
 //! opened itself.
 //!
-//! # What was here before
+//! # Why the range is these five
 //!
-//! Nothing. An arriving SUBSCRIBE was checked for its identifier and dropped,
-//! and no UNSUBSCRIBE was processed at all, so a peer that subscribed to this
-//! endpoint waited for an answer the crate had no record to build. The five
-//! drafts here are the ones where the subscriber chooses the Track Alias, and
-//! a Track Alias with no subscription behind it is one nothing can ever
-//! release - which is why the alias rule in
-//! `a_track_alias_names_one_track_at_the_publisher.rs` needed this first.
+//! They are the drafts where the subscriber chooses the Track Alias: the
+//! SUBSCRIBE draws a Track Alias field of its own through draft-11 and
+//! draft-12 deletes it. A Track Alias with no subscription behind it is one
+//! nothing can ever release, which is why the alias rule in
+//! `a_track_alias_names_one_track_at_the_publisher.rs` rests on this flow for
+//! these five drafts.
 //!
 //! # Why none of this closes the session
 //!
@@ -231,9 +230,9 @@ macro_rules! inbound_subscribe_gates {
             /// reaches the flow that can answer it.
             ///
             /// The dispatch arm is the whole of what this measures. Without it
-            /// a SUBSCRIBE is checked for its identifier and then dropped,
-            /// which is what these drafts did: the peer waits for an answer
-            /// the endpoint has no record to build one from.
+            /// a SUBSCRIBE is checked for its identifier and then dropped, and
+            /// the peer waits for an answer the endpoint has no record to
+            /// build one from.
             ///
             /// # What it catches, observed by making the change and running it
             ///

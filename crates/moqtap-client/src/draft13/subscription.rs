@@ -123,16 +123,34 @@ impl SubscriptionStateMachine {
         }
     }
 
-    /// Active → Done (SUBSCRIBE_DONE received — publisher finished).
+    /// Active → Done (SUBSCRIBE_DONE received — publisher finished, and `Done` unchanged).
+    ///
+    /// # Why `Done` is not refused
+    ///
+    /// Because UNSUBSCRIBE is usually what put the subscription there, and this
+    /// message is what a publisher is meant to answer one with. A subscriber
+    /// that withdraws is told the subscription has ended, with a code saying it
+    /// was its own doing — so `on_unsubscribe` followed by `on_subscribe_done` is
+    /// the ordinary end of a subscription rather than a peer misbehaving.
+    ///
+    /// Refusing the second half would make a conforming relay's last message
+    /// read as a protocol error against this endpoint's own bookkeeping — an
+    /// `invalid transition from Done` raised against this endpoint, not the
+    /// relay, and so a wall rather than a finding about the peer.
+    ///
+    /// `Idle` and `Subscribing` are still refused. In neither is there an active
+    /// subscription for this message to end.
     pub fn on_subscribe_done(&mut self) -> Result<(), SubscriptionError> {
-        if self.state == SubscriptionState::Active {
-            self.state = SubscriptionState::Done;
-            Ok(())
-        } else {
-            Err(SubscriptionError::InvalidTransition {
+        match self.state {
+            SubscriptionState::Active => {
+                self.state = SubscriptionState::Done;
+                Ok(())
+            }
+            SubscriptionState::Done => Ok(()),
+            _ => Err(SubscriptionError::InvalidTransition {
                 from: self.state,
                 event: "on_subscribe_done".to_string(),
-            })
+            }),
         }
     }
 }
@@ -177,7 +195,10 @@ impl SubscriptionStateMachine {
         })
     }
 
-    /// Active -> Done (SUBSCRIBE_DONE sent to the subscribing peer).
+    /// Active -> Done (SUBSCRIBE_DONE sent to the subscribing peer), and `Done`
+    /// unchanged — this endpoint answers a peer's UNSUBSCRIBE with this
+    /// message, and the withdrawal it answers has already recorded the end.
+    /// See [`SubscriptionStateMachine::on_subscribe_done`], whose tolerance this inherits.
     pub fn on_subscribe_done_sent(&mut self) -> Result<(), SubscriptionError> {
         self.on_subscribe_done().map_err(|_| SubscriptionError::InvalidTransition {
             from: self.state(),

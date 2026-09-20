@@ -110,8 +110,33 @@ fn meta_matches_read_object(header: &AnySubgroupHeader, objects: &[AnySubgroupOb
     assert!(!cursor.has_remaining(), "meta reader left bytes behind");
 }
 
+/// Deliberately not [`CodecError::is_incomplete`], and it must stay that way.
+///
+/// This is the list of errors a truncated *data stream* is allowed to produce,
+/// written out here so the assertion is an independent statement. Calling the
+/// production predicate would make it agree with itself: widening
+/// `is_incomplete` to admit one error too many would turn every "truncation
+/// reports incomplete" case green rather than red, which is the one failure
+/// this helper exists to catch.
+///
+/// It is narrower than the predicate on purpose. Data streams carry no
+/// key-value pairs, so the two Kvp spellings `is_incomplete` admits are
+/// unreachable from here and listing them would weaken the claim.
+///
+/// The extra assertion below is the other direction: whatever this admits, the
+/// production predicate must admit too, or a reader would stall on an error a
+/// truncation really can produce.
 fn is_incomplete(error: &CodecError) -> bool {
-    matches!(error, CodecError::UnexpectedEnd | CodecError::VarInt(VarIntError::UnexpectedEnd))
+    let admitted =
+        matches!(error, CodecError::UnexpectedEnd | CodecError::VarInt(VarIntError::UnexpectedEnd));
+    if admitted {
+        assert!(
+            error.is_incomplete(),
+            "truncation produced {error}, which CodecError::is_incomplete does not admit; \
+             a framed reader would report it as malformed instead of reading on"
+        );
+    }
+    admitted
 }
 
 /// Every prefix of a valid stream must fail with a "need more bytes" error
@@ -1546,11 +1571,11 @@ fn fetch_objects_draft20_resolve_deltas_against_the_prior_object() {
 /// [`AnyFetchObject::publisher_priority`] is a `u8`, and a marker states no
 /// Priority — draft-19 Section 11.4.4.2 lists it among the fields "not
 /// present" — so the value can only be the one still in force from the Object
-/// before it or the 128 a subscription that stated none is read under. Drafts
-/// 16, 17 and 19 answered the first and draft-18 the second, for the same
-/// stream through the same draft-neutral type, a difference none of the four
-/// drafts has: what they settle is what the *next* Object inherits, and they
-/// agree on that.
+/// before it or the 128 a subscription that stated none is read under. Every
+/// one of drafts 16 through 20 reports the first, and a draft-neutral type that
+/// reported the second on any of them would invent a difference none of the
+/// five drafts has: what they settle is what the *next* Object inherits, and
+/// they agree on that.
 ///
 /// Each draft encodes the same two frames — one Object at priority 0x40, then
 /// an End of Non-Existent Range up to group 9, object 4 — and the bytes differ
@@ -1559,12 +1584,12 @@ fn fetch_objects_draft20_resolve_deltas_against_the_prior_object() {
 ///
 /// # Ablation
 ///
-/// Draft-18's own answer restored — `publisher_priority: None` in its marker
-/// branch, which is what it shipped:
+/// Draft-18's marker branch set to `publisher_priority: None`, so it reports
+/// the 128 default instead:
 ///
 /// ```text
 /// thread 'an_end_of_range_marker_reports_the_priority_in_force_on_every_draft'
-/// panicked at crates\moqtap-codec\tests\data_dispatch_tests.rs:1609:9:
+/// panicked at crates\moqtap-codec\tests\data_dispatch_tests.rs:
 /// assertion `left == right` failed: draft-18: a marker reports the Priority in force, not the 128 default
 ///   left: 128
 ///  right: 64

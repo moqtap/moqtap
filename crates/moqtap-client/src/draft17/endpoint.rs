@@ -385,6 +385,86 @@ fn prefixes_overlap(a: &[Vec<u8>], b: &[Vec<u8>]) -> bool {
 }
 
 impl EndpointError {
+    /// Whose doing this is — the peer's, or this endpoint's, or a variant that
+    /// cannot say.
+    ///
+    /// The companion of [`EndpointError::session_error_code`], which answers
+    /// *what the draft requires be done about it*. Neither answers the other's
+    /// question and the pair is what a caller needs: a code without a side
+    /// names nobody, and a side without a code is not grounds to publish
+    /// anything.
+    ///
+    /// Exhaustive, with no wildcard arm, so a variant added to this draft's
+    /// `EndpointError` is a compile error here rather than a silent arrival on
+    /// the wrong side of the answer. See
+    /// [`EndpointFault`](crate::above_codec_rules::EndpointFault) for the three
+    /// answers and for the collision that made the third one necessary.
+    pub fn fault(&self) -> crate::above_codec_rules::EndpointFault {
+        use crate::above_codec_rules::{AboveCodecRule as Rule, EndpointFault as Fault};
+
+        match self {
+            // Raised on both a receive path and a send path, so the
+            // variant cannot say which end is at fault. The state machines
+            // render as `invalid transition from X on event Y` whichever end
+            // asked for the transition, and the unknown-request errors name
+            // an id that may be one the peer sent or one a caller here made
+            // up.
+            EndpointError::Session(..)
+            | EndpointError::Subscription(..)
+            | EndpointError::Fetch(..)
+            | EndpointError::Namespace(..)
+            | EndpointError::TrackStatus(..)
+            | EndpointError::PublishFlow(..)
+            | EndpointError::Setup(..)
+            | EndpointError::UnknownRequest(..) => Fault::EitherEnd,
+
+            // Raised on the way out. Nothing reached the wire, so none of
+            // these is evidence about a peer — including the ones a peer
+            // caused, where what failed is this side's attempt to accept
+            // something the draft says to refuse.
+            EndpointError::NotAResponse(..)
+            | EndpointError::NoUpdateToAnswer(..)
+            | EndpointError::WrongUpdateFailureStatus { .. }
+            | EndpointError::NotActive
+            | EndpointError::Draining
+            | EndpointError::TrackAliasInUse { .. }
+            | EndpointError::UnjoinableSubscription { .. }
+            | EndpointError::WrongJoiningRefusal { .. }
+            | EndpointError::PeerPrefixOverlap { .. }
+            | EndpointError::OwnPrefixOverlap { .. }
+            | EndpointError::WrongOverlapRefusal { .. } => Fault::ThisEndpoint,
+
+            // Raised reading what the peer sent.
+            EndpointError::NotARequest(..) => Fault::Peer(Rule::BidiStreamOpener),
+            EndpointError::DuplicateTrackAlias { .. } => Fault::Peer(Rule::DuplicateTrackAlias),
+            EndpointError::GoAwayUriAtServer => Fault::Peer(Rule::GoAwayAtServer),
+            EndpointError::ResponseOnControlStream
+            | EndpointError::RequestUpdateOnControlStream
+            | EndpointError::RequestMessageOnControlStream(..)
+            | EndpointError::UnexpectedOnPeerRequestStream(..) => {
+                Fault::Peer(Rule::MessageOnTheWrongStream)
+            }
+            EndpointError::ObjectPastFinalObject { .. } => Fault::Peer(Rule::ObjectPastFinalObject),
+            EndpointError::RepeatedGoAway => Fault::Peer(Rule::RepeatedGoAway),
+            EndpointError::DuplicateRequestId(..) => Fault::Peer(Rule::RequestIdOutOfSequence),
+            EndpointError::NotASubscription(..) => Fault::Peer(Rule::TrackStatusIsNotASubscription),
+
+            // The Request ID rules, which are the peer's: every one of them is
+            // read off an id the peer put on the wire. This draft carries no
+            // MAX_REQUEST_ID, so neither ceiling arm can fire — the allocator
+            // opens at `u64::MAX` and nothing ever lowers it - and they are
+            // answered rather than left out so that a draft restoring the
+            // message does not restore a hole with it.
+            EndpointError::RequestId(e) => match e {
+                RequestIdError::Decreased(..) => Fault::Peer(Rule::MaxRequestIdDecreased),
+                RequestIdError::ExceedsMax(..) => Fault::Peer(Rule::RequestIdCeiling),
+                RequestIdError::WrongParity(..) => Fault::Peer(Rule::RequestIdParity),
+                // This endpoint has spent the budget the peer granted it.
+                RequestIdError::Blocked => Fault::ThisEndpoint,
+            },
+        }
+    }
+
     /// The code to close the session with, when draft-17 says this error is
     /// fatal to the session rather than to one request.
     ///
@@ -401,9 +481,20 @@ impl EndpointError {
     /// checking close codes can tell the two apart, so this must too.
     pub fn session_error_code(&self) -> Option<SessionErrorCode> {
         match self {
+            // A REQUEST_UPDATE or a request message on the control stream is
+            // refused and answers `None` here, which is the arm below. Neither
+            // is PROTOCOL_VIOLATION, because Section 3.3's opener sentence does
+            // not cover them: that sentence is about what a bidirectional
+            // stream may *begin* with, and a message on the control stream
+            // begins nothing. Draft-17 Section 9.10 describes where a
+            // REQUEST_UPDATE travels — "The sender of a request (SUBSCRIBE,
+            // PUBLISH, FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE) can later
+            // send a REQUEST_UPDATE on the same bidi stream as the request to
+            // modify it." — and attaches no consequence to one that arrives
+            // elsewhere. Drafts 19 and 20 add that consequence; draft-17 has
+            // not got it, so a close here would be this crate's model rather
+            // than the draft's.
             EndpointError::NotARequest(_)
-            | EndpointError::RequestUpdateOnControlStream
-            | EndpointError::RequestMessageOnControlStream(_)
             | EndpointError::GoAwayUriAtServer
             | EndpointError::RepeatedGoAway => Some(SessionErrorCode::ProtocolViolation),
             EndpointError::DuplicateRequestId(_)
@@ -1092,8 +1183,8 @@ impl Endpoint {
         // SetupExchange is in that set because the Termination section says
         // "The Transport Session can be terminated at any point", and the
         // Setup exchange is a point. So a violation caught while the setup is
-        // still in flight does close the session rather than being recorded
-        // and forgotten, which is what this discarded result used to mean.
+        // still in flight does close the session, and the discarded result is
+        // safe because that is one of the states `on_close` accepts.
         let _ = self.session.on_close();
         err
     }
@@ -1720,19 +1811,22 @@ impl Endpoint {
         match msg {
             ControlMessage::Setup(ref m) => self.receive_setup(m),
             ControlMessage::GoAway(ref m) => self.receive_goaway(m),
-            ControlMessage::RequestUpdate(_) => {
-                Err(self.fail_session(EndpointError::RequestUpdateOnControlStream))
-            }
+            // Refused, and the session left running rather than going through
+            // `fail_session`, which is the answer for a rule the draft closes
+            // over — and draft-17 closes over none of them; see
+            // `session_error_code`. A control message carries its own
+            // length, so the next boundary on the stream is known and a
+            // refused message costs the session nothing; that is the answer
+            // `ResponseOnControlStream` below has always given.
+            ControlMessage::RequestUpdate(_) => Err(EndpointError::RequestUpdateOnControlStream),
             ControlMessage::Namespace(_) => {
-                Err(self.fail_session(EndpointError::RequestMessageOnControlStream("NAMESPACE")))
+                Err(EndpointError::RequestMessageOnControlStream("NAMESPACE"))
             }
             ControlMessage::NamespaceDone(_) => {
-                Err(self
-                    .fail_session(EndpointError::RequestMessageOnControlStream("NAMESPACE_DONE")))
+                Err(EndpointError::RequestMessageOnControlStream("NAMESPACE_DONE"))
             }
             ControlMessage::PublishBlocked(_) => {
-                Err(self
-                    .fail_session(EndpointError::RequestMessageOnControlStream("PUBLISH_BLOCKED")))
+                Err(EndpointError::RequestMessageOnControlStream("PUBLISH_BLOCKED"))
             }
             ControlMessage::SubscribeOk(_)
             | ControlMessage::PublishDone(_)
@@ -2472,8 +2566,8 @@ impl Endpoint {
         match msg {
             // Through the same method the requester side uses, so the rule
             // about which requests may be updated is stated once. An id the
-            // peer never opened is in none of the maps that method probes,
-            // which is the check this arm used to make for itself.
+            // peer never opened is in none of the maps that method probes, so
+            // this arm needs no check of its own.
             ControlMessage::RequestUpdate(ref m) => self.receive_request_update(request_id, m),
             ControlMessage::PublishDone(_) => {
                 let sm = self.publishes.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
@@ -2989,7 +3083,7 @@ mod responder_tests {
             ep.receive_response_on_stream(id, build())
                 .unwrap_or_else(|e| panic!("{name} belongs on a request stream: {e:?}"));
 
-            // Where it does not, which the draft answers with a close.
+            // Where it does not. Refused, and the session left running.
             let err = match ep.receive_message(build()) {
                 Err(e) => e,
                 Ok(()) => panic!("{name} must be refused on the control stream: Ok(())"),
@@ -2998,18 +3092,21 @@ mod responder_tests {
                 matches!(err, EndpointError::RequestMessageOnControlStream(m) if m == name),
                 "{name} on the control stream gave {err}"
             );
-            // The error alone would let a caller ignore it and carry on, which
-            // is the opposite of the close the draft requires.
+            // And refused *without* a close. Section 3.3's opener sentence
+            // does not reach a message arriving on the control stream — that
+            // sentence is about what a bidirectional stream may *begin* with —
+            // and no sentence in draft-17 closes a session over a message
+            // being in the wrong place. A library that closes a session over
+            // its own model of the protocol hands every consumer an accusation
+            // the draft will not support.
             assert_eq!(
                 err.session_error_code(),
-                Some(SessionErrorCode::ProtocolViolation),
-                "{err} should be fatal to the session"
+                None,
+                "no sentence in draft-17 answers {err} with a close"
             );
-            assert_eq!(ep.session_state(), SessionState::Closed);
-            assert!(matches!(
-                ep.subscribe(ns(), b"t".to_vec(), vec![]),
-                Err(EndpointError::NotActive)
-            ));
+            assert_eq!(ep.session_state(), SessionState::Active);
+            ep.subscribe(ns(), b"t".to_vec(), vec![])
+                .expect("the session survives a message it could not place");
         }
     }
 }

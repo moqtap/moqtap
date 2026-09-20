@@ -1649,11 +1649,10 @@ fn endpoint_receive_publish_error_for_publish() {
 
 /// A PUBLISH_ERROR does not refuse a SUBSCRIBE.
 ///
-/// It used to: the handler fell through to the subscriptions this endpoint had
-/// opened, and this test asserted that it did. A SUBSCRIBE is refused with
-/// SUBSCRIBE_ERROR, which has a handler of its own that reaches the same
-/// record, so the fall-through answered a message the peer had no reason to
-/// send and hid one it should have been told about.
+/// A SUBSCRIBE is refused with SUBSCRIBE_ERROR, which has a handler of its own
+/// that reaches the same record. A PUBLISH_ERROR handler that fell through to
+/// this endpoint's subscriptions would answer a message the peer had no reason
+/// to send and hide one it should have been told about.
 #[test]
 fn endpoint_receive_publish_error_does_not_refuse_a_subscribe() {
     let mut ep = make_active_client_with_max_id(10);
@@ -1690,12 +1689,11 @@ fn endpoint_receive_publish_error_does_not_refuse_a_subscribe() {
     ep.receive_subscribe_error(&subscribe_err).expect("SUBSCRIBE_ERROR refuses a SUBSCRIBE");
 }
 
-/// A PUBLISH_ERROR naming nothing is refused, as its sibling answer always was.
+/// A PUBLISH_ERROR naming nothing is refused, as its sibling answer is.
 ///
-/// This used to assert the opposite, under the name `..._graceful`. The two
-/// answers to one offer disagreed about the same unknown identifier:
-/// `receive_publish_ok` returned `UnknownRequest` and this one returned
-/// `Ok(())`.
+/// The two answers to one offer must agree about an unknown identifier:
+/// `receive_publish_ok` returns `UnknownRequest` for one, and so does this,
+/// which the second half of the gate checks.
 #[test]
 fn endpoint_receive_publish_error_unknown_id_is_refused() {
     let mut ep = make_active_client_with_max_id(10);

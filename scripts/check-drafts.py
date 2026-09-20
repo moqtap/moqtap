@@ -8,7 +8,7 @@ read it: a misquoted sentence compiles, a citation naming a section that does
 not exist compiles, and a quotation filed under the wrong section compiles and
 reads as though somebody had looked.
 
-Seven rules, over two objects.
+Eight rules, over three objects.
 
 **Citations.** Rule 1 asks that every `draft-NN Section X.Y` anywhere under
 `crates/` names a section that draft has. Rule 2 asks the same of every bare
@@ -32,6 +32,22 @@ the draft has not got, which is the half of rule 3's question that needs no
 attribution: a sentence found in a draft the moment its last full stop is
 dropped is that draft's sentence with its ending changed, whichever draft was
 meant.
+
+**A citation the tree stores as a value rather than as prose.** Rule 8 is the
+odd one and reads the third object: `AboveCodecRule::citations` in
+`moqtap-client`, which is a table of quoted draft sentences held as Rust data
+because a consumer publishes them per negotiated draft. Rules 3 to 7 read
+comments, and deliberately — a quotation in a string literal is as likely to be
+a recorded panic message as a draft's sentence. That leaves a table like this
+one read by nothing at all, which is the state such a table is in wherever no
+gate walks it: one sentence per rule, printed beside whichever draft was
+negotiated, and no gate anywhere near it. So rule 8 reads the
+table's own rows and asks all three of the questions a row makes: that the
+sentence is in every draft of the run it claims, that it sits in the section the
+row names, and that the code name the row carries is a name the sentence itself
+uses. It fails closed — a table it cannot find or cannot parse stops the run
+rather than passing silently, which is the failure mode a rule reading one file
+at a fixed path is otherwise exactly one rename away from.
 
 **A file names its draft two ways, and only one of them was being read.** A
 `src/draft14/` directory says it, and so does a `tests/draft14_wire_rules.rs`
@@ -239,8 +255,9 @@ never take one away.
 
 ## Needs the rendered drafts, and fails closed without them
 
-One rendering per draft the tree implements, read from `../site/spec-sources/`
-by default and from anywhere else with `--drafts DIR`. Which drafts those are
+One rendering per draft the tree implements, read from the directory of
+rendered drafts beside this checkout by default, and from anywhere else with
+`--drafts DIR`. Which drafts those are
 is derived rather than declared - see `implemented_drafts` - so the set grows
 with the tree and a missing rendering stops the run instead of narrowing it. If
 they are not where it looks, it says so and exits 1: an unverifiable citation is
@@ -263,7 +280,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-DEFAULT_DRAFTS = os.path.join(os.path.dirname(ROOT), "site", "spec-sources")
+
+# The rendered drafts are not part of this repository. `.drafts` at the checkout
+# root is where `--fetch` writes them, what CI and the justfile pass, and a path
+# git ignores — so the default resolves on a fresh clone with nothing set up.
+DEFAULT_DRAFTS = os.environ.get("MOQT_SPEC_DIR", os.path.join(ROOT, ".drafts"))
 
 SKIP_DIRS = (".git", "target", "test-vectors")
 
@@ -732,8 +753,8 @@ def load_drafts(where, fetch=False):
         print("::error::the rendered drafts are not in %s (missing %s). This "
               "cannot check a citation it cannot read, and an unverifiable "
               "citation is not a verified one. Pass --fetch to download them "
-              "from the IETF archive, or --drafts DIR to point it somewhere "
-              "else." % (where, ", ".join(missing)))
+              "from the IETF archive, --drafts DIR to point it somewhere else, "
+              "or set MOQT_SPEC_DIR." % (where, ", ".join(missing)))
         sys.exit(1)
     return out
 
@@ -1509,6 +1530,158 @@ def rule_7(rendered, verbose):
     return bool(new)
 
 
+# ---------------------------------------------------------------------------
+# The citation table, which is a value rather than a comment
+# ---------------------------------------------------------------------------
+
+# Where the per-draft citations live. One path, hard-coded, and guarded below by
+# a floor on how many rows have to parse - because a rule that reads one file is
+# one rename away from reading nothing and reporting a clean run, which is the
+# failure this whole script exists to make impossible.
+CITATION_TABLE = os.path.join(
+    ROOT, "crates", "moqtap-client", "src", "above_codec_rules.rs")
+
+# The fewest rows that can be there without something having gone wrong. Not the
+# exact count: this is a lower bound on a table that is expected to grow, and a
+# gate that has to be edited every time a citation is added is a gate somebody
+# edits without reading. The exact count is pinned on the Rust side, by
+# `a_wording_shared_across_runs_is_written_once`, which is where it belongs -
+# that test can say *which* sentence moved and this cannot.
+CITATION_FLOOR = 60
+
+# `const NAME: &str = "...";`, where the literal may run over several lines with
+# a backslash at each break. One literal, not several concatenated: that is what
+# the tree writes and what `rustfmt` leaves alone, and reading only this form
+# means a table written some other way is reported as unparsed rather than
+# quietly skipped.
+CITATION_CONST = re.compile(
+    r'const\s+(\w+)\s*:\s*&str\s*=\s*"((?:[^"\\]|\\.)*)"\s*;', re.S)
+# `Self::RuleName => &[`, which opens one rule's runs.
+CITATION_ARM = re.compile(r"Self::(\w+)\s*=>\s*&\[")
+# One run. Written on one line by hand and exploded over five by `rustfmt`, so
+# every separator here has to tolerate a newline.
+CITATION_ROW = re.compile(
+    r"RuleCitation\s*\{\s*"
+    r"drafts:\s*\((\d+)\s*,\s*(\d+)\)\s*,\s*"
+    r'section:\s*"([^"]*)"\s*,\s*'
+    r"sentence:\s*(\w+)\s*,\s*"
+    r'code_name:\s*(?:None|Some\("([^"]*)"\))\s*,?\s*\}',
+    re.S)
+
+
+def rust_string(literal):
+    """A Rust string literal's body as the text it denotes.
+
+    Only the escapes this table can contain, and it is a short list on purpose:
+    a backslash before a newline swallows the break and the indentation that
+    follows it, which is how a 200-character draft sentence is written inside a
+    100-column file, and an escaped quote and an escaped backslash are the two
+    characters that cannot be written raw. Anything else is left as it stands
+    rather than guessed at - a
+    table using an escape this does not know reports as a sentence no draft has,
+    which is the safe direction.
+    """
+    out, i = [], 0
+    while i < len(literal):
+        c = literal[i]
+        if c != "\\" or i + 1 >= len(literal):
+            out.append(c)
+            i += 1
+            continue
+        nxt = literal[i + 1]
+        if nxt == "\n":
+            i += 2
+            while i < len(literal) and literal[i] in " \t\r":
+                i += 1
+            continue
+        if nxt == '"' or nxt == "\\":
+            out.append(nxt)
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def citation_rows():
+    """`[(rule, lo, hi, section, sentence, code)]` read off the table."""
+    try:
+        text = io.open(CITATION_TABLE, encoding="utf-8").read()
+    except OSError:
+        print("::error::the per-draft citation table is not at %s. Rule 8 checks "
+              "the sentences a consumer publishes per negotiated draft, and a "
+              "table it cannot read is a table nothing checks - which is the "
+              "state this rule was written to end. If the file moved, move this "
+              "path with it." % rel(CITATION_TABLE))
+        sys.exit(1)
+    text = re.sub(r"(?m)^\s*//.*$", "", text)
+    sentences = {m.group(1): rust_string(m.group(2))
+                 for m in CITATION_CONST.finditer(text)}
+    arms = [(m.start(), m.group(1)) for m in CITATION_ARM.finditer(text)]
+    out = []
+    for m in CITATION_ROW.finditer(text):
+        rule = "?"
+        for at, name in arms:
+            if at < m.start():
+                rule = name
+            else:
+                break
+        key = m.group(4)
+        if key not in sentences:
+            print("::error::%s: the run for %s names a sentence constant %s that "
+                  "this file does not define" % (rel(CITATION_TABLE), rule, key))
+            sys.exit(1)
+        out.append((rule, int(m.group(1)), int(m.group(2)),
+                    m.group(3), sentences[key], m.group(5)))
+    return out
+
+
+def rule_8(rendered, tocs, verbose):
+    """Every row of the citation table is its drafts' own sentence, where it says."""
+    rows = citation_rows()
+    if len(rows) < CITATION_FLOOR:
+        print("::error::%s parsed as %d citation rows, and there were at least %d. "
+              "A table this rule cannot read reports nothing, so too few rows is "
+              "an error rather than a smaller table." % (rel(CITATION_TABLE), len(rows), CITATION_FLOOR))
+        sys.exit(1)
+    checked = 0
+    bad = []
+    for rule, lo, hi, section, sentence, code in rows:
+        pattern = phrase(sentence)
+        for n in range(lo, hi + 1):
+            checked += 1
+            if n not in rendered:
+                bad.append((rule, n, section, "draft-%02d is not in this sweep" % n, sentence))
+                continue
+            if section not in tocs[n]:
+                bad.append((rule, n, section, "that draft has no such section", sentence))
+                continue
+            owns = [section_of(rendered[n], hit.start())
+                    for hit in re.finditer(pattern, rendered[n], re.I)]
+            owns = [o for o in owns if o is not None]
+            if not owns:
+                bad.append((rule, n, section, "the sentence is not in that draft at all", sentence))
+            elif section not in owns:
+                bad.append((rule, n, section,
+                            "the sentence sits in Section %s" % ", ".join(sorted(set(owns))), sentence))
+        if code:
+            flat = sentence.replace("_", " ").lower()
+            if code.replace("_", " ").lower() not in flat:
+                bad.append((rule, lo, section,
+                            "names the code %s, which its own sentence does not use" % code,
+                            sentence))
+    print("rule 8  %5d per-draft citations in %s, %d wrong (floor 0)"
+          % (checked, rel(CITATION_TABLE), len(bad)))
+    for rule, n, section, why, sentence in bad:
+        print("::error::%s: %s cites draft-%02d Section %s and %s"
+              % (rel(CITATION_TABLE), rule, n, section, why))
+        print("          %s" % sentence[:150])
+    if verbose:
+        print("        %d rows over %d drafts, from %s"
+              % (len(rows), checked, rel(CITATION_TABLE)))
+    return bool(bad)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--drafts", default=DEFAULT_DRAFTS,
@@ -1528,6 +1701,7 @@ def main():
     failed |= rule_5(rendered, args.verbose)
     failed |= rule_6(rendered, args.verbose)
     failed |= rule_7(rendered, args.verbose)
+    failed |= rule_8(rendered, tocs, args.verbose)
     return 1 if failed else 0
 
 

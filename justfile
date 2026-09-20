@@ -95,6 +95,15 @@ optional-features:
     echo "=== moqtap-client: webtransport ==="
     cargo clippy -p moqtap-client --features webtransport --all-targets -- -D warnings
     cargo test -p moqtap-client --features webtransport
+    # `wt-protocol` is the one feature here that cannot build outside this
+    # workspace: it reads the CONNECT response, which needs the `[patch]` in the
+    # root manifest. That is the point of the row — the feature claims it fails
+    # to compile without the patch rather than answering `None`, and the row
+    # next to it is what shows `webtransport` alone still builds against the
+    # registry copy.
+    echo "=== moqtap-client: wt-protocol ==="
+    cargo clippy -p moqtap-client --features wt-protocol --all-targets -- -D warnings
+    cargo test -p moqtap-client --features wt-protocol
     echo "=== moqtap-proxy: webtransport ==="
     cargo clippy -p moqtap-proxy --features webtransport --all-targets -- -D warnings
     cargo test -p moqtap-proxy --features webtransport
@@ -261,7 +270,10 @@ draft-pairs:
 # The zero-draft rows stay `--lib` because that is what CI asserts there too,
 # and because the proxy's zero-draft row is asserting a *refusal* at
 # const-evaluation: `--all-targets` would report that refusal once per test
-# target rather than once.
+# target rather than once. That row is also the only one of the thirty that
+# expects a non-zero exit, so it is the only one that has to say *which*
+# failure it wants — see `$6` on `run_row` for the five strings it holds the
+# compiler to and for the false green that made them necessary.
 #
 # Client + proxy under each single draft (all targets) and zero drafts (lib)
 draft-matrix:
@@ -276,13 +288,65 @@ draft-matrix:
     # would name a draft the build does not have. Asserting the refusal beats
     # skipping the row — an exit 0 there would mean that constant had quietly
     # acquired a fallback.
-    run_row() {   # $1 = crate, $2 = feature args, $3 = expected resolution, $4 = expected exit, $5 = target scope
-        local crate="$1" feat="$2" want="$3" want_rc="${4:-0}" scope="${5:---lib}" got rc
+    #
+    # `$6` is why that row is no longer weaker than the other twenty-nine.
+    #
+    # An exit code is one bit and 101 is what cargo answers for *any* failed
+    # compile, so a row asserting a non-zero exit is satisfied by every way the
+    # build can break — including the ways that never reach the thing it exists
+    # to test. That is not hypothetical here: for most of one session this row
+    # was green while `capability::DEFAULT_DRAFT` was never evaluated at all,
+    # because `moqtap-client`'s own zero-draft build failed first and cargo
+    # stopped there. The 101 came from a dependency several crates away, and
+    # nothing in the row could tell the difference.
+    #
+    # So the row names the diagnostic. Everything after `$5` is a fixed string
+    # — matched with `grep -F`, so no regex escaping and no accidental
+    # metacharacters — and **all** of them must appear in the compiler's
+    # output. Five, and each one closes a different way of being right by
+    # accident:
+    #
+    #   * `error[E0080]` — a const-evaluation failure specifically, not a type
+    #     error, a missing item, or a `-D warnings` denial.
+    #   * the panic's own words — so the failing const is `default_draft()` and
+    #     not some other const in the crate that also refuses.
+    #   * `pub const DEFAULT_DRAFT` — the source line rustc echoes, which names
+    #     the constant the row is about. Stable across rewordings of rustc's
+    #     surrounding prose in a way `evaluation of ... failed` is not.
+    #   * `could not compile `moqtap-proxy`` — in the crate under test rather
+    #     than in a dependency. This is the one that would have caught the
+    #     false green above.
+    #   * `due to 1 previous error` — and nothing else is wrong with a
+    #     zero-draft proxy. That is the row's real claim: the *only* thing that
+    #     stops this build is that it has no draft to default to. A second
+    #     error appearing here reddens the row rather than being absorbed by
+    #     it, which is the whole difference between this and an exit code.
+    #
+    # The strings are not a substitute for the exit assertion; both are kept.
+    # A build that printed the diagnostic and somehow exited 0 would be a
+    # stranger finding than either check alone reports.
+    PROXY_ZERO_DRAFT_DIAGNOSTIC=(
+        'error[E0080]'
+        'this build compiled no draft at all, so there is no default to take'
+        'pub const DEFAULT_DRAFT'
+        'could not compile `moqtap-proxy`'
+        'due to 1 previous error'
+    )
+    # All five positional arguments are required — every caller below passes
+    # them — so there are no `${n:-default}` fallbacks to disagree with the
+    # `shift 5` that collects the diagnostics.
+    run_row() {   # $1 = crate, $2 = feature args, $3 = expected resolution, $4 = expected exit, $5 = target scope, $6.. = expected diagnostics
+        local crate="$1" feat="$2" want="$3" want_rc="$4" scope="$5"
+        shift 5
+        local got rc out want_line
         got=$(cargo tree -p "$crate" --no-default-features $feat \
                 --edges normal --depth 1 --prefix none -f '{lib}={f}' 2>/dev/null \
               | grep -E '^moqtap_(client|codec)=' \
               | LC_ALL=C sort | paste -sd' ' -) || true
-        cargo check -q -p "$crate" --no-default-features $feat $scope >/dev/null 2>&1
+        # Captured rather than discarded, because the diagnostics read it. A
+        # failed compile is never cached, so this is the run's own output every
+        # time and not a replay of somebody else's.
+        out=$(cargo check -q -p "$crate" --no-default-features $feat $scope 2>&1)
         rc=$?
         printf '%-14s %-20s %-13s exit=%-4d %s\n' "$crate" "${feat:-<zero drafts>}" "$scope" "$rc" "$got"
         if [ "$rc" -ne "$want_rc" ]; then
@@ -293,15 +357,25 @@ draft-matrix:
             printf '  RESOLUTION MISMATCH: expected %s\n' "$want"
             fail=$((fail + 1))
         fi
+        for want_line in "$@"; do
+            if ! printf '%s\n' "$out" | grep -qF -- "$want_line"; then
+                printf '  DIAGNOSTIC MISMATCH: the compiler never said: %s\n' "$want_line"
+                printf '  what it said instead:\n'
+                printf '%s\n' "$out" | sed 's/^/    /'
+                fail=$((fail + 1))
+            fi
+        done
     }
     for crate in moqtap-client moqtap-proxy; do
         echo "=== $crate ==="
         for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20; do
             run_row "$crate" "--features $d" "moqtap_client=$d moqtap_codec=$d" 0 --all-targets
         done
-        # The proxy is the one crate that must refuse a zero-draft build.
+        # The proxy is the one crate that must refuse a zero-draft build, and
+        # the one row that says which refusal it is expecting.
         if [ "$crate" = "moqtap-proxy" ]; then
-            run_row "$crate" "" "moqtap_client= moqtap_codec=" 101 --lib
+            run_row "$crate" "" "moqtap_client= moqtap_codec=" 101 --lib \
+                    "${PROXY_ZERO_DRAFT_DIAGNOSTIC[@]}"
         else
             run_row "$crate" "" "moqtap_client= moqtap_codec=" 0 --lib
         fi

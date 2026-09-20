@@ -246,12 +246,12 @@ pub fn namespace_text(ns: &TrackNamespace) -> String {
 // -- a frame this codec wrote, with one value rewritten ----------------------
 //
 // Several gates here hand a peer a frame whose one wrong value is the rule
-// under test. The frame used to come straight from the encoder with the wrong
-// value passed in, and that stopped working for a reason worth stating: the
-// encoder refuses every value the decoder refuses. A value that is not what its
-// Type defines is one the receiver must close the session over, so writing it
-// is not a way to send it, and a gate that watches a peer close over one cannot
-// ask this codec to produce it.
+// under test. Such a frame cannot come straight from the encoder with the wrong
+// value passed in, for a reason worth stating: the encoder refuses every value
+// the decoder refuses. A value that is not what its Type defines is one the
+// receiver must close the session over, so writing it is not a way to send it,
+// and a gate that watches a peer close over one cannot ask this codec to
+// produce it.
 //
 // So the frame is written around a value the encoder will write, and the value
 // alone is rewritten. Everything else is still the encoder's: the message type,

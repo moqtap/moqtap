@@ -546,7 +546,10 @@ fn the_checked_subgroup_encoder_refuses_what_the_decoder_would() {
             track_alias: varint(1),
             group_id: varint(0),
             subgroup_id: varint(0),
-            publisher_priority: Some(0x80),
+            // Matched to the Type byte's DEFAULT_PRIORITY bit, so this gate
+            // holds on the Type alone. The gate below is the one that moves
+            // them apart.
+            publisher_priority: if t & 0x20 == 0 { Some(0x80) } else { None },
         };
         let mut buf = Vec::new();
         let written = header.encode_checked(&mut buf);
@@ -556,6 +559,71 @@ fn the_checked_subgroup_encoder_refuses_what_the_decoder_would() {
             assert!(written.is_err(), "type {t:#04x} has no encoding: {written:?}");
             assert!(buf.is_empty(), "a refused header leaves the buffer untouched");
         }
+    }
+}
+
+/// The subgroup header's Priority byte is on the wire because the Type byte
+/// says so, and `encode_checked` refuses a header whose two halves disagree.
+///
+/// Section 10.4.2: "The DEFAULT_PRIORITY bit (0x20) indicates when the Priority
+/// field is present. When set to 1, the Priority field is omitted ... When set
+/// to 0, the Priority field is present in the Subgroup header." One bit decides
+/// it, and `decode` reads that bit — so an encoder driven by whether the Rust
+/// `Option` happens to be `Some` writes a header its own decoder cannot read.
+/// Both directions of the disagreement desync the stream rather than merely
+/// losing a field: a stray byte is taken for the first Object's Object ID
+/// Delta, and a missing one makes the reader take that Delta for the priority.
+///
+/// So this gate asks two things of the twenty-four Types the draft permits.
+/// `encode` resolves the disagreement — the byte count follows the Type byte
+/// whatever the `Option` holds, which is what keeps an infallible encoder from
+/// emitting an unparseable stream — and `encode_checked` refuses it, because
+/// the caller who set the wrong half is the only one who can fix it.
+///
+/// Driving `encode` off the `Option` fails with:
+///
+/// ```text
+/// type 0x10 with None round-trips: Err(UnexpectedEnd)
+/// ```
+///
+/// Dropping the `encode_checked` agreement check fails with:
+///
+/// ```text
+/// type 0x10 with None is not what it says: Ok(())
+/// ```
+#[test]
+fn a_subgroup_priority_byte_that_disagrees_with_its_type_is_refused() {
+    for t in valid_subgroup_types() {
+        // The half the Type byte does not ask for, in both directions.
+        let wrong = if t & 0x20 == 0 { None } else { Some(0x80u8) };
+        let header = SubgroupHeader {
+            header_type: t,
+            track_alias: varint(1),
+            group_id: varint(0),
+            subgroup_id: varint(0),
+            publisher_priority: wrong,
+        };
+
+        let mut buf = Vec::new();
+        header.encode(&mut buf);
+        let mut rest = &buf[..];
+        let back = SubgroupHeader::decode(&mut rest)
+            .unwrap_or_else(|e| panic!("type {t:#04x} with {wrong:?} round-trips: Err({e:?})"));
+        assert!(
+            !rest.has_remaining(),
+            "type {t:#04x} with {wrong:?} left {} stray byte(s) the peer reads as an Object ID Delta",
+            rest.remaining()
+        );
+        assert_eq!(
+            back.publisher_priority.is_some(),
+            t & 0x20 == 0,
+            "type {t:#04x}: the Priority field's presence follows the Type byte"
+        );
+
+        let mut buf = Vec::new();
+        let written = header.encode_checked(&mut buf);
+        assert!(written.is_err(), "type {t:#04x} with {wrong:?} is not what it says: {written:?}");
+        assert!(buf.is_empty(), "a refused header leaves the buffer untouched");
     }
 }
 
@@ -1327,4 +1395,144 @@ fn a_subgroup_stream_still_reads_its_objects() {
         ids.push(reader.read_object(&mut cursor).expect("objects parse").object_id.into_inner());
     }
     assert_eq!(ids, vec![0, 1]);
+}
+
+/// The two draft-16 renderer tables name exactly what draft-16 assigns, and
+/// nothing a decoded message could not carry.
+///
+/// Draft-16 opened a second registry and moved three code points into it.
+/// Section 13.2 Table 8 lists nine Message Parameters — 0x02, 0x03, 0x08, 0x09,
+/// 0x10, 0x20, 0x21, 0x22, 0x32 — and Section 13.3 Table 9 lists the Extension
+/// Headers, of which six are scoped Track: 0x02, 0x04, 0x0B, 0x0E, 0x22 and
+/// 0x30. The numbers overlap and mean different things in each: 0x22 is
+/// GROUP_ORDER as a Message Parameter and DEFAULT_PUBLISHER_GROUP_ORDER as an
+/// Extension Header.
+///
+/// The Message Parameter renderer had three names too many, inherited from
+/// draft-15 where those numbers really were Message Parameters. They were worse
+/// than unused. Section 9.2 makes an unknown Message Parameter a session close
+/// and `decode_parameters` applies it, so no decoded message can carry one of
+/// the three — the names were reachable only for a parameter the same file had
+/// already refused. The first half of this gate ties the two together: a type
+/// the renderer names has to be a type a frame can actually arrive carrying.
+///
+/// The Track Extension renderer had three names too few — 0x0B, 0x22 and 0x30,
+/// which is the whole of the Immutable Extensions block plus both extensions
+/// draft-16 gives a value range to, and therefore both of the two this codec
+/// closes the session over. The parameter a trace could not name was the one
+/// most worth naming.
+///
+/// 0x3C and 0x3E are not asserted: Table 9 scopes them to Object, and this
+/// renderer answers for a `track_extensions` field.
+///
+/// Dropping the trim fails with:
+///
+/// ```text
+/// renderer names 0x4, decode_parameters refuses it
+/// ```
+///
+/// Dropping the three added Track Extension names fails with:
+///
+/// ```text
+/// draft-16 Table 9 scopes 0xb to Track, so the renderer names it
+/// ```
+#[test]
+fn the_renderer_tables_are_the_two_registries_draft_16_assigns() {
+    /// A value of the shape its Type defines.
+    ///
+    /// An even Type takes a bare varint and an odd one a length-prefixed
+    /// value, and two odd Types are held to their contents as well: 0x03 is a
+    /// Token and 0x21 a subscription filter, and a value that is not one is a
+    /// session close before the renderer is ever reached. Everything else is
+    /// opaque, so an empty value is the shape.
+    fn value_for(key: u64) -> Vec<u8> {
+        match key {
+            // USE_VALUE (0x3) with Token Type 0 and no Token Value.
+            0x03 => vec![0x03, 0x00],
+            // LatestObject (0x2), which carries no further fields.
+            0x21 => vec![0x02],
+            // Every value range on an even Type admits 1.
+            _ if key.is_multiple_of(2) => vec![0x01],
+            _ => Vec::new(),
+        }
+    }
+
+    fn kvp_value(key: u64) -> KvpValue {
+        if key.is_multiple_of(2) {
+            KvpValue::Varint(varint(1))
+        } else {
+            KvpValue::Bytes(value_for(key))
+        }
+    }
+
+    /// Whether a SUBSCRIBE_OK carrying one parameter of this type decodes.
+    fn a_frame_can_carry(key: u64) -> bool {
+        let mut body = vec![0x01, 0x01, 0x01]; // Request ID, Track Alias, one parameter
+                                               // The Type is a delta from zero, so it is the Type itself.
+        VarInt::from_u64(key).unwrap().encode(&mut body);
+        let value = value_for(key);
+        if !key.is_multiple_of(2) {
+            VarInt::from_usize(value.len()).encode(&mut body);
+        }
+        body.extend_from_slice(&value);
+
+        let mut wire = vec![0x04];
+        wire.extend_from_slice(&(body.len() as u16).to_be_bytes());
+        wire.extend_from_slice(&body);
+        ControlMessage::decode(&mut &wire[..]).is_ok()
+    }
+
+    /// The name this draft's renderer gives one parameter in `field`.
+    fn name_of(field: &str, key: u64) -> Option<String> {
+        let pair = KeyValuePair { key: varint(key), value: kvp_value(key) };
+        let message = ControlMessage::SubscribeOk(SubscribeOk {
+            request_id: varint(1),
+            track_alias: varint(1),
+            parameters: if field == "parameters" { vec![pair.clone()] } else { Vec::new() },
+            track_extensions: if field == "track_extensions" { vec![pair] } else { Vec::new() },
+        });
+        let fields = moqtap_codec::draft16::fields::message_fields(&message);
+        let Some(moqtap_codec::fields::FieldValue::Array(entries)) = fields.get(field) else {
+            panic!("{field} renders as a list: {fields:?}");
+        };
+        let moqtap_codec::fields::FieldValue::Map(entry) = entries.first()? else {
+            panic!("an entry renders as a map");
+        };
+        match entry.get("name") {
+            Some(moqtap_codec::fields::FieldValue::Text(name)) => Some(name.clone()),
+            _ => None,
+        }
+    }
+
+    // Table 8, and no more. Every type the Message Parameter renderer names has
+    // to be one a frame can arrive carrying, or the name is unreachable.
+    for key in 0x00u64..0x40 {
+        if name_of("parameters", key).is_some() {
+            assert!(
+                a_frame_can_carry(key),
+                "renderer names {key:#x}, decode_parameters refuses it"
+            );
+        }
+    }
+    for key in [0x02u64, 0x03, 0x08, 0x09, 0x10, 0x20, 0x21, 0x22, 0x32] {
+        assert!(
+            name_of("parameters", key).is_some(),
+            "draft-16 Table 8 assigns {key:#x}, so the renderer names it"
+        );
+    }
+
+    // Table 9, Track scope. A separate table because the two registries reuse
+    // numbers: 0x22 is named twice, above and below, and differently.
+    for key in [0x02u64, 0x04, 0x0b, 0x0e, 0x22, 0x30] {
+        assert!(
+            name_of("track_extensions", key).is_some(),
+            "draft-16 Table 9 scopes {key:#x} to Track, so the renderer names it"
+        );
+    }
+    assert_eq!(
+        name_of("track_extensions", 0x22).as_deref(),
+        Some("default_publisher_group_order"),
+        "0x22 is GROUP_ORDER among Message Parameters and this among Extension Headers"
+    );
+    assert_eq!(name_of("parameters", 0x22).as_deref(), Some("group_order"));
 }

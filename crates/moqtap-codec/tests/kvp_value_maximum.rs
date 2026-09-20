@@ -23,23 +23,24 @@
 //! byte over the second. No frame is written either way.
 //!
 //! What differs is which of the two rules the error names, and the drafts name
-//! them separately. Before the writer applied the value rule, drafts 11 through
-//! 15 built the whole payload and reported the message rule, while drafts 16
-//! through 20 reported the value rule from inside their own parameter encoders —
-//! a difference in the codec, on a sentence the ten drafts share word for word.
+//! them separately. A writer that does not apply the value rule builds the whole
+//! payload and reports the message rule instead, which on drafts 11 through 15
+//! would diverge from drafts 16 through 20, whose parameter encoders report the
+//! value rule from inside themselves — a difference in the codec, on a sentence
+//! the ten drafts share word for word.
 //! The gates below are the same defect put to all ten, and they read the error,
 //! not just the refusal.
 //!
 //! # Why drafts 17 through 20 are driven through both of their namespaces
 //!
-//! Those four keep two parameter encoders, and until this was gated only one of
-//! them applied the maximum. Setup Options take their value shape from the
-//! type's parity and have bounded the value all along; Message Parameters take
-//! theirs from a table, and that encoder wrote a value of any length at all,
-//! while the decoder ten lines below it refused one. So the rule held in one
-//! namespace and not in its neighbour, inside a single module.
+//! Those four keep two parameter encoders, and the maximum has to be applied in
+//! both. Setup Options take their value shape from the type's parity; Message
+//! Parameters take theirs from a table, and a table-driven encoder that writes a
+//! value of any length while the decoder ten lines below it refuses one holds
+//! the rule in one namespace and not in its neighbour, inside a single module.
 //!
-//! It is worth saying how nearly this was missed. The table's length-prefixed
+//! It is worth saying why the table's rows look exempt and are not. The
+//! table's length-prefixed
 //! rows both carry structure rules of their own — AUTHORIZATION TOKEN must
 //! decode as a Token, SUBSCRIPTION FILTER as a filter — which reads like a
 //! reason an over-long opaque value cannot be spelled there at all. It is not
@@ -47,7 +48,7 @@
 //! whatever it is given, and a *well-formed* USE_VALUE Token can be as long as
 //! it likes: its Token Value has no length of its own and runs to the end of the
 //! parameter, so the structure rule is satisfied by construction. Both routes
-//! reach the length, and neither was stopped.
+//! reach the length, and both have to be stopped.
 //!
 //! Drafts 11 through 16 have one parameter encoder per namespace and no table,
 //! so a SUBSCRIBE carrying an unassigned odd type is enough there.
@@ -109,16 +110,16 @@ macro_rules! kvp_value_maximum_gates {
         ///
         /// # What it catches
         ///
-        /// Both places the rule was missing, each observed by making the change
+        /// Both places the rule has to hold, each observed by making the change
         /// and running it. Pointing drafts 11 through 15's parameter encoders
-        /// back at the unchecked list form, which is where they were:
+        /// at the unchecked list form:
         ///
         /// ```text
         /// a value past the maximum must be refused as a value, got Err(MessageTooLong(65554))
         /// ```
         ///
         /// And taking the maximum back out of drafts 17 through 19's Message
-        /// Parameter encoder, which never had it:
+        /// Parameter encoder:
         ///
         /// ```text
         /// a value past the maximum must be refused as a value, got Err(MessageTooLong(65549))
@@ -128,8 +129,8 @@ macro_rules! kvp_value_maximum_gates {
         /// rule instead of the value rule, and the difference between them is
         /// the framing each draft's SUBSCRIBE puts around it. That the payload
         /// is over its own limit in both is the module doc's arithmetic, and it
-        /// is why the old behaviour was never *wrong* — only less specific than
-        /// the layering the drafts state.
+        /// is why reporting the message rule is never *wrong* — only less
+        /// specific than the layering the drafts state.
         #[test]
         fn a_value_past_the_maximum_is_refused_by_the_rule_it_broke() {
             let message = $carrier(vec![opaque(super::PAST_THE_MAXIMUM)]);

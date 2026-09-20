@@ -201,7 +201,7 @@ macro_rules! caps_bind_the_reader {
 /// draft-07 states no reason phrase cap but refused to read 1025 bytes: Err(ReasonPhraseTooLong)
 /// ```
 ///
-/// Putting the URI check back on the encode side, where it used to be:
+/// Putting a URI cap on the encode side:
 ///
 /// ```text
 /// draft-07 states no URI cap but refused to write 8193 bytes: Err(GoAwayUriTooLong)
@@ -226,7 +226,8 @@ macro_rules! no_cap_is_invented {
                 got
             );
 
-            // Writing: the same, and this is the direction the codec got wrong.
+            // Writing: the same claim on the encode side, where a cap the
+            // draft does not state would refuse a URI it allows.
             let message = ControlMessage::GoAway(GoAway {
                 new_session_uri: std::iter::repeat_n(b'u', 8193).collect(),
             });

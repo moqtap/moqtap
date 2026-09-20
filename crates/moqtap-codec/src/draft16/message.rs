@@ -215,15 +215,35 @@ fn check_track_extension_values(extensions: &[KeyValuePair]) -> Result<(), Codec
                 let mut inner = &bytes[..];
                 let mut prev_key: u64 = 0;
                 let mut nested = Vec::new();
+                let mut readable = true;
                 while inner.has_remaining() {
                     match decode_kvp_delta_pair(&mut prev_key, &mut inner) {
                         Ok(pair) => nested.push(pair),
                         // Not a Key-Value-Pair run. See the note above: this is
                         // a malformed Track and not a session close.
-                        Err(_) => return Ok(()),
+                        //
+                        // `break` rather than ending the walk: Section 11.2's
+                        // rule ("A Track is considered malformed ... A
+                        // Key-Value-Pair cannot be parsed") is about the block
+                        // whose pairs will not parse, and says nothing about
+                        // its neighbours. Ending the walk would let a peer keep
+                        // an out-of-range extension from being looked at by
+                        // putting an unparseable block in front of it.
+                        Err(_) => {
+                            readable = false;
+                            break;
+                        }
                     }
                 }
-                check_track_extension_values(&nested)?;
+                // The pairs read before the failure are not checked either. A
+                // run that stops mid-pair was being read under framing it does
+                // not have, so the numbers ahead of the break are not reliably
+                // the types and values they look like — and refusing on one
+                // would close a session over a misparse. The whole block is
+                // carried, which is what the note above promises.
+                if readable {
+                    check_track_extension_values(&nested)?;
+                }
             }
             KvpValue::Bytes(_) => {}
         }
@@ -426,7 +446,8 @@ pub struct SubscribeOk {
     pub track_extensions: Vec<KeyValuePair>,
 }
 
-/// REQUEST_UPDATE (0x02). Renamed from SubscribeUpdate.
+/// REQUEST_UPDATE (0x02). Drafts 15 and earlier name this codepoint
+/// SUBSCRIBE_UPDATE.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestUpdate {
     pub request_id: VarInt,
@@ -480,7 +501,8 @@ pub struct PublishNamespace {
     pub parameters: Vec<KeyValuePair>,
 }
 
-/// PUBLISH_NAMESPACE_DONE (0x09). Draft-16: just request_id (was namespace in d15).
+/// PUBLISH_NAMESPACE_DONE (0x09). Draft-16 carries just request_id; draft-15
+/// carries the track namespace instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishNamespaceDone {
     pub request_id: VarInt,
@@ -1069,7 +1091,7 @@ fn decode_setup_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, Code
 }
 
 /// Encode a count-prefixed parameter list with delta-encoded Types, refusing
-/// every list [`decode_parameters_in`] would refuse.
+/// every list [`decode_parameters_in`] would refuse *over a value*.
 ///
 /// The duplicate rule is the sender's own and does not consult a registry, so
 /// there is nothing for the two namespaces to disagree about there. The value
@@ -1081,6 +1103,38 @@ fn decode_setup_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, Code
 /// that is not what its Type defines is one the receiver must close the session
 /// over, so writing it is not a way to send it — the sender's first sign of
 /// trouble would be the session going.
+///
+/// # The one rule that is decode-only, and why
+///
+/// [`check_message_parameters_are_known`] is not called here. That is the rule
+/// whose sentence has a second half: Section 9.2 says "All Message Parameters MUST be defined
+/// in the negotiated version of MOQT or negotiated via Setup Parameters", and
+/// it is that second clause the neighbouring function's own doc says a codec
+/// cannot settle — it describes an extension the two endpoints agreed on in
+/// their SETUP, which this codec does not implement.
+///
+/// A decoder has to resolve that the conservative way. It was handed bytes, it
+/// has no record of what the two peers negotiated, and the draft's answer to a
+/// parameter it cannot name is a close. An encoder is in the opposite position:
+/// its caller *is* the endpoint that negotiated, and is the only party that
+/// knows the type was agreed. Refusing here would make a negotiated extension
+/// unsendable through this codec — and unreplayable, which is the same argument
+/// `data_stream.rs`'s `extensions_permitted_at` makes about a rule that
+/// addresses the receiving endpoint: a writer that refused it could not
+/// reproduce a capture containing one.
+///
+/// Draft-17 takes the same position in the same place, with a fallback arm in
+/// its `encode_parameters` that writes an unknown Type as a plain even/odd pair
+/// while its decoder answers `UnknownMessageParameter` for the same number.
+/// This is a difference between the two directions, not between the drafts.
+///
+/// It is also a gated one rather than an accident.
+/// `tests/unknown_message_parameter.rs`'s `an_unknown_message_parameter_is_refused`
+/// drives exactly this asymmetry on this draft: it hands the encoder type 0x41,
+/// requires it to be written — its `expect` says in so many words that the
+/// encoder writes the parameters it is given — and requires the decoder to
+/// answer `UnknownMessageParameter`. A check here would fail that test on the
+/// line before the one it is about.
 fn encode_parameters_in(
     parameters: &[KeyValuePair],
     buf: &mut impl BufMut,

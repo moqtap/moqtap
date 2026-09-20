@@ -1,5 +1,5 @@
 #![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
-//! Rules drafts 17 through 20 state and this codec was not holding itself to.
+//! Rules drafts 17 through 20 state and this codec must hold itself to.
 //!
 //! Four rules, each pinned by what a caller can observe rather than by reading
 //! a field back:
@@ -77,7 +77,7 @@ const SUBGROUP_WITH_PROPERTIES: u8 = 0x11;
 ///
 /// ```text
 /// thread 'the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:104:5:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-17 wrote a datagram with the PROPERTIES bit and an empty block
 /// ```
 ///
@@ -86,7 +86,7 @@ const SUBGROUP_WITH_PROPERTIES: u8 = 0x11;
 ///
 /// ```text
 /// thread 'the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:192:13:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-19 refused a zero-length properties block on a subgroup stream, which
 /// Section 11.4.2 requires of an object with no properties: InvalidField
 /// ```
@@ -291,7 +291,7 @@ fn the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one() 
 ///
 /// ```text
 /// thread 'properties_are_not_written_beside_a_status_other_than_normal'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:275:5:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-18 wrote properties beside End of Track
 /// ```
 ///
@@ -301,7 +301,7 @@ fn the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one() 
 ///
 /// ```text
 /// thread 'properties_are_not_written_beside_a_status_other_than_normal'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:306:9:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-19 refused properties beside Normal, which Section 11.2.1.2 permits:
 /// InvalidField
 /// ```
@@ -472,7 +472,7 @@ fn namespace_17() -> moqtap_codec::types::TrackNamespace {
 ///
 /// ```text
 /// thread 'a_fetch_type_that_disagrees_with_its_body_is_refused'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:398:5:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-17 encoded a Standalone FETCH holding a joining body; it decodes as
 /// Err(VarInt(UnexpectedEnd))
 /// ```
@@ -488,7 +488,7 @@ fn namespace_17() -> moqtap_codec::types::TrackNamespace {
 ///
 /// ```text
 /// thread 'a_fetch_type_that_disagrees_with_its_body_is_refused'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:454:5:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-19 encoded a Standalone FETCH holding a joining body; it decodes as
 /// Err(VarInt(UnexpectedEnd))
 /// ```
@@ -594,7 +594,7 @@ fn a_fetch_type_that_disagrees_with_its_body_is_refused() {
 ///
 /// ```text
 /// thread 'a_request_error_redirect_must_match_its_error_code'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:512:5:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-18 encoded a REDIRECT error with no Redirect body; it decodes as
 /// Err(VarInt(UnexpectedEnd))
 /// ```
@@ -605,7 +605,7 @@ fn a_fetch_type_that_disagrees_with_its_body_is_refused() {
 ///
 /// ```text
 /// thread 'a_request_error_redirect_must_match_its_error_code'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:531:5:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-19 encoded a Redirect body under error code 0x1; it decodes as
 /// Err(InvalidField)
 /// ```
@@ -767,7 +767,7 @@ fn a_request_error_redirect_must_match_its_error_code() {
 ///
 /// ```text
 /// thread 'a_status_datagram_never_yields_a_payload'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:648:9:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-19 permitted a payload on a status datagram carrying status 0x00
 /// ```
 ///
@@ -776,7 +776,7 @@ fn a_request_error_redirect_must_match_its_error_code() {
 ///
 /// ```text
 /// thread 'a_status_datagram_never_yields_a_payload'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:626:33:
+/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
 /// draft-17 accepted 4 trailing byte(s) on a status 0x00 datagram and handed
 /// them back as [de, ad, be, ef]
 /// ```

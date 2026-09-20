@@ -84,16 +84,16 @@
 //! this endpoint's at all — a peer subscribing to it makes it the publisher —
 //! and a publisher has nothing to withdraw from.
 //!
-//! # The fetch half, and the record it took
+//! # The fetch half, and the record it takes
 //!
 //! A fetch is the other way this endpoint receives a track, and on drafts 14
-//! and 15 the sentence names it. Finding one took a record this crate did not
-//! have: `fetch()` put the namespace and the name into the message and kept a
-//! state machine under the Request ID and nothing else, so nothing here knew
-//! which track a fetch was for. The endpoint now writes the track down as the
-//! fetch is made, in a table of its own rather than in the alias table beside
-//! it — a fetch never holds a Track Alias, because its objects arrive on a
-//! stream that opens by naming the Request ID.
+//! and 15 the sentence names it. Finding one takes a record the Request ID
+//! alone can be looked up in: the namespace and the name go out in the FETCH
+//! and nothing carries them back, because draft-14 Section 10.4.4 opens the
+//! response stream with a FETCH_HEADER of a type and a Request ID and nothing
+//! else. So the endpoint writes the track down as the fetch is made, in a table
+//! of its own rather than in the alias table beside it — a fetch never holds a
+//! Track Alias.
 //!
 //! **And one fetch names no track at all.** A Joining Fetch identifies itself
 //! by the subscription it joins. Draft-14 Section 9.16.2 and
@@ -106,12 +106,12 @@
 //! outlives the subscription, so the lookup comes up empty precisely when
 //! there is still a fetch to cancel. The last gate here is that gate.
 //!
-//! It ran on draft-15 alone to begin with, and the reason was a gap rather
-//! than a difference between the drafts: draft-14 states the rule and this
-//! crate had no way to send the message. It has one now, so the gate runs on
-//! both. **A per-draft module that is missing a method looks exactly like a
-//! draft that does not have the feature**, and what tells the two apart is
-//! reading the draft rather than the module beside it.
+//! It runs on both, because draft-14 and draft-15 both state the rule. A gate
+//! that ran on draft-15 alone would be reporting a gap in the per-draft module
+//! rather than a difference between the drafts. **A per-draft module that is
+//! missing a method looks exactly like a draft that does not have the
+//! feature**, and what tells the two apart is reading the draft rather than the
+//! module beside it.
 //!
 //! # What makes the answer happen once
 //!

@@ -42,9 +42,8 @@ use moqtap_proxy::parser::data::DataStreamType;
 
 /// A [`FramerConfig`] with an explicit buffer cap.
 ///
-/// `FramerConfig` became `#[non_exhaustive]` in 0.4.0, so a struct literal
-/// no longer compiles from this crate; the builder is the replacement and
-/// this wrapper keeps the call sites below reading the way they did.
+/// `FramerConfig` is `#[non_exhaustive]`, so a struct literal does not
+/// compile from this crate; this wrapper keeps the call sites below short.
 fn capped(max_buffered_object_bytes: usize) -> FramerConfig {
     FramerConfig::new().with_max_buffered_object_bytes(max_buffered_object_bytes)
 }

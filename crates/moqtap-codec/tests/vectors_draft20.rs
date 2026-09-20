@@ -455,15 +455,14 @@ fn run_fetch_vectors(relative_path: &str) -> usize {
                 .unwrap_or_else(|| panic!("[{}] missing objects array", vector.id));
 
             // Resolution runs through `FetchObjectReader`, the same public API a
-            // consumer uses, rather than being recomputed here. An earlier
-            // revision of this test re-derived Group ID, Object ID, Subgroup ID
-            // and priority inline, which meant it compared the corpus against a
-            // second implementation living in the test file and never executed
-            // the codec's own Section 11.4.4.1 arithmetic at all. That shadow
-            // copy was wrong in the one place the corpus had no vector for —
-            // it reset the Object ID to 0 on a new group instead of continuing
-            // `prior + 1` — so the gap in the corpus and the bug in the test
-            // hid each other exactly.
+            // consumer uses, rather than being recomputed here. A test that
+            // re-derives Group ID, Object ID, Subgroup ID and priority inline
+            // compares the corpus against a second implementation living in the
+            // test file and never executes the codec's own Section 11.4.4.1
+            // arithmetic at all. Where the corpus has no vector for a case — a
+            // new group continuing `prior + 1` rather than resetting the Object
+            // ID to 0 — the shadow copy's error and the corpus gap hide each
+            // other exactly.
             let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
 
             for eo in expected_objs {

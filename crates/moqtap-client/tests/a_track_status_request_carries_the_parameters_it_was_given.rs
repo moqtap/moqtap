@@ -1,7 +1,7 @@
 #![cfg(any(feature = "draft12", feature = "draft13", feature = "draft14"))]
 
-//! A TRACK_STATUS request carries the parameters the caller gave it, on the
-//! three drafts that used to fill the field in for them.
+//! A TRACK_STATUS request carries the parameters the caller gave it, on
+//! drafts 12, 13 and 14.
 //!
 //! The third of the row's builders, after SUBSCRIBE and FETCH. The same claim
 //! and the same reason: each of these drafts registers AUTHORIZATION TOKEN,
@@ -11,7 +11,7 @@
 //! # Two shapes, because the request has two names
 //!
 //! Draft-12 calls the request `track_status_request` and keeps `track_status`
-//! for the answer, which has taken the caller's parameters all along. Drafts
+//! for the answer, whose builder takes the caller's parameters. Drafts
 //! 13 and 14 name the request `track_status` and word it like a SUBSCRIBE,
 //! with a priority, a group order, a forward flag and a filter of its own.
 //!
@@ -80,13 +80,12 @@ macro_rules! track_status_parameter_gates {
             ///
             /// # What it catches
             ///
-            /// Sending an empty list whatever the caller passed, which is
-            /// what all three drafts did:
+            /// Sending an empty list whatever the caller passed:
             ///
             /// ```text
             /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, and this call used to send an
-            /// empty list whatever it was given left: 0 right: 1
+            /// attached must reach the peer, not the empty list a call that
+            /// ignores its argument sends left: 0 right: 1
             /// ```
             ///
             /// It reddens three, this gate on each draft in the range and
@@ -108,8 +107,8 @@ macro_rules! track_status_parameter_gates {
                 assert_eq!(
                     carried.len(),
                     1,
-                    "the parameter the caller attached must reach the peer, and this call \
-                     used to send an empty list whatever it was given"
+                    "the parameter the caller attached must reach the peer, not the empty \
+                     list a call that ignores its argument sends"
                 );
                 assert_eq!(
                     carried[0].key.into_inner(),

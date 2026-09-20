@@ -239,7 +239,7 @@ async fn listener_builds_a_profile_through_the_supplied_installer() {
 ///
 /// ```text
 /// thread 'a_leg_with_a_profile_a_spec_and_an_installer_runs_on_the_installers_base'
-/// (62076) panicked at crates\moqtap-proxy\tests\transport_config.rs:210:5:
+/// (62076) panicked at crates\moqtap-proxy\tests\transport_config.rs:
 /// the installer was skipped because a capture was asked for beside it: the leg
 /// is running on quinn's defaults and reporting success
 /// ```

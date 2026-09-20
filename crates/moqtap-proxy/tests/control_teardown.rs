@@ -903,7 +903,7 @@ const SECOND_REASON: &[u8] = b"a later caller";
 ///
 /// ```text
 /// thread 'a_second_close_inside_the_drain_window_is_refused_and_the_first_pair_stands'
-/// panicked at crates\moqtap-proxy\tests\control_teardown.rs:927:10:
+/// panicked at crates\moqtap-proxy\tests\control_teardown.rs:
 /// a session already draining under one close does not take a second: ()
 /// ```
 ///

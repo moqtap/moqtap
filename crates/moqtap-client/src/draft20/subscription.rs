@@ -145,16 +145,34 @@ impl SubscriptionStateMachine {
         }
     }
 
-    /// Active -> Done (PUBLISH_DONE received).
+    /// Active -> Done (PUBLISH_DONE received, and `Done` unchanged).
+    ///
+    /// # Why `Done` is not refused
+    ///
+    /// Because this draft has no UNSUBSCRIBE — a subscriber ends a subscription
+    /// by resetting its own request stream — and a publisher that was already
+    /// sending PUBLISH_DONE when that happened is not misbehaving. The same
+    /// tolerance the drafts with the message need, for the same reason: the end
+    /// of a subscription is two events and they can arrive in either order.
+    ///
+    /// Refusing the second half would make a conforming relay's last message
+    /// read as a protocol error against this endpoint's own bookkeeping — an
+    /// `invalid transition from Done` raised against this endpoint, not the
+    /// relay, and so a wall rather than a finding about the peer.
+    ///
+    /// `Idle` and `Subscribing` are still refused. In neither is there an active
+    /// subscription for this message to end.
     pub fn on_publish_done(&mut self) -> Result<(), SubscriptionError> {
-        if self.state == SubscriptionState::Active {
-            self.state = SubscriptionState::Done;
-            Ok(())
-        } else {
-            Err(SubscriptionError::InvalidTransition {
+        match self.state {
+            SubscriptionState::Active => {
+                self.state = SubscriptionState::Done;
+                Ok(())
+            }
+            SubscriptionState::Done => Ok(()),
+            _ => Err(SubscriptionError::InvalidTransition {
                 from: self.state,
                 event: "on_publish_done".to_string(),
-            })
+            }),
         }
     }
 }

@@ -1,13 +1,12 @@
 //! One value rewritten inside a frame this codec wrote.
 //!
 //! Several files here drive a decode rule by handing the decoder a frame whose
-//! single wrong value is the rule's subject. The frame used to come straight
-//! from the encoder with the wrong value passed in, and that stopped working
-//! for a reason worth stating: the encoder refuses every value the decoder
-//! refuses. A value that is not the serialization its Type defines is one the
-//! receiver must close the session over, so writing it is not a way to send it,
-//! and the tests that read the rule from the receiver's side can no longer ask
-//! the sender to produce their fixture.
+//! single wrong value is the rule's subject. The frame cannot come straight
+//! from the encoder with the wrong value passed in, for a reason worth stating:
+//! the encoder refuses every value the decoder refuses. A value that is not the
+//! serialization its Type defines is one the receiver must close the session
+//! over, so writing it is not a way to send it, and the tests that read the rule
+//! from the receiver's side cannot ask the sender to produce their fixture.
 //!
 //! So the frame is written around a value the encoder will write, and the value
 //! alone is rewritten afterwards. Everything else is still the encoder's: the

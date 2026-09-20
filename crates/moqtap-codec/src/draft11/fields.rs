@@ -22,25 +22,108 @@ fn loc_to_json(loc: &Location) -> Value {
 }
 
 /// Parse an authorization_token byte value into JSON.
+///
+/// Draft-11 Section 8.2.1.1 Figure 4 gives the Token four fields, three of them
+/// optional, with the first deciding which of the others are on the wire:
+///
+/// ```text
+/// TOKEN {
+///   Alias Type (i),
+///   [Token Alias (i),]
+///   [Token Type (i),]
+///   [Token Value (..)]
+/// }
+/// ```
+///
+/// Table 3 spells out which: DELETE (0x0) and USE_ALIAS (0x2) are "an Alias but
+/// no Type or Value", REGISTER (0x1) is "an Alias, a Type and a Value", and
+/// USE_VALUE (0x3) is "no Alias and there is a Type and Value". So the second
+/// varint is the Alias on three of the four forms and the Token Type on one.
+///
+/// So the second varint has to be read against the Alias Type rather than
+/// named ahead of it: `token_type` is its name on USE_VALUE alone, and on the
+/// other three forms it is the Alias. [`crate::auth_token::TokenAliasType`] is
+/// the same table in code, and draft-13's renderer branches on it the same
+/// way.
+///
+/// # What a value it cannot read renders as
+///
+/// The raw bytes, as `fields::params` and every other draft's renderer do.
+/// Field extraction runs on a message that has already decoded, so it has no
+/// refusal to give: what a peer sent is what there is to show.
+///
+/// Draft-11 is the one draft where nothing public can hand this a value its own
+/// decoder did not already hold to the structure. `check_authorization_tokens`
+/// runs `AuthorizationToken::decode` over every 0x01 on the way in, and this
+/// draft alone keeps the token out of the setup namespace — so
+/// `setup_option_name`, which exists precisely to hand one draft bytes another
+/// draft's peer sent, answers `path` for a setup 0x01 and never arrives here.
+/// The reads are `if let` anyway, because that guarantee belongs to two
+/// functions in a different file and a renderer that panics on the bytes it was
+/// handed is wrong whether or not today's call graph reaches it. Drafts 12 and
+/// 13, which moved the token to 0x03 in both namespaces, are where the same
+/// `unwrap` was reachable.
 fn auth_token_to_json(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let alias_type = VarInt::decode(&mut buf).unwrap();
-    let token_type = VarInt::decode(&mut buf).unwrap();
-    let token_value = buf; // remaining bytes
+    let Ok(alias_type) = VarInt::decode(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
+    let at = alias_type.into_inner();
     let mut o = Map::new();
-    o.insert("alias_type".into(), vi(alias_type.into_inner()));
-    o.insert("token_type".into(), vi(token_type.into_inner()));
-    o.insert("token_value".into(), Value::Bytes(token_value.to_vec()));
+    o.insert("alias_type".into(), vi(at));
+    match at {
+        // DELETE, USE_ALIAS: an Alias and nothing else.
+        0 | 2 => {
+            if let Ok(ta) = VarInt::decode(&mut buf) {
+                o.insert("token_alias".into(), vi(ta.into_inner()));
+            }
+        }
+        // REGISTER: an Alias, a Type and a Value.
+        1 => {
+            if let Ok(ta) = VarInt::decode(&mut buf) {
+                o.insert("token_alias".into(), vi(ta.into_inner()));
+            }
+            if let Ok(tt) = VarInt::decode(&mut buf) {
+                o.insert("token_type".into(), vi(tt.into_inner()));
+            }
+            o.insert("token_value".into(), Value::Bytes(buf.to_vec()));
+        }
+        // USE_VALUE (0x3), and any Alias Type this draft does not assign: a
+        // Type and a Value. An unassigned code has no serialization at all —
+        // Section 8.2.1.1 calls the Alias Type "an integer defining both the
+        // serialization and the processing behavior of the receiver" — so this
+        // arm is a guess. It is the one that shows the most of an unreadable
+        // value rather than the one the draft endorses.
+        _ => {
+            if let Ok(tt) = VarInt::decode(&mut buf) {
+                o.insert("token_type".into(), vi(tt.into_inner()));
+            }
+            o.insert("token_value".into(), Value::Bytes(buf.to_vec()));
+        }
+    }
     Value::Map(o)
 }
 
 /// Convert draft-11 KVP list to JSON for setup messages.
-fn kvp_to_json_setup(params: &[KeyValuePair]) -> Value {
+///
+/// The three Setup Parameters Section 8.3.2 defines, and no more. There is
+/// deliberately no `authorization_token` here: draft-11 numbers that parameter
+/// 0x01 in the version-specific namespace only, where 0x01 among Setup
+/// Parameters is PATH, and Section 8.2.1 says outright that "since Setup
+/// parameters use a separate namespace, it is impossible for these parameters
+/// to appear in Setup messages". Draft-12 Section 8.3.2.4 is where the token
+/// joins this list.
+pub(crate) fn kvp_to_json_setup(params: &[KeyValuePair]) -> Value {
     crate::fields::kvp_entries(params, |key, value| match (key, value) {
         (0x01, KvpValue::Bytes(b)) => {
             (Some("path"), Some(Value::Text(String::from_utf8_lossy(b).into_owned())))
         }
         (0x02, KvpValue::Varint(v)) => (Some("max_request_id"), Some(vi(v.into_inner()))),
+        // Section 8.3.2.3, and 0x04 rather than 0x03: draft-11 leaves 0x03
+        // unassigned in this namespace.
+        (0x04, KvpValue::Varint(v)) => {
+            (Some("max_auth_token_cache_size"), Some(vi(v.into_inner())))
+        }
         _ => (None, None),
     })
 }

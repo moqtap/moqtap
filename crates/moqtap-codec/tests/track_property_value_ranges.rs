@@ -304,6 +304,65 @@ macro_rules! track_property_range_gate {
                 assert_eq!(tail.len(), 1);
                 assert_eq!(tail[0].value, KvpValue::Bytes(vec![0xFF]));
             }
+
+            /// An unreadable Immutable block does not stop the entries after it
+            /// from being checked.
+            ///
+            /// The test above says such a block is carried. This one says what
+            /// "carried" is scoped to. The walk answered the unreadable block by
+            /// returning from the whole function, so every property *after* it
+            /// went unexamined — and a peer wanting an out-of-range value
+            /// carried had only to put a one-byte 0xFF block in front of it.
+            /// That is the same opt-out the module note describes one level up,
+            /// reached from the other side.
+            ///
+            /// The draft scopes the rule to the block and not to its
+            /// neighbours. Draft-16 Section 11.2: "A Track is considered
+            /// malformed ... if any of the following conditions are detected:
+            /// ... A Key-Value-Pair cannot be parsed." Drafts 17 and later keep
+            /// the sentence under Immutable Properties. Nothing in it reaches
+            /// the run outside.
+            ///
+            /// # What it catches
+            ///
+            /// With `Err(_) => return Ok(())` restored, the out-of-range value
+            /// is handed to the caller behind the block that hid it:
+            ///
+            /// ```text
+            /// assertion `left == right` failed: type 0x22 value 0 behind an unreadable block must still be refused
+            ///   left: Ok([KeyValuePair { key: VarInt(11), value: Bytes([255]) }, KeyValuePair { key: VarInt(34), value: Varint(VarInt(0)) }])
+            ///  right: Err(TrackPropertyValueOutOfRange { key: 34, value: 0 })
+            /// ```
+            #[test]
+            fn an_unreadable_immutable_block_does_not_shield_what_follows_it() {
+                // Types in a run ascend, so "after the block" is only a place a
+                // Type above 0x0B can be. That is where both entries with a
+                // range live; draft-16's extra DELIVERY_TIMEOUT row is 0x02 and
+                // can only precede the block, which is the case the gate above
+                // already covers.
+                let after: Vec<_> = OUT_OF_RANGE
+                    .iter()
+                    .chain($also_refused)
+                    .filter(|&&(key, _)| key > IMMUTABLE)
+                    .collect();
+                assert!(!after.is_empty(), "something must be able to follow the block");
+
+                for &&(key, value) in &after {
+                    let mut run = Vec::new();
+                    let mut prev = 0;
+                    // The same one-byte block as above: 0xFF opens a varint
+                    // eight bytes wide with nothing behind it.
+                    kvp_bytes(&mut prev, IMMUTABLE, &[0xFF], &mut run);
+                    kvp_varint(&mut prev, key, value, &mut run);
+
+                    assert_eq!(
+                        tail_of(&subscribe_ok(&run)),
+                        Err(CodecError::TrackPropertyValueOutOfRange { key, value }),
+                        "type {key:#x} value {value} behind an unreadable block \
+                         must still be refused",
+                    );
+                }
+            }
         }
     };
 }

@@ -70,11 +70,6 @@
 //! directions live in one map per request kind, so the record of what actually
 //! arrived is what keeps them apart.
 //!
-//! # What was here before
-//!
-//! Nothing on any of the fourteen. Every draft states the rule and every one
-//! makes it a MUST; no endpoint compared a prefix with anything.
-//!
 //! # The third statement, on drafts 18 and 19
 //!
 //! Those two say it once more for a REQUEST_UPDATE carrying the

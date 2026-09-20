@@ -146,7 +146,7 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// ```text
 /// ---- extension_headers_on_a_non_normal_status_are_refused_and_close stdout ----
 ///
-/// thread 'extension_headers_on_a_non_normal_status_are_refused_and_close' (42668) panicked at crates\moqtap-client\tests\draft16_extensions_on_non_normal_status.rs:240:5:
+/// thread 'extension_headers_on_a_non_normal_status_are_refused_and_close' (42668) panicked at crates\moqtap-client\tests\draft16_extensions_on_non_normal_status.rs:
 /// Section 10.2.1.2 answers this with a close, but close_for_data_stream declined
 /// ```
 #[tokio::test]

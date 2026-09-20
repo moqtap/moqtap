@@ -30,17 +30,6 @@
 //! peer answered, which is the other direction from the file beside this one.
 //! The two are held apart, and the last gate of each is the one that says so.
 //!
-//! # What was here before
-//!
-//! Drafts 07 through 13 had both halves and nothing observed either. Drafts 14
-//! through 16 had neither: no way to withdraw an announcement of this
-//! endpoint's own, and no dispatch for the cancellation that arrives about one,
-//! so the rule above had nothing to be true of. What those three did have was a
-//! PUBLISH_NAMESPACE_DONE handler pointed the wrong way, ending announcements
-//! this endpoint had made when the peer withdrew one of its own - draft-14's
-//! ended every one of them at once. The last gate here is what holds that
-//! apart.
-//!
 //! # Why none of this ends the session
 //!
 //! "The publisher does not send UNANNOUNCE" describes what the publisher does,

@@ -20,13 +20,12 @@
 //!
 //! # "Data, then a reset" is an order here, not a wait
 //!
-//! Both reset cases used to write their bytes, sleep, and then reset —
-//! 100 ms on the data stream and 150 ms on the control stream — because a
-//! reset that overtook the bytes would leave the *reset* assertions green
-//! and only the byte count wrong. A duration cannot make that ordering
-//! true; on a loaded box it just makes it likely.
+//! A reset that overtook the bytes would leave the *reset* assertions green
+//! and only the byte count wrong, and a sleep between the write and the
+//! reset — 100 ms on the data stream, 150 ms on the control stream — cannot
+//! make that ordering true; on a loaded box it only makes it likely.
 //!
-//! Now the side that reads says when it holds the bytes, over a
+//! So the side that reads says when it holds the bytes, over a
 //! `oneshot`, and the side that resets waits for that. The data case reads
 //! `PARTIAL_GROUP` with `read_exact` before releasing the upstream; the
 //! control case has the upstream read the forwarded CLIENT_SETUP before
@@ -138,10 +137,9 @@ impl TeardownObserver {
 /// control path, so the `pipe_control_mutating` propagation sites are
 /// exercised as well as `pipe_control_passthrough`'s.
 ///
-/// 0.3.x spelled this `wants_control_mutation() -> true`. Hook v2 asks
-/// the same question through [`Interest::CONTROL`], which is what
-/// `session.rs`'s `control_mutation` gate reads — the routing decision is
-/// identical, so every assertion below is unchanged.
+/// It asks through [`Interest::CONTROL`], which is what `session.rs`'s
+/// `control_mutation` gate reads, and that gate is the whole of the
+/// routing decision between the two control pipes.
 ///
 /// It counts the control messages it is shown, because that is the only
 /// thing that distinguishes the two paths from outside: `on_control_message`
@@ -551,12 +549,13 @@ const IDLE_STOP_WINDOW: Duration = Duration::from_millis(400);
 /// This is the same claim as
 /// [`client_stop_sending_reaches_the_upstream_with_the_same_code`] minus its
 /// workaround. That test keeps the upstream writing in a 20 ms loop, and the
-/// loop is not incidental — it is the only reason the shipped code passed
-/// it. Before the watcher a `STOP_SENDING` was noticed *only* when the next
-/// write to the destination failed, so a publisher between groups, or one
-/// that has finished a subgroup and is waiting for the next, was never
-/// stopped at all. Removing the loop is the whole test: the upstream here
-/// writes four bytes and then does nothing but wait to be told.
+/// loop is not incidental — it is what lets that test pass even without the
+/// `stop.watch()` branch, because without the watcher a `STOP_SENDING` is
+/// noticed *only* when the next write to the destination fails, so a
+/// publisher between groups, or one that has finished a subgroup and is
+/// waiting for the next, is never stopped at all. Removing the loop is the
+/// whole test: the upstream here writes four bytes and then does nothing but
+/// wait to be told.
 ///
 /// It runs on the **framed** pipe — an observer is attached, so
 /// `objects_enabled` is true. `interest_none.rs`'s

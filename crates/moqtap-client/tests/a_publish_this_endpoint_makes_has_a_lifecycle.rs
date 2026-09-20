@@ -11,9 +11,9 @@
 //! message. The subscriber either accepts or rejects the subscription using
 //! PUBLISH_OK or PUBLISH_ERROR. A subscriber initiates a subscription to a
 //! track by sending the SUBSCRIBE message." Both halves of the first sentence
-//! are the point: the two drafts carried the subscriber's half and the
-//! publisher's half of the PUBLISH sequence was missing, so an application
-//! could take an offer and never make one.
+//! are the point: an application that can take an offer but cannot make one has
+//! only half of the sequence the drafts describe, and the publisher's half is
+//! what this file holds.
 //!
 //! What follows the answer is the same sentence for both sequences: "Once
 //! either of these sequences is successful, the subscription can be updated by
@@ -28,23 +28,16 @@
 //! below are 12 and 13's, and the gate bodies carry draft-14's own where a
 //! message names one.
 //!
-//! # What was here before
+//! # What the caller names and what this endpoint derives
 //!
-//! Drafts 12 and 13 carried PUBLISH in the codec, took one from the peer, gave
-//! it a lifecycle and answered it. Neither had an `Endpoint::publish` or a
-//! `Connection::publish`, and the state machine was constructed in one place
-//! on each draft, which was `receive_publish`. The two methods that take the
-//! answer were there and did nothing: they ignored their argument, returned
-//! `Ok(())`, and said in their own doc comments that they were the publisher
-//! side of an offer the crate had no way to make.
-//!
-//! Draft-14 could make the offer and could not describe it. `publish` took a
-//! namespace, a name, an alias and a forwarding preference, and filled in the
-//! delivery order, the Content Exists flag, the largest location and the
-//! parameters itself. An application offering a track that already had content
-//! could not say so, and the subscriber read "no object has been published on
-//! this track" instead. It takes all four from the caller now, which is what
-//! puts it in this file.
+//! `publish` takes the same seven arguments on all three drafts: the namespace,
+//! the name, the alias, the delivery order, the largest location, the
+//! forwarding flag and the parameters. The four after the alias are the ones an
+//! offer would otherwise decide on the application's behalf, and the largest
+//! location is the one that shows why that matters — an application offering a
+//! track that already has content has to be able to say so, or the subscriber
+//! reads "no object has been published on this track" whatever the application
+//! knows.
 //!
 //! # The alias, and where its rule is measured
 //!
@@ -55,9 +48,8 @@
 //! an active subscription, it MUST close the session with error 'Duplicate
 //! Track Alias'." The half addressed to the endpoint choosing the alias is in
 //! `an_endpoint_gives_one_alias_to_one_track.rs`, which reaches these two
-//! drafts for the first time now that they can choose one; the half addressed
-//! to the endpoint receiving it is in
-//! `duplicate_track_alias_closes_the_session.rs`, which already did.
+//! drafts because they can choose one; the half addressed to the endpoint
+//! receiving it is in `duplicate_track_alias_closes_the_session.rs`.
 //!
 //! Three things are gated here and not there, because all three are about the
 //! offer's own lifetime rather than about the sentence. An offer of this
@@ -66,8 +58,8 @@
 //! back when the subscription ends with SUBSCRIBE_DONE, which is the word
 //! "simultaneously" on the ending this file owns. And an accepted offer of
 //! this endpoint's is in the set an arriving PUBLISH is judged against, which
-//! is the second of those two rules reading a record that did not exist here
-//! before.
+//! is the second of those two rules reading a record that only an offer of
+//! this endpoint's own writes.
 //!
 //! # What the endpoint does not decide
 //!
@@ -92,28 +84,16 @@
 //! the one gate whose subject is the other half of the alias sentence, which
 //! is a session close and says so.
 //!
-//! # Two gates draft-14 does not have
+//! # The two gates about the answer
 //!
-//! Both are about the *answer* rather than the offer, and each fails there for
-//! a reason of its own.
-//!
-//! `receive_publish_error` on draft-14 ends by returning `Ok(())` for an
-//! identifier it found nothing under, while `receive_publish_ok` beside it
-//! answers `UnknownRequest` for that same identifier. One offer, two answers,
-//! two verdicts on the same unknown id.
-//!
-//! And both of those methods read the one map draft-14 keeps for publishes in
-//! either direction, so a PUBLISH_OK naming an offer the *peer* made is taken
-//! as an answer to one of this endpoint's. The record that tells the two apart
-//! is right there - `inbound_publishes` holds the peer's offer and never this
-//! endpoint's - and neither answer consults it, though `receive_unsubscribe`
-//! on the same draft now does.
-//!
-//! Neither is a consequence of the change here; draft-14 joined this file
-//! because its `publish` stopped deciding four of the message's fields for
-//! the caller, and these two were what joining it revealed. Closing them is
-//! a change of its own: turning draft-14's last macro argument from
-//! `neither` to `both` is what will do it.
+//! Both are about the *answer* rather than the offer, and all three drafts run
+//! them. An identifier nothing was offered under is refused by
+//! `receive_publish_ok` and by `receive_publish_error` alike, and so is an
+//! answer naming an offer the *peer* made: `inbound_publishes` holds the peer's
+//! offer and never this endpoint's, so that is the record telling the two
+//! directions apart - consulted by both answers on draft-14, where one map
+//! holds publishes in either direction, and kept apart from `publishes`
+//! outright on drafts 12 and 13.
 
 //! # Ablations, measured
 //!
@@ -121,12 +101,14 @@
 //! `moqtap-client` can reach, and reverted. Each gate records the ones
 //! that redden it.
 //!
-//! Four of them are the four fields `publish` takes and used to decide, and
-//! each is cut on all three drafts at once, because all three now build the
-//! message with the same call. The rest were cut on drafts 12 and 13 only,
-//! which is where the code they cut lives: draft-14 reaches those same claims
-//! through code of its own, and the reach sentences say which drafts each cut
-//! was applied to rather than which drafts the claim covers.
+//! Four of them are the four the read-back gate covers — the delivery order,
+//! the parameters, the largest location, and the Content Exists flag derived
+//! from that location — and each is cut on all three drafts at once, because
+//! all three build the message with the same call. The rest were cut on
+//! drafts 12 and 13 only, which is where the code they cut lives: draft-14
+//! reaches those same claims through code of its own, and the reach sentences
+//! say which drafts each cut was applied to rather than which drafts the claim
+//! covers.
 //!
 //! Four of them reach past this file, into
 //! `an_endpoint_gives_one_alias_to_one_track.rs`, and that is the honest
@@ -135,13 +117,13 @@
 //! the aliases already spoken for, reaches every draft that can build an offer
 //! rather than only these two.
 //!
-//! One gate was rewritten because of what the pass showed. The cut that throws
-//! the peer's refusal away reddened the gates on either side of
-//! `a_refused_offer_opened_no_subscription` and not that one, which was the
-//! gate it was written for: the assertion asked only that SUBSCRIBE_DONE fail
-//! with a publish-flow error, and that is true of an offer that is over and of
-//! one still waiting for an answer alike. It asks a question the two states
-//! answer differently now.
+//! One gate here is shaped by what the cuts showed. A SUBSCRIBE_DONE is refused
+//! with a publish-flow error from a refused offer and from one still waiting for
+//! an answer alike, so a gate asking only that question cannot tell the two
+//! states apart and stays green under the cut that throws the peer's refusal
+//! away. `a_refused_offer_opened_no_subscription` asks for a second refusal and
+//! a late acceptance as well, which the two states answer differently, and that
+//! cut reddens it.
 
 #![allow(clippy::items_after_test_module)]
 
@@ -213,9 +195,9 @@ macro_rules! publisher_ends {
 
 /// The two gates about the answer rather than the offer.
 ///
-/// Draft-14 passes neither, for two reasons of its own that the module
-/// doc sets out. The selector is what keeps that a stated exclusion
-/// rather than a gate quietly missing from a draft.
+/// Every draft here passes `both`. The selector is what would keep a draft
+/// that cannot run them a stated exclusion rather than a gate quietly
+/// missing from a draft.
 #[macro_export]
 macro_rules! answer_gates {
     (neither) => {};
@@ -227,10 +209,9 @@ macro_rules! answer_gates {
         ///
         /// # What it catches
         ///
-        /// Taking the acceptance and dropping it, which is what both drafts
-        /// did: `receive_publish_ok` ignored its argument and returned
-        /// `Ok(())`, so nothing the subscription did afterwards had a state to
-        /// be judged against:
+        /// Taking the acceptance and dropping it — `receive_publish_ok`
+        /// ignoring its argument and returning `Ok(())`, so nothing the
+        /// subscription does afterwards has a state to be judged against:
         ///
         /// ```text
         /// an acceptance of an offer that was never made, and instead: Ok(())
@@ -249,17 +230,15 @@ macro_rules! answer_gates {
         /// one in `an_endpoint_gives_one_alias_to_one_track.rs`:
         /// `an_alias_is_free_once_its_offer_ends`.
         ///
-        /// Returning `Ok(())` when the identifier names no offer, which is what
-        /// draft-14's refusal did while the acceptance beside it answered
-        /// `UnknownRequest`:
+        /// Returning `Ok(())` from the refusal when the identifier names no
+        /// offer, while the acceptance beside it answers `UnknownRequest`:
         ///
         /// ```text
         /// a refusal of an offer that was never made, and instead: Ok(())
         /// ```
         ///
         /// It reddens four: this gate on draft-14, and three in
-        /// `endpoint_tests.rs` that were rewritten alongside it because they had
-        /// asserted the behaviour being removed.
+        /// `endpoint_tests.rs`.
         #[test]
         fn an_answer_naming_no_offer_is_refused() {
             let mut ep = offered();
@@ -286,10 +265,9 @@ macro_rules! answer_gates {
         ///
         /// # What it catches
         ///
-        /// Taking the acceptance and dropping it, which is what both drafts
-        /// did: `receive_publish_ok` ignored its argument and returned
-        /// `Ok(())`, so nothing the subscription did afterwards had a state to
-        /// be judged against:
+        /// Taking the acceptance and dropping it — `receive_publish_ok`
+        /// ignoring its argument and returning `Ok(())`, so nothing the
+        /// subscription does afterwards has a state to be judged against:
         ///
         /// ```text
         /// the peer's own offer was answered as though this endpoint had made
@@ -323,17 +301,17 @@ macro_rules! answer_gates {
         /// test on them to cut.
         ///
         /// The same, from the refusal. It needs a cut of its own because it is
-        /// a second call site of the same idea, and the gate above drove only
-        /// the acceptance until this cut reddened nothing:
+        /// a second call site of the same idea, and a gate that drives only the
+        /// acceptance leaves this one unmeasured:
         ///
         /// ```text
         /// the peer's own offer was refused as though this endpoint had made
         /// it, and instead: Ok(())
         /// ```
         ///
-        /// It reddens one, the same gate on draft-14. Before the gate drove
-        /// both answers it reddened nothing at all, which is how the missing
-        /// half was found.
+        /// It reddens one, the same gate on draft-14, and only because that
+        /// gate drives both answers: an acceptance-only gate leaves this cut
+        /// green, which is why the assertion below is a pair.
         #[test]
         fn an_answer_to_the_peers_own_offer_is_not_an_answer_to_ours() {
             let mut ep = offered();
@@ -496,8 +474,7 @@ macro_rules! outbound_publish_gates {
             /// # What it catches
             ///
             /// Building the offer with a Track Alias of zero rather than the one
-            /// the caller chose, which is what draft-14's PUBLISH did until it was
-            /// given the field:
+            /// the caller chose:
             ///
             /// ```text
             /// assertion `left == right` failed: the alias the offer spends left:
@@ -568,10 +545,9 @@ macro_rules! outbound_publish_gates {
             ///
             /// # What it catches
             ///
-            /// Taking the acceptance and dropping it, which is what both drafts
-            /// did: `receive_publish_ok` ignored its argument and returned
-            /// `Ok(())`, so nothing the subscription did afterwards had a state to
-            /// be judged against:
+            /// Taking the acceptance and dropping it — `receive_publish_ok`
+            /// ignoring its argument and returning `Ok(())`, so nothing the
+            /// subscription does afterwards has a state to be judged against:
             ///
             /// ```text
             /// Section 4.1 lets the publisher end it with SUBSCRIBE_DONE:
@@ -603,10 +579,9 @@ macro_rules! outbound_publish_gates {
             ///
             /// # What it catches
             ///
-            /// Taking the acceptance and dropping it, which is what both drafts
-            /// did: `receive_publish_ok` ignored its argument and returned
-            /// `Ok(())`, so nothing the subscription did afterwards had a state to
-            /// be judged against:
+            /// Taking the acceptance and dropping it — `receive_publish_ok`
+            /// ignoring its argument and returning `Ok(())`, so nothing the
+            /// subscription does afterwards has a state to be judged against:
             ///
             /// ```text
             /// a refused offer cannot then be accepted, and instead: Ok(())
@@ -641,8 +616,8 @@ macro_rules! outbound_publish_gates {
                 // The two assertions below are what tell a refused offer from
                 // one still waiting for an answer. The SUBSCRIBE_DONE beneath
                 // them is not: it is refused from either state and names the
-                // same error doing it, so a gate that asked only that question
-                // passed with the refusal thrown away.
+                // same error doing it, so a gate that asks only that question
+                // passes with the refusal thrown away.
                 let again = ep.receive_publish_error(&publish_error(OURS_FIRST));
                 assert!(
                     matches!(again, Err(EndpointError::PublishFlow(_))),
@@ -666,10 +641,9 @@ macro_rules! outbound_publish_gates {
             ///
             /// # What it catches
             ///
-            /// Taking the acceptance and dropping it, which is what both drafts
-            /// did: `receive_publish_ok` ignored its argument and returned
-            /// `Ok(())`, so nothing the subscription did afterwards had a state to
-            /// be judged against:
+            /// Taking the acceptance and dropping it — `receive_publish_ok`
+            /// ignoring its argument and returning `Ok(())`, so nothing the
+            /// subscription does afterwards has a state to be judged against:
             ///
             /// ```text
             /// Section 4.1 says exactly one answer, and instead: Ok(())
@@ -747,10 +721,9 @@ macro_rules! outbound_publish_gates {
             ///
             /// # What it catches
             ///
-            /// Taking the acceptance and dropping it, which is what both drafts
-            /// did: `receive_publish_ok` ignored its argument and returned
-            /// `Ok(())`, so nothing the subscription did afterwards had a state to
-            /// be judged against:
+            /// Taking the acceptance and dropping it — `receive_publish_ok`
+            /// ignoring its argument and returning `Ok(())`, so nothing the
+            /// subscription does afterwards has a state to be judged against:
             ///
             /// ```text
             /// the publisher ends it: PublishFlow(InvalidTransition { from:
@@ -833,10 +806,9 @@ macro_rules! outbound_publish_gates {
             ///
             /// # What it catches
             ///
-            /// Taking the acceptance and dropping it, which is what both drafts
-            /// did: `receive_publish_ok` ignored its argument and returned
-            /// `Ok(())`, so nothing the subscription did afterwards had a state to
-            /// be judged against:
+            /// Taking the acceptance and dropping it — `receive_publish_ok`
+            /// ignoring its argument and returning `Ok(())`, so nothing the
+            /// subscription does afterwards has a state to be judged against:
             ///
             /// ```text
             /// the publisher ends it: PublishFlow(InvalidTransition { from:
@@ -879,10 +851,9 @@ macro_rules! outbound_publish_gates {
             ///
             /// # What it catches
             ///
-            /// Taking the acceptance and dropping it, which is what both drafts
-            /// did: `receive_publish_ok` ignored its argument and returned
-            /// `Ok(())`, so nothing the subscription did afterwards had a state to
-            /// be judged against:
+            /// Taking the acceptance and dropping it — `receive_publish_ok`
+            /// ignoring its argument and returning `Ok(())`, so nothing the
+            /// subscription does afterwards has a state to be judged against:
             ///
             /// ```text
             /// a PUBLISH took the alias a subscription this endpoint publishes
@@ -977,8 +948,7 @@ macro_rules! outbound_publish_gates {
             /// # What it catches
             ///
             /// Writing the Content Exists flag from a constant rather than from the
-            /// field it governs, which is what draft-14 did for every offer it
-            /// built:
+            /// field it governs:
             ///
             /// ```text
             /// an offer the encoder accepts is a coherent one: InvalidField
@@ -987,7 +957,7 @@ macro_rules! outbound_publish_gates {
             /// It reddens three, this gate on drafts 12, 13 and 14 and nothing else.
             ///
             /// Filling in the delivery order instead of passing the caller's
-            /// through, which is the other half of what draft-14 did:
+            /// through:
             ///
             /// ```text
             /// assertion `left == right` failed: the delivery order is the caller's

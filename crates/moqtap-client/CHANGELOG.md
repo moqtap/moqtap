@@ -5,6 +5,38 @@ All notable changes to moqtap-client will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.0] - 2026-09-20
+
+The draft-agnostic facade gains a data plane and a peer-initiated request direction, and `AnyConnectionError` gains the reason a call stopped rather than only the text to print.
+
+### Added
+
+- **A data plane on `AnyConnection`**: `open_subgroup`, `accept_subgroup`, `accept_fetch`, `write_object`, `read_object` and `finish`, over `AnySubgroupWriter`, `AnySubgroupReader`, `AnyFetchReader`, `AnyObject` and `AnyFetchObject`. `Draft16FetchStream` carries the header inheritance draft-16's codec leaves to its caller.
+- **Peer-initiated requests**: `recv_inbound` returns an `AnyArrival`, with `accept_subscribe` and `recv_response`. `AnyInboundRequest` is `#[must_use]` and refuses the request when dropped on drafts 17 and later.
+- **Requests whose halves cannot come apart**: `subscribe_range` takes a `SubscribeRange` and `SubscribeEnd` in absolute terms and derives the delta the late drafts want, refusing `ThroughObject` on the twelve drafts that cannot express it; `fetch_joining` takes a `JoiningStart` so the Fetch Type and its value are one value. With `publish_namespace`, `publish_namespace_done` and `fetch_group_order`.
+- **Setup over a transport the caller dialled**: `adopt` and `adopt_offering`, with `server_setup()`, `server_setup_raw()` and `negotiated_version()` to read what was agreed. `next_free_track_alias` keeps `subscribe` at one signature across the draft-12 alias-ownership split.
+- **`dispatch::ErrorCause` and `AnyConnectionError::cause`** — ten variants covering the ten every draft's `ConnectionError` shares, plus the rules a draft states above its decoder. `Codec` carries the session error code the negotiated draft's own text names, so a caller need not hold fourteen tables.
+- **`above_codec_rules`**, naming the rules an endpoint enforces that its own decoder cannot see — each stated about a frame that decodes perfectly well, so none ever reached `CodecError` and a caller reading only that channel found the peer blameless. With `AboveCodecRule`, `CodecRule`, `RuleCitation`, `EndpointFault` and `DraftSpecificCause`.
+- **`EndpointError::fault`** on all fourteen drafts, dividing that type by where the variant is raised: reading what the peer sent, writing, or refusing to. Most of it is the peer's doing and was filed against this build's own state machine.
+- **`Connection::draft_specific_cause` and `::codec_session_error_code` are public** on all fourteen drafts.
+- **WebTransport is dialable before a draft is chosen**: `dial_webtransport` and `dial_webtransport_to`, the counterparts to the QUIC dials. Draft auto-detect could dial raw QUIC only, so it timed out against a WebTransport-only relay.
+- **Transport observability**: `QuicTarget` and `dial_quic_to`; `Transport::closed()` and `peer_certificates()`; `CertificateHook` and `CertificateLog`; `HandshakeFailure` and `CodeSpace`; `TLS13_CIPHER_SUITES` and `show_cipher_suite`; `QuicDialOptions::new` with builders.
+- **`transport::DialPhase`, `DialError::phase` and `::is_local`.** A dial is four stages and only the last involves the peer; `is_local` true means nothing left this machine, so the failure is not evidence about the peer.
+- **`AnyConnectionError::is_local`, `::message` and `::facade`.**
+- **A `wt-protocol` feature**, reading the CONNECT response for the server's half of WebTransport version negotiation. Off by default and outside `all-drafts`: it requires a patched `wtransport` and does not build without one, so the crates.io build is unaffected.
+
+### Changed
+
+- **Breaking. `AnyConnectionError` is no longer a tuple struct.** Construct with `::facade(msg)` or `From` on a draft's `ConnectionError`; read with `::message()` in place of `.0`. `Display` is unchanged. It now derives `Clone`, `PartialEq` and `Eq`.
+- **Breaking. `QuicDialOptions` gains three public fields** — `wt_protocols`, `on_peer_certificates` and `cipher_suites` — so an existing struct-literal construction stops compiling. The builders and functional-update syntax avoid it.
+- **Breaking. `TransportError` is `#[non_exhaustive]`** and gains `Handshake(HandshakeFailure)` and `SessionClosed { code, reason }`. The attribute alone ends a downstream exhaustive match.
+- **Breaking. `transport::DialError::LocalSocket`.** A socket this machine would not open was spelled `InvalidAddress`, and on the WebTransport arm it arrived as `TransportError::Connect`, which `is_local` answers false for — a socket this side could not open, filed against the relay. Both dials raise `LocalSocket` now.
+- **Breaking, narrowly. `EndpointError::MaxRequestIdWouldNotIncrease`** (drafts 11-16) and `::MaxSubscribeIdWouldNotIncrease` (07-10). Refusing to advertise a ceiling that does not increase raised the same variant a peer's decreasing MAX_REQUEST_ID raises, which `session_error_code` answers `PROTOCOL_VIOLATION`. The send side has its own variant and answers `None`, because nothing reached the wire.
+- `dial_quic` no longer rewrites a peer's refusal while naming the address it came from, so the typed `HandshakeFailure` survives a multi-address dial.
+- `SubscriptionStateMachine::on_publish_done` is idempotent on `Done` across all fourteen drafts. The end of a subscription is two events that can arrive in either order, so refusing the second read a conforming relay's last message as a protocol error against this endpoint's own bookkeeping.
+
 ## [0.5.0] - 2026-09-03
 
 Draft-20 support. One new draft module, and two breaking changes that adding it

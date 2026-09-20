@@ -118,8 +118,8 @@ async fn handshake(
 ///
 /// # What it catches
 ///
-/// Reverting `Connection::subscribe_namespace` to `self.send_control(&msg)`
-/// fails with
+/// Writing the message from `Connection::subscribe_namespace` with
+/// `self.send_control(&msg)` fails with
 ///
 /// ```text
 /// the client never opened a second bidirectional stream: Elapsed(())
@@ -649,69 +649,88 @@ async fn a_bidi_stream_that_begins_with_the_wrong_message_closes_the_session() {
     peer.await.expect("peer task");
 }
 
-/// A NAMESPACE on the control stream closes the session on the wire too.
+/// A NAMESPACE on the control stream is refused on the wire, and the session
+/// carries on.
 ///
 /// It belongs on a SUBSCRIBE_NAMESPACE response stream and carries no Request
-/// ID, so on the control stream it names nothing. The client used to take it
-/// there and do nothing with it.
+/// ID, so on the control stream it names nothing.
 ///
-/// # What it catches
+/// # Why no close is asserted
+///
+/// The reading that invites one is *a message on a stream it does not belong on
+/// closes with PROTOCOL_VIOLATION*. Draft-16 does not say so. Section 3.3's
+/// sentence — "Bidirectional streams MUST NOT begin with any other message type
+/// unless negotiated. If they do, the peer MUST close the Session with a
+/// Protocol Violation." — is about what a stream may *begin* with, and a
+/// NAMESPACE arriving on the control stream begins nothing. Draft-16 states
+/// where a conforming publisher sends these (Section 9.25) and no consequence
+/// for a peer that sends one elsewhere, so the endpoint refuses the message and
+/// leaves the session running.
+///
+/// # What it catches, and why the second message is the whole test
 ///
 /// Replacing the `Namespace` arm of `Endpoint::receive_message` with `Ok(())`
-/// fails with
+/// fails at the first read with
 ///
 /// ```text
-/// a NAMESPACE on the control stream is refused, got Ok(Namespace(Namespace {
+/// NAMESPACE 1 on the control stream is refused, got Ok(Namespace(Namespace {
 /// namespace_suffix: TrackNamespace([[109, 101, 101, 116, 105, 110, 103, 61, 49, 50, 51]]) }))
 /// ```
 ///
-/// The client takes the message, hands it back as though it belonged there, and
-/// the peer's `closed()` never resolves.
+/// Answering `Some(ProtocolViolation)` from `session_error_code` for
+/// `NamespaceMessageOnControlStream`, so that the refusal closes the session,
+/// fails at the *second* read instead, and with a transport error rather than
+/// the endpoint's own refusal, because by then the connection is gone. That
+/// second read is what makes the recovery a measurement rather than a claim:
+/// a control message carries its own length, so the next boundary on the
+/// stream is known however this one was refused, and the proof is that the
+/// client finds it.
 #[tokio::test]
-async fn a_namespace_on_the_control_stream_closes_the_session() {
+async fn a_namespace_on_the_control_stream_is_refused_without_closing() {
     common::init_crypto();
     let (endpoint, addr) = common::spawn_server(&[DraftVersion::Draft16.quic_alpn()]);
+
+    // The peer holds its connection open until the client has read both, and
+    // then reports whether it was ever closed. Without the handshake the peer
+    // task would end at the second write and drop the connection, which the
+    // client would see as a close it did not make.
+    let (done, wait) = tokio::sync::oneshot::channel::<()>();
 
     let peer = tokio::spawn(async move {
         let conn = endpoint.accept().await.expect("accept").await.expect("tls handshake");
         let (mut control_send, _control_recv) = handshake(&conn).await;
-        control_send
-            .write_control(&AnyControlMessage::Draft16(ControlMessage::Namespace(
-                message::Namespace { namespace_suffix: suffix() },
-            )))
-            .await
-            .expect("write NAMESPACE on the control stream");
-
-        let reason = tokio::time::timeout(PATIENCE, conn.closed())
-            .await
-            .expect("the client accepted a NAMESPACE on the control stream");
-        match reason {
-            quinn::ConnectionError::ApplicationClosed(frame) => {
-                assert_eq!(
-                    u64::from(frame.error_code),
-                    PROTOCOL_VIOLATION,
-                    "a message on a stream it does not belong on closes with this code; the \
-                     close carried {} instead",
-                    u64::from(frame.error_code)
-                );
-            }
-            other => panic!("expected an application close, got {other:?}"),
+        for _ in 0..2 {
+            control_send
+                .write_control(&AnyControlMessage::Draft16(ControlMessage::Namespace(
+                    message::Namespace { namespace_suffix: suffix() },
+                )))
+                .await
+                .expect("write NAMESPACE on the control stream");
         }
+        wait.await.expect("the client finished reading");
+        assert!(
+            conn.close_reason().is_none(),
+            "draft-16 states no close for a NAMESPACE on the control stream, and the client              made one: {:?}",
+            conn.close_reason()
+        );
     });
 
     let mut conn = Connection::connect(&addr.to_string(), config()).await.expect("client connect");
-    let outcome = tokio::time::timeout(PATIENCE, conn.recv_and_dispatch())
-        .await
-        .expect("the NAMESPACE never arrived");
-    assert!(
-        matches!(
-            outcome,
-            Err(moqtap_client::draft16::connection::ConnectionError::Endpoint(
-                EndpointError::NamespaceMessageOnControlStream(_)
-            ))
-        ),
-        "a NAMESPACE on the control stream is refused, got {outcome:?}"
-    );
+    for nth in 1..=2 {
+        let outcome = tokio::time::timeout(PATIENCE, conn.recv_and_dispatch())
+            .await
+            .expect("the NAMESPACE never arrived");
+        assert!(
+            matches!(
+                outcome,
+                Err(moqtap_client::draft16::connection::ConnectionError::Endpoint(
+                    EndpointError::NamespaceMessageOnControlStream(_)
+                ))
+            ),
+            "NAMESPACE {nth} on the control stream is refused, got {outcome:?}"
+        );
+    }
+    done.send(()).expect("the peer is still waiting");
     peer.await.expect("peer task");
 }
 

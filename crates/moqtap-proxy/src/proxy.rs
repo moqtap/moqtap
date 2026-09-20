@@ -308,7 +308,7 @@ impl TransparentProxy {
     // than passing the build and dropping the value at run time. Do not add
     // `..` to either pattern; it would put the trap back.
     //
-    // Two fields no longer come from the template unconditionally, and both
+    // Two fields do not come from the template unconditionally, and both
     // read the control plane first: the client leg's transport parameters
     // and the session's shape profile. A live request that set either of
     // them has to win over the value the proxy was built with, or the

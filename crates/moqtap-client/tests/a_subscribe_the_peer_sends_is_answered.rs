@@ -21,14 +21,6 @@
 //! receives the UNSUBSCRIBE and sends the message that ends the flow - every
 //! message the other way round from a subscription it opened itself.
 //!
-//! # What was here before
-//!
-//! Nothing. An arriving SUBSCRIBE was checked for its Request ID and dropped,
-//! and no UNSUBSCRIBE was processed at all, so a peer that subscribed to this
-//! endpoint waited for an answer the crate had no record to build. These five
-//! drafts are the ones that had a record for the peer's PUBLISH and none for
-//! the peer's SUBSCRIBE.
-//!
 //! # Why the Track Alias is judged here and not on arrival
 //!
 //! From draft-12 the SUBSCRIBE does not carry one: the publisher chooses it
@@ -279,9 +271,9 @@ macro_rules! inbound_subscribe_gates {
             /// reaches the flow that can answer it.
             ///
             /// The dispatch arm is the whole of what this measures. Without it
-            /// a SUBSCRIBE is checked for its Request ID and then dropped,
-            /// which is what these drafts did: the peer waits for an answer
-            /// the endpoint has no record to build one from.
+            /// a SUBSCRIBE is checked for its Request ID and then dropped, and
+            /// the peer waits for an answer the endpoint has no record to
+            /// build one from.
             ///
             /// # What it catches, observed by making the change and running it
             ///

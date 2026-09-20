@@ -14,8 +14,9 @@
 //! Measured. On drafts 15 through 18 a `Connection::absolute_joining_fetch`
 //! was cut to call the endpoint's *relative* builder, and the whole suite
 //! stayed green. The cut compiles, writes a FETCH and asks for the wrong one.
-//! Nothing on drafts 15 and 16 drove a connection helper as far as the wire at
-//! all, so there was nothing there to notice.
+//! The gates below are what drives a connection helper as far as the wire on
+//! drafts 15 and 16, which is why the file is those two: on them there is
+//! nothing else for a cut like that to get past.
 //!
 //! # What the peer does
 //!
@@ -479,8 +480,8 @@ fn a_rendering_that_dropped_a_field_would_hide_a_helper_asking_for_the_wrong_thi
     assert_ne!(
         subscribe_request(4, &namespace(), TRACK, 1),
         subscribe_request(4, &namespace(), TRACK, 0),
-        "the parameter count has to reach the rendering: a helper that dropped \
-         the caller's list is the defect this file was opened for"
+        "the parameter count has to reach the rendering: a helper that drops \
+         the caller's list is the defect this file exists to catch"
     );
     assert_ne!(
         publish_request(4, &namespace(), TRACK, ALIAS, 1, None),

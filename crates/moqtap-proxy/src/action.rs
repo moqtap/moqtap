@@ -138,13 +138,7 @@ impl Gate {
 ///
 /// # `Delay { then: Drop(_) }` is admitted, and is not inert
 ///
-/// A previous revision of this paragraph named it as a refused shape and
-/// called it "unobservable". Both halves were wrong, and they also
-/// contradicted the sentence above them, which lists `Drop` as a legal
-/// inner action. The engine's behaviour is the correct one and the doc has
-/// been brought to it.
-///
-/// It is not unobservable. A deferred drop takes an **ordering slot** in
+/// A deferred drop is not unobservable: it takes an **ordering slot** in
 /// the stream's pending queue for the whole of `by`, and the queue only
 /// ever writes from its front — so nothing the hook decides after it can
 /// reach the wire until it is released. So
@@ -363,7 +357,7 @@ impl Action {
 ///
 /// `MarkMissing` — a zero-length object carrying status
 /// `ObjectDoesNotExist`, the obvious default to reach for — is **not in
-/// this enum in 0.4.0**. That status was removed from the registry in
+/// this enum**. That status was removed from the registry in
 /// draft-17, and drafts 15-19 do not validate the status on write, so a
 /// naive implementation emits a code point those drafts do not define, on a
 /// stream that round-trips green against itself. Dropping an object
@@ -374,7 +368,7 @@ impl Action {
 ///
 /// ```compile_fail
 /// use moqtap_proxy::action::DropMode;
-/// // drop_mark_missing_is_not_constructible: no such variant in 0.4.0.
+/// // drop_mark_missing_is_not_constructible: no such variant.
 /// let _mode = DropMode::MarkMissing;
 /// ```
 ///
@@ -397,7 +391,7 @@ pub enum DropMode {
     /// Drafts 07-13, and fetch streams on drafts 07-14, encode absolute
     /// IDs, so this is pure byte deletion: every survivor is forwarded
     /// verbatim, including any non-minimally-encoded varint it arrived
-    /// with. Drafts 14-19 delta-encode, so the *one* object following an
+    /// with. Drafts 14-20 delta-encode, so the *one* object following an
     /// elided run has its leading ID varint rewritten and nothing else;
     /// every later object is again forwarded verbatim, because the wire
     /// cursor re-converges after that one fix-up.

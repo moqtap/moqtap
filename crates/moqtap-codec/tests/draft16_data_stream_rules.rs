@@ -309,11 +309,11 @@ fn a_first_object_cannot_inherit_a_location() {
 /// default that lets resolution continue anyway. The predicate reports the full
 /// rule so a caller that must close the session can.
 ///
-/// No shipped vector reaches it any more: `fetch-with-explicit-subgroup` and
-/// `fetch-datagram-forwarding` both used to leave bit 0x10 clear on the first
-/// object of their stream, and both now state a Priority. The bodies below are
-/// written here for that reason — a rule the corpus stopped exercising is one
-/// only a hand-written frame can hold.
+/// No shipped vector reaches it: `fetch-with-explicit-subgroup` and
+/// `fetch-datagram-forwarding` both state a Priority on the first object of
+/// their stream, so nothing in the corpus leaves bit 0x10 clear there. The
+/// bodies below are written here for that reason — a rule the corpus does not
+/// exercise is one only a hand-written frame can hold.
 ///
 /// Observed by dropping the Priority term from `references_prior_object`, which
 /// fails this with:
@@ -493,18 +493,18 @@ fn an_unassigned_status_has_no_payload_permission() {
 /// "Type values with SUBGROUP_ID_MODE set to 0b11: 0x16, 0x17, 0x1E, 0x1F,
 /// 0x36, 0x37, 0x3E, 0x3F. This mode is reserved for future use."
 ///
-/// This module read those two bits one at a time, so `0x16` set both and the
-/// header answered to two carriers at once — the Subgroup ID comes from the
-/// first object, *and* an explicit field follows the Group ID — and `encode`
-/// wrote that field. Mode 3 defines no field to write, and no neighbouring
-/// draft wrote one: 15, 17, 18 and 19 all leave it off.
+/// Reading those two bits one at a time makes `0x16` set both, so the header
+/// answers to two carriers at once — the Subgroup ID comes from the first
+/// object, *and* an explicit field follows the Group ID — and `encode` writes
+/// that field. Mode 3 defines no field to write, and no neighbouring draft
+/// defines one: 15, 17, 18 and 19 all leave it off.
 ///
 /// Observed through `encode`, because the bytes are what a caller is handed;
 /// asserting the predicates would only read the flags back. `decode` refuses
 /// `0x16` outright, asserted here as well so the header under test stays one
 /// that had to be built by hand.
 ///
-/// *Ablation (measured):* restore either predicate to its single-bit reading,
+/// *Ablation (measured):* give either predicate a single-bit reading,
 /// `self.header_type & 0x04 != 0`:
 ///
 /// ```text

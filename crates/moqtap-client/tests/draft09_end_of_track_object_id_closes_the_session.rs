@@ -128,7 +128,7 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// ```text
 /// ---- an_end_of_track_object_at_a_non_zero_id_closes_the_connection stdout ----
 ///
-/// thread 'an_end_of_track_object_at_a_non_zero_id_closes_the_connection' (51516) panicked at crates\moqtap-client\tests\draft09_end_of_track_object_id_closes_the_session.rs:201:5:
+/// thread 'an_end_of_track_object_at_a_non_zero_id_closes_the_connection' (51516) panicked at crates\moqtap-client\tests\draft09_end_of_track_object_id_closes_the_session.rs:
 /// Section 8.1.1.1 answers this with a close, but close_for_data_stream declined
 /// ```
 #[tokio::test]

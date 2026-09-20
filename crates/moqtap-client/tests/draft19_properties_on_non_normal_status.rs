@@ -167,7 +167,7 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// ```text
 /// ---- an_object_with_properties_on_a_non_normal_status_is_refused stdout ----
 ///
-/// thread 'an_object_with_properties_on_a_non_normal_status_is_refused' (66196) panicked at crates\moqtap-client\tests\draft19_properties_on_non_normal_status.rs:227:10:
+/// thread 'an_object_with_properties_on_a_non_normal_status_is_refused' (66196) panicked at crates\moqtap-client\tests\draft19_properties_on_non_normal_status.rs:
 /// properties on End of Group must be refused: SubgroupObject { object_id: VarInt(0), extension_headers: [1, 2, 3, 4], payload_length: VarInt(0), object_status: Some(EndOfGroup), payload: [] }
 /// ```
 #[tokio::test]
@@ -282,7 +282,7 @@ const PROTOCOL_VIOLATION: u64 = 0x3;
 /// ```text
 /// ---- the_refusal_closes_the_quic_connection stdout ----
 ///
-/// thread 'the_refusal_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft19_properties_on_non_normal_status.rs:350:5:
+/// thread 'the_refusal_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft19_properties_on_non_normal_status.rs:
 /// Section 11.2.1.2 answers this with a close, but close_for_data_stream declined
 /// ```
 #[tokio::test]

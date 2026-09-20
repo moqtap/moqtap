@@ -178,7 +178,7 @@ const FETCH_REQUEST: u64 = 9;
 /// A draft-19 fetch stream of three objects, each stating all four of its
 /// fields.
 ///
-/// Drafts 18 and 19 read a stated Group ID as a *difference* from the object
+/// Drafts 18-20 read a stated Group ID as a *difference* from the object
 /// before — draft-19 Section 11.4.4.1 — so these three sit in three groups
 /// rather than one. What matters here is that each carries a Subgroup ID for
 /// a rule to key on, and that reading them at all needs the fetch's Group

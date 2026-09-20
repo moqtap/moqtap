@@ -10,24 +10,23 @@
 //! endpoint that keeps only how far a request has got has kept the half that
 //! cannot answer it.
 //!
-//! # What was here before
+//! # Why draft-16 sits with the other three
 //!
 //! Drafts 17, 18 and 19 take every request kind through one entry point,
-//! `receive_request_on_stream`, and each arm built a state machine and dropped
-//! the message. Six kinds on draft-17 and seven on 18 and 19, and no accessor
-//! on any of the three returned a request. Draft-16 does the same for the one
-//! request that already had a stream of its own: its SUBSCRIBE_NAMESPACE
-//! arrived, moved a state machine and was gone, so the namespace prefix it
-//! carried - which is in that message and nowhere else - could not be read
-//! again.
+//! `receive_request_on_stream` - six kinds on draft-17 and seven on 18 and 19.
+//! Draft-16 has an entry point of its own for exactly one kind, because Section
+//! 3.3 there names only two uses of a bidirectional stream: the control stream
+//! and SUBSCRIBE_NAMESPACE. That one message is also the only place a namespace
+//! prefix appears, so an arm that moved a state machine and dropped the message
+//! would leave the prefix with nowhere to be read from again.
 //!
 //! # Why one map holds both directions, and the messages do not
 //!
 //! A Request ID the peer allocated and one this endpoint allocated have
 //! opposite least significant bits, so a per-kind map of state machines can
 //! hold both ends' requests without confusing them. That is why these drafts
-//! have one, and it is not what was missing. What was missing is the request,
-//! and the record of it is written on arrival only, which is what makes
+//! have one - but a state machine is not the request. The request itself is
+//! recorded on arrival and only on arrival, which is what makes
 //! "did the peer ask this" a question the endpoint can answer at all. The last
 //! gate in each group is the one that says so.
 //!
@@ -129,8 +128,7 @@ mod draft16 {
     ///
     /// # What it catches, observed by making the change and running it
     ///
-    /// Moving the state machine on and dropping the request, which is what
-    /// draft-16 did:
+    /// Moving the state machine on and dropping the request:
     ///
     /// ```text
     /// the namespace subscription the peer opened must be readable
@@ -456,8 +454,7 @@ macro_rules! peers_request_gates {
             ///
             /// # What it catches, observed by making the change and running it
             ///
-            /// Moving the state machine on and dropping the request, which is
-            /// what these drafts did:
+            /// Moving the state machine on and dropping the request:
             ///
             /// ```text
             /// the subscription the peer opened must be readable

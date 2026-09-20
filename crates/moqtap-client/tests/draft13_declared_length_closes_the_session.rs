@@ -5,24 +5,25 @@
 //! the length does not match the length of the Message Payload, the receiver
 //! MUST close the session with Protocol Violation."
 //!
-//! # Why this rule reached the wire so late
+//! # Why the rule needs a variant of its own
 //!
-//! The check has been in every draft's `ControlMessage::decode` for a long time.
-//! It answered `CodecError::InvalidField`, which a dozen unrelated malformations
-//! also answer, so no mapping table could route it to a close without closing
-//! sessions the drafts say nothing about. The rule was enforced against the
-//! frame and invisible to the session, which is the same half-fix a rule reaches
-//! whenever it lands on that variant.
+//! Every draft's `ControlMessage::decode` has the check. Answered with
+//! `CodecError::InvalidField` it reaches no further than the frame: a dozen
+//! unrelated malformations answer with that variant too, so no mapping table can
+//! route it to a close without closing sessions the drafts say nothing about. A
+//! rule that lands there is enforced against the frame and invisible to the
+//! session, which is the half-fix any rule reaches on that variant, and why this
+//! one answers `CodecError::ControlMessageLengthMismatch` instead.
 //!
 //! # Why the short direction and not the long one
 //!
 //! "Does not match" has two sides and they arrive as different failures. A
 //! Length larger than the fields leaves bytes unread; the codec has gated that
-//! on all fourteen drafts for a while. A Length *smaller* than the fields makes
-//! them run past the end of a buffer that cannot grow, and that one used to
-//! report `UnexpectedEnd` — the variant every table excludes on purpose, because
-//! everywhere else it means the message is still arriving and a reader loops on
-//! it rather than closing.
+//! on all fourteen drafts. A Length *smaller* than the fields makes
+//! them run past the end of a buffer that cannot grow. Reported as
+//! `UnexpectedEnd` it would be invisible to every close table, which excludes
+//! the variant on purpose: everywhere else it means the message is still
+//! arriving and a reader loops on it rather than closing.
 //!
 //! Inside a buffer already bounded by the declared Length there is nothing left
 //! to arrive. The frame is entirely present and it is the number describing it
@@ -30,9 +31,9 @@
 //!
 //! # Why draft-13
 //!
-//! It had no gate of its own. Drafts 11 and 14 hold the two ends of their group
-//! and drafts 12 and 13 were covered only by whatever they share with them,
-//! which is exactly how four identical-looking tables can drift apart unnoticed.
+//! Drafts 11 and 14 hold the two ends of their group, so without a gate here
+//! drafts 12 and 13 are covered only by whatever they share with them — which
+//! is exactly how four identical-looking tables drift apart unnoticed.
 
 mod common;
 
@@ -99,14 +100,15 @@ fn goaway_with_a_short_declared_length() -> Vec<u8> {
 ///
 /// # What it catches, observed by making the change and running it
 ///
-/// Reverting draft-13's `ControlMessage::decode` to let the payload parser's
-/// `UnexpectedEnd` out unchanged — the shape it had before this rule got a
-/// variant of its own, and the shape in which a table cannot answer it:
+/// Letting draft-13's `ControlMessage::decode` pass the payload parser's
+/// `UnexpectedEnd` out unchanged instead of answering with
+/// `ControlMessageLengthMismatch`, which is the shape in which a table cannot
+/// answer it:
 ///
 /// ```text
 /// ---- a_short_declared_length_closes_the_quic_connection stdout ----
 ///
-/// thread 'a_short_declared_length_closes_the_quic_connection' (61172) panicked at crates\moqtap-client\tests\draft13_declared_length_closes_the_session.rs:170:5:
+/// thread 'a_short_declared_length_closes_the_quic_connection' (61172) panicked at crates\moqtap-client\tests\draft13_declared_length_closes_the_session.rs:
 /// the error should name the rule; got "codec error: insufficient bytes"
 /// ```
 ///

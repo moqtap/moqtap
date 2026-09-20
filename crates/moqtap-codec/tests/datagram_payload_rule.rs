@@ -36,7 +36,7 @@
 /// ```text
 /// ---- a_status_datagram_permits_no_payload_and_a_normal_one_does stdout ----
 ///
-/// thread 'a_status_datagram_permits_no_payload_and_a_normal_one_does' (8768) panicked at crates\moqtap-codec\tests\datagram_payload_rule.rs:55:9:
+/// thread 'a_status_datagram_permits_no_payload_and_a_normal_one_does' (8768) panicked at crates\moqtap-codec\tests\datagram_payload_rule.rs:
 /// draft-17 says an End-of-Group datagram may carry a payload
 /// ```
 #[test]

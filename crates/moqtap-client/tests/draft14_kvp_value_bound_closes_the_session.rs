@@ -3,12 +3,12 @@
 //! length of a value is 2^16-1 bytes. If an endpoint receives a length larger
 //! than the maximum, it MUST close the session with a Protocol Violation."
 //!
-//! # Why this draft needed the machinery at all
+//! # Why this draft needs the machinery at all
 //!
-//! `close_for_codec` and its mapping table arrived with draft-17. Drafts 11
-//! through 14 state most of the same bounds and had none of it, so every one of
-//! them stopped at refusing the frame while the peer, which is the one that
-//! broke the rule, saw a session that was still open and went on
+//! Draft-14 states most of the same decoder bounds as the later drafts, so it
+//! needs a `close_for_codec` and a mapping table of its own. Without them a
+//! refusal stops at the frame, and the peer, which is the one that broke the
+//! rule, sees a session that is still open and goes on
 //! sending. That gap is invisible from inside the process: the decoder returns
 //! `Err` either way, and only something holding the other end of a real
 //! connection can tell the difference.
@@ -113,13 +113,13 @@ fn publish_namespace_with_an_oversized_parameter() -> Vec<u8> {
 ///
 /// # What it catches, observed by making the change and running it
 ///
-/// Reverting `recv_control` to `recv.read_control(capture_raw).await?` — the
-/// shape it had before `close_for_codec` existed on this draft:
+/// Replacing `recv_control`'s body with `recv.read_control(capture_raw).await?`,
+/// so the refusal never reaches `close_for_codec`:
 ///
 /// ```text
 /// ---- an_oversized_parameter_value_closes_the_quic_connection stdout ----
 ///
-/// thread 'an_oversized_parameter_value_closes_the_quic_connection' (16764) panicked at crates\moqtap-client\tests\draft14_kvp_value_bound_closes_the_session.rs:149:14:
+/// thread 'an_oversized_parameter_value_closes_the_quic_connection' (16764) panicked at crates\moqtap-client\tests\draft14_kvp_value_bound_closes_the_session.rs:
 /// the client refused the frame but never closed the connection: Elapsed(())
 /// ```
 ///

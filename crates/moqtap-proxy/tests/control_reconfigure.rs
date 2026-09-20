@@ -1121,12 +1121,13 @@ async fn an_impairment_armed_on_the_client_leg_stops_the_bytes_and_clearing_it_r
 /// The first is that the reasons are **told apart**. Both profiles below are
 /// armed and do nothing, for different reasons and with different fixes:
 /// `EveryNth { n: 0 }` is a loss model that can never fire, and
-/// `PeerFilter::Only(vec![])` is a filter that matches no peer. They used to
-/// arrive as one sentence naming the leg, with the caller directed to re-run
-/// `ImpairProfile::validate` to find out which had happened — a workaround
-/// for a type that could not hold the answer. Comparing the two refusals
-/// against each other is what makes "the reason survived" checkable rather
-/// than asserted: an error that carried no reason would make them equal.
+/// `PeerFilter::Only(vec![])` is a filter that matches no peer. A refusal
+/// that named only the leg would leave the caller to re-run
+/// `ImpairProfile::validate` to find out which of the two had happened —
+/// the workaround a type that cannot hold the answer forces. Comparing the
+/// two refusals against each other is what makes "the reason survived"
+/// checkable rather than asserted: an error that carried no reason would
+/// make them equal.
 ///
 /// The second is the consequence, and it is what a caller acts on: a refused
 /// profile arms nothing and disturbs nothing. The blackout armed before the
@@ -1135,7 +1136,7 @@ async fn an_impairment_armed_on_the_client_leg_stops_the_bytes_and_clearing_it_r
 /// something, or had disarmed what was there, would show up as bytes
 /// arriving in the middle window.
 ///
-/// *Ablation, run:* return the old blanket refusal from
+/// *Ablation, run:* return a blanket refusal from
 /// `ProxyControl::set_impair` —
 /// `ControlError::Unsupported { what: "the impairment profile supplied",
 /// leg, transport: … }` — for any profile `arm` rejects. This row reddens
@@ -1143,7 +1144,7 @@ async fn an_impairment_armed_on_the_client_leg_stops_the_bytes_and_clearing_it_r
 ///
 /// ```text
 /// thread 'a_profile_quinn_netem_refuses_is_reported_with_its_own_reason_and_arms_nothing'
-/// (4568) panicked at crates\moqtap-proxy\tests\control_reconfigure.rs:1139:22:
+/// (4568) panicked at crates\moqtap-proxy\tests\control_reconfigure.rs:
 /// a refused impairment profile has to carry quinn-netem's own reason: the
 /// thirteen ways a profile arms and does nothing have thirteen different
 /// fixes, got the impairment profile supplied is unsupported on the Client leg

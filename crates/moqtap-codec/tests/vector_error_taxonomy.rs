@@ -22,7 +22,7 @@
 //!
 //! ```text
 //! thread 'a_parameter_outside_its_scope_is_its_own_category' panicked at
-//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:135:5:
+//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:
 //! assertion `left == right` failed: draft-19 FETCH_OK carrying EXPIRES
 //!   left: "invalid_value"
 //!  right: "parameter_out_of_scope"
@@ -33,7 +33,7 @@
 //!
 //! ```text
 //! thread 'a_type_the_draft_names_as_invalid_is_not_an_unknown_one' panicked at
-//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:155:5:
+//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:
 //! assertion `left == right` failed: draft-19 subgroup Type 0x16
 //!   left: "unknown_message"
 //!  right: "invalid_type"
@@ -46,7 +46,7 @@
 //!
 //! ```text
 //! thread 'every_category_the_corpus_claims_is_one_the_schema_names' panicked at
-//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:217:13:
+//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:
 //! transport/draft19/codec/messages/fetch-ok.json [with-params-and-properties]
 //! claims error category "parameter_out_of_scop", which the schema does not
 //! name. Nothing can answer to it, so the vector fails whatever the decoder
@@ -58,7 +58,7 @@
 //!
 //! ```text
 //! thread 'every_category_the_schema_names_is_either_reachable_or_recorded'
-//! panicked at crates\moqtap-codec\tests\vector_error_taxonomy.rs:273:9:
+//! panicked at crates\moqtap-codec\tests\vector_error_taxonomy.rs:
 //! the schema names "missing_parameter" and nothing in this file produces it.
 //! Either drive a decoder to it, or add it to UNREACHABLE with the reason.
 //! ```
@@ -69,7 +69,7 @@
 //!
 //! ```text
 //! thread 'every_category_this_file_accounts_for_is_one_the_schema_names'
-//! panicked at crates\moqtap-codec\tests\vector_error_taxonomy.rs:300:9:
+//! panicked at crates\moqtap-codec\tests\vector_error_taxonomy.rs:
 //! this file drives a decoder to "payload_not_permitted" and the schema no
 //! longer names it, so no vector can claim what the decoder demonstrably
 //! produces. Restore the name, or delete the case above that reaches it.

@@ -297,7 +297,7 @@ fn endpoint_unknown_announce_request_id_rejected() {
 }
 
 // ============================================================
-// SubscribeNamespace flow (renamed from SubscribeAnnounces)
+// SubscribeNamespace flow (draft-12 spells the same request SUBSCRIBE_ANNOUNCES)
 // ============================================================
 
 #[test]

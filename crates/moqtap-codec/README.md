@@ -103,13 +103,13 @@ Each draft is behind a feature flag. Enable the ones you need. The default is
 
 ```toml
 # every draft (default)
-moqtap-codec = "0.5"
+moqtap-codec = "0.6"
 
 # draft-14 only
-moqtap-codec = { version = "0.5", default-features = false, features = ["draft14"] }
+moqtap-codec = { version = "0.6", default-features = false, features = ["draft14"] }
 
 # draft-07 plus draft-14 for runtime dispatch
-moqtap-codec = { version = "0.5", default-features = false, features = ["draft07", "draft14"] }
+moqtap-codec = { version = "0.6", default-features = false, features = ["draft07", "draft14"] }
 ```
 
 Draft-20 is supported and is not a default anywhere. It is the newest draft this

@@ -102,20 +102,11 @@ pub enum Site {
 /// A capability, named independently of whether
 /// [`Action`](crate::action::Action) can express it.
 ///
-/// Every kind here names a capability some value can express. A kind that
-/// nothing could construct used to be published too, so the table could
-/// document the gap — but a variant that no value can carry is a unit that
-/// compiles and never runs, and a table row saying so is a row about this
-/// crate's plans rather than about what it does. Two such kinds were
-/// removed; the capabilities they named are simply absent, and absence is
-/// what the table now says by not listing them.
-///
-/// [`Self::OpenAfter`] and [`Self::SerializeAfter`] were in that family
-/// until 0.4.0, when that release shipped
-/// [`StreamAction::OpenAfter`](crate::action::StreamAction::OpenAfter) and
-/// [`StreamAction::SerializeAfter`](crate::action::StreamAction::SerializeAfter);
-/// their rustdoc now carries ordinary doc-tests that *construct* them,
-/// where it used to carry `compile_fail` blocks that could not.
+/// Every kind here names a capability some value can express. A variant that
+/// no value can carry is a unit that compiles and never runs, and a table row
+/// saying so is a row about this crate's plans rather than about what it
+/// does — so the family of constructor-less capabilities is simply absent
+/// from this enum, and absence is what the table says by not listing it.
 ///
 /// [`Self::ReplaceObject`] is deliberately **not** in that family, and the
 /// distinction is what keeps the table honest: a value that carries it to
@@ -192,9 +183,7 @@ pub enum ActionKind {
     /// kind there and nothing is ever attempted.
     ReplaceObject,
     /// Opening the peer stream after a delay.
-    /// [`StreamAction::OpenAfter`](crate::action::StreamAction::OpenAfter),
-    /// shipped in 0.4.0; this kind is no longer in the constructor-less
-    /// family.
+    /// [`StreamAction::OpenAfter`](crate::action::StreamAction::OpenAfter).
     ///
     /// `open_after_and_serialize_after_are_constructible` — the pair of
     /// doc-tests that used to prove this capability's *absence* now proves
@@ -259,26 +248,23 @@ pub enum ActionKind {
     /// ```
     OpenAfter,
     /// Head-of-line simulation.
-    /// [`StreamAction::SerializeAfter`](crate::action::StreamAction::SerializeAfter),
-    /// shipped in 0.4.0; this kind is no longer in the constructor-less
-    /// family either.
+    /// [`StreamAction::SerializeAfter`](crate::action::StreamAction::SerializeAfter).
     ///
-    /// Its constructor proof hangs on [`Self::OpenAfter`], with its pair,
-    /// as its `compile_fail` block used to.
+    /// Its constructor proof hangs on [`Self::OpenAfter`], with its pair.
     SerializeAfter,
 }
 
 /// Whether a capability is available.
 ///
-/// Five verdicts, not three. The earlier design had `Yes` / `No` /
-/// `Conditional` only, and a large part of the published matrix fits none
-/// of them: 30 site×kind pairs are ruled out by the *return type* (a site
-/// that returns [`StreamAction`](crate::action::StreamAction) cannot be
-/// handed an [`Action`](crate::action::Action), and four [`ActionKind`]s
-/// have no constructor at all), and every cell on a draft this build did not
-/// compile names a refusal the engine can never emit because the hook is
-/// never invoked there. Both classes used to be written `—` or "unreachable" in prose,
-/// which `tests/action_matrix.rs` cannot assert. They are now verdicts.
+/// Five verdicts, not three. `Yes` / `No` / `Conditional` alone fit a large
+/// part of the table [`classify`] answers not at all: 34 of its 84 site×kind
+/// pairs — six sites, fourteen kinds — are ruled out by the *return type* (a
+/// site that returns [`StreamAction`](crate::action::StreamAction) cannot be
+/// handed an [`Action`](crate::action::Action), nor the other way round), and
+/// the object and control cells on a draft this build did not compile name a
+/// refusal the engine can never emit because the hook is never invoked
+/// there. Written `—` or "unreachable" in prose, neither class is anything
+/// `tests/action_matrix.rs` can assert; as verdicts, both are.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Support {
@@ -295,7 +281,7 @@ pub enum Support {
     /// this site**, so the engine can never be asked and no
     /// `ActionRefused` can ever be emitted.
     ///
-    /// Three families, and [`NotAttemptable`] names which:
+    /// Two families, and [`NotAttemptable`] names which:
     ///
     /// 1. a site whose return type is the other enum (`Pass` at
     ///    `StreamOpen`, `Reject` at `Object`, …) — two variants,
@@ -373,10 +359,11 @@ pub enum Support {
 /// what collects the debt: a cell whose only honest answer would be *nothing at
 /// all is emitted* finds no variant here to reach for, so it cannot be
 /// published until the report it needs exists. The control site on an
-/// uncompiled draft sat outside this enum for exactly that reason, answering
-/// [`Support::Yes`] for a cell no hook is ever offered, until
+/// uncompiled draft is the case in point: no hook is ever offered a frame
+/// there, and its verdict can be [`Support::Unreachable`] rather than
+/// [`Support::Yes`] only because
 /// [`ImpairmentKind::ControlFrameNotDecodable`](crate::event::ImpairmentKind::ControlFrameNotDecodable)
-/// gave it something true to point at.
+/// gives it something true to point at.
 ///
 /// The field is not a second copy of `refusal`. A refusal names what the
 /// *table* would say; this names what an observer will actually see on the
@@ -645,18 +632,19 @@ pub struct CapCtx {
 ///    { KindNotDefinedAtThisSite, WrongSite { .. } }`, and at `Site::Object`
 ///    it is the same `No(WrongSite { .. })` as `Replace` — one value for
 ///    both rows, since one expression carries both.
-/// 3. A return-type mismatch is `NotAttemptable { SiteReturns.., WrongSite
+/// 2. A return-type mismatch is `NotAttemptable { SiteReturns.., WrongSite
 ///    { .. } }`.
-/// 4. The object site behind a stream the framer cannot address is
+/// 3. The object site behind a stream the framer cannot address is
 ///    [`Support::Unreachable`]: the hook is never invoked there, so no
 ///    refusal can be emitted and the run's reportable fact is the bypass.
 ///    One fact reaches this step: a draft this build did not compile
-///    ([`draft_is_compiled`]). A fetch stream used to bring a second, and no
-///    longer does — see `fetch_group_order_is_needed` for where that went.
-/// 5. The control site on a draft this build did not compile is
+///    ([`draft_is_compiled`]). Whether a fetch stream can be addressed is a
+///    property of the stream rather than of the draft — see
+///    `fetch_group_order_is_needed`.
+/// 4. The control site on a draft this build did not compile is
 ///    [`Support::Unreachable`] too, for the same reason one decoder later:
 ///    every frame is stepped over before the hook is offered one.
-/// 6. Otherwise the per-site rules apply.
+/// 5. Otherwise the per-site rules apply.
 ///
 /// # What an unsupplied fact means
 ///
@@ -679,9 +667,7 @@ pub fn classify(site: Site, kind: ActionKind, cx: &CapCtx) -> Support {
 
     // A stream the framer cannot address never reaches the object site, so
     // nothing can be attempted and nothing can be refused. One fact lands
-    // here: *any* stream on a draft this build did not compile. A fetch
-    // stream on drafts 18, 19 and 20 used to land here too, and does not now —
-    // see `fetch_group_order_is_needed`.
+    // here: *any* stream on a draft this build did not compile.
     let framing_bypass = match (site, cx.draft) {
         (Site::Object, Some(draft)) => object_framing_bypass(draft, cx.stream_kind),
         _ => None,
@@ -917,7 +903,7 @@ impl MatcherKey {
 ///
 /// A shaping rule keyed on something the negotiated draft does not carry
 /// arms, matches nothing, and reports success — the silent no-op this crate
-/// exists to make loud. Before this predicate the only way to learn it was
+/// exists to make loud. Without this predicate the only way to learn it is
 /// to run the session and read `Impairment{ShapeRuleUnmatchable}` out of the
 /// report, which requires a run, traffic of the right shape, and a reader.
 /// The answer needs nothing but the draft and the compiled feature set, so
@@ -933,7 +919,7 @@ impl MatcherKey {
 /// axis the answer actually varies on, and it is the axis a rule is written
 /// against.
 ///
-/// # The three facts, in the order they are read
+/// # The two facts, in the order they are read
 ///
 /// 1. **A draft this build did not compile frames nothing at all.** The
 ///    stream header decode returns `UnsupportedDraft`, the framer latches
@@ -954,23 +940,21 @@ impl MatcherKey {
 ///
 /// [`Matcher::subgroup_id`] and [`Matcher::priority`] are the two keys whose
 /// absence can be a property of one **header** rather than of the draft — a
-/// header in *subgroup ID is the first object's ID* mode (eight drafts) or
-/// drafts 17-20's reserved mode 3 carries no subgroup ID, and drafts 15-20 omit
+/// header in *subgroup ID is the first object's ID* mode (ten drafts) or
+/// drafts 16-20's reserved mode 3 carries no subgroup ID, and drafts 15-20 omit
 /// the publisher priority whenever the header sets the default-priority bit, on
 /// a subgroup header and on a datagram alike. Neither is a *draft* fact. Every
 /// one of the fourteen drafts also has header shapes that carry both — modes 0
-/// and 2 on 17-20, an explicit subgroup ID field elsewhere, and a clear
+/// and 2 on 16-20, an explicit subgroup ID field elsewhere, and a clear
 /// default-priority bit — and every fetch object on the drafts that frame one
 /// carries both unconditionally. So a rule keyed on either can match on every
 /// draft, and this predicate answers `true`.
 ///
 /// There is deliberately no fact about a stream *kind* that yields no unit
-/// at all. There used to be one — a [`MatchKind::Fetch`] class on drafts 18
-/// and 19, refused before the run because no fetch stream there could be
-/// framed — and it went when those streams became readable; see
-/// `fetch_group_order_is_needed`. A fetch stream the session cannot resolve
-/// is now one stream rather than a draft, and it reports itself as
-/// `Impairment { FramerBypass { FetchGroupOrderUnknown } }` while it happens.
+/// at all. A fetch stream the session cannot resolve is one stream rather
+/// than a draft, and it reports itself as
+/// `Impairment { FramerBypass { FetchGroupOrderUnknown } }` while it happens
+/// — see `fetch_group_order_is_needed`.
 ///
 /// The one place `subgroup_id` crosses the line is a rule aimed at
 /// [`MatchKind::Datagram`], which fact 2 above refuses: there the absence is
@@ -1074,7 +1058,7 @@ impl std::fmt::Display for UnsupportedMatcherKey {
 
 impl std::error::Error for UnsupportedMatcherKey {}
 
-// ── The three site-independent `NotAttemptable` families ───────────────
+// ── The two site-independent `NotAttemptable` families ─────────────────
 
 /// Whether this site's hook method returns
 /// [`StreamAction`](crate::action::StreamAction) rather than
@@ -1101,9 +1085,9 @@ const fn is_stream_decision(kind: ActionKind) -> bool {
     )
 }
 
-/// Families 1-3 of [`Support::NotAttemptable`], in the order [`classify`]
-/// documents: no constructor, then `ReplaceObject`'s single reading, then
-/// the return-type mismatch.
+/// The two families of [`Support::NotAttemptable`], in the order
+/// [`classify`] documents: `ReplaceObject`'s single reading, then the
+/// return-type mismatch.
 fn not_attemptable(site: Site, kind: ActionKind) -> Option<Support> {
     if kind == ActionKind::ReplaceObject && site != Site::Object {
         return Some(Support::NotAttemptable {
@@ -1142,12 +1126,10 @@ fn filtered_earlier(site: Site, kind: ActionKind) -> Support {
 /// draft this build did not compile fails at the stream header and reports
 /// [`BypassReason::DecodeError`], so nothing after it is ever asked.
 ///
-/// A fetch stream on drafts 18, 19 and 20 used to answer a second reason. It no
-/// longer does, because whether such a stream can be addressed is no longer a
-/// property of the draft: the session reads the Group Order off the FETCH and
-/// the framer takes it from there — see [`fetch_group_order_is_needed`]. What
-/// is left of that case belongs to one stream rather than to the table, and
-/// is reported per stream as before.
+/// Whether a fetch stream can be addressed is not a property of the draft:
+/// the session reads the Group Order off the FETCH and the framer takes it
+/// from there — see [`fetch_group_order_is_needed`]. That case belongs to one
+/// stream rather than to the table, and is reported per stream.
 ///
 /// `stream_kind: None` reads as a subgroup stream, matching
 /// [`Capabilities::supports`]'s published column.
@@ -1197,7 +1179,8 @@ const fn object_framing_bypass(
 /// fall through to their catch-all arm and return
 /// `CodecError::UnsupportedDraft(*draft DraftNN not enabled via feature
 /// flag*)`. That is not an incomplete-input error
-/// (`parser::data::is_incomplete_error` admits only `UnexpectedEnd`), so
+/// (`parser::data::is_incomplete_error` admits only the `UnexpectedEnd`
+/// spellings), so
 /// [`ObjectFramer`](crate::framer::ObjectFramer)'s header poll takes its
 /// terminal `Err` arm, latches [`BypassReason::DecodeError`] and forwards the
 /// stream uninterpreted. No object on it ever reaches
@@ -1219,7 +1202,7 @@ const fn object_framing_bypass(
 /// needs `instead` to name a report and this path emitted none. It emits
 /// [`ImpairmentKind::ControlFrameNotDecodable`](crate::event::ImpairmentKind::ControlFrameNotDecodable)
 /// now, so the cell is [`Support::Unreachable`] with
-/// [`Instead::ControlFrameNotDecodable`] — see [`classify`], step 5.
+/// [`Instead::ControlFrameNotDecodable`] — see [`classify`], step 4.
 ///
 /// # What it does *not* cover
 ///
@@ -1274,9 +1257,8 @@ const DEFAULT_DRAFT_ORDER: [DraftVersion; 14] = [
 /// The draft a session configuration takes when the caller names none.
 ///
 /// Draft-14 wherever the build has it, which is every build that did not trim
-/// its drafts, and the newest draft the build does have otherwise. The value is
-/// what it always was on a full build; what changes is that a reduced-draft
-/// build no longer starts out naming a draft it cannot speak.
+/// its drafts, and the newest draft the build does have otherwise — so a
+/// reduced-draft build never starts out naming a draft it cannot speak.
 ///
 /// # Why a default cannot simply refuse
 ///
@@ -1392,7 +1374,7 @@ pub(crate) const fn fetch_group_order_is_needed(draft: DraftVersion) -> bool {
 /// Whether this draft defines a *subgroup ID is the first object's ID* stream
 /// type.
 ///
-/// Nine drafts do: every one from 11 on. Drafts 07-10 always carry the
+/// Ten drafts do: every one from 11 on. Drafts 07-10 always carry the
 /// subgroup ID explicitly, so eliding index 0 there redefines nothing.
 ///
 /// The two wordings are worth telling apart, because reading only the later
@@ -1456,7 +1438,7 @@ const fn has_implicit_subgroup_id_mode(draft: DraftVersion) -> bool {
 /// differs; the two bits and their four values are not.
 ///
 /// What decides it is where `AnySubgroupHeader::subgroup_id` answers `None`
-/// for more than one reason. On these five it answers `None` for both mode 1
+/// for more than one reason. On these six it answers `None` for both mode 1
 /// and the fourth combination, so `None` alone cannot say whether the first
 /// object defines the subgroup or the header is one no receiver should read,
 /// and the mode has to be consulted. Drafts 11 through 14 give each carrier a
@@ -1464,13 +1446,9 @@ const fn has_implicit_subgroup_id_mode(draft: DraftVersion) -> bool {
 /// means the first object and nothing else; drafts 07-10 always put the ID on
 /// the wire and never answer `None` at all.
 ///
-/// Both were outside this set while the codec still resolved their fourth
-/// combination to a subgroup ID — draft-15 to zero by falling through, draft-16
-/// to whatever varint it went on to read — and being outside it was right then,
-/// because a `None` from those two really did mean mode 1 and nothing else. The
-/// codec now answers `None` for both readings, as it always did on 17-20, so
-/// the sentence above is what picks the drafts rather than a list of the ones
-/// that name a field.
+/// Draft-15 and draft-16 are in the set on that reading alone. Draft-15 names
+/// no mode field and draft-16 names one, so the field is not what puts either
+/// of them here; a `None` that could mean either reading is.
 ///
 /// Exhaustive rather than a `matches!`, because the question this asks is not
 /// one a new draft can be assumed out of: the sentence above is about what
@@ -1512,11 +1490,9 @@ const fn subgroup_id_mode_must_be_consulted(draft: DraftVersion) -> bool {
 /// own beside it. Its request streams take the same control path, so this
 /// column reads the same for it as for every other draft.
 ///
-/// This column carried a `Conditional` for 17-19 while the engine believed
-/// the control plane was the first bidirectional stream on every draft.
-/// `tests/control_plane_uni.rs` is the end-to-end reading that replaced it,
-/// and `tests/draft16_request_streams.rs` is the one for the draft that
-/// needs both answers.
+/// `tests/control_plane_uni.rs` is the end-to-end reading behind this
+/// column, and `tests/draft16_request_streams.rs` is the one for the draft
+/// that needs both answers.
 fn classify_control(kind: ActionKind) -> Support {
     let honoured = Support::Yes;
 
@@ -1832,7 +1808,7 @@ mod tests {
         DraftVersion::Draft20,
     ];
 
-    /// All sixteen kinds — the axis every table test below sweeps.
+    /// All fourteen kinds — the axis every table test below sweeps.
     const KINDS: [ActionKind; 14] = [
         ActionKind::Pass,
         ActionKind::Replace,
@@ -2142,10 +2118,10 @@ mod tests {
                 assert_eq!(cell(kind), want, "{draft:?} {kind:?}");
             }
 
-            // The unconstructible two and the four stream decisions stay
-            // `NotAttemptable` even where the hook is never invoked — the
-            // return-type family is decided before the framing bypass, so
-            // a fetch cell on 18-19 is `NotAttemptable`, not `Unreachable`.
+            // The four stream decisions stay `NotAttemptable` even where
+            // the hook is never invoked — the return-type family is decided
+            // before the framing bypass, so a cell on a draft this build
+            // did not compile is `NotAttemptable`, not `Unreachable`.
             for kind in [
                 ActionKind::Open,
                 ActionKind::Reject,
@@ -2174,7 +2150,7 @@ mod tests {
             let cell = |kind| caps.supports(Site::Control, kind);
 
             // The two `NotAttemptable` families below are decided ahead of
-            // reachability — `classify` step 1 — so they keep their own
+            // reachability — `classify` steps 1 and 2 — so they keep their own
             // answers on every build, and this wrapper is deliberately not
             // applied to them.
             let unreachable = !draft_is_compiled(draft);
@@ -2510,7 +2486,7 @@ mod tests {
     }
 
     /// The reserved-mode split, on every draft whose two mode bits have to be
-    /// consulted **and** was compiled. Empty in a build that left all five
+    /// consulted **and** was compiled. Empty in a build that left all six
     /// out, which is the honest answer there: those cells are `Unreachable`.
     #[test]
     fn elide_guards_follow_the_execution_order() {
@@ -2637,10 +2613,9 @@ mod tests {
     /// row, and the drafts it added to the loop answered `Yes` anyway, because
     /// a resolved Subgroup ID satisfies the guard on every draft that has one.
     ///
-    /// That last sentence is the claim worth making, so the sweep is now all
-    /// fourteen and the expected answer is one value. The contrast it used to
-    /// gesture at — refused where the carrier exists, allowed where it does
-    /// not — is
+    /// That last sentence is the claim worth making, so the sweep is all
+    /// fourteen and the expected answer is one value. The contrast — refused
+    /// where the carrier exists, allowed where it does not — is
     /// [`the_first_object_subgroup_guard_turns_on_the_stream_kind`], which
     /// states it per draft.
     #[test]

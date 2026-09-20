@@ -6,7 +6,7 @@
 //! previously sent Object ID within a given group in that stream." Drafts 14 and
 //! later encode the ID as a delta from the object before it, so a repeat or a
 //! decrease underflows the subtraction and the per-draft writer already refuses
-//! it - those six need nothing and have nothing here.
+//! it - those seven need nothing and have nothing here.
 //!
 //! # Why this is not an `encode_checked` test
 //!

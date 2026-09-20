@@ -21,37 +21,58 @@ fn loc_to_json(loc: &Location) -> Value {
     Value::Map(o)
 }
 
+/// Parse an authorization_token byte value into JSON.
+///
+/// # What a value it cannot read renders as
+///
+/// The raw bytes, as `fields::params` and every other draft's renderer do, and
+/// a field the value ran out before is simply absent. Field extraction runs on
+/// a message that has already decoded, so it has no refusal to give: what a
+/// peer sent is what there is to show.
+///
+/// That the bytes are a Token at all is not something this can assume. This
+/// function is reached from `setup_option_name`, whose whole purpose is asking
+/// a second draft about a parameter that arrived under a first — precisely
+/// where nothing has validated it against this draft's rules.
+/// `setup_option_name(13, &KeyValuePair { key: 0x03, value:
+/// KvpValue::Bytes(vec![]) })` is a public call with an empty value.
 fn auth_token_to_json(bytes: &[u8]) -> Value {
     let mut buf = bytes;
-    let alias_type = VarInt::decode(&mut buf).unwrap();
+    let Ok(alias_type) = VarInt::decode(&mut buf) else {
+        return Value::Bytes(bytes.to_vec());
+    };
     let at = alias_type.into_inner();
     let mut o = Map::new();
     o.insert("alias_type".into(), vi(at));
     match at {
         // DELETE, USE_ALIAS: only token_alias
         0 | 2 => {
-            let token_alias = VarInt::decode(&mut buf).unwrap();
-            o.insert("token_alias".into(), vi(token_alias.into_inner()));
+            if let Ok(token_alias) = VarInt::decode(&mut buf) {
+                o.insert("token_alias".into(), vi(token_alias.into_inner()));
+            }
         }
         // REGISTER: token_alias + token_type + token_value
         1 => {
-            let token_alias = VarInt::decode(&mut buf).unwrap();
-            let token_type = VarInt::decode(&mut buf).unwrap();
-            o.insert("token_alias".into(), vi(token_alias.into_inner()));
-            o.insert("token_type".into(), vi(token_type.into_inner()));
+            if let Ok(token_alias) = VarInt::decode(&mut buf) {
+                o.insert("token_alias".into(), vi(token_alias.into_inner()));
+            }
+            if let Ok(token_type) = VarInt::decode(&mut buf) {
+                o.insert("token_type".into(), vi(token_type.into_inner()));
+            }
             o.insert("token_value".into(), Value::Bytes(buf.to_vec()));
         }
         // USE_VALUE (3) or other: token_type + token_value
         _ => {
-            let token_type = VarInt::decode(&mut buf).unwrap();
-            o.insert("token_type".into(), vi(token_type.into_inner()));
+            if let Ok(token_type) = VarInt::decode(&mut buf) {
+                o.insert("token_type".into(), vi(token_type.into_inner()));
+            }
             o.insert("token_value".into(), Value::Bytes(buf.to_vec()));
         }
     }
     Value::Map(o)
 }
 
-fn kvp_to_json_setup(params: &[KeyValuePair]) -> Value {
+pub(crate) fn kvp_to_json_setup(params: &[KeyValuePair]) -> Value {
     crate::fields::kvp_entries(params, |key, value| match (key, value) {
         (0x01, KvpValue::Bytes(b)) => {
             (Some("path"), Some(Value::Text(String::from_utf8_lossy(b).into_owned())))

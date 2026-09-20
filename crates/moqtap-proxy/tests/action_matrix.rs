@@ -40,9 +40,9 @@
 //! item in `src/` — `DropMode` — and
 //! `cargo test --doc -p moqtap-proxy` collects **one** of them, which is
 //! the number [`the_no_constructor_proofs_are_doc_tests_on_src_items`]
-//! records verbatim. It was four blocks over three items until
-//! `StreamAction::OpenAfter` and `SerializeAfter` shipped; those two blocks
-//! are now ordinary doc-tests that construct the variants. A block that is
+//! records verbatim. `StreamAction::OpenAfter` and `SerializeAfter` are
+//! constructible variants, so the blocks hanging on them are ordinary
+//! doc-tests that build the variants rather than proofs. A block that is
 //! never collected reports `0 passed`, and the count is the only thing that
 //! tells that apart from success.
 //!
@@ -291,7 +291,7 @@ impl std::fmt::Display for Cell {
 /// Whether a fetch stream on this draft can only be read by an endpoint that
 /// knows the Group Order the fetch asked for.
 ///
-/// Drafts 18 and 19. There a fetch object's Group ID is a difference and the
+/// Drafts 18, 19 and 20. There a fetch object's Group ID is a difference and the
 /// order decides its sign (draft-19 Section 11.4.4.1); nothing on the data
 /// stream states it, and the wrong assumption decodes rather than failing.
 /// The order is on the FETCH — draft-19 Section 10.2.8: "If omitted from
@@ -322,9 +322,10 @@ fn fetch_objects_use_serialization_flags(d: DraftVersion) -> bool {
 
 /// Whether a fetch object of this draft can carry an Object Status.
 ///
-/// Drafts 07-15. Drafts 16-20 removed the field from fetch objects, so a
-/// zero-length fetch frame there is an object with no bytes rather than a
-/// status object — which is what decides whether eliding one is refused.
+/// Drafts 07-15. Drafts 16-20 define no Object Status field on a fetch
+/// object, so a zero-length fetch frame there is an object with no bytes
+/// rather than a status object — which is what decides whether eliding one
+/// is refused.
 fn fetch_objects_carry_a_status(d: DraftVersion) -> bool {
     d.number() <= 15
 }
@@ -333,9 +334,9 @@ fn fetch_objects_carry_a_status(d: DraftVersion) -> bool {
 /// stream type: every draft from 11 on.
 ///
 /// Transcribed from the drafts rather than read off the engine, which is the
-/// point of this file — and this transcription is where draft-15 went
-/// missing. Its neighbours read differently enough to hide it. Drafts 11
-/// through 15 give the mode as a property of the type value, draft-15
+/// point of this file — and the drafts do not word the mode the same way on
+/// both halves of the range. Drafts 11 through 15 give the mode as a property
+/// of the type value, draft-15
 /// Section 10.4.2 putting it as "the Subgroup ID is either 0 (for Types
 /// 0x10-11 and 0x18-19) or the Object ID of the first object transmitted in
 /// this subgroup (for Types 0x12-13 and 0x1A-1B)"; drafts 16 through 20 name
@@ -344,9 +345,9 @@ fn fetch_objects_carry_a_status(d: DraftVersion) -> bool {
 /// transmitted in this Subgroup". Reading for the later phrasing alone finds
 /// 16 through 20 and walks straight past 11 through 15.
 ///
-/// Draft-20 renamed the header's leading field from `Type` to `Type Flags`
-/// and left every bit of it alone, so its subgroup stream types and their
-/// SUBGROUP_ID_MODE values are draft-19's (Section 11.4.2).
+/// Draft-20 spells the header's leading field `Type Flags` where draft-19
+/// spells it `Type`, with the same bits, so its subgroup stream types and
+/// their SUBGROUP_ID_MODE values are draft-19's (Section 11.4.2).
 fn has_implicit_subgroup_id_mode(d: DraftVersion) -> bool {
     matches!(d.number(), 11..=20)
 }
@@ -718,12 +719,10 @@ const TABLE_ONLY_REFUSALS: [&str; 2] = ["StreamNotFramed", "ControlFrameNotDecod
 /// verdict itself stays gated where it is produced, in `capability`'s own
 /// tests; what no session can show is one being emitted.
 ///
-/// This used to call drafts 17-19 the only ones carrying that field, which
-/// is wrong and made the range look narrower than it is: draft-16 carries a
-/// SUBGROUP_ID_MODE and the same reserved value, and refuses those type
-/// values at decode exactly as its successors do. The unprovokability
-/// argument is unchanged by that — it rests on the decoder's refusal, which
-/// all five drafts share — but the reason now names the right range.
+/// Five drafts carry the field: 16, 17, 18, 19 and 20 each define a
+/// SUBGROUP_ID_MODE with the same reserved `0b11`, and each refuses the type
+/// values carrying it at decode. The unprovokability argument rests on that
+/// refusal, which all five share.
 ///
 /// Kept beside the other two lists rather than folded into either, so the
 /// day a draft defines mode 3 this set empties and the partition below
@@ -788,7 +787,7 @@ enum SubgroupMode {
     /// The subgroup ID is the first object's ID — the mode that makes
     /// eliding index 0 a redefinition.
     FirstObject,
-    /// Drafts 17-20's reserved subgroup-ID mode 3.
+    /// Drafts 16-20's reserved subgroup-ID mode 3.
     Reserved,
 }
 
@@ -797,7 +796,7 @@ enum SubgroupMode {
 /// Drafts 07-10 have a single subgroup type and always carry the ID
 /// explicitly. Draft-11 numbers the type space 0x08-0x0D; drafts 12+ use
 /// 0x10-0x15, where bit 1 selects "first object" and bit 2 "explicit".
-/// Drafts 17-20 read bits 1-2 as a two-bit mode, whose value 3 is reserved.
+/// Drafts 16-20 read bits 1-2 as a two-bit mode, whose value 3 is reserved.
 fn subgroup_stream_type(draft: DraftVersion, mode: SubgroupMode) -> u8 {
     match (draft.number(), mode) {
         (7..=10, _) => 0x04,
@@ -950,7 +949,7 @@ fn fetch_frame(draft: DraftVersion) -> Option<Vec<u8>> {
 /// count-prefixed and drafts 09-14 use a byte-length prefix — and unlike
 /// subgroup objects it is never gated on the stream type.
 ///
-/// **Drafts 15-17.** A Serialization Flags field first, then only the
+/// **Drafts 15-20.** A Serialization Flags field first, then only the
 /// fields it announces. Every object built here states all four outright —
 /// flags `0x1F`: Subgroup ID present, Object ID present, Group ID present,
 /// Priority present — which is the encoding that makes this function's
@@ -961,7 +960,18 @@ fn fetch_frame(draft: DraftVersion) -> Option<Vec<u8>> {
 /// cell and the engine agree, and they agree on every fetch object of those
 /// drafts whatever it states.
 ///
-/// Drafts 16 and 17 removed the Object Status field from fetch objects, so a
+/// From draft-18 the same two bits announce a *difference* rather than an
+/// absolute value, which draft-18 Section 11.4.4.1 names Group ID Delta and
+/// Object ID Delta, so these bytes are read differently there even though
+/// they are written the same. That costs this fixture nothing: "The first
+/// Object MUST include a Group ID Delta and Object ID Delta", so the opening
+/// object lands where it states. Each later one repeats that Group ID, which
+/// on those drafts is a step away from the object before rather than a
+/// return to it, so every one of them opens a group of its own. This column
+/// asserts nothing about that, because what it measures is what may be done
+/// to an object rather than where the object sits.
+///
+/// Drafts 16-20 define no Object Status field on a fetch object, so a
 /// `status` asked for there comes out as an ordinary zero-length object.
 fn fetch_object(
     draft: DraftVersion,
@@ -1361,7 +1371,7 @@ const UNDECODABLE_DATAGRAM: &[u8] = &[0xC0, 0x00];
 /// itself an assertion: a session that reported something before its first
 /// unit existed would put an extra `Obs` in front of the first probe's
 /// expected sequence, and the probe would fail on it rather than count it
-/// separately. Drafts 17-19 used to need such an exemption.
+/// separately.
 fn obs_of(event: &moqtap_proxy::event::ProxyEvent) -> Option<Obs> {
     use moqtap_proxy::event::ProxyEvent as E;
     match event {
@@ -1441,7 +1451,7 @@ impl Rig {
     /// the session to have read it.
     ///
     /// A no-op on the eleven drafts whose fetch streams resolve from their
-    /// own bytes. On drafts 18 and 19 it is what makes the stream readable:
+    /// own bytes. On drafts 18, 19 and 20 it is what makes the stream readable:
     /// the session files the Group Order under the Request ID and the framer
     /// takes it out again when the response opens.
     ///
@@ -1640,9 +1650,11 @@ fn queued_then(events: &[Obs], kind: ActionKind, inner: ActionKind, effect: &Eff
 ///
 /// Every draft opens with a datagram type field. Drafts 07-10 number the
 /// payload-bearing datagram `0x01`; drafts 11-13 number it `0x00` and use
-/// the low bits for flags this fixture leaves clear; drafts 15-19 open with
-/// one type byte, and `0x00` clears every flag there too. Asserted rather
-/// than assumed — see `the_datagram_fixtures_delimit_their_payload`.
+/// the low bits for flags this fixture leaves clear; drafts 15-20 open with
+/// one type byte, where `0x00` is again the payload-bearing value with
+/// object ID and priority present — a row of draft-15's type table, and
+/// every flag clear on 16-20. Asserted rather than assumed — see
+/// `the_datagram_fixtures_delimit_their_payload`.
 fn decodable_datagram(draft: DraftVersion) -> Option<Vec<u8>> {
     if draft == DraftVersion::Draft14 {
         return None;
@@ -1954,16 +1966,16 @@ async fn sweep_data_streams(draft: DraftVersion, sw: &mut Sweep) {
         sw.cover(cell(sub, ActionKind::DropElide), "~SI failing: WouldRedefineSubgroupId");
     }
 
-    // ── Stream 3: drafts 17-20's reserved header mode, which no draft
-    //    decodes ──
+    // ── Stream 3: the reserved subgroup-ID header mode, which no draft
+    //    decodes. Drafts 16-20 define the mode; this drives it on 17-20 ──
     //
-    // Draft-20 Section 11.4.2, and the same list in 19, 18 and 17, gives every
-    // mode-3 type value as invalid and tells the endpoint receiving one to
-    // close the session with a PROTOCOL_VIOLATION. This proxy is not that
-    // endpoint. The header does not decode, so nothing on the stream is
-    // addressable and the object site is never reached — no cell is
-    // covered here — while the bytes reach the far side untouched, which
-    // is what lets the peer be the one that answers as the draft says.
+    // Draft-20 Section 11.4.2, and the same list in 19, 18, 17 and 16,
+    // gives every mode-3 type value as invalid and tells the endpoint
+    // receiving one to close the session with a PROTOCOL_VIOLATION. This
+    // proxy is not that endpoint. The header does not decode, so nothing on
+    // the stream is addressable and the object site is never reached — no
+    // cell is covered here — while the bytes reach the far side untouched,
+    // which is what lets the peer be the one that answers as the draft says.
     if draft.number() >= 17 {
         let header = subgroup_header(draft, SubgroupMode::Reserved);
         let object = subgroup_object(draft, None, 0, b"jjjj", None);
@@ -2438,11 +2450,11 @@ async fn sweep_fetch_streams(draft: DraftVersion, sw: &mut Sweep) {
     // subgroup ID. What refuses an elide differs across the boundary at
     // draft-15 and is the one branch below.
     //
-    // Drafts 18 and 19 join this column rather than a bypassed one of their
-    // own, and `arm_fetch` is the whole difference: their Group IDs are
+    // Drafts 18, 19 and 20 join this column rather than a bypassed one of
+    // their own, and `arm_fetch` is the whole difference: their Group IDs are
     // differences the FETCH's Group Order gives a direction to, and the
     // session has now been told it. The objects below state all four of
-    // their fields on those two as on 15-17, so the first object's deltas
+    // their fields on those three as on 15-17, so the first object's deltas
     // are its absolute Location and every later one opens a group of its
     // own — which nothing here asserts about, because what this column
     // measures is what may be done to an object rather than where it sits.
@@ -3383,20 +3395,22 @@ async fn a_streams_key_is_stable_across_its_three_sites() {
 /// where they live and what `cargo test --doc -p moqtap-proxy` must report,
 /// so a future edit that moves one into a test file has somewhere to fail.
 ///
-/// **Measured**, after `OpenAfter` and `SerializeAfter` shipped:
+/// **Measured**:
 ///
 /// ```text
 /// $ cargo test --doc -p moqtap-proxy
-/// running 8 tests
+/// running 9 tests
 /// test crates\moqtap-proxy\src\egress.rs - egress (line 19) ... ignored
-/// test crates\moqtap-proxy\src\action.rs - action::DropMode (line 378) - compile fail ... ok
-/// test crates\moqtap-proxy\src\event.rs - event::ProxyEvent (line 59) ... ok
-/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 212) ... ok
-/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 203) ... ok
+/// test crates\moqtap-proxy\src\action.rs - action::DropMode (line 375) - compile fail ... ok
+/// test crates\moqtap-proxy\src\event.rs - event::ProxyEvent (line 48) ... ok
+/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 220) ... ok
+/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 211) ... ok
+/// test crates\moqtap-proxy\src\action.rs - action::DropMode (line 385) ... ok
+/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 239) ... ok
+/// test crates\moqtap-proxy\src\transport.rs - transport::TransportProfile (line 129) ... ok
 /// test crates\moqtap-proxy\src\action.rs - action::Interest::STREAMS (line 52) ... ok
-/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 231) ... ok
-/// test crates\moqtap-proxy\src\action.rs - action::DropMode (line 388) ... ok
-/// test result: ok. 7 passed; 0 failed; 1 ignored
+///
+/// test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.75s
 /// ```
 ///
 /// The three `ActionKind::OpenAfter` entries carry **no** `- compile fail`
@@ -3404,39 +3418,36 @@ async fn a_streams_key_is_stable_across_its_three_sites() {
 /// the shipped variants and the third asserts their verdicts, so all three
 /// can only report `ok` by compiling *and* running.
 ///
-/// **Two** `compile_fail` blocks on **two** `src/` items, each with its
-/// positive companion, which is what stops a block that fails for the wrong
+/// **One** `compile_fail` block, on one `src/` item, with a positive
+/// companion beside it, which is what stops a block that fails for the wrong
 /// reason (a mistyped path) from counting as a proof. The count is the
 /// whole point: a `compile_fail` that rustdoc never collected reports
 /// `0 passed`, and that is indistinguishable from success unless somebody
 /// reads the number.
 ///
-/// It was **four blocks on three items** until those two variants shipped.
-/// The pair on
-/// `ActionKind::OpenAfter` did not merely become wrong — it had **never
-/// been able to go red**: both blocks used struct-variant syntax
-/// (`OpenAfter { after: … }`) against variants that are tuples, so they
-/// would have kept failing to compile, and kept reporting `ok`, after the
-/// capability existed. They are now ordinary doc-tests that *construct*
-/// both variants, which can only pass by compiling and running. That is
-/// why this test's list shrank by one row and its per-kind loop by two
-/// entries: the two are separate lists and both had to move.
+/// A `compile_fail` block that cannot go red is the hazard behind both
+/// rules. Struct-variant syntax (`OpenAfter { after: … }`) against a tuple
+/// variant fails to compile for a reason of its own, so a block written
+/// that way keeps reporting `ok` whether or not the capability it guards
+/// exists. The `ActionKind::OpenAfter` entries are therefore ordinary
+/// doc-tests that *construct* both variants, which can only pass by
+/// compiling and running.
 ///
 /// # `PROOFS` is checked against the sources, not against itself
 ///
-/// It used to end at `assert_eq!(PROOFS.len(), 2)`, which is a compile-time
-/// `2` on a `[…; 2]` — there is no one-line edit that reddens it and also
-/// compiles, and `PROOFS` was referenced nowhere else in the file, so the
-/// item paths it records were never checked against anything.
-/// The rows are now read against the two source files themselves through
+/// Checking `PROOFS.len()` against a literal would check nothing: an array's
+/// length is a compile-time constant of the array beside it, and no one-line
+/// edit reddens such an assertion and also compiles. A test that ended there
+/// would read `PROOFS` nowhere else, so the item paths it records would be
+/// checked against nothing.
+/// The rows are read against the two source files themselves through
 /// `include_str!`, so the count is a count of real ```` ```compile_fail ````
 /// fences in `src/` and the "somewhere to fail" this test promises actually
-/// exists: move a block into a test file, delete one, or add a third, and
+/// exists: move the block into a test file, delete it, or add another, and
 /// this row reddens rather than the doc-test total quietly changing by one.
 ///
 /// It cannot *run* the blocks — nothing in `tests/*.rs` can — so this is a
-/// bookkeeping gate over the transcript above, which is what it always
-/// claimed to be.
+/// bookkeeping gate over the transcript above, and nothing more.
 #[test]
 fn the_no_constructor_proofs_are_doc_tests_on_src_items() {
     // (proof name, the `src/` item its rustdoc hangs on)
@@ -3454,11 +3465,12 @@ fn the_no_constructor_proofs_are_doc_tests_on_src_items() {
     const FENCE: &str = "```compile_fail";
     // The kinds each proof stands behind must still classify as
     // `NoConstructor`, or the proof is guarding a capability that shipped.
-    // `OpenAfter` and `SerializeAfter` are gone from this loop for exactly
-    // that reason, and their new verdicts are asserted by `published()`.
-    // Exactly two compile proofs ship, and each one is a fence in
-    // the file its item path names — checked against the source rather than
-    // against `PROOFS.len()`, which is a compile-time constant.
+    // `OpenAfter` and `SerializeAfter` are constructible variants, so they
+    // are not in `PROOFS`: their verdicts are `published()`'s, and the loop
+    // at the end of this test is what holds them out of the constructor-less
+    // family. Exactly one compile proof ships, and it is a fence in the file
+    // its item path names — checked against the source rather than against
+    // `PROOFS.len()`, which is a compile-time constant.
     let mut fences = 0;
     for (stem, src) in SOURCES {
         let want = PROOFS.iter().filter(|(_, item)| item.starts_with(stem)).count();
@@ -3486,10 +3498,10 @@ fn the_no_constructor_proofs_are_doc_tests_on_src_items() {
              is the only thing tying the transcript above to a fence in the source"
         );
     }
-    // The other half of the same claim, and the one that would have caught
-    // the shipped-but-still-guarded state: neither deferred stream decision
-    // may classify as `NoConstructor` anywhere, now that both are real
-    // `StreamAction` variants a caller can build.
+    // The other half of the same claim, and the half a fence count cannot
+    // make: neither deferred stream decision may classify as
+    // `NoConstructor` anywhere, because both are real `StreamAction`
+    // variants a caller can build.
     for kind in [ActionKind::OpenAfter, ActionKind::SerializeAfter] {
         for &draft in DRAFTS {
             for column in COLUMNS {

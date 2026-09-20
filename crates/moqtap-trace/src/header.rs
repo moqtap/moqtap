@@ -273,8 +273,8 @@ fn deduplicated(entries: impl Iterator<Item = (Value, Value)>) -> Vec<(Value, Va
 /// returns the first entry for a key whatever it holds leaves the first, and
 /// one that skips an entry whose value it cannot use may leave a later one.
 /// This drops the first entry for a key the map writes either way, so on a
-/// mixed-type duplicate the two disagree about *which* entry survives. Both
-/// were lost before this walk existed, and SPEC.md leaves readers free to
+/// mixed-type duplicate the two disagree about *which* entry survives. Without
+/// this walk both are lost, and SPEC.md leaves readers free to
 /// disagree over which of a duplicate pair wins, so nothing may depend on it.
 pub(crate) fn unrecognised(
     pairs: &[(Value, Value)],
@@ -306,8 +306,8 @@ pub(crate) fn unrecognised(
 ///
 /// A list of pairs is not a map and can hold one key twice: a caller can build
 /// such a list by hand, and a file that repeated a key no field could use
-/// leaves one behind (see [`unrecognised`]). Until this pass existed both
-/// entries went into the file. RFC 8949 calls a map with a repeated key
+/// leaves one behind (see [`unrecognised`]). Without this pass both entries go
+/// into the file. RFC 8949 calls a map with a repeated key
 /// invalid, the JavaScript reader silently collapses one, and SPEC.md forbids
 /// emitting one at all.
 ///

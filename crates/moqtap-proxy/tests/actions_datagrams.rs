@@ -295,13 +295,17 @@ fn datagram_header(draft: DraftVersion, payload_len: usize) -> Vec<u8> {
             varint(OBJECT_ID, &mut h);
             h.push(PRIORITY);
         }
-        // 14-20: a leading datagram-type field. `0x00` clears every flag
-        // — object ID present, priority present, no extensions or
-        // properties, no status — so the layout is the same five fields on
-        // all seven. It is written as one octet, which is both a valid
-        // one-byte varint (drafts 14-16 read it as a varint) and the raw
-        // `u8` drafts 17-20 read. Draft-20 renamed the field from `Type` to
-        // `Type Flags` and changed none of its bits.
+        // 14-20: a leading datagram-type field. `0x00` means object ID
+        // present, priority present, no extensions or properties, no
+        // status, so the layout is the same five fields on all seven. It
+        // is written as one octet, which serves every reader here: drafts
+        // 14, 15 and 20 decode this field as a varint and 16-19 as a raw
+        // `u8`, and a lone `0x00` is both a valid one-byte varint and that
+        // `u8`. How the field is defined differs too: 14 and 15 enumerate
+        // whole type values in a table, while 16-20 name the bits and
+        // `0x00` clears all of them. Draft-20 spells the field
+        // `Type Flags` where 14-19 spell it `Type`; draft-20's bits are
+        // draft-19's.
         DraftVersion::Draft14
         | DraftVersion::Draft15
         | DraftVersion::Draft16
@@ -331,7 +335,7 @@ fn datagram(draft: DraftVersion, payload: &[u8]) -> Vec<u8> {
 /// payload slot at all.
 ///
 /// One byte-for-byte layout serves all six. The type is a single octet,
-/// which drafts 15 and 16 read as a one-byte varint and 17-19 as a raw
+/// which drafts 15 and 20 read as a one-byte varint and 16-19 as a raw
 /// `u8`; the status is `0x3`, which is one byte under both the RFC 9000
 /// varint and MoQT's.
 ///

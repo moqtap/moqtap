@@ -868,13 +868,11 @@ impl ProxyRecorder {
     /// exists to prevent, and it would arrive silently and be unrecoverable
     /// without restarting the proxy.
     ///
-    /// The way an empty list used to get here was a [`ShapeProfile`] with no
-    /// classes, which the constructor accepted because it validated each
-    /// class it was *given* and had nothing to say about being given none.
-    /// [`ShapeProfile::try_new`] now refuses that outright as
+    /// The one way an empty list could reach here is a [`ShapeProfile`] with
+    /// no classes, and [`ShapeProfile::try_new`] refuses that outright as
     /// [`ShapeError::NoClasses`](super::ShapeError::NoClasses), so no
     /// profile can carry an empty list to this call and the branch below is
-    /// no longer reachable from any public path.
+    /// not reachable from any public path.
     ///
     /// It stays because of what it costs against what it prevents: two lines
     /// and a comparison that is already being made, against a proxy-wide,
@@ -1986,16 +1984,13 @@ mod tests {
     /// a list that is present and holds nothing.
     ///
     /// **It reaches [`ProxyRecorder::adopt_classes`] directly, and that is
-    /// the point of this version of the row.** The way an empty list used to
-    /// arrive was a `ShapeProfile` with no classes, which
-    /// [`ShapeProfile::try_new`] accepted because it validated each class it
-    /// was handed and had nothing to say about being handed none. That
-    /// constructor now refuses one as `ShapeError::NoClasses`, so there is no
-    /// profile left that could bring an empty list here and no public path
-    /// that reaches this branch. The guard stays anyway, and so does this
-    /// row: what it prevents is proxy-wide, silent and unrecoverable without
-    /// a restart, and the check is a comparison that was being made in any
-    /// case.
+    /// the point of this version of the row.** The only thing that could
+    /// carry an empty list there is a `ShapeProfile` with no classes, and
+    /// [`ShapeProfile::try_new`] refuses that outright as
+    /// `ShapeError::NoClasses`, so no public path reaches this branch. The
+    /// guard is kept anyway, and so is this row: what it prevents is
+    /// proxy-wide, silent and unrecoverable without a restart, and the check
+    /// is a comparison that is being made in any case.
     ///
     /// An empty row set matches no later class list, so the proxy's rows
     /// would stay empty and every classed session accepted for the rest of
@@ -2007,12 +2002,11 @@ mod tests {
     /// lost, only misfiled.
     ///
     /// *Ablation, run:* drop the `names.is_empty()` guard from
-    /// `ProxyRecorder::adopt_classes`, which is the state this file shipped
-    /// in. The first assertion reddens with
+    /// `ProxyRecorder::adopt_classes`. The first assertion reddens with
     ///
     /// ```text
     /// thread 'shape::stats::tests::an_empty_class_list_does_not_size_the_proxys_class_rows'
-    /// (63164) panicked at crates\moqtap-proxy\src\shape\stats.rs:2053:9:
+    /// (63164) panicked at crates\moqtap-proxy\src\shape\stats.rs:
     /// a list with no rows in it names no row, so there is nothing for it to
     /// charge and nothing is lost by declining it
     /// ```
@@ -2020,8 +2014,8 @@ mod tests {
     /// The three assertions under it are not reached, so that is the whole of
     /// what the mutation was seen to produce; the misfiling they describe is
     /// what the empty row set leaves behind once the sizing has been lost.
-    /// The bug this pins was found by probe rather than by review — a throwaway
-    /// test printed `classes=[] default_bytes=100` against the shipped code.
+    /// A probe run without the guard prints `classes=[] default_bytes=100`:
+    /// every byte counted, every label gone.
     #[test]
     fn an_empty_class_list_does_not_size_the_proxys_class_rows() {
         let proxy = Arc::new(ProxyRecorder::new());

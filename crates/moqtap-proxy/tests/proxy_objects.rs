@@ -2,8 +2,8 @@
 //!
 //! Proves the two framing promises together: a subgroup stream
 //! arrives at the far end byte-identical, *and* one
-//! [`ProxyEvent::Object`] fires per object — on every draft, including
-//! 14-19, where the proxy previously emitted nothing at all.
+//! [`ProxyEvent::Object`] fires per object — on every draft the build
+//! compiled, 07 through 20.
 
 //! `DRAFTS` is cfg-built, so the sweep is the compiled set. A build with
 //! no draft at all has no subgroup codec to build a stream with, and
@@ -105,11 +105,12 @@ impl ProxyObserver for ObjectCollector {
 /// upstream connection that never arrives rather than as anything about
 /// framing.
 ///
-/// The newest rather than the first, so that a build with every draft runs
-/// them on draft-19, which is what they named before this was derived, and
-/// which is the half of the range where the proxy used to report nothing
-/// at all. `DRAFTS` is cfg-built and the file-level gate guarantees at
-/// least one entry.
+/// The newest rather than the first, so the pick follows the list forward:
+/// a draft appended to `DRAFTS` becomes the one these two tests run on,
+/// where `DRAFTS[0]` would keep them on the oldest draft the build still
+/// compiles — draft-07 in a full build — however many newer ones land.
+/// `DRAFTS` is cfg-built and the file-level gate guarantees at least one
+/// entry.
 fn a_compiled_draft() -> DraftVersion {
     DRAFTS[DRAFTS.len() - 1]
 }

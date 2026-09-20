@@ -78,7 +78,7 @@ fn frame(msg_type: u64, body: &[u8]) -> Vec<u8> {
 /// ```text
 /// ---- setup_option_key_may_not_wrap_past_the_end_of_the_range stdout ----
 ///
-/// thread 'setup_option_key_may_not_wrap_past_the_end_of_the_range' (7244) panicked at crates\moqtap-codec\src\draft17\message.rs:282:23:
+/// thread 'setup_option_key_may_not_wrap_past_the_end_of_the_range' (7244) panicked at crates\moqtap-codec\src\draft17\message.rs:
 /// attempt to add with overflow
 /// ```
 ///
@@ -156,7 +156,7 @@ fn parameter_key_may_not_wrap_past_the_end_of_the_range() {
 /// ```text
 /// ---- descending_parameters_are_refused_rather_than_wrapped stdout ----
 ///
-/// thread 'descending_parameters_are_refused_rather_than_wrapped' (21352) panicked at crates\moqtap-codec\src\draft17\message.rs:230:21:
+/// thread 'descending_parameters_are_refused_rather_than_wrapped' (21352) panicked at crates\moqtap-codec\src\draft17\message.rs:
 /// attempt to subtract with overflow
 /// ```
 ///
@@ -314,7 +314,7 @@ fn out_of_range_uint8_parameters_are_refused_on_every_draft_that_defines_them() 
 /// ```text
 /// ---- an_oversized_uint8_parameter_is_refused_not_truncated stdout ----
 ///
-/// thread 'an_oversized_uint8_parameter_is_refused_not_truncated' (59216) panicked at crates\moqtap-codec\tests\parameter_and_namespace_rules.rs:299:5:
+/// thread 'an_oversized_uint8_parameter_is_refused_not_truncated' (59216) panicked at crates\moqtap-codec\tests\parameter_and_namespace_rules.rs:
 /// draft-17 truncated GROUP_ORDER 258 instead of refusing it: Ok(())
 /// ```
 #[test]
@@ -445,7 +445,7 @@ fn an_oversized_reason_phrase_is_refused_and_the_maximum_is_not() {
 /// ```text
 /// ---- a_zero_length_namespace_field_is_refused stdout ----
 ///
-/// thread 'a_zero_length_namespace_field_is_refused' (59212) panicked at crates\moqtap-codec\tests\parameter_and_namespace_rules.rs:427:5:
+/// thread 'a_zero_length_namespace_field_is_refused' (59212) panicked at crates\moqtap-codec\tests\parameter_and_namespace_rules.rs:
 /// draft-17 accepted a zero-length namespace field: Ok(Subscribe(Subscribe { request_id: VarInt(1), required_request_id_delta: VarInt(0), track_namespace: TrackNamespace([[]]), track_name: [116], parameters: [] }))
 /// ```
 #[test]

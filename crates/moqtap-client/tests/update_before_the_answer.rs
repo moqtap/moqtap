@@ -9,13 +9,12 @@
 //! stream is open, from the moment the SUBSCRIBE is sent.
 //!
 //! So a subscriber that sends SUBSCRIBE and its update back to back is
-//! conforming, and this crate used to refuse it — on thirteen of these
-//! fourteen drafts, with the same line in the same place in each. That is the
-//! shape this file exists for: the state machines are fourteen copies of one
-//! graph, so a fix applied to one of them and not the rest reads exactly like a
-//! fix applied to all of them. Draft-20 was ported after the fix and inherited
-//! it, which is the other way the same shape goes wrong — a copy made from a
-//! corrected original is indistinguishable from one nobody checked.
+//! conforming. That is the shape this file exists for: the state machines are
+//! fourteen copies of one graph, so a change applied to one of them and not the
+//! rest reads exactly like a change applied to all of them, and only a gate on
+//! every draft tells the two apart. A module ported from a corrected original is
+//! indistinguishable from one nobody checked, which is the same hazard from the
+//! other side.
 //!
 //! The rest of the edge is asserted too. `Idle` and `Done` still refuse an
 //! update, because in neither does the subscription an update names exist.
@@ -44,7 +43,7 @@ macro_rules! update_before_the_answer_gates {
             ///
             /// ```text
             /// thread 'draft19::an_update_may_precede_the_subscriptions_own_answer'
-            /// panicked at crates\moqtap-client\tests\update_before_the_answer.rs:110:1:
+            /// panicked at crates\moqtap-client\tests\update_before_the_answer.rs:
             /// a REQUEST_UPDATE may precede the subscription's own answer: InvalidTransition { from: Subscribing, event: "on_subscribe_update" }
             /// ```
             ///

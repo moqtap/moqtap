@@ -60,7 +60,7 @@
 //!
 //! ```text
 //! thread 'draft18_names_agree_with_the_corpus' panicked at
-//! crates\moqtap-codec\tests\message_type_names.rs:258:5:
+//! crates\moqtap-codec\tests\message_type_names.rs:
 //! draft18: assigned by the corpus, not named by this crate: 0x50
 //! subscribe_namespace, 0x51 subscribe_tracks
 //! ```
@@ -70,7 +70,7 @@
 //!
 //! ```text
 //! thread 'draft19_names_agree_with_the_corpus' panicked at
-//! crates\moqtap-codec\tests\message_type_names.rs:275:9:
+//! crates\moqtap-codec\tests\message_type_names.rs:
 //! draft19: 0xf is publish_skipped in the corpus, publish_blocked in this crate
 //! ```
 //!
@@ -79,7 +79,7 @@
 //!
 //! ```text
 //! thread 'draft18_names_agree_with_the_corpus' panicked at
-//! crates\moqtap-codec\tests\message_type_names.rs:291:13:
+//! crates\moqtap-codec\tests\message_type_names.rs:
 //! draft18/publish-ok.json: 0x7 is also filed as publish_ok, and this crate
 //! answers request_ok. Either the corpus assigns one id to two messages, or
 //! publish_ok is an alias that needs a row in ALIASES saying so.

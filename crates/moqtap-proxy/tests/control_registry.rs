@@ -91,10 +91,10 @@ const ALPN: &[u8] = b"moq-00";
 /// The drafts this build compiled, draft-14 first.
 ///
 /// Order rather than a plain list: nothing here frames anything, so any
-/// compiled draft serves, and putting 14 first keeps the default all-drafts
-/// build on the draft this file has always used. A reduced build takes
-/// whichever one it has instead of configuring a session for a draft it
-/// cannot frame — which the session refuses.
+/// compiled draft serves, and putting 14 first pins the default all-drafts
+/// build to draft-14. A reduced build takes whichever one it has instead of
+/// configuring a session for a draft it cannot frame — which the session
+/// refuses.
 const CANDIDATE_DRAFTS: &[DraftVersion] = &[
     #[cfg(feature = "draft14")]
     DraftVersion::Draft14,
@@ -240,7 +240,7 @@ fn census_of(control: &ProxyControl, n: usize) -> Option<Vec<SessionId>> {
 ///
 /// ```text
 /// thread 'the_census_names_the_sessions_that_are_forwarding_and_no_others'
-/// panicked at crates\moqtap-proxy\tests\control_registry.rs:134:9:
+/// panicked at crates\moqtap-proxy\tests\control_registry.rs:
 /// timed out waiting for the census to drop the session whose client went away
 /// ```
 ///
@@ -331,7 +331,7 @@ async fn the_census_names_the_sessions_that_are_forwarding_and_no_others() {
 ///
 /// ```text
 /// thread 'the_reported_address_is_one_a_client_connects_through'
-/// panicked at crates\moqtap-proxy\tests\control_registry.rs:302:29:
+/// panicked at crates\moqtap-proxy\tests\control_registry.rs:
 /// a client cannot dial the address the handle reported: invalid remote address: 127.0.0.1:0
 /// ```
 ///

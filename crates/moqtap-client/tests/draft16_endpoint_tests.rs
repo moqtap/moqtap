@@ -150,9 +150,9 @@ fn endpoint_subscribe_error_via_request_error() {
 }
 
 /// Section 9.11 sends a REQUEST_UPDATE from the sender of the request, so one
-/// that arrives names a request the peer made. The peer makes one here first;
-/// this test used to feed an update naming a subscription this endpoint had
-/// opened itself, which is the message no peer following the draft sends.
+/// that arrives names a request the peer made. The peer makes one here first,
+/// because an update naming a subscription this endpoint opened itself is a
+/// message no peer following the draft sends.
 #[test]
 fn endpoint_subscribe_update_via_dispatch() {
     let mut ep = make_active_client();
@@ -455,9 +455,8 @@ fn endpoint_unknown_publish_namespace_ok_rejected() {
 // ============================================================
 
 /// Draft-16 Section 6.1 puts the answer on the request's own stream, so the
-/// answer is fed to the endpoint the same way. Feeding it through
-/// `receive_message` — the control stream — is what this test used to do, and
-/// the endpoint took it, which is the defect the stream work corrected.
+/// answer is fed to the endpoint the same way, through
+/// `receive_on_namespace_stream` rather than `receive_message`.
 #[test]
 fn endpoint_subscribe_namespace_roundtrip() {
     let mut ep = make_active_client();

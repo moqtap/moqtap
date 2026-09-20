@@ -81,8 +81,9 @@ mod draft07 {
     }
 
     /// A value the key's type cannot read is a malformed parameter, not a
-    /// parameter to skip. Skipping it is how the defect above stayed quiet:
-    /// the ceiling simply stayed at its default and nothing said why.
+    /// parameter to skip. A skipped parameter leaves the ceiling at its default
+    /// and says nothing about why, which is how an unreadable value goes
+    /// unnoticed for a whole session.
     #[test]
     fn a_max_subscribe_id_parameter_with_an_unreadable_value_is_refused() {
         let mut setup = server_setup_from_corpus();
@@ -154,8 +155,9 @@ mod draft08 {
     }
 
     /// A value the key's type cannot read is a malformed parameter, not a
-    /// parameter to skip. Skipping it is how the defect above stayed quiet:
-    /// the ceiling simply stayed at its default and nothing said why.
+    /// parameter to skip. A skipped parameter leaves the ceiling at its default
+    /// and says nothing about why, which is how an unreadable value goes
+    /// unnoticed for a whole session.
     #[test]
     fn a_max_subscribe_id_parameter_with_an_unreadable_value_is_refused() {
         use moqtap_codec::kvp::{KeyValuePair, KvpValue};
@@ -227,8 +229,9 @@ mod draft09 {
     }
 
     /// A value the key's type cannot read is a malformed parameter, not a
-    /// parameter to skip. Skipping it is how the defect above stayed quiet:
-    /// the ceiling simply stayed at its default and nothing said why.
+    /// parameter to skip. A skipped parameter leaves the ceiling at its default
+    /// and says nothing about why, which is how an unreadable value goes
+    /// unnoticed for a whole session.
     #[test]
     fn a_max_subscribe_id_parameter_with_an_unreadable_value_is_refused() {
         use moqtap_codec::kvp::{KeyValuePair, KvpValue};
@@ -300,8 +303,9 @@ mod draft10 {
     }
 
     /// A value the key's type cannot read is a malformed parameter, not a
-    /// parameter to skip. Skipping it is how the defect above stayed quiet:
-    /// the ceiling simply stayed at its default and nothing said why.
+    /// parameter to skip. A skipped parameter leaves the ceiling at its default
+    /// and says nothing about why, which is how an unreadable value goes
+    /// unnoticed for a whole session.
     #[test]
     fn a_max_subscribe_id_parameter_with_an_unreadable_value_is_refused() {
         use moqtap_codec::kvp::{KeyValuePair, KvpValue};

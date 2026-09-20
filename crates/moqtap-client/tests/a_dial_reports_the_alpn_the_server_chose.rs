@@ -81,7 +81,7 @@ fn every_alpn() -> Vec<Vec<u8>> {
 }
 
 fn options(alpn: Vec<Vec<u8>>) -> QuicDialOptions {
-    QuicDialOptions { skip_cert_verification: true, ca_certs: Vec::new(), alpn }
+    QuicDialOptions::new(alpn).insecure(true)
 }
 
 fn client_config() -> ClientConfig {
@@ -127,7 +127,7 @@ async fn the_dial_reports_the_protocol_the_server_selected() {
         DraftVersion::from_alpn(&negotiated),
         Some(DraftVersion::Draft16),
         "the reported protocol has to be one a draft can be resolved from, or the value is \
-         useless to the caller it was added for"
+         useless to the caller it exists for"
     );
 
     let _ = tokio::time::timeout(PATIENCE, server).await;
@@ -167,7 +167,7 @@ async fn a_server_sharing_no_protocol_refuses_the_dial() {
     let _ = tokio::time::timeout(PATIENCE, server).await;
 }
 
-/// The pair, doing the job it was added for: dial without knowing the draft,
+/// The pair, doing the job it exists for: dial without knowing the draft,
 /// then bring the transport to the module the answer names.
 ///
 /// `Connection::connect` is not reachable from here — it would have had to be

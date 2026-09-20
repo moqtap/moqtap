@@ -260,9 +260,14 @@ const ABSOLUTE_ID_EXT_DRAFTS: &[DraftVersion] = &[
 /// refused by `ProxyError::DraftNotCompiled` before it dials, so naming a
 /// draft outright decides whether such a test runs on the feature set
 /// rather than on the code. The newest rather than the first, so a build
-/// with every draft still runs it on draft-19, which is the draft it named
-/// before this was derived. `DRAFTS` is cfg-built and the file-level gate
-/// guarantees it is not empty.
+/// with every draft runs it on draft-20, the last entry `DRAFTS` carries.
+/// `DRAFTS` is cfg-built, so this index is only sound where some draft is
+/// compiled — and unlike `action_matrix.rs` and `actions_datagrams.rs`,
+/// this file carries no `#![cfg(any(…))]` gate of its own. What rules the
+/// empty build out is the crate: `capability::DEFAULT_DRAFT` is a `const`
+/// that panics in const evaluation when no draft feature is on, so a
+/// zero-draft build fails to compile the library and never produces this
+/// test binary.
 fn a_compiled_draft() -> DraftVersion {
     DRAFTS[DRAFTS.len() - 1]
 }
@@ -1375,9 +1380,9 @@ async fn reemit_rewrites_the_leading_varint_when_it_must() {
 /// [`an_oversized_successor_whose_new_delta_needs_a_wider_varint`] covers
 /// the case where the width changes.
 ///
-/// *Ablation (measured):* revert to the earlier design — call the fix-up
-/// only from `poll_object`'s addressable arm, i.e. discard
-/// `apply_elide_fixup`'s rewritten bytes in `poll_oversized`. Verified to
+/// *Ablation (measured):* call the fix-up only from `poll_object`'s
+/// addressable arm, i.e. discard `apply_elide_fixup`'s rewritten bytes in
+/// `poll_oversized`. Verified to
 /// fail on every one of drafts 14-20, the emitted chunk carrying
 /// `…, 0, 0, 128, 80, …` where `…, 0, 1, 128, 80, …` is owed. It fails
 /// nothing outside the two oversized tests, because the addressable path

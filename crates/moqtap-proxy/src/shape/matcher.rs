@@ -166,14 +166,13 @@ impl From<RangeSet> for Vec<RangeInclusive<u64>> {
 /// `Datagram` matcher never matches a unit. The report is the scheduler's
 /// job once this module is wired.
 ///
-/// `Fetch` is live on all fourteen. It was not always: drafts 18, 19 and 20
-/// write a fetch object's Group ID as a difference whose sign the fetch's
-/// Group Order settles, and while nothing carried that order to the framer a
-/// fetch stream there was bypassed at its header and produced no
-/// [`ObjectMeta`] for a rule to see. The session reads the order off the
-/// FETCH now — `capability::fetch_group_order_is_needed` — so what is left is
-/// one stream at a time rather than a whole draft, and a stream the session
-/// cannot resolve says so itself as
+/// `Fetch` is live on all fourteen. Drafts 18, 19 and 20 write a fetch
+/// object's Group ID as a difference whose sign the fetch's Group Order
+/// settles; the session reads that order off the FETCH —
+/// `capability::fetch_group_order_is_needed` — and hands it to the framer, so
+/// what a rule can miss is one stream at a time rather than a whole draft. A
+/// stream the session cannot resolve is bypassed at its header and produces
+/// no [`ObjectMeta`] for a rule to see, and says so itself as
 /// `Impairment { FramerBypass { FetchGroupOrderUnknown } }`.
 ///
 /// Being matchable is not being *mutable*, and the two are answered
@@ -221,7 +220,7 @@ pub enum MatcherField {
     /// every fetch stream.
     TrackAlias,
     /// [`Matcher::subgroup_id`], against a unit whose header carried none —
-    /// eight drafts in first-object mode, and 17-19 in reserved mode 3.
+    /// ten drafts in first-object mode, and 16-20 in reserved mode 3.
     ///
     /// Never reported about a datagram, which carries no subgroup ID on any
     /// draft. That is not a fact about one header, so it is a pre-run
@@ -297,8 +296,8 @@ pub struct Matcher {
     pub track_alias: Option<RangeSet>,
     /// Group ID. Always present on a framed object.
     pub group_id: Option<RangeSet>,
-    /// Subgroup ID. `None` on eight drafts in first-object mode and on
-    /// 17-19 in reserved mode 3, so a rule keyed here claims nothing there.
+    /// Subgroup ID. `None` on ten drafts in first-object mode and on
+    /// 16-20 in reserved mode 3, so a rule keyed here claims nothing there.
     pub subgroup_id: Option<RangeSet>,
     /// Absolute object ID. Always present on a framed object.
     pub object_id: Option<RangeSet>,
@@ -449,11 +448,12 @@ impl Matcher {
     /// allocate. `[None; 3]` is the answer for a matcher whose keys are all
     /// carried, which is the common case.
     ///
-    /// Every row here is a key **this unit** did not carry. There is no row
-    /// for a key no unit of this draft could ever carry, because there is no
-    /// longer such a key: the one candidate was a `Fetch`-aimed class on
-    /// drafts 18 and 19, and a fetch stream there is addressed now — see
-    /// [`MatchKind::Fetch`].
+    /// Every row here is a key **this unit** did not carry, and a unit is the
+    /// only scope this function answers at. No row says a key is dead for a
+    /// whole draft: a `Fetch`-aimed class is matchable on every draft, and a
+    /// fetch stream whose Group Order the session cannot resolve is bypassed
+    /// at its header and produces no [`ObjectMeta`] for a rule to be measured
+    /// against — see [`MatchKind::Fetch`].
     ///
     /// Only checked *after* [`Self::matches`] has answered `false`: a rule
     /// that matched cannot have been defeated by an absent key.
@@ -520,7 +520,7 @@ impl Matcher {
     /// [`ProxyHook`](crate::hook::ProxyHook) rather than to a shaping class
     /// reaches no constructor that could check it.
     ///
-    /// The three shapes, each of which `try_new` used to accept:
+    /// The three shapes this catches:
     ///
     /// - a [`RangeSet`] built from an inverted range — [`RangeSet::new`]
     ///   drops `start > end`, so the set is empty and `contains` is always
@@ -575,10 +575,10 @@ struct Keys {
 /// The `Fetch` arm is **live**, on all fourteen drafts:
 /// `detect_stream_type` maps stream type `0x05` to
 /// [`DataStreamType::Fetch`] and the framer produces ordinary [`ObjectMeta`]
-/// for it. On drafts 18 and 19 that needs the fetch's Group Order, which the
-/// session reads off the FETCH before the response opens; a response naming a
-/// request nobody made is bypassed and says so per stream, and produces no
-/// meta for a rule to be measured against either way.
+/// for it. On drafts 18, 19 and 20 that needs the fetch's Group Order, which
+/// the session reads off the FETCH before the response opens; a response
+/// naming a request nobody made is bypassed and says so per stream, and
+/// produces no meta for a rule to be measured against either way.
 /// `the_fetch_arm_claims_a_fetch_object` is what keeps the arm from being
 /// deletable without a red.
 fn kind_of(stream_kind: DataStreamType) -> MatchKind {
@@ -837,9 +837,9 @@ mod tests {
     ///
     /// ```text
     /// thread '...the_fetch_arm_claims_a_fetch_object' panicked at
-    /// crates\moqtap-proxy\src\shape\matcher.rs:597:9:
-    /// a Fetch-aimed class must claim a fetch object: the arm is live on the eight
-    /// drafts that have a fetch object codec
+    /// crates\moqtap-proxy\src\shape\matcher.rs:
+    /// a Fetch-aimed class must claim a fetch object: the arm is live on all fourteen
+    /// drafts, every one of which has a fetch object codec
     /// ```
     #[test]
     fn the_fetch_arm_claims_a_fetch_object() {
@@ -853,8 +853,8 @@ mod tests {
 
         assert!(
             fetch_rule.matches(ProxySide::ClientToProxy, &fetch, 0),
-            "a Fetch-aimed class must claim a fetch object: the arm is live on \
-             the eight drafts that have a fetch object codec"
+            "a Fetch-aimed class must claim a fetch object: the arm is live on all \
+             fourteen drafts, every one of which has a fetch object codec"
         );
         assert!(
             !fetch_rule.matches(ProxySide::ClientToProxy, &meta(), 0),
@@ -867,12 +867,10 @@ mod tests {
     /// **Naming a stream kind never makes a rule unmatchable**, on any draft
     /// and from either carrier.
     ///
-    /// One pair used to be the exception: a `Fetch`-aimed class on drafts 18
-    /// and 19, where every fetch stream was bypassed at its header for want
-    /// of a Group Order and no `ObjectMeta` was ever built for the rule to
-    /// see. The session carries that order now, so the exception is gone and
-    /// with it the whole idea that a *kind* can be dead on a *draft* — what
-    /// is left is one unresolvable stream at a time, which reports itself as
+    /// A *kind* is never dead on a *draft*: what can go missing is one fetch
+    /// stream at a time. A stream whose Group Order the session cannot
+    /// resolve is bypassed at its header, so no `ObjectMeta` is ever built
+    /// for a rule to see, and it reports itself as
     /// `Impairment { FramerBypass { FetchGroupOrderUnknown } }`.
     ///
     /// The contrast is what keeps this from being a test that nothing can
@@ -880,8 +878,8 @@ mod tests {
     /// same drafts, through the same call. Every fetch header carries a
     /// Request ID where a subgroup header carries a Track Alias, so a rule
     /// keyed on the alias can never claim a fetch object on any draft — and
-    /// that is a fact about the *key*, which is the only kind of fact this
-    /// function still states.
+    /// that is a fact about the *key* rather than about one header, which is
+    /// what makes it hold wherever the rule is measured.
     ///
     /// *Ablation:* drop the `TrackAlias` row from
     /// [`Matcher::unmatchable_fields`]:

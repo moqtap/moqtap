@@ -1,10 +1,9 @@
 #![cfg(any(feature = "draft12", feature = "draft13", feature = "draft14"))]
 
-//! A FETCH carries the parameters the caller gave it, on the three drafts that
-//! used to fill the field in for them.
+//! A FETCH carries the parameters the caller gave it, on drafts 12, 13 and 14.
 //!
 //! The same claim as `a_fetch_carries_the_parameters_it_was_given.rs` makes for
-//! drafts 15 through 19, in the shape these three drafts draw a FETCH: with a
+//! drafts 15 through 20, in the shape these three drafts draw a FETCH: with a
 //! Subscriber Priority and a Group Order of their own, which draft-15 moves
 //! into the parameters and this range does not.
 //!
@@ -12,8 +11,8 @@
 //!
 //! Each of these drafts registers AUTHORIZATION TOKEN, DELIVERY TIMEOUT and
 //! MAX CACHE DURATION as message parameters. A fetch that cannot carry an
-//! authorization token cannot fetch from a track that requires one, and the
-//! field was being written by the crate rather than by the application.
+//! authorization token cannot fetch from a track that requires one, so the
+//! field has to be the application's to fill in and not the crate's.
 //!
 //! # Both kinds of FETCH
 //!
@@ -22,13 +21,6 @@
 //! about naming the range through a subscription rather than outright that
 //! changes what may be attached. So the claim covers both, and the third gate
 //! on each draft is the joining one.
-//!
-//! Drafts 12 and 13 took the argument on that call from the start. Draft-14
-//! had no such call at all until the sender was written, which is why the gate
-//! arrives on three drafts at once rather than on the one it was written for.
-//! Drafts 15 through 19 had the call and filled the field in themselves for a
-//! round longer; `a_fetch_carries_the_parameters_it_was_given.rs` gates them
-//! now, in the shape those drafts give the call.
 //!
 //! # Ablations, measured
 //!
@@ -135,14 +127,12 @@ macro_rules! fetch_parameter_gates {
             ///
             /// # What it catches
             ///
-            /// Sending an empty list whatever the caller passed, which is
-            /// what all three drafts did and what there was no argument to
-            /// change:
+            /// Sending an empty list whatever the caller passed:
             ///
             /// ```text
             /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, and this call used to send an
-            /// empty list whatever it was given left: 0 right: 1
+            /// attached must reach the peer, not the empty list a call that
+            /// ignores its argument sends left: 0 right: 1
             /// ```
             ///
             /// It reddens three, this gate on each draft in the range and
@@ -174,8 +164,8 @@ macro_rules! fetch_parameter_gates {
                 assert_eq!(
                     back.parameters.len(),
                     1,
-                    "the parameter the caller attached must reach the peer, and this call \
-                     used to send an empty list whatever it was given"
+                    "the parameter the caller attached must reach the peer, not the empty \
+                     list a call that ignores its argument sends"
                 );
                 assert_eq!(
                     back.parameters[0].key.into_inner(),
@@ -226,8 +216,7 @@ macro_rules! fetch_parameter_gates {
             /// # What it catches
             ///
             /// A joining fetch that sends an empty list whatever the caller
-            /// passed, which is what draft-14's sender was written as before
-            /// this gate:
+            /// passed:
             ///
             /// ```text
             /// assertion `left == right` failed: a Joining Fetch is a FETCH,

@@ -118,11 +118,11 @@ pub enum SessionErrorCode {
 /// Use [`PublishErrorCode`], [`FetchErrorCode`], [`AnnounceErrorCode`] and
 /// [`SubscribeNamespaceErrorCode`] for those messages.
 ///
-/// The name is `RequestErrorCode` for compatibility with existing callers; the
-/// registry it transcribes is SUBSCRIBE_ERROR.
+/// Draft-15 merges these five registries into one, carried there as
+/// `RequestErrorCode`. Draft-14 has no REQUEST_ERROR message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u64)]
-pub enum RequestErrorCode {
+pub enum SubscribeErrorCode {
     /// `INTERNAL_ERROR` — An implementation specific or generic error occurred.
     InternalError = 0x0,
     /// `UNAUTHORIZED` — The subscriber is not authorized to subscribe to the
@@ -397,7 +397,7 @@ impl SessionErrorCode {
     }
 }
 
-impl RequestErrorCode {
+impl SubscribeErrorCode {
     /// Every SUBSCRIBE_ERROR code draft-14 assigns, in ascending wire order.
     ///
     /// This is the set [`Self::from_u64`] accepts, written out so that it can
@@ -405,28 +405,28 @@ impl RequestErrorCode {
     /// wants the registry has to be handed it. Writing it down is also what
     /// lets a test state its claims about the registry itself rather than about
     /// the range some sweep happens to reach.
-    pub const ALL: &[RequestErrorCode] = &[
-        RequestErrorCode::InternalError,
-        RequestErrorCode::Unauthorized,
-        RequestErrorCode::Timeout,
-        RequestErrorCode::NotSupported,
-        RequestErrorCode::TrackDoesNotExist,
-        RequestErrorCode::InvalidRange,
-        RequestErrorCode::MalformedAuthToken,
-        RequestErrorCode::ExpiredAuthToken,
+    pub const ALL: &[SubscribeErrorCode] = &[
+        SubscribeErrorCode::InternalError,
+        SubscribeErrorCode::Unauthorized,
+        SubscribeErrorCode::Timeout,
+        SubscribeErrorCode::NotSupported,
+        SubscribeErrorCode::TrackDoesNotExist,
+        SubscribeErrorCode::InvalidRange,
+        SubscribeErrorCode::MalformedAuthToken,
+        SubscribeErrorCode::ExpiredAuthToken,
     ];
 
-    /// Convert a raw u64 to a `RequestErrorCode`, if valid.
+    /// Convert a raw u64 to a `SubscribeErrorCode`, if valid.
     pub fn from_u64(v: u64) -> Option<Self> {
         match v {
-            0x0 => Some(RequestErrorCode::InternalError),
-            0x1 => Some(RequestErrorCode::Unauthorized),
-            0x2 => Some(RequestErrorCode::Timeout),
-            0x3 => Some(RequestErrorCode::NotSupported),
-            0x4 => Some(RequestErrorCode::TrackDoesNotExist),
-            0x5 => Some(RequestErrorCode::InvalidRange),
-            0x10 => Some(RequestErrorCode::MalformedAuthToken),
-            0x12 => Some(RequestErrorCode::ExpiredAuthToken),
+            0x0 => Some(SubscribeErrorCode::InternalError),
+            0x1 => Some(SubscribeErrorCode::Unauthorized),
+            0x2 => Some(SubscribeErrorCode::Timeout),
+            0x3 => Some(SubscribeErrorCode::NotSupported),
+            0x4 => Some(SubscribeErrorCode::TrackDoesNotExist),
+            0x5 => Some(SubscribeErrorCode::InvalidRange),
+            0x10 => Some(SubscribeErrorCode::MalformedAuthToken),
+            0x12 => Some(SubscribeErrorCode::ExpiredAuthToken),
             _ => None,
         }
     }

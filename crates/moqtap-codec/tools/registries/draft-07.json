@@ -7,6 +7,7 @@
   "row_definition": "One <tr> of a table identified as an error, status or termination code registry that assigns a code point. Header rows are excluded; empty-code line-wrap continuation rows are merged into the row above; range and expression code points count as one row each and are tagged kind=\"reserved\".",
   "description_coverage_note": "rows_described_from_reason_column counts rows whose description is the Reason cell of the table itself, copied verbatim -- a phrase such as 'Internal Error', not the draft's full rule for the code. Where those drafts say more about a code, they say it in prose after the table, and this tool does not follow that prose. A legacy-shape draft therefore reaches full coverage by having a Reason column, which is a weaker claim than it looks. rows_described_from_section_prose is the strong one: it counts rows whose description was read from the definition list in the section the table's Specification column points at.",
   "object_status_note": "object_status is a second registry family, counted under its own definition and reported separately. totals.rows and the registries list cover the error, status and termination code registries only, and are unchanged by its presence; totals.object_status_rows is not included in totals.rows and must not be added to it without a deliberate decision to do so. Drafts 19 and 20 have an IANA registry for Object Status (object_status.iana_registry); in drafts 07-18 the same code points are assigned in prose and object_status.form is 'prose-list'.",
+  "parameter_note": "parameters is a third registry family -- the parameters carried by control messages, the properties carried by objects and tracks, the setup options, and the auth token alias and type codes -- counted under its own definition and reported separately. totals.rows, the registries list, totals.object_status_rows and object_status are unchanged by its presence; totals.parameter_rows is in neither of them and the three must not be added together without a deliberate decision to do so. Rows carry no description except in drafts 11-14, whose AUTHORIZATION TOKEN table prints a 'Serialization and behavior' column; the sections these tables point at are prose rather than the definition lists the error-code sections use, so description_source is null everywhere else, which is a fact about the drafts and not a gap. Join rows by (registry_id, code) and never by code alone: registries in one family share a code space, and totals.parameter_codes_registered_more_than_once_in_a_family counts where that matters.",
   "totals": {
     "registries": 3,
     "rows": 21,
@@ -14,7 +15,11 @@
     "rows_described_from_reason_column": 21,
     "rows_described_from_section_prose": 0,
     "object_status_rows": 5,
-    "object_status_rows_also_counted_in_rows": 0
+    "object_status_rows_also_counted_in_rows": 0,
+    "parameter_registries": 0,
+    "parameter_rows": 0,
+    "parameter_rows_also_counted_in_rows": 0,
+    "parameter_codes_registered_more_than_once_in_a_family": 0
   },
   "registries": [
     {
@@ -371,6 +376,15 @@
       }
     ]
   },
+  "parameters": {
+    "family": "parameters, properties, setup options and auth token code points",
+    "present": false,
+    "reason_absent": "this draft prints no parameter, property, setup option or auth token table. It does assign such code points: they are stated inside the prose sentence that introduces each parameter, so a table-anchored extraction cannot reach them and this count is 0 rather than the draft assigning none",
+    "row_definition": "One <tr> of a table that assigns a parameter, property, setup option or auth token code point. Header rows are excluded; empty-code line-wrap continuation rows are merged into the row above and counted in continuation_rows_merged; range and expression code points count as one row each and are tagged kind=\"reserved\". Counted separately from totals.rows and totals.object_status_rows; the three are never summed.",
+    "registry_count": 0,
+    "row_count": 0,
+    "registries": []
+  },
   "excluded_candidates": [
     {
       "kind": "table",
@@ -382,7 +396,7 @@
       ],
       "hex_rows": 25,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "table",
@@ -394,7 +408,7 @@
       ],
       "hex_rows": 3,
       "codes": null,
-      "reason": "header is not a Code|Reason or Name|Code|Specification registry layout; not an error, status or termination registry"
+      "reason": "header matches none of the layouts this tool extracts: not Code|Reason or Name|Code|Specification, so not an error, status or termination registry, and not one of the parameter, property, setup option or auth token layouts either"
     },
     {
       "kind": "prose-list",
@@ -409,7 +423,7 @@
         "0x03",
         "0x04"
       ],
-      "reason": "code points assigned in prose, one paragraph or bullet per code, with no table to match either registry layout; out of scope for this tool and recorded so the boundary stays auditable"
+      "reason": "code points assigned in prose, one paragraph or bullet per code, with no table to match any of this tool's registry layouts; out of scope for this tool and recorded so the boundary stays auditable"
     }
   ],
   "warnings": []

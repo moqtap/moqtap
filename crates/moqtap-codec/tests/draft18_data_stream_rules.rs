@@ -81,7 +81,7 @@ fn subgroup_header_bytes(header_type: u8) -> Vec<u8> {
 ///
 /// ```text
 /// thread 'a_subgroup_stream_refuses_every_type_value_the_draft_calls_invalid'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:100:26:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// draft-18 Section 11.4.2 lists type 0x16 as invalid, but it decoded
 /// ```
 #[test]
@@ -128,7 +128,7 @@ fn a_subgroup_stream_refuses_every_type_value_the_draft_calls_invalid() {
 ///
 /// ```text
 /// thread 'the_checked_subgroup_encoder_writes_only_what_the_decoder_accepts'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:147:13:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// encode_checked wrote type 0x00, which Section 11.4.2 calls invalid
 /// ```
 #[test]
@@ -266,7 +266,7 @@ fn datagram_bytes(datagram_type: u8) -> Vec<u8> {
 ///
 /// ```text
 /// thread 'a_datagram_refuses_every_type_value_the_draft_calls_invalid'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:231:26:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// draft-18 Section 11.3.1 lists type 0x10 as invalid, but it decoded
 /// ```
 #[test]
@@ -314,7 +314,7 @@ fn a_datagram_refuses_every_type_value_the_draft_calls_invalid() {
 ///
 /// ```text
 /// thread 'the_checked_datagram_encoder_writes_only_what_the_decoder_accepts'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:290:13:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// encode_checked wrote type 0x10, which Section 11.3.1 calls invalid
 /// ```
 #[test]
@@ -373,7 +373,7 @@ fn the_checked_datagram_encoder_writes_only_what_the_decoder_accepts() {
 /// that bit reads a padding stream as a subgroup header and invents a track
 /// alias and group ID from the type's own remaining bytes. This asserts the
 /// leading octet as well as the refusal, because the refusal is only
-/// interesting given what that octet used to mean.
+/// interesting given what that octet means to such a decoder.
 ///
 /// # Ablation
 ///
@@ -381,7 +381,7 @@ fn the_checked_datagram_encoder_writes_only_what_the_decoder_accepts() {
 ///
 /// ```text
 /// thread 'a_padding_frame_is_refused_rather_than_read_as_a_header'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:351:23:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// a padding stream decoded as a subgroup header: track alias 19, group 43
 /// ```
 ///
@@ -389,7 +389,7 @@ fn the_checked_datagram_encoder_writes_only_what_the_decoder_accepts() {
 ///
 /// ```text
 /// thread 'a_padding_frame_is_refused_rather_than_read_as_a_header'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:365:23:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// a padding datagram decoded as a datagram header: track alias 19, group 43
 /// ```
 ///
@@ -462,7 +462,7 @@ fn a_padding_frame_is_refused_rather_than_read_as_a_header() {
 ///
 /// ```text
 /// thread 'a_type_wider_than_one_byte_is_refused_by_what_it_is' (48484) panicked at
-/// crates\moqtap-codec\tests\draft18_data_stream_rules.rs:470:19:
+/// crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// SETUP is a Type Table 3 assigns, so a subgroup reader must refuse it without naming the unknown-stream-type rule, got UnknownStreamType(175)
 /// ```
 ///
@@ -531,7 +531,7 @@ fn a_type_wider_than_one_byte_is_refused_by_what_it_is() {
 ///
 /// ```text
 /// thread 'a_status_datagram_may_not_be_followed_by_payload_bytes'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:437:9:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// status 0x0: a datagram with no payload field permits no payload
 /// ```
 ///
@@ -540,7 +540,7 @@ fn a_type_wider_than_one_byte_is_refused_by_what_it_is() {
 ///
 /// ```text
 /// thread 'a_status_datagram_may_not_be_followed_by_payload_bytes'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:443:22:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// status 0x0: decode_object accepted 4 byte(s) after a header with no payload field
 /// ```
 #[test]
@@ -620,7 +620,7 @@ fn a_status_datagram_may_not_be_followed_by_payload_bytes() {
 ///
 /// ```text
 /// thread 'a_subgroup_object_meta_reports_the_payload_rule'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:514:5:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// assertion `left == right` failed: an End of Group object may not carry a payload
 ///   left: Some(Permitted)
 ///  right: Some(Forbidden)
@@ -688,7 +688,7 @@ fn a_subgroup_object_meta_reports_the_payload_rule() {
 ///
 /// ```text
 /// thread 'a_wrapped_object_id_delta_is_reported_as_its_own_error'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:582:19:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// read_object reported a wrapped Object ID as invalid field value, which a session cannot act on
 /// ```
 #[test]
@@ -753,7 +753,7 @@ fn a_wrapped_object_id_delta_is_reported_as_its_own_error() {
 ///
 /// ```text
 /// thread 'a_first_fetch_object_may_not_reference_the_object_before_it'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:660:27:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// flags 0x0c (no Priority) references an Object that does not exist, but it resolved to group 0 object 0
 /// ```
 ///
@@ -817,7 +817,7 @@ fn a_first_fetch_object_may_not_reference_the_object_before_it() {
 ///
 /// ```text
 /// thread 'a_fetch_frame_refuses_a_serialization_flags_value_the_draft_leaves_undefined'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:697:17:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// Serialization Flags 0x80 is not a value draft-18 defines, but it decoded
 /// ```
 #[test]
@@ -875,7 +875,7 @@ fn a_fetch_frame_refuses_a_serialization_flags_value_the_draft_leaves_undefined(
 ///
 /// ```text
 /// thread 'an_end_of_range_marker_moves_the_location_but_not_the_subgroup_or_priority'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:763:10:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// the object after a marker must inherit the last real object's fields: InvalidField
 /// ```
 #[test]
@@ -948,7 +948,7 @@ fn an_end_of_range_marker_moves_the_location_but_not_the_subgroup_or_priority() 
 ///
 /// ```text
 /// thread 'a_group_id_delta_follows_the_group_order'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:829:5:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// assertion `left == right` failed: a descending delta of 0 moves one group down
 ///   left: 21
 ///  right: 19
@@ -1021,7 +1021,7 @@ fn a_group_id_delta_follows_the_group_order() {
 ///
 /// ```text
 /// thread 'a_fetch_frame_that_disagrees_with_its_own_flags_is_not_written'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:914:9:
+/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
 /// flags 0x1c with no Priority must be refused, got Ok(())
 /// ```
 #[test]

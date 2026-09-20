@@ -56,7 +56,7 @@ enum ParamEncoding {
 
 fn param_encoding(key: u64) -> Option<ParamEncoding> {
     match key {
-        // 0x02 = OBJECT_DELIVERY_TIMEOUT (renamed from DELIVERY_TIMEOUT)
+        // 0x02 = OBJECT_DELIVERY_TIMEOUT (DELIVERY_TIMEOUT on drafts 11-17)
         // 0x04 = RENDEZVOUS_TIMEOUT (draft-18 Section 10.2.6). Not
         //        MAX_CACHE_DURATION: that is Property Type 0x04 in the
         //        separate Properties registry (Section 15.8), a different
@@ -589,12 +589,18 @@ fn check_track_property_values(properties: &[KeyValuePair]) -> Result<(), CodecE
             }
             KvpValue::Bytes(bytes) if key == IMMUTABLE_PROPERTIES => {
                 let mut inner = &bytes[..];
-                match decode_kvp_delta(&mut inner) {
-                    Ok(nested) => check_track_property_values(&nested)?,
-                    // Not a Key-Value-Pair run. See the note above: reading the
-                    // block is a permission, so one that cannot be read is
-                    // carried rather than refused.
-                    Err(_) => return Ok(()),
+                // A block that is not a Key-Value-Pair run is skipped rather
+                // than refused. See the note above: reading inside it is a
+                // permission, so one that cannot be read is carried.
+                //
+                // Skipped means this block and only this block. The rule the
+                // draft states here is about the block whose pairs will not
+                // parse, and says nothing about its neighbours; ending the
+                // whole walk would let a peer keep an out-of-range property
+                // from being looked at by putting an unparseable block in
+                // front of it.
+                if let Ok(nested) = decode_kvp_delta(&mut inner) {
+                    check_track_property_values(&nested)?;
                 }
             }
             KvpValue::Bytes(_) => {}
@@ -945,8 +951,9 @@ pub struct SubscribeNamespace {
 }
 
 /// SUBSCRIBE_TRACKS (0x51, new in draft-18). Subscribes to PUBLISH messages
-/// for tracks whose namespace matches `namespace_prefix`. Carries the
-/// FORWARD parameter (which previously lived on SUBSCRIBE_NAMESPACE).
+/// for tracks whose namespace matches `namespace_prefix`. Carries the FORWARD
+/// parameter (Section 10.2.12), which on drafts 15 through 17 may appear on
+/// SUBSCRIBE_NAMESPACE instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeTracks {
     pub request_id: VarInt,
@@ -1834,8 +1841,8 @@ mod tests {
     /// LARGEST_OBJECT carries no length of its own — that is the whole point
     /// of the encoding — so `encode_parameters` writes its bytes verbatim. A
     /// value built in memory rather than decoded is under no obligation to be
-    /// two varints, and before this check the codec answered `Ok(())` and put
-    /// a frame on the wire that `ControlMessage::decode` then refused. One
+    /// two varints, and without this check the codec answers `Ok(())` and puts
+    /// a frame on the wire that `ControlMessage::decode` then refuses. One
     /// varint short and one varint long are the two ways to get it wrong.
     #[test]
     fn a_location_value_that_is_not_two_varints_is_refused_on_encode() {

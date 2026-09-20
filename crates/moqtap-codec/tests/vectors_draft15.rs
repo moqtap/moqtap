@@ -143,11 +143,11 @@ fn run_subgroup_vectors(relative_path: &str) {
                 "[{}] subgroup_id mismatch",
                 vector.id
             );
-            // The corpus carries `end_of_group` and, before this, nothing read
-            // it: the field could disagree with the bytes beside it
-            // indefinitely. It did — one vector annotated a first-object-mode
-            // stream as end-of-group, matching a decoder that read the marker
-            // at the wrong bit, and both were wrong together.
+            // The corpus carries `end_of_group`, and reading it here is what
+            // stops the field disagreeing with the bytes beside it: a vector can
+            // annotate a first-object-mode stream as end-of-group and match a
+            // decoder that reads the marker at the wrong bit, leaving both wrong
+            // together and nothing to catch either.
             assert_eq!(
                 header.has_end_of_group(),
                 expected.get("end_of_group").and_then(|v| v.as_bool()).unwrap_or(false),

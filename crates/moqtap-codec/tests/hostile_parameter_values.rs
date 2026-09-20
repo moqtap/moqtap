@@ -33,7 +33,7 @@
 //! frame is valid, the peer is owed whatever reply the draft says, and one
 //! parameter's value is not the shape its type names. There is no error channel
 //! and there should not be one: the right answer is to render what arrived, as
-//! `fields::params` does since the `params.rs` fix, which is the raw bytes.
+//! `fields::params` does, which is the raw bytes.
 //!
 //! # Release mode is a separate claim
 //!
@@ -136,7 +136,7 @@ fn subscribe_ok_with_largest_object(value: &[u8]) -> Vec<u8> {
 ///
 /// ```text
 /// thread 'a_draft_15_largest_object_that_is_not_two_varints_renders' panicked at
-/// crates\moqtap-codec\src\draft15\fields.rs:103:42:
+/// crates\moqtap-codec\src\draft15\fields.rs:
 /// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
 /// ```
 #[cfg(feature = "draft15")]
@@ -314,7 +314,7 @@ fn filter_name(parameter_type: u64) -> &'static str {
 ///
 /// ```text
 /// thread 'a_truncated_draft_20_range_filter_renders' panicked at
-/// crates\moqtap-codec\src\draft20\fields.rs:114:56:
+/// crates\moqtap-codec\src\draft20\fields.rs:
 /// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
 /// ```
 #[cfg(feature = "draft20")]
@@ -651,4 +651,154 @@ fn a_well_formed_filter_is_not_reported_as_violating_anything() {
         panic!("a well-formed filter must render as fields: {params:?}");
     };
     assert_eq!(filter.get("violates"), None, "nothing is broken here: {filter:?}");
+}
+
+// ============================================================
+// 3. AUTHORIZATION TOKEN, asked of a draft that never saw it
+// ============================================================
+
+/// A setup AUTHORIZATION TOKEN parameter carrying `value` verbatim.
+///
+/// 0x03 is an odd Type, so its value is length-prefixed and
+/// `KeyValuePair::decode` stores whatever bytes arrive. Built in memory rather
+/// than framed, because [`moqtap_codec::setup_option_name`] takes the pair
+/// itself.
+#[allow(dead_code)]
+fn setup_token(value: &[u8]) -> moqtap_codec::kvp::KeyValuePair {
+    use moqtap_codec::kvp::{KeyValuePair, KvpValue};
+    use moqtap_codec::varint::VarInt;
+
+    KeyValuePair { key: VarInt::from_u64(0x03).unwrap(), value: KvpValue::Bytes(value.to_vec()) }
+}
+
+/// Every draft this build has, so a single-draft build asks its one draft and an
+/// all-drafts build asks all fourteen.
+///
+/// [`moqtap_codec::setup_option_name`] answers `None` for a draft the build left
+/// out, which is the right answer and not a claim about anything — so the loops
+/// below run over 7..=20 unconditionally and the drafts that are missing simply
+/// contribute nothing. A panic is a panic in any build that has the draft.
+#[allow(dead_code)]
+const EVERY_DRAFT: std::ops::RangeInclusive<u8> = 7..=20;
+
+/// `setup_option_name` must not panic on a Token value it was handed.
+///
+/// This is the one function in the crate whose entire purpose is asking a
+/// *second* draft about a parameter that arrived under a *first*, which makes it
+/// the one place where a value has provably not been through the answering
+/// draft's `check_authorization_tokens`. Drafts 12 through 20 name 0x03 in the
+/// setup namespace and route a `Bytes` value straight into their own token
+/// renderer, and drafts 12 and 13 read it with `unwrap`.
+///
+/// The empty value is the shortest trigger there is and the one the audit
+/// recorded:
+///
+/// ```text
+/// setup_option_name(13, &KeyValuePair { key: 0x03, value: KvpValue::Bytes(vec![]) })
+/// ```
+///
+/// The rest are the other places a Token runs out: after the Alias Type, and
+/// after the Alias on the two forms that carry a Type behind it. `0x01` is
+/// REGISTER, the longest form and so the one with the most places to stop.
+///
+/// *Ablation:* restore `VarInt::decode(&mut buf).unwrap()` in
+/// `draft13/fields.rs::auth_token_to_json` and this does not fail — it panics
+/// inside the function under test:
+///
+/// ```text
+/// thread 'a_token_value_that_runs_out_never_panics_a_renderer' panicked at
+/// crates\moqtap-codec\src\draft13\fields.rs:
+/// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
+/// ```
+#[test]
+fn a_token_value_that_runs_out_never_panics_a_renderer() {
+    for value in [
+        vec![],           // no Alias Type at all
+        vec![0x00],       // DELETE, and no Alias behind it
+        vec![0x01],       // REGISTER, and no Alias behind it
+        vec![0x01, 0x07], // REGISTER with an Alias and no Token Type
+        vec![0x02],       // USE_ALIAS, and no Alias behind it
+        vec![0x03],       // USE_VALUE, and no Token Type behind it
+        vec![0x09],       // an Alias Type no draft assigns
+    ] {
+        let param = setup_token(&value);
+        for draft in EVERY_DRAFT {
+            // The assertion is that the call returns at all. What it returns is
+            // the next test's business.
+            let _ = moqtap_codec::setup_option_name(draft, &param);
+        }
+    }
+}
+
+/// The positive control: a well-formed token still renders, and the draft still
+/// names the parameter.
+///
+/// A renderer that answered raw bytes for everything would pass the test above
+/// and be useless. Drafts 12 through 20 all number the setup token 0x03, so all
+/// of them that this build has must name it.
+#[test]
+fn a_well_formed_setup_token_is_still_named_by_every_draft_that_has_one() {
+    // USE_VALUE (0x3) with Token Type 0 and a two-byte value: the shortest
+    // complete form, and Token Type 0 is the one the drafts reserve for a
+    // meaning the peers settle out of band, so the fixture commits to nothing.
+    let param = setup_token(&[0x03, 0x00, 0xab, 0xcd]);
+    let named: Vec<u8> = (12..=20u8)
+        .filter(|&d| {
+            moqtap_codec::setup_option_name(d, &param).as_deref() == Some("authorization_token")
+        })
+        .collect();
+
+    // A draft this build left out answers `None` by design, so the set is
+    // whatever this build has rather than all nine — and the claim is that no
+    // draft in the range is missing from it for any other reason.
+    let compiled: Vec<u8> = (12..=20u8).filter(|&d| draft_is_compiled(d)).collect();
+    assert_eq!(named, compiled, "every draft from 12 on numbers the setup token 0x03");
+    assert!(
+        !compiled.is_empty() || cfg!(not(feature = "draft20")),
+        "a build with draft-20 has at least one draft in the range"
+    );
+}
+
+/// Draft-11 keeps the token out of the setup namespace, and its setup 0x01 is a
+/// PATH.
+///
+/// The negative control for the loop above, and the reason draft-11 is not in
+/// it: reading a setup 0x01 as a Token on this draft would refuse paths the
+/// draft permits. Section 8.2.1: "since Setup parameters use a separate
+/// namespace, it is impossible for these parameters to appear in Setup
+/// messages."
+#[cfg(feature = "draft11")]
+#[test]
+fn draft_11_has_no_setup_authorization_token() {
+    use moqtap_codec::kvp::{KeyValuePair, KvpValue};
+    use moqtap_codec::varint::VarInt;
+
+    assert_eq!(moqtap_codec::setup_option_name(11, &setup_token(&[0x03, 0x00])), None);
+
+    let path = KeyValuePair {
+        key: VarInt::from_u64(0x01).unwrap(),
+        value: KvpValue::Bytes(b"/moq".to_vec()),
+    };
+    assert_eq!(moqtap_codec::setup_option_name(11, &path).as_deref(), Some("path"));
+}
+
+/// Whether this build compiled draft `draft`.
+///
+/// Spelled as a `cfg!` per draft rather than read off any table, because the
+/// question the test above asks is exactly "does the naming table agree with the
+/// feature set" — reading the answer out of the same table would make it
+/// vacuous.
+fn draft_is_compiled(draft: u8) -> bool {
+    match draft {
+        12 => cfg!(feature = "draft12"),
+        13 => cfg!(feature = "draft13"),
+        14 => cfg!(feature = "draft14"),
+        15 => cfg!(feature = "draft15"),
+        16 => cfg!(feature = "draft16"),
+        17 => cfg!(feature = "draft17"),
+        18 => cfg!(feature = "draft18"),
+        19 => cfg!(feature = "draft19"),
+        20 => cfg!(feature = "draft20"),
+        other => panic!("draft-{other} is outside the range this test is about"),
+    }
 }

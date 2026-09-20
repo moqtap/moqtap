@@ -274,7 +274,7 @@ enum GreasingRange {
 ///
 /// ```text
 /// thread 'draft16_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:352:5:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// assertion `left == right` failed: registry "Session Termination Error Codes"
 /// has 0 reserved rows, expected the one greasing range
 ///   left: 0
@@ -287,7 +287,7 @@ enum GreasingRange {
 ///
 /// ```text
 /// thread 'draft17_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:385:5:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// draft-17 "Session Termination Error Codes": the extraction reserves
 /// 0x7f * N + 0x9D, but no draft before 17 sets a range aside
 /// ```
@@ -323,7 +323,7 @@ fn greasing_era(draft: u64) -> GreasingRange {
 ///
 /// ```text
 /// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:551:13:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// draft-19 REQUEST_ERROR Codes: RequestErrorCode accepts 0x9d, which the
 /// draft reserves for greasing rather than assigning
 /// ```
@@ -334,7 +334,7 @@ fn greasing_era(draft: u64) -> GreasingRange {
 ///
 /// ```text
 /// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:539:13:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// draft-19 REQUEST_ERROR Codes: the extraction reports 0x9d as assigned,
 /// inside the range this same registry reserves for greasing
 /// ```
@@ -438,7 +438,7 @@ fn upper_snake(camel: &str) -> String {
 ///
 /// ```text
 /// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:881:5:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// assertion `left == right` failed: RequestErrorCode::ALL and
 /// RequestErrorCode::from_u64 describe different sets
 ///   left: {..., 52: "REDIRECT", 53: "CONFLICTING_FILTERS"}
@@ -596,11 +596,11 @@ fn same_registry(
 ///
 /// The list is the mapping, and it is not the same shape twice: the registries
 /// split and merge across the range — draft-07 has three, draft-14 has eight,
-/// draft-15 has four again — and the type that carries one of them is renamed
-/// under it, `SubscribeErrorCode` on drafts 07 through 13 becoming
-/// `RequestErrorCode` on draft-14 while the registry it transcribes is still
-/// SUBSCRIBE_ERROR. So there is nothing to derive and the pairing is written
-/// out per draft.
+/// draft-15 has four again — and one registry is renamed under the same id,
+/// `stream_reset` carrying `StreamResetErrorCode` on drafts 11 through 13,
+/// `DataStreamResetErrorCode` on 14 through 17, and `StreamResetErrorCode`
+/// again from 18. So there is nothing to derive and the pairing is written out
+/// per draft.
 ///
 /// What is derived is that the list is complete. Every registry the extraction
 /// carries has to appear, which is what stops a draft from being called gated
@@ -613,7 +613,7 @@ fn same_registry(
 ///
 /// ```text
 /// thread 'draft13_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:743:5:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// draft-13: the extraction carries publish_error, which this test compares
 /// against nothing
 /// ```
@@ -765,9 +765,7 @@ fn draft14_error_registries_match_the_extracted_draft() {
 
     registries!(14, {
         "session_termination" => SessionErrorCode,
-        // The type is `RequestErrorCode` for callers that predate the split;
-        // the registry it transcribes is SUBSCRIBE_ERROR.
-        "subscribe_error" => RequestErrorCode,
+        "subscribe_error" => SubscribeErrorCode,
         "publish_done" => PublishDoneStatusCode,
         "publish_error" => PublishErrorCode,
         "fetch_error" => FetchErrorCode,
@@ -828,7 +826,7 @@ fn draft17_error_registries_match_the_extracted_draft() {
 ///
 /// ```text
 /// thread 'draft18_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:584:9:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// assertion `left == right` failed: draft-18 PUBLISH_DONE Codes: 0x5 is
 /// TOO_FAR_BEHIND in the draft, EXPIRED in PublishDoneStatusCode
 ///   left: "EXPIRED"
@@ -860,7 +858,7 @@ fn draft18_error_registries_match_the_extracted_draft() {
 ///
 /// ```text
 /// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:569:5:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// draft-19 REQUEST_ERROR Codes: assigned by the draft, not accepted by
 /// RequestErrorCode: 0x36 INVALID_FILTER
 /// ```
@@ -872,7 +870,7 @@ fn draft18_error_registries_match_the_extracted_draft() {
 ///
 /// ```text
 /// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:577:5:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// draft-19 REQUEST_ERROR Codes: accepted by RequestErrorCode, not assigned by
 /// the draft: 0x37 INVALID_PRIORITY
 /// ```
@@ -959,7 +957,7 @@ fn same_object_status(draft: u64, doc: &Value, codec: &BTreeMap<u64, String>) {
 ///
 /// ```text
 /// thread 'object_status_registries_match_the_extracted_drafts' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:913:5:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// assertion `left == right` failed: draft-19 Object Status: the draft assigns
 /// {0: "NORMAL", 3: "END_OF_GROUP", 4: "END_OF_TRACK"}, this crate accepts
 /// {0: "NORMAL", 3: "END_OF_GROUP", 5: "END_OF_TRACK"}
@@ -1098,7 +1096,7 @@ const OBJECT_STATUS_ERAS: &[&[u64]] =
 ///
 /// ```text
 /// thread 'the_extracted_drafts_are_distinguishable_from_each_other' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:1125:21:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// drafts 8 and 10 assign identical error code points, but this test has them
 /// in different runs
 /// ```
@@ -1108,7 +1106,7 @@ const OBJECT_STATUS_ERAS: &[&[u64]] =
 ///
 /// ```text
 /// thread 'the_extracted_drafts_are_distinguishable_from_each_other' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:1131:21:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// drafts 8 and 11 are in one run, but their Object Status assignments differ
 /// ```
 #[test]
@@ -1211,7 +1209,7 @@ fn the_extracted_drafts_are_distinguishable_from_each_other() {
 ///
 /// ```text
 /// thread 'symbolic_names_appear_in_the_drafts_that_print_them' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:1189:21:
+/// crates\moqtap-codec\tests\registry_conformance.rs:
 /// draft-19 request_error 0x36: draft-14 and later name their error codes, so
 /// this row should carry a name and it carries none
 /// ```

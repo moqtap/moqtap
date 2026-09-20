@@ -46,6 +46,28 @@ pub enum EndpointError {
     /// A request ID allocation or validation error.
     #[error("request ID error: {0}")]
     RequestId(#[from] RequestIdError),
+    /// This endpoint was asked to advertise a Maximum Request ID that does
+    /// not increase, and refused. Nothing was written.
+    ///
+    /// The send-side mirror of the rule a peer breaks by sending one — Section 9.5:
+    /// "The Maximum Request ID MUST only increase within a session." Its own
+    /// variant, and not the received one, because the two are opposite
+    /// findings that would otherwise arrive as the same value: the received one
+    /// is a peer in violation and this one is a caller of this library asking
+    /// for a message that would put this endpoint in violation, and
+    /// [`EndpointError::session_error_code`] answers `Some` for it either way.
+    ///
+    /// Not fatal. The message is refused instead of built, the ceiling stays
+    /// where it was, and nothing reaches the peer to object to.
+    #[error(
+        "the Maximum Request ID already advertised is {advertised}, so {offered} would not increase it"
+    )]
+    MaxRequestIdWouldNotIncrease {
+        /// The ceiling this endpoint has already advertised.
+        advertised: u64,
+        /// The value it was asked to advertise instead.
+        offered: u64,
+    },
     /// A subscription state machine error.
     #[error("subscription error: {0}")]
     Subscription(#[from] SubscriptionError),
@@ -377,6 +399,88 @@ fn prefixes_overlap(a: &[Vec<u8>], b: &[Vec<u8>]) -> bool {
 }
 
 impl EndpointError {
+    /// Whose doing this is — the peer's, or this endpoint's, or a variant that
+    /// cannot say.
+    ///
+    /// The companion of [`EndpointError::session_error_code`], which answers
+    /// *what the draft requires be done about it*. Neither answers the other's
+    /// question and the pair is what a caller needs: a code without a side
+    /// names nobody, and a side without a code is not grounds to publish
+    /// anything.
+    ///
+    /// Exhaustive, with no wildcard arm, so a variant added to this draft's
+    /// `EndpointError` is a compile error here rather than a silent arrival on
+    /// the wrong side of the answer. See
+    /// [`EndpointFault`](crate::above_codec_rules::EndpointFault) for the three
+    /// answers and for the collision that made the third one necessary.
+    pub fn fault(&self) -> crate::above_codec_rules::EndpointFault {
+        use crate::above_codec_rules::{AboveCodecRule as Rule, EndpointFault as Fault};
+
+        match self {
+            // Raised on both a receive path and a send path, so the
+            // variant cannot say which end is at fault. The state machines
+            // render as `invalid transition from X on event Y` whichever end
+            // asked for the transition, and the unknown-request errors name
+            // an id that may be one the peer sent or one a caller here made
+            // up.
+            EndpointError::Session(..)
+            | EndpointError::Subscription(..)
+            | EndpointError::Fetch(..)
+            | EndpointError::Namespace(..)
+            | EndpointError::TrackStatus(..)
+            | EndpointError::PublishFlow(..)
+            | EndpointError::Setup(..)
+            | EndpointError::UnknownRequest(..)
+            | EndpointError::UnknownPeerNamespace => Fault::EitherEnd,
+
+            // Raised on the way out. Nothing reached the wire, so none of
+            // these is evidence about a peer — including the ones a peer
+            // caused, where what failed is this side's attempt to accept
+            // something the draft says to refuse.
+            EndpointError::MaxRequestIdWouldNotIncrease { .. }
+            | EndpointError::NotActive
+            | EndpointError::Draining
+            | EndpointError::TrackAliasInUse { .. }
+            | EndpointError::UnjoinableSubscription { .. }
+            | EndpointError::WrongJoiningRefusal { .. }
+            | EndpointError::PeerPrefixOverlap { .. }
+            | EndpointError::OwnPrefixOverlap { .. }
+            | EndpointError::WrongOverlapRefusal { .. } => Fault::ThisEndpoint,
+
+            // Raised reading what the peer sent.
+            EndpointError::NotASubscribeNamespace(..) => Fault::Peer(Rule::BidiStreamOpener),
+            EndpointError::DuplicateTrackAlias { .. } => Fault::Peer(Rule::DuplicateTrackAlias),
+            EndpointError::GoAwayUriAtServer => Fault::Peer(Rule::GoAwayAtServer),
+            EndpointError::NamespaceMessageOnControlStream(..) => {
+                Fault::Peer(Rule::MessageOnTheWrongStream)
+            }
+            EndpointError::ObjectPastFinalObject { .. } => Fault::Peer(Rule::ObjectPastFinalObject),
+            EndpointError::RepeatedGoAway => Fault::Peer(Rule::RepeatedGoAway),
+            EndpointError::UpdateParameterNotForKind { .. }
+            | EndpointError::UpdateForUnknownRequest(..) => {
+                Fault::Peer(Rule::RequestUpdateForTheWrongRequest)
+            }
+            EndpointError::ResponseIdMismatch { .. } => {
+                Fault::Peer(Rule::ResponseNamesAnotherRequest)
+            }
+            EndpointError::NotASubscription(..) => Fault::Peer(Rule::TrackStatusIsNotASubscription),
+
+            // The Request ID rules, which are the peer's whenever they are
+            // read off the wire. The mirror — this endpoint asked to advertise
+            // a ceiling that does not increase — is
+            // `MaxRequestIdWouldNotIncrease` above, which is a variant of its
+            // own so that the two never arrive as one value.
+            EndpointError::RequestId(e) => match e {
+                RequestIdError::Decreased(..) => Fault::Peer(Rule::MaxRequestIdDecreased),
+                RequestIdError::ExceedsMax(..) => Fault::Peer(Rule::RequestIdCeiling),
+                RequestIdError::WrongParity(..) => Fault::Peer(Rule::RequestIdParity),
+                RequestIdError::OutOfSequence { .. } => Fault::Peer(Rule::RequestIdOutOfSequence),
+                // This endpoint has spent the budget the peer granted it.
+                RequestIdError::Blocked => Fault::ThisEndpoint,
+            },
+        }
+    }
+
     /// The code to close the session with, when draft-16 answers this error
     /// with a close rather than leaving it to the one request it concerns.
     ///
@@ -426,13 +530,25 @@ impl EndpointError {
             // to reconnect, which it has no standing to do.
             EndpointError::GoAwayUriAtServer => Some(SessionErrorCode::ProtocolViolation),
             // Section 3.3 answers a bidirectional stream that begins with the
-            // wrong message type with this code by name, and a NAMESPACE or
-            // NAMESPACE_DONE on the control stream is the same misplacement
-            // read from the other end.
-            EndpointError::NotASubscribeNamespace(_)
-            | EndpointError::NamespaceMessageOnControlStream(_) => {
-                Some(SessionErrorCode::ProtocolViolation)
-            }
+            // wrong message type with this code by name.
+            //
+            // A NAMESPACE or NAMESPACE_DONE on the control stream does not
+            // take the same answer, though it reads like *the same
+            // misplacement from the other end*. It is not, and the difference
+            // is the whole of what Section 3.3 says: its sentence is about
+            // what a bidirectional stream may *begin* with, and a message
+            // arriving on the control stream begins nothing. Read across all
+            // fourteen texts for a sentence that closes a session over a
+            // message being in the wrong place, draft-16 has none — Section
+            // 9.25 describes where NAMESPACE messages are sent ("the publisher
+            // will send matching NAMESPACE messages on the response stream"),
+            // which is prose about a conforming publisher with no consequence
+            // attached to a peer that does otherwise. A close there would be
+            // this build's reading of the protocol rather than the draft's.
+            // The message is refused; the session survives it, which it can,
+            // because a control message carries its own length and the next
+            // boundary is known.
+            EndpointError::NotASubscribeNamespace(_) => Some(SessionErrorCode::ProtocolViolation),
             // Sections 9.10 and 9.13 name this code in the sentence that
             // states the rule, and name no other. A close carrying
             // PROTOCOL_VIOLATION would tell the peer a different thing went
@@ -1334,14 +1450,17 @@ impl Endpoint {
     ///
     /// # Errors
     ///
-    /// The decrease error if the value does not strictly increase.
+    /// [`EndpointError::MaxRequestIdWouldNotIncrease`] if the value does not
+    /// strictly increase. Its own variant rather than the one a *received*
+    /// ceiling that did not increase raises, so that a refusal to write is
+    /// never read back as a peer in violation.
     pub fn send_max_request_id(&mut self, max_id: VarInt) -> Result<ControlMessage, EndpointError> {
         let new_val = max_id.into_inner();
         if new_val <= self.advertised_max_id {
-            return Err(EndpointError::RequestId(RequestIdError::Decreased(
-                self.advertised_max_id,
-                new_val,
-            )));
+            return Err(EndpointError::MaxRequestIdWouldNotIncrease {
+                advertised: self.advertised_max_id,
+                offered: new_val,
+            });
         }
         self.advertised_max_id = new_val;
         Ok(ControlMessage::MaxRequestId(MaxRequestId { request_id: max_id }))
@@ -1429,8 +1548,8 @@ impl Endpoint {
         // SetupExchange is in that set because the Termination section says
         // "The Transport Session can be terminated at any point", and the
         // Setup exchange is a point. So a violation caught while the setup is
-        // still in flight does close the session rather than being recorded
-        // and forgotten, which is what this discarded result used to mean.
+        // still in flight does close the session, and the discarded result is
+        // safe because that is one of the states `on_close` accepts.
         let _ = self.session.on_close();
         err
     }
@@ -3213,12 +3332,20 @@ impl Endpoint {
             // no Request ID, so here they name nothing. Refusing them is what
             // stops this endpoint writing on the control stream exactly what
             // its own receive half will not read there.
+            //
+            // Refused, and the session left running rather than going through
+            // `fail_session`, which is the answer for a rule the draft closes
+            // over — and draft-16 closes over no such rule; see
+            // `session_error_code` below. The message is framed, so its length
+            // is known and the next boundary on the control stream is too,
+            // which is why refusing one costs nothing: this is the same answer
+            // `ResponseOnControlStream` has always given on the drafts that
+            // have it.
             ControlMessage::Namespace(_) => {
-                Err(self.fail_session(EndpointError::NamespaceMessageOnControlStream("NAMESPACE")))
+                Err(EndpointError::NamespaceMessageOnControlStream("NAMESPACE"))
             }
             ControlMessage::NamespaceDone(_) => {
-                Err(self
-                    .fail_session(EndpointError::NamespaceMessageOnControlStream("NAMESPACE_DONE")))
+                Err(EndpointError::NamespaceMessageOnControlStream("NAMESPACE_DONE"))
             }
             ControlMessage::PublishNamespace(ref m) => self.receive_publish_namespace(m),
             ControlMessage::PublishNamespaceCancel(ref m) => {

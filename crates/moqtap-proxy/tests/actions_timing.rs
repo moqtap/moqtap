@@ -48,12 +48,12 @@
 //! [`calibration_a_five_millisecond_delay_is_measured_as_five_milliseconds`]
 //! for the whole argument and the numbers behind it.
 //!
-//! ## The paired-comparison rule was tried, and it is false
+//! ## Paired comparison does not rescue an accuracy pair
 //!
-//! The previous revision of this doc ranked paired comparisons **first**,
-//! on the reasoning that "scheduler noise is additive and lands on both
-//! arms, so it cancels in the difference". For an accuracy pair that is
-//! wrong, and it was falsified by measurement rather than argued away:
+//! It is tempting to rank paired comparisons **first**, on the reasoning
+//! that "scheduler noise is additive and lands on both arms, so it cancels
+//! in the difference". For an accuracy pair that is wrong, and it is
+//! falsified by measurement rather than argued away:
 //! under 16 busy-loop processes the wheel arm does *not* keep its ~0.5 ms
 //! lateness while the tokio arm keeps its ~11 ms tick. Both arms degrade
 //! to the same tens of milliseconds and the separation collapses. Measured
@@ -89,31 +89,31 @@
 //! the window — the "never silently gone" guarantee, and the thing an
 //! inline drain loop fails.
 //!
-//! # Three tests here were red, and each pinned a defect that is now fixed
+//! # Three tests here each pin a measured defect
 //!
-//! They stay, unchanged in what they assert, as the regression tests for
-//! the fixes. Each rustdoc records the original measurement and the
-//! ablation that puts it back.
+//! They are the regression tests for three concrete failure modes. Each
+//! rustdoc records the measurement that caught its defect and the ablation
+//! that puts the failure back.
 //!
 //! * `releasing_a_gate_resumes_the_stream` and
 //!   `releasing_a_gate_resumes_the_stream_and_its_fin` — a `Hold` on one
-//!   object stalled every later object on that stream, and the stream's
-//!   FIN, until `max_hold` (30 s by default) **even after the gate was
-//!   released**. Fixed by separating readiness from ordering in
-//!   `egress.rs`: `PendingQueue::push` no longer rewrites a successor's
+//!   object stalls every later object on that stream, and the stream's FIN,
+//!   until `max_hold` (30 s by default) **even after the gate is
+//!   released**, unless readiness is kept separate from ordering in
+//!   `egress.rs`: `PendingQueue::push` does not rewrite a successor's
 //!   deadline.
-//! * `a_delay_behind_a_hold_keeps_its_own_deadline` — the same rewrite
-//!   overwrote a queued `Delay`'s own `arrived_at + by` deadline with the
-//!   hold's ceiling.
+//! * `a_delay_behind_a_hold_keeps_its_own_deadline` — that same rewrite
+//!   would overwrite a queued `Delay`'s own `arrived_at + by` deadline with
+//!   the hold's ceiling.
 //! * `a_held_object_is_never_silently_lost_at_teardown` — on a multi-thread
-//!   runtime, cancelling a session while an object was held lost that
-//!   object with no event at all, 8 runs out of 8. Fixed by reporting
-//!   `PendingQueue::unconfirmed_bytes` rather than `queued_bytes` on every
-//!   teardown path: bytes handed to a transport the session is closing are
+//!   runtime, cancelling a session while an object is held loses that
+//!   object with no event at all, 8 runs out of 8, unless every teardown
+//!   path reports `PendingQueue::unconfirmed_bytes` rather than
+//!   `queued_bytes`: bytes handed to a transport the session is closing are
 //!   not delivered bytes.
 //!
-//! None was ever `#[ignore]`d, because an ignored test is a defect that
-//! stopped being visible. That rule holds for every claim about *what* the
+//! None of them is `#[ignore]`d, because an ignored test is a defect that
+//! has stopped being visible. That rule holds for every claim about *what* the
 //! session does. The single `#[ignore]` in this file is on a claim about
 //! *how accurately* it does it, where there is no defect to hide — the
 //! capability is gated by the lower bounds and counters above — and where
@@ -902,11 +902,11 @@ async fn calibration_a_five_millisecond_delay_is_measured_as_five_milliseconds()
     /// of it. Under the ablation in this test's rustdoc the same two
     /// numbers were 10.486 ms and 10.522 ms — 36 µs.
     ///
-    /// **Do not tune this to make a loaded run green.** An earlier revision
-    /// claimed the separation "did not move between the idle box and the
-    /// loaded one"; it does. Under 16 busy-loop processes the wheel arm
-    /// degrades to the control's own level and the separation reaches 0 ns,
-    /// which is why this whole test is `#[ignore]`d rather than margined.
+    /// **Do not tune this to make a loaded run green.** The separation does
+    /// move between an idle box and a loaded one: under 16 busy-loop
+    /// processes the wheel arm degrades to the control's own level and the
+    /// separation reaches 0 ns, which is why this whole test is
+    /// `#[ignore]`d rather than margined.
     /// There is no value here that is both meaningful and load-proof:
     /// anything above ~10 ms is passed by the `tokio::time::sleep`
     /// implementation this exists to reject, and anything below it is
@@ -1214,10 +1214,10 @@ async fn a_released_gate_makes_the_held_unit_due_at_once() {
 /// wait for it, and they carry no gate, so `Pending::is_due` had nothing to
 /// make them due early. The gate clause fixed the head and only the head.
 ///
-/// The fix is candidate 2 below: `push` no longer clamps a unit's own
-/// deadline at all. Ordering is the deque's job — `pop_next_due` only ever
-/// looks at the front — and the clamp survives as `Pending::expected_at`,
-/// which is reported as `Effect::Queued { release_at }` and gates nothing.
+/// What keeps it green: `push` does not clamp a unit's own deadline at all.
+/// Ordering is the deque's job — `pop_next_due` only ever looks at the
+/// front — and the clamp is what `Pending::expected_at` computes, which is
+/// reported as `Effect::Queued { release_at }` and gates nothing.
 ///
 /// It was not visible from `egress.rs`'s own tests:
 /// `a_released_gate_makes_a_unit_due_before_its_ceiling` puts exactly one
@@ -1775,10 +1775,10 @@ async fn held_unit_settled(
 /// cancellation — in three orderings, each pinned so it exercises the drain
 /// it is meant to.
 ///
-/// An earlier version of this test left it unpinned whether the source FINs
-/// before the cancel, so a run might or might not have entered the FIN drain
-/// and could go green while the hazard was live. Each case below waits for a
-/// *recorded event* before cancelling, so the ordering is not a sleep.
+/// Leaving it unpinned whether the source FINs before the cancel lets a run
+/// enter the FIN drain or skip it, so the test can go green with the hazard
+/// still live. Each case below waits for a *recorded event* before
+/// cancelling, so the ordering is not a sleep.
 ///
 /// Three cases, because the three reach cancellation through different
 /// code: case 1 through the pipe loop's own cancel arm, cases 2 and 3
@@ -2124,14 +2124,14 @@ async fn a_held_object_is_never_silently_lost_at_teardown() {
 // # And each leg waits for the park rather than timing it
 //
 // The window makes the park inevitable; it does not say when it starts.
-// Both legs used to spend `50 ms + 200 ms` there and call the proxy
-// "demonstrably parked", which is a claim about the run that the run was
+// Spending a fixed `50 ms + 200 ms` there and calling the proxy
+// "demonstrably parked" would be a claim about the run that the run was
 // never asked. It matters more here than in most places: a stop that lands
 // before the release branch has entered its write is mirrored by
 // `StopWatcher` instead, and a leg that drifted into that ordering would
 // stay green under its own ablation while gating the other site.
 //
-// So each leg now waits for something it can see, and the two are
+// So each leg waits for something it can see, and the two are
 // different because the two fixtures park differently:
 //
 // * **data** — one object is larger than the whole window, so the first

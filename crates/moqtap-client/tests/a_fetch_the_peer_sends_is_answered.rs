@@ -28,16 +28,12 @@
 //! that arrives, so it sends the answer, receives the cancel and finishes the
 //! stream - every message the other way round from a fetch it makes itself.
 //!
-//! # What was here before
+//! # Why the range stops at 16
 //!
-//! Nothing on any of the ten. Drafts 07 through 10 checked an arriving FETCH's
-//! Subscribe ID and dropped it; drafts 11 through 16 did not dispatch the
-//! message at all, so its Request ID was counted and nothing else happened. A
-//! peer that fetched from this crate waited for an answer the crate had no
-//! record to build.
-//!
-//! Drafts 17 through 20 already carry this, because a request there arrives on
-//! a stream of its own and the same map holds both ends' fetches.
+//! Drafts 17 through 20 already carry all of this, because a request there
+//! arrives on a stream of its own — draft-17 Section 9.14 has the subscriber
+//! send FETCH "as the first message on a new bidi stream" — and the same map
+//! holds both ends' fetches.
 //!
 //! # Why none of this ends the session
 //!
@@ -391,9 +387,8 @@ macro_rules! inbound_fetch_gates {
             /// reaches the flow that can answer it.
             ///
             /// The dispatch arm is the whole of what this measures. Without it
-            /// the FETCH is counted and dropped, which is what every one of
-            /// these drafts did: the peer waits for an answer the endpoint has
-            /// no record to build one from.
+            /// the FETCH is counted and dropped, and the peer waits for an
+            /// answer the endpoint has no record to build one from.
             ///
             /// # What it catches, observed by making the change and running it
             ///

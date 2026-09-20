@@ -2,20 +2,20 @@
 //! Draft-07 Section 7: "An endpoint that receives an unknown stream type MUST
 //! close the session."
 //!
-//! # Why draft-07 had no data-stream close at all
+//! # Why the rule needs a variant of its own
 //!
-//! It was recorded as the one draft stating no data-stream rule. That was
-//! wrong, and the correction is the reason this file exists. Draft-07 states
-//! this one; the decoder answered it with `CodecError::InvalidField`, shared by
-//! a dozen unrelated malformations, so no mapping table could route it without
-//! closing sessions the draft says nothing about. A rule that cannot be
-//! expressed looks exactly like a rule that does not exist.
+//! Answered with `CodecError::InvalidField`, which a dozen unrelated
+//! malformations share, it would reach no mapping table that could route it
+//! without closing sessions the draft says nothing about. A rule that cannot be
+//! expressed looks exactly like a rule that does not exist, which is why this
+//! one answers `CodecError::UnknownStreamType` instead.
 //!
 //! Every draft from 07 to 20 states the rule, in one of two phrasings. This one
 //! names streams alone because draft-07 numbers its datagrams in the very same
 //! table; drafts 08 through 16 split the table in two and say "an unknown stream
 //! or datagram type"; drafts 17 through 20 give each table a sentence of its
-//! own. A search for either phrasing alone finds five drafts and misses nine.
+//! own. The stream-only sentence is in five drafts and the combined one in
+//! nine, so a search for either phrasing alone misses the rest.
 //!
 //! # Why a data-stream gate and not another control-stream one
 //!
@@ -24,8 +24,7 @@
 //! unidirectional stream, and `accept_subgroup_stream` hands the caller a
 //! `FramedRecvStream` holding no connection — so the reader that finds the
 //! violation is not the object that can act on it. `close_for_data_stream` is
-//! the join, and until this rule was split out draft-07 was the one connection
-//! that did not have one.
+//! the join between the two.
 //!
 //! # Why the type is 0x02
 //!
@@ -105,19 +104,19 @@ fn stream_with_an_unassigned_type() -> Vec<u8> {
 /// Two things are asserted and neither implies the other. The refusal names the
 /// type it saw, so a log says which value arrived rather than that some value
 /// was wrong. And the peer receives a CONNECTION_CLOSE, which is the part of
-/// "MUST close the session" that is about the wire and the part this draft had
-/// no way to reach.
+/// "MUST close the session" that is about the wire and the part only something
+/// holding the other end can observe.
 ///
 /// # What it catches, observed by making each change and running it
 ///
-/// Reverting the decoder to answer `CodecError::InvalidField`, which is what it
-/// did for as long as this rule was thought not to exist. It compiles, and
+/// Making the decoder answer `CodecError::InvalidField` instead of the rule's
+/// own variant. It compiles, and
 /// `close_for_data_stream` declines, because `InvalidField` is not a rule:
 ///
 /// ```text
 /// ---- an_unassigned_stream_type_closes_the_connection stdout ----
 ///
-/// thread 'an_unassigned_stream_type_closes_the_connection' (24648) panicked at crates\moqtap-client\tests\draft07_unknown_stream_type_closes_the_session.rs:193:18:
+/// thread 'an_unassigned_stream_type_closes_the_connection' (24648) panicked at crates\moqtap-client\tests\draft07_unknown_stream_type_closes_the_session.rs:
 /// expected an unknown-stream-type refusal, got Codec(InvalidField)
 /// ```
 ///
@@ -128,7 +127,7 @@ fn stream_with_an_unassigned_type() -> Vec<u8> {
 /// ```text
 /// ---- an_unassigned_stream_type_closes_the_connection stdout ----
 ///
-/// thread 'an_unassigned_stream_type_closes_the_connection' (30040) panicked at crates\moqtap-client\tests\draft07_unknown_stream_type_closes_the_session.rs:198:5:
+/// thread 'an_unassigned_stream_type_closes_the_connection' (30040) panicked at crates\moqtap-client\tests\draft07_unknown_stream_type_closes_the_session.rs:
 /// Section 7 answers this with a close, but close_for_data_stream declined
 /// ```
 #[tokio::test]

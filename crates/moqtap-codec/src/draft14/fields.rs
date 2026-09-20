@@ -60,6 +60,47 @@ fn auth_token_to_json_d14(bytes: &[u8]) -> Value {
 }
 
 /// Known parameter names for draft-14+ SETUP messages.
+///
+/// # 0x05 has two names in this draft, and this table gives it one
+///
+/// Draft-14 Section 9.3.2.1 assigns 0x05 to AUTHORITY and Section 9.3.2.6
+/// assigns 0x05 to MOQT_IMPLEMENTATION. That is a defect in the draft, not a
+/// gap in this table: the two sections are five subsections apart in one
+/// document and both spell "Parameter Type 0x05". Draft-15 Section 9.3.1.6
+/// moves MOQT_IMPLEMENTATION to 0x07 and the collision ends there — its change
+/// log names the move outright, "Change MOQT IMPLEMENTATION code point to 0x7".
+///
+/// Both values are opaque bytes — an RFC3986 authority component and a
+/// "UTF-8 encoded string" naming an implementation — so nothing in the frame
+/// separates them. A renderer handed a draft-14 setup 0x05 has no way to know
+/// which parameter it is looking at, and there is no reading of the draft that
+/// gives it one.
+///
+/// **This answers `authority`, deliberately, and the name is not a claim that
+/// the sender meant AUTHORITY.** Three reasons, in the order they decided it:
+///
+/// 1. The shared vector corpus names it `authority` — `transport/draft14/codec/
+///    messages/client-setup.json`, the `authority-param` case — and that file is
+///    the contract between this codec and every other implementation reading the
+///    same vectors. A rendering that disagreed with it would be a rendering no
+///    other reader produces.
+/// 2. AUTHORITY is the half with consequences attached. Draft-14 assigns
+///    INVALID_AUTHORITY (0x19) and MALFORMED_AUTHORITY (0x1A) and says what a
+///    server does with a bad one; MOQT_IMPLEMENTATION is informational and the
+///    draft's own security section still carries a TODO about it. Reading an
+///    implementation string as an authority shows a reader a field they can act
+///    on; the reverse hides one.
+/// 3. Naming it for both — `authority_or_moqt_implementation`, say — would put
+///    the ambiguity in a place no consumer can use it, since the name is what a
+///    trace keys on, and would break every reader keyed on the corpus while
+///    still not saying which parameter arrived.
+///
+/// So the ambiguity is recorded here rather than in the rendered field, and a
+/// reader who needs to tell the two apart has to do it from the value: an
+/// authority is a host, and an implementation string is a name and a version.
+/// `setup_option_name` cannot help — asking draft-15 about a draft-14 0x05
+/// answers `authority` as well, because draft-15 keeps AUTHORITY at 0x05 and
+/// only moved the other one.
 fn d14_setup_param_name(key: u64) -> Option<&'static str> {
     match key {
         0x01 => Some("path"),
@@ -100,7 +141,7 @@ fn kvp_to_json_d14(params: &[KeyValuePair]) -> Value {
     kvp_to_json(params, d14_msg_param_name)
 }
 
-fn kvp_to_json_d14_setup(params: &[KeyValuePair]) -> Value {
+pub(crate) fn kvp_to_json_d14_setup(params: &[KeyValuePair]) -> Value {
     kvp_to_json(params, d14_setup_param_name)
 }
 

@@ -10,9 +10,9 @@
 //! fetch stream" and is "encoded as if they were Parameters for a separate
 //! message"
 //! and stops there, so whether that block carries a `Number of Parameters`
-//! count is a choice — recorded in this repository's `DECISIONS.md` as D1, made
-//! in `draft20::fill`, and made again in the codec's decoder. The gate is the
-//! bytes on the wire, read back by a peer that decodes them with the codec, so
+//! count is a choice — made in `draft20::fill`, and made again in the codec's
+//! decoder. The gate is the bytes on the wire, read back by a peer that
+//! decodes them with the codec, so
 //! the two halves of the choice have to agree for it to pass.
 //!
 //! **A fill fetch stream is attributable.** Section 5.1.3: "The FETCH_HEADER on

@@ -21,9 +21,16 @@ repository can observe, because none of them changes an exit code until
    guessing which release they belong to. `moqtap-client` sat at `0.3.0` —
    live on crates.io — while carrying three breaking changes.
 
+   The heading itself is part of the rule. A changelog with no
+   `## [Unreleased]` at all cannot answer the question either way, so it is an
+   error rather than a pass — otherwise deleting one line silences this rule
+   for good, and the state it leaves behind is a *green* line asserting
+   something nothing checked.
+
 3. **A crate sitting at an already-published version must have the same `src/`
-   as the published one.** Rule 2 asks the changelog whether there is
-   unreleased work, so a change nobody wrote down answers *no* and passes.
+   and the same `Cargo.toml` as the published one.** Rule 2 asks the changelog
+   whether there is unreleased work, so a change nobody wrote down answers *no*
+   and passes.
    That is not a hypothetical: `moqtap-trace` sat at `0.1.0` — live on
    crates.io — having gained a public field on a public enum variant, with an
    empty `## [Unreleased]`, and rules 1 and 2 were both green. The check was
@@ -31,7 +38,9 @@ repository can observe, because none of them changes an exit code until
 
    So rule 3 asks the code. It downloads the published `.crate` for the
    version the tree claims and compares every `src/**/*.rs` against the
-   working tree.
+   working tree — and the manifest with them, against the tarball's
+   `Cargo.toml.orig`, because a feature added at a published version is a
+   change to the public API that no file under `src/` records.
 
    **It is a source comparison, not a semantic one, and it is deliberately the
    blunter instrument.** It flags a comment fix as loudly as a renamed
@@ -110,19 +119,39 @@ def workspace_pin(root_manifest, name):
     return version.group(1) if version else None
 
 
+NO_CHANGELOG = object()
+NO_SECTION = object()
+
+
 def unreleased_body(name):
     """Whatever sits under `## [Unreleased]` in this crate's changelog.
 
-    Returns `None` if the file is missing, which is itself a failure: a
-    publishable crate with no changelog cannot answer rule 2 either way.
+    Three failure states, and they were once one. `NO_CHANGELOG` means the file
+    is missing; `NO_SECTION` means the file has no `## [Unreleased]` heading at
+    all. Both are cases where rule 2 *cannot be answered*, and collapsing either
+    into `""` makes this function report "nothing unreleased" about a crate it
+    never examined — which is a worse failure than the one rule 2 catches,
+    because it is a green line rather than a missing one. `moqtap-client` and
+    `moqtap-proxy` were both in the second state while carrying hundreds of
+    lines of unreleased work.
+
+    The empty string keeps its meaning: the heading is there and nothing is
+    under it, which is the one state that genuinely passes.
     """
     path = "crates/%s/CHANGELOG.md" % name
     try:
         text = open(path, encoding="utf-8").read()
     except OSError:
-        return None
-    section = re.search(r"^## \[Unreleased\][^\n]*\n(.*?)(?=^## )", text, re.M | re.S)
-    return section.group(1).strip() if section else ""
+        return NO_CHANGELOG
+    # `\Z` as well as the next heading: `## [Unreleased]` is often the *last*
+    # `##` in a changelog — a crate with no released sections yet, or one whose
+    # link references sit under a different heading level. Without it the
+    # lookahead fails, the search returns nothing, and a section full of
+    # unreleased work reads as an absent one.
+    section = re.search(
+        r"^## \[Unreleased\][^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S
+    )
+    return section.group(1).strip() if section else NO_SECTION
 
 
 def published_versions(name):
@@ -156,8 +185,19 @@ def normalize(text):
     return "\n".join(line.rstrip() for line in lines).rstrip("\n")
 
 
-def published_sources(name, version):
-    """`src/**/*.rs` from the published `.crate`, as `{path: normalized text}`.
+def published_files(name, version):
+    """The published `.crate`'s comparable files, as `{path: normalized text}`.
+
+    `src/**/*.rs`, plus `Cargo.toml` — taken from the tarball's
+    `Cargo.toml.orig`, which is the manifest as written. The tarball's own
+    `Cargo.toml` is cargo's normalized rewrite of it (path dependencies
+    resolved to versions, workspace inheritance flattened, keys reordered) and
+    would never match a working tree verbatim.
+
+    **The manifest is compared because a published feature list is as much
+    public API as a `pub fn`.** Rule 3 read only `src/` for its whole history,
+    so `moqtap-client` could gain a `wt-protocol` feature at an already-published
+    `0.5.0` and every rule here stay green on that account. It happened.
 
     Raises on anything that is not a clean answer, so the caller fails closed —
     an unreadable tarball is not evidence that the sources match.
@@ -181,7 +221,9 @@ def published_sources(name, version):
             if not path.startswith(prefix):
                 continue
             path = path[len(prefix):]
-            if not path.startswith("src/") or not path.endswith(".rs"):
+            if path == "Cargo.toml.orig":
+                path = "Cargo.toml"
+            elif not path.startswith("src/") or not path.endswith(".rs"):
                 continue
             handle = tar.extractfile(member)
             if handle is None:
@@ -190,8 +232,8 @@ def published_sources(name, version):
     return out
 
 
-def tree_sources(name):
-    """The same shape, read from `crates/<name>/src`."""
+def tree_files(name):
+    """The same shape, read from `crates/<name>`."""
     import os
 
     base = os.path.join("crates", name)
@@ -203,6 +245,9 @@ def tree_sources(name):
             full = os.path.join(dirpath, filename)
             key = os.path.relpath(full, base).replace(os.sep, "/")
             out[key] = normalize(open(full, encoding="utf-8").read())
+    manifest = os.path.join(base, "Cargo.toml")
+    if os.path.exists(manifest):
+        out["Cargo.toml"] = normalize(open(manifest, encoding="utf-8").read())
     return out
 
 
@@ -214,10 +259,13 @@ def source_drift(name, version):
     at all, which is a fact about that crate's packaging rather than a pass —
     the caller reports it rather than counting it as agreement.
     """
-    published = published_sources(name, version)
-    if not published:
+    published = published_files(name, version)
+    # Deliberately `src/`, not `published`: a tarball always carries a manifest,
+    # so counting it here would turn the "nothing to compare" case into a
+    # comparison of one file and report agreement the sources never showed.
+    if not any(path.startswith("src/") for path in published):
         return None
-    tree = tree_sources(name)
+    tree = tree_files(name)
 
     drift = []
     for path in sorted(set(published) | set(tree)):
@@ -270,11 +318,22 @@ def main():
             continue
 
         unreleased = unreleased_body(name)
-        if unreleased is None:
+        if unreleased is NO_CHANGELOG:
             print(
                 "::error::%s is publishable and has no crates/%s/CHANGELOG.md, "
                 "so whether %s carries unreleased work cannot be answered."
                 % (name, name, version)
+            )
+            failed = True
+        elif unreleased is NO_SECTION:
+            print(
+                "::error::%s is at %s, which is already on crates.io, and its "
+                "changelog has no `## [Unreleased]` heading — so whether it "
+                "carries unreleased work cannot be answered. Add the heading. "
+                "An absent section and an empty one are the same green line "
+                "otherwise, and deleting the heading at release time is the "
+                "one edit that would silence this rule permanently."
+                % (name, version)
             )
             failed = True
         elif unreleased:

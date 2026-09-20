@@ -93,9 +93,9 @@
 //! An `Err` returned to a caller proves none of those: it is returned just as
 //! readily by an implementation that closes nothing.
 //!
-//! This half is opt-in. A test that never sends a [`PeerCommand`] sees exactly
-//! the event stream it saw before the accept path existed, which is what keeps
-//! `every_request_helper_opens_its_own_stream` free of interleaving.
+//! This half is opt-in. A test that never sends a [`PeerCommand`] sees an event
+//! stream carrying nothing but what the client's own traffic produces, which is
+//! what keeps `every_request_helper_opens_its_own_stream` free of interleaving.
 //!
 //! Both halves of that are gated on the peer as well —
 //! `the_peer_opens_a_request_stream_and_requires_the_answer_on_it` and
@@ -1692,9 +1692,9 @@ macro_rules! uni_control_plane_gates {
             /// Bring up an enforcing peer and connect a client to it.
             ///
             /// The command sender is dropped here, so the peer opens no
-            /// request streams of its own and every test that uses this sees
-            /// the event stream it saw before the accept path existed. A test
-            /// that wants the other half calls
+            /// request streams of its own and every test that uses this sees an
+            /// event stream carrying nothing but what the client's own traffic
+            /// produces. A test that wants the other half calls
             /// [`connected_with_commands`] instead.
             async fn connected() -> Connected {
                 let (conn, peer, seen, _commands) = connected_with_commands().await;
@@ -1875,11 +1875,12 @@ macro_rules! uni_control_plane_gates {
             ///
             /// # What it catches
             ///
-            /// Putting the control stream back on a bidirectional stream —
-            /// `transport.open_bi()` in `Connection::connect`, with the
-            /// control plane read back off the same stream — fails every draft
-            /// here. Recorded when the file covered three; draft-20 fails it
-            /// the same way, because its Section 3.3 is the same sentence:
+            /// Carrying the control stream on a bidirectional stream, the way
+            /// drafts 07 through 16 carry it — `transport.open_bi()` in
+            /// `Connection::connect`, with the control plane read off that
+            /// same stream — fails every draft here. The transcript below is
+            /// drafts 17, 18 and 19; draft-20 fails it the same way, because
+            /// its Section 3.3 is the same sentence:
             ///
             /// ```text
             /// draft-17: connect failed with Transport(Read("connection lost")); the peer reported Ok(ClosedBidiStream(12032))
@@ -2672,9 +2673,9 @@ macro_rules! uni_control_plane_gates {
             /// # What it catches
             ///
             /// Draft-17's `absolute_joining_fetch` left calling the
-            /// endpoint's *relative* builder. **This cut reddened nothing at
-            /// all until the peer decoded what it was sent** — it was made
-            /// once before, against this very sweep, and passed:
+            /// endpoint's *relative* builder. **This cut reddens nothing at
+            /// all unless the peer decodes what it was sent** — a sweep that
+            /// only counted the streams would pass with it in place:
             ///
             /// ```text
             /// assertion `left == right` failed: draft-17: the absolute joining FETCH must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
@@ -3022,13 +3023,13 @@ macro_rules! uni_control_plane_gates {
             /// gates below it, and nothing else in the file:
             ///
             /// ```text
-            /// thread 'draft17::a_peers_request_is_answered_on_the_stream_it_arrived_on' (38500) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2714:1:
+            /// thread 'draft17::a_peers_request_is_answered_on_the_stream_it_arrived_on' (38500) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: the client never accepted the request the peer opened a stream with
-            /// thread 'draft17::an_inbound_request_is_served_while_an_outbound_one_is_in_flight' (13992) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2714:1:
+            /// thread 'draft17::an_inbound_request_is_served_while_an_outbound_one_is_in_flight' (13992) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: the client never accepted the peer's request while one of its own was outstanding
-            /// thread 'draft17::a_peer_request_id_with_our_own_parity_closes_the_session' (31456) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2714:1:
+            /// thread 'draft17::a_peer_request_id_with_our_own_parity_closes_the_session' (31456) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: the accept never reached a verdict
-            /// thread 'draft17::a_stream_that_opens_no_request_closes_the_session' (41532) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2714:1:
+            /// thread 'draft17::a_stream_that_opens_no_request_closes_the_session' (41532) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: the accept never reached a verdict
             /// ```
             ///
@@ -3187,7 +3188,7 @@ macro_rules! uni_control_plane_gates {
             /// passes, and only the wire half fails:
             ///
             /// ```text
-            /// thread 'draft17::a_stream_that_opens_no_request_closes_the_session' (49352) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2714:1:
+            /// thread 'draft17::a_stream_that_opens_no_request_closes_the_session' (49352) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: the client refused the non-request opener but never closed the session; a returned error is not a CONNECTION_CLOSE
             /// ```
             #[tokio::test]
@@ -3270,7 +3271,7 @@ macro_rules! uni_control_plane_gates {
             /// nothing checks the least significant bit:
             ///
             /// ```text
-            /// thread 'draft17::a_peer_request_id_with_our_own_parity_closes_the_session' (60144) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2714:1:
+            /// thread 'draft17::a_peer_request_id_with_our_own_parity_closes_the_session' (60144) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: an even Request ID from a server peer must be refused, got an accepted request on stream 0
             /// ```
             ///
@@ -3354,20 +3355,17 @@ macro_rules! uni_control_plane_gates {
             /// answer — fails this gate and no other in this file:
             ///
             /// ```text
-            /// thread 'draft17::a_repeated_peer_request_id_closes_the_session' (52620) panicked at crates\moqtap-client\tests\uni_control_plane.rs:3205:1:
+            /// thread 'draft17::a_repeated_peer_request_id_closes_the_session' (52620) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: a Request ID the peer has already spent must be refused, got a second accepted request on stream 1
-            ///
-            /// test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
             /// ```
             ///
             /// The line number is draft-17's macro invocation site and moves
             /// whenever this file is edited; the message is what identifies the
             /// failure.
             ///
-            /// Before this gate existed that same deletion left the whole file
-            /// green — `test result: ok. 57 passed; 0 failed` — which is the
-            /// coverage hole it was written to fill. The endpoint's own unit
-            /// test caught the deletion in-process; nothing on the wire did.
+            /// This gate is the only thing on the wire that sees that
+            /// deletion: the endpoint's own unit test catches it in-process,
+            /// and every other gate in this file stays green through it.
             #[tokio::test]
             async fn a_repeated_peer_request_id_closes_the_session() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -3628,10 +3626,8 @@ macro_rules! uni_control_plane_gates {
             /// which is what shows the gate is per-draft and not incidental:
             ///
             /// ```text
-            /// thread 'draft17::a_peers_publish_carries_a_second_message_from_the_peer' (14612) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2948:1:
+            /// thread 'draft17::a_peers_publish_carries_a_second_message_from_the_peer' (14612) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: the PUBLISH_DONE the peer sent on its own stream came back as Endpoint(UnknownRequest(1)) instead of being dispatched as a request-side message
-            ///
-            /// test result: FAILED. 53 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             /// ```
             #[tokio::test]
             async fn a_peers_publish_carries_a_second_message_from_the_peer() {
@@ -3756,10 +3752,8 @@ macro_rules! uni_control_plane_gates {
             /// and no other in the file:
             ///
             /// ```text
-            /// thread 'draft17::a_cancelled_accept_does_not_lose_the_peers_stream' (42568) panicked at crates\moqtap-client\tests\uni_control_plane.rs:3062:1:
+            /// thread 'draft17::a_cancelled_accept_does_not_lose_the_peers_stream' (42568) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: the stream survived cancellation but the request on it never completed
-            ///
-            /// test result: FAILED. 56 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             /// ```
             ///
             /// Note which assertion fired. The stash is still *written* under
@@ -3868,11 +3862,11 @@ macro_rules! uni_control_plane_gates {
             /// these three and the four responder gates, and nothing else:
             ///
             /// ```text
-            /// thread 'draft17::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (54980) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2716:1:
+            /// thread 'draft17::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (54980) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-17: the peer never opened a request stream
-            /// thread 'draft18::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (67764) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2742:1:
+            /// thread 'draft18::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (67764) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-18: the peer never opened a request stream
-            /// thread 'draft19::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (65256) panicked at crates\moqtap-client\tests\uni_control_plane.rs:2766:1:
+            /// thread 'draft19::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (65256) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// draft-19: the peer never opened a request stream
             /// ```
             ///
@@ -4089,11 +4083,11 @@ macro_rules! uni_control_plane_gates {
             /// passing and fails only these three, one per draft:
             ///
             /// ```text
-            /// thread 'draft17::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:1170:1:
+            /// thread 'draft17::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// the peer never closed the session: Elapsed(())
-            /// thread 'draft18::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:1186:1:
+            /// thread 'draft18::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// the peer never closed the session: Elapsed(())
-            /// thread 'draft19::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:1201:1:
+            /// thread 'draft19::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:
             /// the peer never closed the session: Elapsed(())
             /// ```
             ///
