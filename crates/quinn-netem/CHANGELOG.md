@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   That cause is imprecise — the queue may hold nothing — but it is the same
   imprecision `Admission::NeverFits` already accepts about the same rate model.
 
-  **Present in 0.1.0, 0.1.1 and 0.1.2.** Upgrade if you expose an impaired
-  socket to traffic you do not control.
+  **Present in 0.1.0 and 0.1.1.** Upgrade if you expose an impaired socket to
+  traffic you do not control.
 
 ### Added
 
@@ -39,16 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused; leaving it there would tail-drop the datagrams behind it against
   occupancy that does not exist.
 
-## [0.1.2] - 2026-09-02
-
-Documentation only. No code path changes, no change to any emitted value, and
-the determinism gate's digest is unchanged.
-
 ### Changed
 
 - Prose across `control`, `log`, `model`, `profile`, `queue` and `stats` now
   describes callers and profiles in the vocabulary of the types it documents.
-  `Preset` is a named profile, which is what it builds.
+  `Preset` is a named profile, which is what it builds. Documentation only: no
+  code path changed and no emitted value moved.
 
 ## [0.1.1] - 2026-08-31
 
