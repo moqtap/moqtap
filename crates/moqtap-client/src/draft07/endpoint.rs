@@ -733,7 +733,7 @@ impl Endpoint {
     /// later ones, so the value is read off the endpoint rather than asked of
     /// the caller: that is what lets
     /// [`crate::dispatch::AnyConnection::subscribe`] carry one signature across
-    /// all fourteen drafts instead of an argument that does nothing on nine of
+    /// all the drafts instead of an argument that does nothing on nine of
     /// them.
     ///
     /// Read rather than kept, for the same reason the alias table beside it

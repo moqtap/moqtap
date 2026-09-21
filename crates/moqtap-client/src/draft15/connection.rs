@@ -75,8 +75,8 @@ pub enum ConnectionError {
     /// hands back can only carry this draft's variant — but the narrowing arm
     /// is compiled in every configuration anyway, under
     /// `#[allow(unreachable_patterns)]` rather than a `cfg` naming the other
-    /// thirteen drafts, because such a list has to be edited in fourteen
-    /// places whenever a draft is added and a copy that omits one leaves the
+    /// drafts, because such a list has to be edited in every per-draft
+    /// module whenever a draft is added and a copy that omits one leaves the
     /// match non-exhaustive.
     ///
     /// Spelled as `CodecError::UnknownMessageType(0)` it would not stay inert:
@@ -275,7 +275,7 @@ impl FramedSendStream {
             // Only this draft's header seeds the object reader. With draft 15 the only enabled
             // draft `AnySubgroupHeader` has a single variant, the arm above is exhaustive and this
             // one unreachable. Compiled in every configuration with the lint allowed, rather than
-            // gated on a `cfg` naming the other thirteen drafts: such a list has to be edited in
+            // gated on a `cfg` naming the other drafts: such a list has to be edited in
             // every draft module whenever a draft is added, and a copy that omits one leaves this
             // match non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -1019,7 +1019,7 @@ impl Connection {
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 15 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
-            // naming the other thirteen drafts: such a list has to be edited in every draft module
+            // naming the other drafts: such a list has to be edited in every draft module
             // whenever a draft is added, and a copy that omits one leaves this match
             // non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -1827,7 +1827,7 @@ impl Connection {
     ///     with a PROTOCOL_VIOLATION." Every draft from 11 to 19 states it; 07
     ///     through 10 state no maximum for the field at all.
     ///   - Unknown control message type: "An endpoint that receives an unknown
-    ///     message type MUST close the session." All fourteen drafts state it,
+    ///     message type MUST close the session." All the drafts state it,
     ///     in the same words, and the sentence names no code, so Protocol
     ///     Violation is what carries it.
     ///
@@ -1967,7 +1967,8 @@ impl Connection {
             | CodecError::ObjectIdOverflow(..)
             | CodecError::ExtensionsOnNonExistentObject(_)
             | CodecError::InvalidRequiredRequestIdDelta(..)
-            | CodecError::InvalidTypeValue { .. }
+            | CodecError::InvalidStreamTypeValue { .. }
+            | CodecError::InvalidDatagramTypeValue { .. }
             | CodecError::UnknownMessageParameter(_)
             // Not `ParameterOutOfScope`: this draft states the scope rule and
             // answers it the other way. Section 9.2.1 Version Specific Parameters: "Each

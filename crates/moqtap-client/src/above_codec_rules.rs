@@ -40,7 +40,7 @@
 //!   [`AboveCodecRule::PayloadOnStatusDatagram`].
 //!
 //! **What a message says about the session it arrived in.** The rest, across
-//! all fourteen drafts, each comparing a message against state this endpoint
+//! all the drafts, each comparing a message against state this endpoint
 //! has been keeping: a Request ID against the sequence the peer's own ids
 //! follow, a GOAWAY against whether one has already arrived, a Track Alias
 //! against the track it already names, an Object's Location against the one the
@@ -141,7 +141,7 @@ pub enum AboveCodecRule {
     /// sentence is about what a bidirectional stream may *begin* with, and a
     /// message arriving on the control stream begins nothing.
     ///
-    /// Read across all fourteen texts for a sentence that closes a session over
+    /// Read across all texts for a sentence that closes a session over
     /// a message being in the wrong place, there is none. The drafts state
     /// placement per message, mostly descriptively; drafts 18 through 20 add a
     /// Stream column to their message table, whose only MUST is that a message
@@ -416,8 +416,8 @@ pub enum AboveCodecRule {
 /// # A citation with no draft in it is a citation about no draft
 ///
 /// [`AboveCodecRule`] names a rule across every draft that states it, and that
-/// is what makes one rule one row in a conformance report rather than fourteen
-/// rows that happen to rhyme. The *sentence* cannot be shared that way: one
+/// is what makes one rule one row in a conformance report rather than rows
+/// that happen to rhyme. The *sentence* cannot be shared that way: one
 /// quoted sentence per rule, printed beside whichever draft was negotiated,
 /// publishes words the negotiated draft does not contain.
 ///
@@ -438,7 +438,8 @@ pub enum AboveCodecRule {
 ///
 /// # Runs, and not a row per draft
 ///
-/// Twenty-eight rules over fourteen drafts is 392 citations, and most of them
+/// Twenty-eight rules with a citation per draft is several hundred rows, and
+/// most of them
 /// would be one sentence written out again. A row here covers a **run**: every
 /// draft over which one sentence sits under one section. The sentence itself is
 /// a named constant, so a wording shared by three runs — or by two different
@@ -451,7 +452,7 @@ pub enum AboveCodecRule {
 /// PROTOCOL_VIOLATION, where draft-16 changed terminate to close, and — far
 /// more often than either — where a section number moved under a sentence that
 /// did not change at all. The Track Alias rule alone runs 6.4, 7.4, 8.6, 8.7,
-/// 8.8, 9.8, 9.10, 9.9, 11.1 across the fourteen, and only four of those eight
+/// 8.8, 9.8, 9.10, 9.9, 11.1 across the drafts, and only four of those eight
 /// moves coincide with a change of wording.
 ///
 /// # What checks it
@@ -570,6 +571,9 @@ const REPEATED_GOAWAY_17: &str = "The endpoint MUST close the session with a PRO
 const REPEATED_GOAWAY_18: &str = "The endpoint MUST close the session with a PROTOCOL_VIOLATION \
                                   (Section 3.5) if it receives more than one GOAWAY on the control \
                                   stream or on a single request stream.";
+const REPEATED_GOAWAY_21: &str = "The endpoint MUST close the session with a PROTOCOL_VIOLATION \
+                                  (Section 12.2) if it receives more than one GOAWAY on the \
+                                  control stream or on a single request stream.";
 const REDIRECT_URI_AT_SERVER: &str = "If a server receives a Redirect with a non-zero Connect URI \
                                       Length it MUST close the session with a PROTOCOL_VIOLATION.";
 const REDIRECT_TRACK_NAME: &str = "an endpoint that receives a non-empty Track Name in a Redirect \
@@ -748,7 +752,7 @@ impl AboveCodecRule {
     /// drafts 16 through 20 and no draft in that range states it, so it is
     /// named, enforced and attributed to the peer while publishing nothing:
     /// there is no sentence to publish and `close` is `None` on every draft.
-    /// The variant's own doc carries the reading across all fourteen texts that
+    /// The variant's own doc carries the reading across all texts that
     /// establishes it, and the one variant that really is covered by a draft
     /// sentence is filed under the rule whose sentence covers it. A draft that
     /// attaches a consequence to this one arrives as a citation rather than as
@@ -775,6 +779,12 @@ impl AboveCodecRule {
                     sentence: PROPERTIES_ON_STATUS,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "11.1.3",
+                    sentence: PROPERTIES_ON_STATUS,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
             Self::BidiStreamOpener => &[
                 RuleCitation {
@@ -789,6 +799,12 @@ impl AboveCodecRule {
                     sentence: BIDI_OPENER_17,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "6.3",
+                    sentence: BIDI_OPENER_17,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
             Self::ResponseBeforeItsFirstResponse => &[
                 RuleCitation {
@@ -800,6 +816,12 @@ impl AboveCodecRule {
                 RuleCitation {
                     drafts: (20, 20),
                     section: "10.19",
+                    sentence: FIRST_RESPONSE,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.15",
                     sentence: FIRST_RESPONSE,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
@@ -853,6 +875,12 @@ impl AboveCodecRule {
                     sentence: GOAWAY_URI_CLOSE,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.2",
+                    sentence: GOAWAY_URI_CLOSE,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
             Self::RepeatedGoAway => &[
                 RuleCitation {
@@ -903,19 +931,41 @@ impl AboveCodecRule {
                     sentence: REPEATED_GOAWAY_18,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.2",
+                    sentence: REPEATED_GOAWAY_21,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
-            Self::RedirectUriAtServer => &[RuleCitation {
-                drafts: (18, 20),
-                section: "10.6.1",
-                sentence: REDIRECT_URI_AT_SERVER,
-                code_name: Some("PROTOCOL_VIOLATION"),
-            }],
-            Self::RedirectTrackNameOnNamespaceRequest => &[RuleCitation {
-                drafts: (18, 20),
-                section: "10.6.1",
-                sentence: REDIRECT_TRACK_NAME,
-                code_name: Some("PROTOCOL_VIOLATION"),
-            }],
+            Self::RedirectUriAtServer => &[
+                RuleCitation {
+                    drafts: (18, 20),
+                    section: "10.6.1",
+                    sentence: REDIRECT_URI_AT_SERVER,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.4.1",
+                    sentence: REDIRECT_URI_AT_SERVER,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::RedirectTrackNameOnNamespaceRequest => &[
+                RuleCitation {
+                    drafts: (18, 20),
+                    section: "10.6.1",
+                    sentence: REDIRECT_TRACK_NAME,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.4.1",
+                    sentence: REDIRECT_TRACK_NAME,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
             Self::RequestIdParity => &[
                 RuleCitation {
                     drafts: (11, 13),
@@ -944,6 +994,12 @@ impl AboveCodecRule {
                 RuleCitation {
                     drafts: (18, 20),
                     section: "10.1",
+                    sentence: REQUEST_ID_17,
+                    code_name: Some("INVALID_REQUEST_ID"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "6.4.2.1",
                     sentence: REQUEST_ID_17,
                     code_name: Some("INVALID_REQUEST_ID"),
                 },
@@ -994,6 +1050,12 @@ impl AboveCodecRule {
                 RuleCitation {
                     drafts: (18, 20),
                     section: "10.1",
+                    sentence: REQUEST_ID_17,
+                    code_name: Some("INVALID_REQUEST_ID"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "6.4.2.1",
                     sentence: REQUEST_ID_17,
                     code_name: Some("INVALID_REQUEST_ID"),
                 },
@@ -1141,6 +1203,12 @@ impl AboveCodecRule {
                     sentence: ALIAS_18,
                     code_name: Some("DUPLICATE_TRACK_ALIAS"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "3.1.2",
+                    sentence: ALIAS_18,
+                    code_name: Some("DUPLICATE_TRACK_ALIAS"),
+                },
             ],
             Self::MixedForwardingPreference => &[
                 RuleCitation {
@@ -1225,25 +1293,55 @@ impl AboveCodecRule {
                     sentence: UPDATE_WRONG_19,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.5",
+                    sentence: UPDATE_WRONG_19,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
-            Self::TooManyRequestUpdates => &[RuleCitation {
-                drafts: (19, 20),
-                section: "10.3.1.7",
-                sentence: TOO_MANY_UPDATES,
-                code_name: Some("TOO_MANY_REQUEST_UPDATES"),
-            }],
-            Self::TrackPropertiesOnNonTrackStatus => &[RuleCitation {
-                drafts: (18, 20),
-                section: "10.5",
-                sentence: TRACK_PROPERTIES,
-                code_name: Some("PROTOCOL_VIOLATION"),
-            }],
-            Self::StateNotifyOnTheWrongRequest => &[RuleCitation {
-                drafts: (20, 20),
-                section: "10.10",
-                sentence: STATE_NOTIFY,
-                code_name: Some("PROTOCOL_VIOLATION"),
-            }],
+            Self::TooManyRequestUpdates => &[
+                RuleCitation {
+                    drafts: (19, 20),
+                    section: "10.3.1.7",
+                    sentence: TOO_MANY_UPDATES,
+                    code_name: Some("TOO_MANY_REQUEST_UPDATES"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.1.7",
+                    sentence: TOO_MANY_UPDATES,
+                    code_name: Some("TOO_MANY_REQUEST_UPDATES"),
+                },
+            ],
+            Self::TrackPropertiesOnNonTrackStatus => &[
+                RuleCitation {
+                    drafts: (18, 20),
+                    section: "10.5",
+                    sentence: TRACK_PROPERTIES,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.3",
+                    sentence: TRACK_PROPERTIES,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::StateNotifyOnTheWrongRequest => &[
+                RuleCitation {
+                    drafts: (20, 20),
+                    section: "10.10",
+                    sentence: STATE_NOTIFY,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.10",
+                    sentence: STATE_NOTIFY,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
             Self::SubscribeAfterAnnounceCancel => &[RuleCitation {
                 drafts: (7, 7),
                 section: "6.11",
@@ -1323,7 +1421,7 @@ impl AboveCodecRule {
 /// naming ten drafts would be claiming it for all ten. The checker has a rule
 /// for exactly that and it would be right to fire.
 ///
-/// # Sixteen of seventeen
+/// # What is in this table
 ///
 /// These are the rules a consumer's catalogue names as a list and does not
 /// carry itself: a `rule_for` matching `CodecError` exhaustively has no
@@ -1331,20 +1429,30 @@ impl AboveCodecRule {
 /// rule the negotiated draft answers with a session close, and without a
 /// citation here there is nothing to publish it as.
 ///
-/// The seventeenth is `CodecError::InvalidTypeValue` and it is absent on
-/// purpose. Drafts 16 through 20 state it as **two** sentences in two sections
-/// — one about a datagram's Type and one about a subgroup stream header's — and
-/// a [`RuleCitation`] is one sentence per draft, because [`Self::citation`]
-/// takes the first run that covers a draft and
+/// # Why the two Type-value rules are two
+///
+/// [`CodecRule::InvalidStreamTypeValue`] and
+/// [`CodecRule::InvalidDatagramTypeValue`] are one condition as a reader thinks
+/// of it — a Type inside its form holding a combination the draft rules out —
+/// and two rules here, because drafts 16 through 21 state them as **two**
+/// sentences in two sections, one about a datagram's Type and one about a
+/// subgroup stream header's.
+///
+/// A [`RuleCitation`] is one sentence per draft: [`Self::citation`] takes the
+/// first run that covers a draft and
 /// `every_run_is_ordered_contiguous_and_in_range` forbids two runs claiming
-/// one. Worse, the error value cannot say which of the two it is: the variant
-/// carries a raw number and a phrase, and deciding from the number which
-/// namespace it came out of would be this build's reading rather than the
-/// decoder's. A citation would therefore be right on half the frames it
-/// published and wrong on the other half, with nothing in the row to say which.
-/// That is the reasoning `CodecError::InvalidField` already gets, arrived at
-/// from a different direction, and the fix has the same shape: two error
-/// variants, at which point each acquires a citation of its own.
+/// one. So a single rule spanning both sentences could publish only one of
+/// them, and would be right on half the frames it published and wrong on the
+/// other half with nothing in the row to say which.
+///
+/// Splitting the rule here is only half of it, and the half that does not work
+/// alone: the decoder has to hand over a value that says which sentence was
+/// broken. `CodecError::InvalidStreamTypeValue` and
+/// `CodecError::InvalidDatagramTypeValue` are that value. Deriving the
+/// namespace from the raw number instead would be this build's reading rather
+/// than the decoder's, because the two Type spaces overlap — which is the
+/// reasoning `CodecError::InvalidField` already gets, arrived at from a
+/// different direction.
 ///
 /// # Two drafts where a close exists and no citation does
 ///
@@ -1359,7 +1467,7 @@ impl AboveCodecRule {
 /// Neither arm is reachable there. `moqtap-codec`'s draft-20 message reader
 /// raises neither error and has nothing to raise it from, so the two closes are
 /// inert rather than wrong, and both are kept for the reason draft-20's own
-/// connection already gives: `CodecError` is shared across fourteen drafts and
+/// connection already gives: `CodecError` is shared across drafts and
 /// is not `#[non_exhaustive]`, so every variant has to be answered on every
 /// draft.
 ///
@@ -1431,7 +1539,7 @@ pub enum CodecRule {
     ///
     /// The sub-variant and not the arm. `CodecError::Kvp` also carries
     /// `MissingLength`, `UnexpectedEnd` and `VarInt`, which report how the bytes
-    /// ran out rather than a rule an endpoint states, and all fourteen drafts
+    /// ran out rather than a rule an endpoint states, and all the drafts
     /// answer all three with no close. Only `ValueTooLong` reaches this rule,
     /// which is why the probe that consumes it matches the sub-variant.
     KvpValueTooLong,
@@ -1572,7 +1680,8 @@ pub enum CodecRule {
     /// A delta-encoded Object ID that would exceed the varint space once the
     /// delta is added to the previous Object ID on the same stream.
     ///
-    /// Drafts 18 through 20, Section 11.4.2 throughout, one run.
+    /// Drafts 18 through 20 in Section 11.4.2 and draft-21 in Section 11.3.1,
+    /// two runs: the wording does not change and the section number does.
     ///
     /// Drafts 14 through 17 carry the identical arithmetic in Section 10.4.2
     /// and state no consequence for overflowing it — all four of them, not
@@ -1584,6 +1693,38 @@ pub enum CodecRule {
     /// sentence about the first Object in the Subgroup stream and makes a
     /// sentence none of the three drafts has.
     ObjectIdOverflow,
+    /// A subgroup stream header's Type holding a combination its draft names as
+    /// invalid.
+    ///
+    /// Drafts 16 through 21, four runs: the section moves twice and the wording
+    /// changes once, and the two moves do not coincide. Sections 10.4.2 on
+    /// drafts 16 and 17, 11.4.2 on 18, 19 and 20, and 11.3.1 on draft-21;
+    /// drafts 16 through 19 enumerate the code points after the sentence and
+    /// drafts 20 and 21 state the bit pattern alone.
+    ///
+    /// The sentence is quoted as far as the colon it ends on, because what
+    /// follows it is a bulleted list of values rather than more sentence. That
+    /// is the whole quotation and not an elision, so no ellipsis stands in for
+    /// the list.
+    ///
+    /// Paired with [`CodecRule::InvalidDatagramTypeValue`], which is the same
+    /// rule stated for the other Type space in a different section of the same
+    /// drafts. They are two rules here because they are two sentences there,
+    /// and because a consumer holding one refusal has to be able to publish the
+    /// sentence it actually broke.
+    InvalidStreamTypeValue,
+    /// A datagram's Type holding a combination its draft names as invalid.
+    ///
+    /// Drafts 16 through 21, four runs, cut where
+    /// [`CodecRule::InvalidStreamTypeValue`]'s are cut and at different
+    /// numbers: Sections 10.3.1 on drafts 16 and 17, 11.3.1 on 18, 19 and 20,
+    /// and 11.2.1 on draft-21.
+    ///
+    /// Draft-21 is why the two rules cannot share a run. It splits the section
+    /// that held both, so the datagram sentence lands at 11.2.1 and the stream
+    /// sentence at 11.3.1 — the one number that had been the datagram's on the
+    /// three drafts before it.
+    InvalidDatagramTypeValue,
     /// An end-of-Track Object stating an Object ID other than zero.
     ///
     /// **Drafts 08 through 10 alone**, and the one rule in this table whose
@@ -1755,6 +1896,28 @@ const OBJECT_ID_WRAP: &str = "The Object ID Delta + 1 is added to the previous O
                               Delta if it's the first Object in the Subgroup stream. If the \
                               resulting Object ID would be greater than 2^64 - 1, the endpoint \
                               MUST close the session with a PROTOCOL_VIOLATION.";
+// The two Type-value rules, four wordings between them. Each draft states both
+// as a sentence introducing a bulleted list of the values it rules out, and
+// what is quoted is the sentence: the list is bullets rather than prose, and a
+// quotation reaching into it would be a quotation of a list.
+//
+// The wording changes once, at draft-20, which stopped enumerating the code
+// points and states the bit pattern alone — so "these Type values" becomes
+// "these values" and the drafts part into two groups on each rule. A needle
+// carrying the word Type finds drafts 16 through 19 and silently misses 20 and
+// 21; the invariant clause is "receives a stream header with any of these".
+const INVALID_STREAM_TYPE_16: &str = "If an endpoint receives a stream header with any of these \
+                                      Type values, it MUST close the session with a \
+                                      PROTOCOL_VIOLATION:";
+const INVALID_STREAM_TYPE_20: &str = "If an endpoint receives a stream header with any of these \
+                                      values, it MUST close the session with a \
+                                      PROTOCOL_VIOLATION:";
+const INVALID_DATAGRAM_TYPE_16: &str = "If an endpoint receives a datagram with any of these Type \
+                                        values, it MUST close the session with a \
+                                        PROTOCOL_VIOLATION:";
+const INVALID_DATAGRAM_TYPE_20: &str = "If an endpoint receives a datagram with any of these \
+                                        values, it MUST close the session with a \
+                                        PROTOCOL_VIOLATION:";
 const END_OF_TRACK_OBJECT_ID: &str = "An object with this status that has a Group ID less than or \
                                       equal to any other Group ID, or an Object ID other than \
                                       zero, is a protocol error, and the receiver MUST terminate \
@@ -1823,6 +1986,12 @@ impl CodecRule {
                     sentence: TRACK_NAME_MAX_16,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "8.7",
+                    sentence: TRACK_NAME_MAX_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
             Self::ReasonPhraseTooLong => &[
                 RuleCitation {
@@ -1846,6 +2015,12 @@ impl CodecRule {
                 RuleCitation {
                     drafts: (17, 20),
                     section: "1.4.4",
+                    sentence: REASON_PHRASE_MAX_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "8.5",
                     sentence: REASON_PHRASE_MAX_15,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
@@ -1875,6 +2050,12 @@ impl CodecRule {
                     sentence: GOAWAY_URI_MAX_17,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.2",
+                    sentence: GOAWAY_URI_MAX_17,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
             Self::KvpValueTooLong => &[
                 RuleCitation {
@@ -1898,6 +2079,12 @@ impl CodecRule {
                 RuleCitation {
                     drafts: (17, 20),
                     section: "1.4.3",
+                    sentence: KVP_VALUE_MAX_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "8.3",
                     sentence: KVP_VALUE_MAX_16,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
@@ -1927,6 +2114,12 @@ impl CodecRule {
                     sentence: KVP_FORMATTING_16,
                     code_name: Some("KEY_VALUE_FORMATTING_ERROR"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "8.3",
+                    sentence: KVP_FORMATTING_16,
+                    code_name: Some("KEY_VALUE_FORMATTING_ERROR"),
+                },
             ],
             Self::UnknownMessageParameter => &[
                 RuleCitation {
@@ -1947,6 +2140,12 @@ impl CodecRule {
                     sentence: UNKNOWN_PARAMETER_17,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.20",
+                    sentence: UNKNOWN_PARAMETER_17,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
             Self::ParameterOutOfScope => &[
                 RuleCitation {
@@ -1958,6 +2157,12 @@ impl CodecRule {
                 RuleCitation {
                     drafts: (18, 20),
                     section: "10.2.1",
+                    sentence: PARAMETER_SCOPE,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.20.1",
                     sentence: PARAMETER_SCOPE,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
@@ -2041,6 +2246,12 @@ impl CodecRule {
                     sentence: KVP_FORMATTING_16,
                     code_name: Some("KEY_VALUE_FORMATTING_ERROR"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "8.3",
+                    sentence: KVP_FORMATTING_16,
+                    code_name: Some("KEY_VALUE_FORMATTING_ERROR"),
+                },
             ],
             Self::FilterEndGroupOverflow => &[
                 RuleCitation {
@@ -2055,13 +2266,79 @@ impl CodecRule {
                     sentence: END_GROUP_WRAP_20,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.20.10",
+                    sentence: END_GROUP_WRAP_20,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
             ],
-            Self::ObjectIdOverflow => &[RuleCitation {
-                drafts: (18, 20),
-                section: "11.4.2",
-                sentence: OBJECT_ID_WRAP,
-                code_name: Some("PROTOCOL_VIOLATION"),
-            }],
+            Self::ObjectIdOverflow => &[
+                RuleCitation {
+                    drafts: (18, 20),
+                    section: "11.4.2",
+                    sentence: OBJECT_ID_WRAP,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "11.3.1",
+                    sentence: OBJECT_ID_WRAP,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::InvalidStreamTypeValue => &[
+                RuleCitation {
+                    drafts: (16, 17),
+                    section: "10.4.2",
+                    sentence: INVALID_STREAM_TYPE_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (18, 19),
+                    section: "11.4.2",
+                    sentence: INVALID_STREAM_TYPE_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (20, 20),
+                    section: "11.4.2",
+                    sentence: INVALID_STREAM_TYPE_20,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "11.3.1",
+                    sentence: INVALID_STREAM_TYPE_20,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::InvalidDatagramTypeValue => &[
+                RuleCitation {
+                    drafts: (16, 17),
+                    section: "10.3.1",
+                    sentence: INVALID_DATAGRAM_TYPE_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (18, 19),
+                    section: "11.3.1",
+                    sentence: INVALID_DATAGRAM_TYPE_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (20, 20),
+                    section: "11.3.1",
+                    sentence: INVALID_DATAGRAM_TYPE_20,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "11.2.1",
+                    sentence: INVALID_DATAGRAM_TYPE_20,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
             Self::EndOfTrackObjectId => &[
                 RuleCitation {
                     drafts: (8, 9),
@@ -2179,6 +2456,8 @@ mod tests {
         CodecRule::SubscriptionFilterMalformed,
         CodecRule::FilterEndGroupOverflow,
         CodecRule::ObjectIdOverflow,
+        CodecRule::InvalidStreamTypeValue,
+        CodecRule::InvalidDatagramTypeValue,
         CodecRule::EndOfTrackObjectId,
         CodecRule::ExtensionsOnNonExistentObject,
         CodecRule::InvalidRequiredRequestIdDelta,
@@ -2211,16 +2490,9 @@ mod tests {
     }
 
     /// And the same for the decoder's half.
-    ///
-    /// Sixteen and not seventeen. The seventeenth is
-    /// `CodecError::InvalidTypeValue`, which drafts 16 through 20 state as two
-    /// sentences in two sections while the error value cannot say which of the
-    /// two a given frame broke — see [`CodecRule`]'s own doc. This count is
-    /// where that decision is pinned: a later pass that adds it without
-    /// splitting the error variant first has to come here and say so.
     #[test]
     fn every_codec_rule_is_swept() {
-        assert_eq!(ALL_CODEC.len(), 16, "a rule was added or removed without updating ALL_CODEC");
+        assert_eq!(ALL_CODEC.len(), 18, "a rule was added or removed without updating ALL_CODEC");
     }
 
     /// A cited rule is a rule this build can actually raise on that draft.
@@ -2230,8 +2502,8 @@ mod tests {
     /// **outside** the range the enum's own doc claims for it — the failure
     /// that would put a sentence in front of a reader with no path to it. The
     /// stronger claim, that a cited draft is one whose
-    /// `codec_session_error_code` answers `Some`, needs all fourteen
-    /// connections at once, and so belongs in a consumer that builds every
+    /// `codec_session_error_code` answers `Some`, needs every draft's
+    /// connection at once, and so belongs in a consumer that builds every
     /// draft rather than here.
     #[test]
     fn a_cited_draft_is_a_draft_that_closes() {
@@ -2240,14 +2512,17 @@ mod tests {
             assert!(!runs.is_empty(), "{rule:?} is named with nothing to cite");
             for cite in runs {
                 assert!(
-                    cite.drafts.0 >= 7 && cite.drafts.1 <= 20,
+                    moqtap_codec::version::DraftVersion::from_number(cite.drafts.0).is_some()
+                        && moqtap_codec::version::DraftVersion::from_number(cite.drafts.1)
+                            .is_some(),
                     "{rule:?} cites a draft outside the range this build implements"
                 );
             }
         }
     }
 
-    /// A rule's runs are ordered, do not overlap, and stay inside 07 to 20.
+    /// A rule's runs are ordered, do not overlap, and name only drafts this
+    /// build implements.
     ///
     /// Overlap is the failure that would be invisible otherwise: `citation`
     /// takes the first run that covers a draft, so two runs claiming draft-14
@@ -2264,7 +2539,11 @@ mod tests {
             for cite in citations {
                 let (lo, hi) = cite.drafts;
                 assert!(lo <= hi, "{rule:?}: run ({lo}, {hi}) runs backwards");
-                assert!((7..=20).contains(&lo) && (7..=20).contains(&hi), "{rule:?}: out of range");
+                assert!(
+                    moqtap_codec::version::DraftVersion::from_number(lo).is_some()
+                        && moqtap_codec::version::DraftVersion::from_number(hi).is_some(),
+                    "{rule:?}: out of range"
+                );
                 if let Some(prev) = last {
                     assert!(
                         prev < lo,
@@ -2299,7 +2578,7 @@ mod tests {
                 None => seen.push(cite.sentence),
             }
         }
-        assert_eq!(seen.len(), 86, "the sentence count moved; re-run the draft sweep");
+        assert_eq!(seen.len(), 91, "the sentence count moved; re-run the draft sweep");
     }
 
     /// The code name a row carries is a name its own sentence uses.
@@ -2361,10 +2640,72 @@ mod tests {
         assert!(rule.citation(19).is_some(), "draft-19 states it again, in new words");
     }
 
+    /// Rules the newest draft genuinely stopped stating.
+    ///
+    /// Empty is the normal state and the interesting one. A draft really can
+    /// drop a rule - `RequestUpdateForTheWrongRequest` above is the worked
+    /// case, deleted in drafts 17 and 18 along with the field it is about -
+    /// so the sweep below cannot simply demand every rule on every draft. An
+    /// entry here is the evidence for one of those, written down instead of
+    /// absorbed; `RequestUpdateForTheWrongRequest` is not in it because
+    /// draft-19 brought the rule back.
+    const DROPPED_BY_THE_NEWEST_DRAFT: &[&str] = &[];
+
+    /// The newest draft is not quietly the first one to stop citing a rule.
+    ///
+    /// `check-draft-parity.py` rule 2 asks this of every draft list in the
+    /// tree - a list naming draft N-1 and not draft N is the shape of one
+    /// nobody brought forward - and it cannot ask it here: `citations`
+    /// publishes runs as `(first, last)` tuples, and a tuple of integers is
+    /// not a draft list. `check-drafts.py` rule 8 cannot ask it either. Rule 8
+    /// holds every citation this table *makes* against that draft's rendered
+    /// text, which is a strong check on the rows that exist and silent about
+    /// the row that was never written. A rule left behind therefore publishes
+    /// a finding with no sentence under it, on a green build.
+    ///
+    /// A run cannot be widened to cover the new draft, which is why this keeps
+    /// happening: the drafts renumber, so a draft that keeps a sentence
+    /// verbatim still files it under a different section and needs its own
+    /// `RuleCitation`. Draft-21 moved every one of them.
+    #[test]
+    fn a_rule_the_previous_draft_states_is_cited_by_the_newest() {
+        let newest = (7u8..=255)
+            .take_while(|n| moqtap_codec::version::DraftVersion::from_number(*n).is_some())
+            .last()
+            .expect("this build implements at least one draft");
+        let previous = newest - 1;
+        assert!(
+            moqtap_codec::version::DraftVersion::from_number(previous).is_some(),
+            "the implemented drafts are contiguous, so the newest has a predecessor"
+        );
+
+        let mut left_behind = Vec::new();
+        for rule in ALL {
+            if rule.citation(previous).is_some() && rule.citation(newest).is_none() {
+                left_behind.push(format!("{rule:?}"));
+            }
+        }
+        for rule in ALL_CODEC {
+            if rule.citation(previous).is_some() && rule.citation(newest).is_none() {
+                left_behind.push(format!("{rule:?}"));
+            }
+        }
+        left_behind.retain(|name| !DROPPED_BY_THE_NEWEST_DRAFT.contains(&name.as_str()));
+
+        assert!(
+            left_behind.is_empty(),
+            "draft-{previous:02} states these rules and draft-{newest:02} cites none of \
+             them: {left_behind:?}. Either that draft dropped the rule, in which case name \
+             it in DROPPED_BY_THE_NEWEST_DRAFT beside the sentence that went away, or the \
+             run was not brought forward - add a RuleCitation at the section the new draft \
+             files the sentence under."
+        );
+    }
+
     /// A rule with no sentence anywhere answers `None` on every draft.
     #[test]
     fn an_uncited_rule_names_no_draft() {
-        for draft in 7..=20 {
+        for draft in 7..=21 {
             assert!(
                 AboveCodecRule::MessageOnTheWrongStream.citation(draft).is_none(),
                 "draft-{draft:02} acquired a citation for a rule no draft states"

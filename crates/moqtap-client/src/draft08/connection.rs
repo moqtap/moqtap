@@ -63,7 +63,7 @@ pub enum ConnectionError {
     /// hands back can only carry this draft's variant — but the narrowing arm
     /// is compiled in every configuration anyway, under
     /// `#[allow(unreachable_patterns)]` rather than a `cfg` naming the other
-    /// thirteen drafts, because such a list has to be edited in every draft
+    /// drafts, because such a list has to be edited in every draft
     /// module whenever a draft is added, and a copy that omits one leaves the
     /// match non-exhaustive.
     ///
@@ -812,7 +812,7 @@ impl Connection {
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 08 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
-            // naming the other thirteen drafts: such a list has to be edited in every draft
+            // naming the other drafts: such a list has to be edited in every draft
             // module whenever a draft is added, and a copy that omits one leaves this match
             // non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -1566,7 +1566,8 @@ impl Connection {
             | CodecError::ObjectIdOverflow(..)
             | CodecError::ExtensionsOnNonExistentObject(_)
             | CodecError::InvalidRequiredRequestIdDelta(..)
-            | CodecError::InvalidTypeValue { .. }
+            | CodecError::InvalidStreamTypeValue { .. }
+            | CodecError::InvalidDatagramTypeValue { .. }
             | CodecError::ReasonPhraseTooLong
             | CodecError::GoAwayUriTooLong
             | CodecError::KeyValueFormatting { .. }

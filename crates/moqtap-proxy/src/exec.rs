@@ -40,7 +40,7 @@
 //! Everything else is propagated from `classify`. The **table-only**
 //! refusal [`Refusal::StreamNotFramed`] is never emitted from here —
 //! `every_refusal_this_module_emits_is_classifys_or_one_of_its_own_three`
-//! below is the falsifiable form of that claim: it sweeps fourteen drafts ×
+//! below is the falsifiable form of that claim: it sweeps drafts ×
 //! five sites × thirteen action shapes and asserts that neither variant ever
 //! reaches an `ActionRefused`, and that all three executor-owned refusals do.
 //!
@@ -197,7 +197,7 @@ impl Target<'_> {
     /// Whether a payload-preserving splice has a locatable boundary.
     ///
     /// At the object site, always: the payload is the trailing field in
-    /// every layout on all fourteen drafts and both stream kinds.
+    /// every layout on all the drafts and both stream kinds.
     ///
     /// At the datagram site this is where the three exceptions live, and
     /// they live *here* rather than at the call site because getting one
@@ -881,7 +881,7 @@ pub(crate) fn execute_stream(
 /// unit anyway** — the queue overshoots its depth by one. A shaper may not
 /// corrupt a stream to honour a depth limit: eliding an object the framer
 /// cannot renumber around does not lose one object, it makes every
-/// successor decode with a wrong absolute ID on drafts 14-20.
+/// successor decode with a wrong absolute ID on drafts 14-21.
 ///
 /// The refusal is reported as an ordinary
 /// [`ProxyEvent::ActionRefused`] and bumps `Counters::actions_refused`,
@@ -1485,7 +1485,8 @@ const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
         | DraftVersion::Draft17
         | DraftVersion::Draft18
         | DraftVersion::Draft19
-        | DraftVersion::Draft20 => true,
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21 => true,
     }
 }
 
@@ -1534,7 +1535,8 @@ fn elide_renumbers_successor(unit: &Unit<'_>) -> bool {
             | DraftVersion::Draft17
             | DraftVersion::Draft18
             | DraftVersion::Draft19
-            | DraftVersion::Draft20 => true,
+            | DraftVersion::Draft20
+            | DraftVersion::Draft21 => true,
         },
         DataStreamType::Fetch => match unit.draft {
             DraftVersion::Draft07
@@ -1550,7 +1552,8 @@ fn elide_renumbers_successor(unit: &Unit<'_>) -> bool {
             | DraftVersion::Draft17
             | DraftVersion::Draft18
             | DraftVersion::Draft19
-            | DraftVersion::Draft20 => true,
+            | DraftVersion::Draft20
+            | DraftVersion::Draft21 => true,
         },
     }
 }
@@ -1840,27 +1843,12 @@ mod tests {
     /// unchanged, the other only that no refusal collected is the framer's
     /// `StreamNotFramed` — and the `Unreachable` an uncompiled draft earns
     /// satisfies both.
-    const ALL_DRAFTS: [DraftVersion; 14] = [
-        DraftVersion::Draft07,
-        DraftVersion::Draft08,
-        DraftVersion::Draft09,
-        DraftVersion::Draft10,
-        DraftVersion::Draft11,
-        DraftVersion::Draft12,
-        DraftVersion::Draft13,
-        DraftVersion::Draft14,
-        DraftVersion::Draft15,
-        DraftVersion::Draft16,
-        DraftVersion::Draft17,
-        DraftVersion::Draft18,
-        DraftVersion::Draft19,
-        DraftVersion::Draft20,
-    ];
+    const ALL_DRAFTS: [DraftVersion; DraftVersion::ALL.len()] = DraftVersion::ALL;
 
     /// The drafts this build actually compiled, in publication order.
     ///
     /// Each element carries its own `#[cfg]`, so the axis is the enabled set
-    /// and not a hardcoded fourteen — the shape `tests/action_matrix.rs` and
+    /// and not a hardcoded list — the shape `tests/action_matrix.rs` and
     /// the test module of `framer.rs` already use. It is the **only** honest
     /// axis for the object site: with no decoder for a draft the framer
     /// never addresses its data streams, the hook is never invoked on an
@@ -1881,7 +1869,7 @@ mod tests {
     /// why the only control cells still on that axis are the two whose
     /// assertions hold whichever refusal comes back.
     ///
-    /// Under the default (all-drafts) build this is all fourteen and every
+    /// Under the default (all-drafts) build this is every draft and every
     /// object test below runs on all of them. Under `--no-default-features`
     /// it is empty: that build has no object site at all, so the object
     /// sweeps run zero times rather than asserting the framer's verdict is
@@ -1916,6 +1904,8 @@ mod tests {
         DraftVersion::Draft19,
         #[cfg(feature = "draft20")]
         DraftVersion::Draft20,
+        #[cfg(feature = "draft21")]
+        DraftVersion::Draft21,
     ];
 
     // ── how many events one action produces ─────────────────────────
@@ -3067,7 +3057,7 @@ mod tests {
     /// framer itself, and that is a limitation worth stating: `note_elided`
     /// `debug_assert`s that the object it is handed is the one the framer
     /// most recently emitted, so a standalone probe cannot ask the framer
-    /// this question without driving fourteen drafts of real wire bytes
+    /// this question without driving drafts of real wire bytes
     /// through it. The compensating cover is
     /// `tests/actions_objects.rs`, which asserts the *bytes* of an elided
     /// run against an independent encoder — a wrong answer here shows up
@@ -3077,7 +3067,7 @@ mod tests {
     /// Swept over [`ALL_DRAFTS`] and not [`COMPILED_DRAFTS`] on purpose:
     /// `elide_renumbers_successor` reads the [`DraftVersion`] value and
     /// nothing else, so every row of the table is answerable in every
-    /// build, and restating all fourteen is the whole point of the test.
+    /// build, and restating every draft is the whole point of the test.
     #[test]
     fn elide_renumbering_names_the_drafts_that_owe_a_fixup() {
         for draft in ALL_DRAFTS {
@@ -3166,7 +3156,8 @@ mod tests {
                 | DraftVersion::Draft17
                 | DraftVersion::Draft18
                 | DraftVersion::Draft19
-                | DraftVersion::Draft20 => true,
+                | DraftVersion::Draft20
+                | DraftVersion::Draft21 => true,
             };
             let mut h = Harness::new();
             let m = meta(draft);
@@ -3247,6 +3238,7 @@ mod tests {
             DraftVersion::Draft18,
             DraftVersion::Draft19,
             DraftVersion::Draft20,
+            DraftVersion::Draft21,
         ]
         .into_iter()
         .filter(|d| COMPILED_DRAFTS.contains(d))

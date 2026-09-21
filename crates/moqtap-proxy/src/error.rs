@@ -240,7 +240,7 @@ pub enum ProxyError {
     /// The session is configured for a MoQT draft this build did not
     /// compile a codec for.
     ///
-    /// [`DraftVersion`] carries all fourteen variants under every feature
+    /// [`DraftVersion`] carries all variants under every feature
     /// set, so a draft that was never compiled is still a value a
     /// configuration can hold — and
     /// `ProxySessionConfig::default().draft` holds one of them. On a build

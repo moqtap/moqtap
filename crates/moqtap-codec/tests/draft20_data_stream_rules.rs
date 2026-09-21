@@ -347,7 +347,10 @@ fn assert_refusal(ty: u64, got: &CodecError, want: Refusal) {
         Refusal::Unknown => {
             matches!(got, CodecError::UnknownStreamType(_) | CodecError::UnknownDatagramType(_))
         }
-        Refusal::NamedInvalid => matches!(got, CodecError::InvalidTypeValue { .. }),
+        Refusal::NamedInvalid => matches!(
+            got,
+            CodecError::InvalidStreamTypeValue { .. } | CodecError::InvalidDatagramTypeValue { .. }
+        ),
         Refusal::NotThisReader => matches!(got, CodecError::InvalidField),
     };
     assert!(ok, "type {ty:#04x} was refused with {got:?}, which is not {want:?}");
@@ -513,7 +516,7 @@ fn the_checked_datagram_encoder_refuses_a_type_the_decoder_refuses() {
 /// ```text
 /// SETUP is a Type Table 3 assigns, so a subgroup reader must refuse it without
 /// naming the unknown-stream-type rule that would end the session, got
-/// InvalidTypeValue { raw: 0, detail: "bit 4 must be 1 for SUBGROUP_HEADER" }
+/// InvalidStreamTypeValue { raw: 0, detail: "bit 4 must be 1 for SUBGROUP_HEADER" }
 /// ```
 #[test]
 fn a_type_wider_than_one_byte_is_judged_by_its_value() {
@@ -573,7 +576,7 @@ fn a_type_wider_than_one_byte_is_judged_by_its_value() {
     match SubgroupHeader::decode(&mut &over_127[..]) {
         Ok(h) => panic!("Type Flags 144 is at or above 128, but decode accepted {h:?}"),
         Err(e) => assert!(
-            matches!(e, CodecError::InvalidTypeValue { raw: 0x90, .. }),
+            matches!(e, CodecError::InvalidStreamTypeValue { raw: 0x90, .. }),
             "Type Flags 144 is Section 11.4.2's third condition, got {e:?}"
         ),
     }
@@ -642,7 +645,7 @@ fn a_non_minimal_type_flags_value_is_accepted_on_receive() {
     assert!(
         matches!(
             SubgroupHeader::decode(&mut &wide_invalid[..]),
-            Err(CodecError::InvalidTypeValue { raw: 0x16, .. })
+            Err(CodecError::InvalidStreamTypeValue { raw: 0x16, .. })
         ),
         "a wide spelling of the reserved-mode Type 0x16 is still the reserved mode"
     );

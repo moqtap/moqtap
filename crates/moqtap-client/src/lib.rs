@@ -11,7 +11,7 @@
 //!
 //! # Feature flags
 //!
-//! Enable a draft with `--features draft14` (or any of `draft07`..`draft20`).
+//! Enable a draft with `--features draft14` (or any of `draft07`..`draft21`).
 //! The default is `all-drafts`, which enables every one; select individual
 //! drafts with `default-features = false`. `webtransport` adds the
 //! WebTransport transport.
@@ -28,7 +28,7 @@
 //!   drafts that make an end-of-track object's placement a protocol error
 //! - `malformed_tracks` — Which tracks this endpoint has withdrawn from, on
 //!   the drafts that answer a malformed one with control messages
-//! - `draft07`..`draft20` — One module per supported MoQT draft, each
+//! - `draft07`..`draft21` — One module per supported MoQT draft, each
 //!   enabled via the matching `draftNN` feature flag.
 
 #[cfg(feature = "draft07")]
@@ -72,6 +72,9 @@ pub mod draft19;
 
 #[cfg(feature = "draft20")]
 pub mod draft20;
+
+#[cfg(feature = "draft21")]
+pub mod draft21;
 
 pub mod transport;
 
@@ -119,7 +122,8 @@ pub mod forwarding_preference;
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 pub mod track_locations;
 
@@ -132,7 +136,7 @@ pub mod track_locations;
 /// error to the application." Drafts 14, 15 and 16 widen the same sentence to
 /// fetches — "it MUST UNSUBSCRIBE any subscription and FETCH_CANCEL any fetch
 /// for that Track from that publisher" — which is a second message and the
-/// same record. Drafts 17 through 20 replace both with a cancellation of the
+/// same record. Drafts 17 through 21 replace both with a cancellation of the
 /// request's own stream — a reset rather than a message — and the record is
 /// compiled there too, because what it holds is *which track was given up and
 /// what for*, which is the same question whichever shape the answer takes. It
@@ -147,7 +151,8 @@ pub mod track_locations;
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 pub mod malformed_tracks;
 

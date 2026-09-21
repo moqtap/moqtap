@@ -11,7 +11,7 @@
 //! are not part of this repository, which is why each file carries
 //! `source_sha256` instead. They are published Internet-Drafts and the tool
 //! will fetch them — `extract-registries.py --all --fetch --check` re-derives
-//! all fourteen from the IETF archive and fails if any row moved. What these tests do is make the extraction's own
+//! every draft from the IETF archive and fails if any row moved. What these tests do is make the extraction's own
 //! self-reporting binding: the tool records a warning whenever it passes over
 //! something it believes it should have taken, and counts the one overlap that
 //! would mean its two definitions had collided. Neither was read by anything

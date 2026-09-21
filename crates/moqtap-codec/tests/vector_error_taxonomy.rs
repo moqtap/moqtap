@@ -84,10 +84,10 @@ mod test_vectors;
 
 use test_vectors::{vector_files, vectors_dir};
 
-#[cfg(any(feature = "draft19", feature = "draft20"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
 use test_vectors::error_category;
 
-#[cfg(any(feature = "draft19", feature = "draft20"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
 fn hex(s: &str) -> Vec<u8> {
     hex::decode(s.replace(' ', "")).expect("test hex")
 }
@@ -96,7 +96,7 @@ fn hex(s: &str) -> Vec<u8> {
 ///
 /// Panics if the bytes decode, because a case that stopped failing is a case
 /// that stopped testing anything.
-#[cfg(any(feature = "draft19", feature = "draft20"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
 fn category_of(
     what: &str,
     decode: impl FnOnce() -> Result<(), moqtap_codec::error::CodecError>,
@@ -199,6 +199,42 @@ fn draft20_names_every_invalid_type_inside_the_byte_space() {
     });
     assert_eq!(category, "unknown_message", "draft-20 subgroup Type 0x0100");
 }
+/// Draft-20 moved the boundary between those two complaints, and this is where
+/// the move is visible.
+///
+/// Draft-19's figure enumerated the valid subgroup Types and left everything
+/// else to Section 6.4.1's unknown-stream-type rule, so 0x60 — bit 4 clear, which
+/// puts it outside the 0b0XX1XXXX pattern — was `unknown_message`. Draft-21
+/// states three conditions instead, and "values where bit 4 is not set" is one
+/// of them, so the draft now *names* 0x60 as invalid and the complaint is
+/// `invalid_type`. The set of accepted values did not change; only what a
+/// refusal is called did.
+///
+/// `unknown_message` is still reachable on draft-21, and only above the byte
+/// space: Section 11.3.1's conditions are about a one-byte flags field, so a
+/// stream type too wide to be one is Section 6.4.1's business again.
+#[cfg(feature = "draft21")]
+#[test]
+fn draft21_names_every_invalid_type_inside_the_byte_space() {
+    use moqtap_codec::draft21::data_stream::SubgroupHeader;
+
+    for (label, bytes) in
+        [("the reserved SUBGROUP_ID_MODE", "16"), ("bit 4 clear", "60"), ("128 or greater", "8090")]
+    {
+        let bytes = hex(bytes);
+        let category = category_of(&format!("draft-21 subgroup Type, {label}"), || {
+            SubgroupHeader::decode(&mut &bytes[..]).map(|_| ())
+        });
+        assert_eq!(category, "invalid_type", "draft-21 subgroup Type, {label}");
+    }
+
+    // Above the byte space, Section 6.4.1's rule is the one that answers.
+    let bytes = hex("810007090380");
+    let category = category_of("draft-21 subgroup Type 0x0100", || {
+        SubgroupHeader::decode(&mut &bytes[..]).map(|_| ())
+    });
+    assert_eq!(category, "unknown_message", "draft-21 subgroup Type 0x0100");
+}
 
 /// Draft-20's new LOCATION_FILTER value shape is the first thing in the corpus
 /// to claim `invalid_parameter` for a malformed filter.
@@ -229,6 +265,36 @@ fn a_malformed_location_filter_is_an_invalid_parameter() {
         ControlMessage::decode(&mut &bytes[..]).map(|_| ())
     });
     assert_eq!(category, "invalid_parameter", "draft-20 LOCATION_FILTER end group overflow");
+}
+/// Draft-20's new LOCATION_FILTER value shape is the first thing in the corpus
+/// to claim `invalid_parameter` for a malformed filter.
+///
+/// The two variants behind it — `SubscriptionFilterMalformed` and
+/// `FilterEndGroupOverflow` — existed before and fell through to
+/// `invalid_value`, because no vector on any draft reached either. Draft-21
+/// Section 3.3.1 rebuilt the value, and its negative vectors are the first to
+/// say what kind of complaint a malformed one is.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_malformed_location_filter_is_an_invalid_parameter_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+
+    // `messages/fetch.json [location-filter-five-fields]`: a LOCATION_FILTER
+    // value holding five vi64 fields, where Section 3.3.1 defines shapes for
+    // zero through four.
+    let bytes = hex("1600150201046c69766505766964656f0121050102030405");
+    let category = category_of("draft-21 LOCATION_FILTER with five fields", || {
+        ControlMessage::decode(&mut &bytes[..]).map(|_| ())
+    });
+    assert_eq!(category, "invalid_parameter", "draft-21 LOCATION_FILTER with five fields");
+
+    // `messages/fetch.json [location-filter-end-group-overflow]`: StartGroup
+    // 2^64 - 1 with an EndGroupDelta of 1.
+    let bytes = hex("16001b0201046c69766505766964656f01210bffffffffffffffffff0001");
+    let category = category_of("draft-21 LOCATION_FILTER end group overflow", || {
+        ControlMessage::decode(&mut &bytes[..]).map(|_| ())
+    });
+    assert_eq!(category, "invalid_parameter", "draft-21 LOCATION_FILTER end group overflow");
 }
 
 /// An object carrying a payload where its framing leaves no room for one.

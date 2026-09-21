@@ -1,6 +1,6 @@
 //! A session refuses to start on a draft this build did not compile.
 //!
-//! `DraftVersion` carries all fourteen variants under every feature set, so
+//! `DraftVersion` carries all variants under every feature set, so
 //! the draft in a `ProxySessionConfig` is a value the type system is happy
 //! with whatever the build compiled — and
 //! `ProxySessionConfig::default().draft` is one particular such value. On a
@@ -128,25 +128,10 @@ async fn session_outcome(draft: DraftVersion) -> ProxyError {
 
 /// Every draft in the enum, whether or not this build compiled it.
 ///
-/// Written out rather than derived from the feature set, because the drafts
-/// this build *left out* are exactly what the row below is about and a list
-/// assembled from `#[cfg]`s would not contain them.
-const EVERY_DRAFT: [DraftVersion; 14] = [
-    DraftVersion::Draft07,
-    DraftVersion::Draft08,
-    DraftVersion::Draft09,
-    DraftVersion::Draft10,
-    DraftVersion::Draft11,
-    DraftVersion::Draft12,
-    DraftVersion::Draft13,
-    DraftVersion::Draft14,
-    DraftVersion::Draft15,
-    DraftVersion::Draft16,
-    DraftVersion::Draft17,
-    DraftVersion::Draft18,
-    DraftVersion::Draft19,
-    DraftVersion::Draft20,
-];
+/// [`DraftVersion::ALL`] and not a list assembled from `#[cfg]`s: the drafts
+/// this build *left out* are exactly what the row below is about, and a
+/// feature-derived list would not contain them.
+const EVERY_DRAFT: [DraftVersion; DraftVersion::ALL.len()] = DraftVersion::ALL;
 
 /// A session configured for a draft this build cannot frame refuses to
 /// start; one configured for a draft it can gets past the check.
@@ -164,7 +149,7 @@ const EVERY_DRAFT: [DraftVersion; 14] = [
 /// Delete the `draft_is_compiled` guard from `run_with_transport` in
 /// `src/session.rs`. Under `cargo test -p moqtap-proxy
 /// --no-default-features --features draft07 --test draft_admission`, thirteen
-/// of the fourteen drafts stop being refused and the row reddens with
+/// of the drafts stop being refused and the row reddens with
 ///
 /// ```text
 /// thread 'a_session_is_admitted_exactly_when_this_build_carries_its_draft'
@@ -180,7 +165,7 @@ const EVERY_DRAFT: [DraftVersion; 14] = [
 ///
 /// Widen the guard to refuse every draft — `if true` in place of the
 /// `!draft_is_compiled(draft)` test. Under `cargo test -p moqtap-proxy
-/// --all-features --test draft_admission` every one of the fourteen is
+/// --all-features --test draft_admission` every one of the drafts is
 /// compiled, so the other half reddens instead:
 ///
 /// ```text

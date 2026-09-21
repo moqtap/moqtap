@@ -10,7 +10,7 @@
 //! The corpus says so with a `profiles` field, and this crate answers
 //! [`test_vectors::PROFILE`] — `endpoint`, because these runners decode a frame
 //! in order to hold it to its draft. [`test_vectors::load_vectors`] drops what
-//! does not bind that profile, in one place rather than in each of the fourteen
+//! does not bind that profile, in one place rather than in each of the
 //! runners, and this file is the other half: it reads the same files without
 //! the filter and asserts what the filter can be leaving out.
 //!

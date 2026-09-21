@@ -591,7 +591,7 @@ macro_rules! publisher_alias_gates {
             /// The alias this endpoint offers a caller is the lowest one no
             /// live binding holds.
             ///
-            /// `AnyConnection::subscribe` spans all fourteen drafts with one
+            /// `AnyConnection::subscribe` spans all the drafts with one
             /// signature and no alias argument, because on these five it takes
             /// the value from here. That only works if the offer is one the
             /// endpoint would itself accept — the two gates above refuse a

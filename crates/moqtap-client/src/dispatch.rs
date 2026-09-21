@@ -171,6 +171,42 @@ macro_rules! dispatch_all {
                     _ => unreachable!("AnyClientEvent has no enabled variants"),
                 }
             }
+
+            /// This event as a [`ControlFrame`], or `None` if it is not a
+            /// control message.
+            ///
+            /// The wildcard arm is over the *other* event variants — a stream
+            /// opening, an object arriving — and not over drafts, so it stays
+            /// reachable in every build and says nothing about which drafts are
+            /// enabled.
+            ///
+            /// `stream_id` is deliberately not carried. Drafts 07 through 15
+            /// have no such field on this event, request streams arriving with
+            /// draft-16, so one arm cannot read it from every draft — and a
+            /// second accessor split across two draft lists is a cost to pay
+            /// when something needs the correlation, not before.
+            pub fn control_frame(&self) -> Option<ControlFrame<'_>> {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(crate::$module::event::ClientEvent::ControlMessage {
+                            direction,
+                            message,
+                            raw,
+                            ..
+                        }) => Some(ControlFrame {
+                            draft: DraftVersion::$variant,
+                            outbound: matches!(
+                                direction,
+                                crate::$module::event::Direction::Send
+                            ),
+                            message,
+                            raw: raw.as_deref(),
+                        }),
+                    )+
+                    _ => None,
+                }
+            }
         }
 
         // The classification, written once and instantiated per draft.
@@ -323,6 +359,8 @@ dispatch_all! {
     Draft19 => draft19,
     #[cfg(feature = "draft20")]
     Draft20 => draft20,
+    #[cfg(feature = "draft21")]
+    Draft21 => draft21,
 }
 
 /// Draft-agnostic transport choice for [`AnyConnection::connect`].
@@ -364,8 +402,8 @@ pub struct AnyClientConfig {
 ///
 /// # What flattening cost, and what it bought
 ///
-/// Fourteen drafts each state their own `ConnectionError`, and this facade
-/// exists so that a caller never has to branch on which. Rendering all fourteen
+/// The drafts each state their own `ConnectionError`, and this facade
+/// exists so that a caller never has to branch on which. Rendering every draft
 /// through `Display` bought exactly that — at the price of the *variant*, which
 /// is the half a caller most often needs. Three questions could not be asked of
 /// a sentence:
@@ -385,7 +423,7 @@ pub struct AnyClientConfig {
 /// # The ten every draft shares, and the ones only some do
 ///
 /// The first ten variants of `ConnectionError` are identical across all
-/// fourteen drafts — `Endpoint`, `Codec`, `Transport`, `VarInt`,
+/// drafts — `Endpoint`, `Codec`, `Transport`, `VarInt`,
 /// `NoControlStream`, `UnexpectedEnd`, `StreamFinished`, `InvalidAddress`,
 /// `TlsConfig`, `DataStreamState` — and those are classified here, once, rather
 /// than fourteen times.
@@ -716,8 +754,12 @@ impl FetchRange {
     /// two absolute fields and would put such a range on the wire, where the
     /// publisher answers it with `INVALID_RANGE`; the difference is where the
     /// refusal happens, not whether the fetch is legal.
+    /// The name carries the draft because the type does: `LOCATION_FILTER`
+    /// is draft-20's and later's, and each draft's `fill` module declares its
+    /// own `LocationFilter`. An unsuffixed name would be two inherent methods
+    /// of one name the moment a second draft defines the parameter.
     #[cfg(feature = "draft20")]
-    pub fn location_filter(
+    pub fn location_filter_draft20(
         &self,
     ) -> Result<crate::draft20::fill::LocationFilter, AnyConnectionError> {
         use crate::draft20::fill::LocationFilter;
@@ -726,6 +768,50 @@ impl FetchRange {
             AnyConnectionError::facade(format!(
                 "fetch: a range from Group {} to Group {} runs backwards, and draft-20 \
                  Section 5.1.2 encodes the end Group as an unsigned delta from the start",
+                self.start_group, self.end_group
+            ))
+        })?;
+        let filter = match self.end {
+            FetchEnd::EntireGroup => {
+                LocationFilter::range(self.start_group, self.start_object, delta)
+            }
+            FetchEnd::Object(last) => {
+                LocationFilter::range_to(self.start_group, self.start_object, delta, last)
+            }
+        };
+        filter.map_err(|e| AnyConnectionError::facade(e.to_string()))
+    }
+    /// The draft-21 `LOCATION_FILTER` that carries this range.
+    ///
+    /// Draft-21 Section 9.11 deleted `Start Location` and `End Location` from
+    /// FETCH and moved the range into the parameter, whose ranges Section 3.3.1
+    /// calls inclusive. So [`FetchEnd::Object`] is written **as it stands** —
+    /// nothing here adds one — and [`FetchEnd::EntireGroup`] becomes the
+    /// three-field filter, which Section 9.20.10 defines as covering all Objects
+    /// in the end Group. The end Group travels as `EndGroupDelta`, "delta
+    /// encoded from StartGroup", so it is `end_group - start_group`.
+    ///
+    /// # Errors
+    ///
+    /// [`AnyConnectionError`] when `end_group` is below `start_group`: the
+    /// delta is unsigned and there is no such filter. Drafts 14 through 19 have
+    /// two absolute fields and would put such a range on the wire, where the
+    /// publisher answers it with `INVALID_RANGE`; the difference is where the
+    /// refusal happens, not whether the fetch is legal.
+    /// The name carries the draft because the type does: `LOCATION_FILTER`
+    /// is draft-21's and later's, and each draft's `fill` module declares its
+    /// own `LocationFilter`. An unsuffixed name would be two inherent methods
+    /// of one name the moment a second draft defines the parameter.
+    #[cfg(feature = "draft21")]
+    pub fn location_filter_draft21(
+        &self,
+    ) -> Result<crate::draft21::fill::LocationFilter, AnyConnectionError> {
+        use crate::draft21::fill::LocationFilter;
+
+        let delta = self.end_group.checked_sub(self.start_group).ok_or_else(|| {
+            AnyConnectionError::facade(format!(
+                "fetch: a range from Group {} to Group {} runs backwards, and draft-21 \
+                 Section 9.20.10 encodes the end Group as an unsigned delta from the start",
                 self.start_group, self.end_group
             ))
         })?;
@@ -793,7 +879,7 @@ pub enum JoiningStart {
 /// ways.
 ///
 /// A SUBSCRIBE that names a start location may also name an end, and the
-/// fourteen drafts spell that end three different ways. Draft-07 Section 6.4
+/// drafts spell that end three different ways. Draft-07 Section 6.4
 /// gives the AbsoluteRange filter an End Group **and** an End Object, with
 /// FETCH's own conventions — "the end Object ID, plus 1. A value of 0 means the
 /// entire group is requested." Draft-08 deleted the End Object and redefined
@@ -810,7 +896,7 @@ pub enum JoiningStart {
 ///
 /// So [`SubscribeEnd::EndOfGroup`] is the end every draft with a range can
 /// express, and [`SubscribeEnd::ThroughObject`] is the one only draft-07 and
-/// draft-20 can. The twelve drafts between them **refuse** it rather than
+/// drafts 20 and 21 can. The twelve drafts between them **refuse** it rather than
 /// rounding it up to the whole group, because a subscription that quietly
 /// covers more than it asked for is one whose extra objects look like a relay
 /// ignoring the range.
@@ -819,7 +905,7 @@ pub enum SubscribeEnd {
     /// No end at all — the AbsoluteStart filter. Every draft has it.
     ///
     /// On draft-20 alone this is not expressible from the start location
-    /// `{0, 0}`; see [`SubscribeRange::location_filter`] for the collision and
+    /// `{0, 0}`; see [`SubscribeRange::location_filter_draft20`] for the collision and
     /// for the two ways round it.
     Open,
     /// Through the whole of this Group, however many Objects it turns out to
@@ -843,7 +929,7 @@ pub enum SubscribeEnd {
 
 /// The range one [`AnyConnection::subscribe_range`] asks for.
 ///
-/// The start is a plain Location on all fourteen drafts and needs no type; the
+/// The start is a plain Location on all the drafts and needs no type; the
 /// end is [`SubscribeEnd`], which is the whole point. What the drafts do to the
 /// **end Group** is handled here rather than by the caller: drafts 08 through 16
 /// write it out in full, drafts 17 through 20 write it as a delta from the start
@@ -904,7 +990,7 @@ impl SubscribeRange {
     /// The whole of one Group, from its first Object.
     ///
     /// The shape a caller asking "what has this track carried in group N"
-    /// wants, and the one that is expressible on all fourteen drafts.
+    /// wants, and the one that is expressible on all the drafts.
     pub fn whole_group(group: u64) -> Self {
         Self::through_end_of_group(group, 0, group)
     }
@@ -1087,8 +1173,12 @@ impl SubscribeRange {
     ///
     /// The `{0, 0}` collision above, and an `end_group` below `start_group`, for
     /// which see [`Self::end_group_delta`].
+    /// The name carries the draft because the type does: `LOCATION_FILTER`
+    /// is draft-20's and later's, and each draft's `fill` module declares its
+    /// own `LocationFilter`. An unsuffixed name would be two inherent methods
+    /// of one name the moment a second draft defines the parameter.
     #[cfg(feature = "draft20")]
-    pub fn location_filter(
+    pub fn location_filter_draft20(
         &self,
     ) -> Result<crate::draft20::fill::LocationFilter, AnyConnectionError> {
         use crate::draft20::fill::LocationFilter;
@@ -1101,6 +1191,73 @@ impl SubscribeRange {
                      AbsoluteStart at {0, 0} as the beginning of the track. For the beginning, \
                      give the range an end: SubscribeRange::through_end_of_group. For the live \
                      edge, LocationFilter::next_object through the Draft20 variant",
+                ));
+            }
+            SubscribeEnd::Open => {
+                Ok(LocationFilter::absolute_start(self.start_group, self.start_object))
+            }
+            SubscribeEnd::EndOfGroup(_) => LocationFilter::range(
+                self.start_group,
+                self.start_object,
+                self.end_group_delta()?.unwrap_or_default(),
+            ),
+            SubscribeEnd::ThroughObject { end_object, .. } => LocationFilter::range_to(
+                self.start_group,
+                self.start_object,
+                self.end_group_delta()?.unwrap_or_default(),
+                end_object,
+            ),
+        };
+        filter.map_err(|e| AnyConnectionError::facade(e.to_string()))
+    }
+    /// This range as the draft-21 `LOCATION_FILTER` that carries it.
+    ///
+    /// Two fields for an open-ended range, three for one through the end of a
+    /// Group, four for one ending at an Object — Section 9.20.10 selects the shape
+    /// by how many fields the value holds, so each of the three is a different
+    /// constructor rather than the same one with values left out.
+    ///
+    /// # `{0, 0}` means the opposite here, and is refused
+    ///
+    /// On drafts 07 through 19 an AbsoluteStart at `{0, 0}` is the beginning of
+    /// the track. Draft-21 Section 9.20.10 gives the two-field filter `{0, 0}` to
+    /// **Next Object** — `{Largest Object.Group, Largest Object.Object + 1}`,
+    /// or `{0,0}` where nothing has been delivered — which is the live edge and
+    /// not the beginning. The identical call would therefore ask thirteen drafts
+    /// for everything and draft-21 for nothing that has already happened, and
+    /// nothing on the wire says which was meant.
+    ///
+    /// So it is refused, and the error names both ways round it: a range
+    /// (`through_end_of_group`, which is three fields and unambiguous) for the
+    /// beginning of the track, and
+    /// [`LocationFilter::next_object`](crate::draft21::fill::LocationFilter::next_object)
+    /// through the draft-21 variant for the live edge. This is the only value on
+    /// the only draft where the two readings collide: a `{0, 0}` start with an
+    /// end beside it is three or four fields and means what it says, and any
+    /// other start location is unambiguous with or without one.
+    ///
+    /// # Errors
+    ///
+    /// The `{0, 0}` collision above, and an `end_group` below `start_group`, for
+    /// which see [`Self::end_group_delta`].
+    /// The name carries the draft because the type does: `LOCATION_FILTER`
+    /// is draft-21's and later's, and each draft's `fill` module declares its
+    /// own `LocationFilter`. An unsuffixed name would be two inherent methods
+    /// of one name the moment a second draft defines the parameter.
+    #[cfg(feature = "draft21")]
+    pub fn location_filter_draft21(
+        &self,
+    ) -> Result<crate::draft21::fill::LocationFilter, AnyConnectionError> {
+        use crate::draft21::fill::LocationFilter;
+
+        let filter = match self.end {
+            SubscribeEnd::Open if self.start_group == 0 && self.start_object == 0 => {
+                return Err(AnyConnectionError::facade(
+                    "subscribe_range: draft-21 Section 9.20.10 reads a two-field LOCATION_FILTER of \
+                     {0, 0} as Next Object — the live edge — where drafts 07 through 19 read an \
+                     AbsoluteStart at {0, 0} as the beginning of the track. For the beginning, \
+                     give the range an end: SubscribeRange::through_end_of_group. For the live \
+                     edge, LocationFilter::next_object through the Draft21 variant",
                 ));
             }
             SubscribeEnd::Open => {
@@ -1173,6 +1330,9 @@ pub enum AnyRequest {
     /// Draft-20: the request owns a bidirectional stream.
     #[cfg(feature = "draft20")]
     Draft20(crate::draft20::connection::RequestStream),
+    /// Draft-21: the request owns a bidirectional stream.
+    #[cfg(feature = "draft21")]
+    Draft21(crate::draft21::connection::RequestStream),
 }
 
 impl AnyRequest {
@@ -1190,6 +1350,8 @@ impl AnyRequest {
             Self::Draft19(r) => r.request_id(),
             #[cfg(feature = "draft20")]
             Self::Draft20(r) => r.request_id(),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(r) => r.request_id(),
         }
     }
 
@@ -1207,6 +1369,8 @@ impl AnyRequest {
             Self::Draft19(r) => r.draft(),
             #[cfg(feature = "draft20")]
             Self::Draft20(r) => r.draft(),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(r) => r.draft(),
         }
     }
 
@@ -1237,6 +1401,8 @@ impl AnyRequest {
             Self::Draft19(r) => Some(r.stream_id()),
             #[cfg(feature = "draft20")]
             Self::Draft20(r) => Some(r.stream_id()),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(r) => Some(r.stream_id()),
         }
     }
 
@@ -1266,6 +1432,8 @@ impl AnyRequest {
             Self::Draft19(r) => r.cancel(code).map_err(AnyConnectionError::from),
             #[cfg(feature = "draft20")]
             Self::Draft20(r) => r.cancel(code).map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(r) => r.cancel(code).map_err(AnyConnectionError::from),
         }
     }
 }
@@ -1309,6 +1477,9 @@ pub enum AnyInboundRequest {
     /// Draft-20: the request arrived on a bidirectional stream of its own.
     #[cfg(feature = "draft20")]
     Draft20(crate::draft20::connection::RequestStream),
+    /// Draft-21: the request arrived on a bidirectional stream of its own.
+    #[cfg(feature = "draft21")]
+    Draft21(crate::draft21::connection::RequestStream),
 }
 
 impl AnyInboundRequest {
@@ -1324,6 +1495,8 @@ impl AnyInboundRequest {
             Self::Draft19(r) => r.request_id(),
             #[cfg(feature = "draft20")]
             Self::Draft20(r) => r.request_id(),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(r) => r.request_id(),
         }
     }
 
@@ -1339,6 +1512,8 @@ impl AnyInboundRequest {
             Self::Draft19(r) => r.draft(),
             #[cfg(feature = "draft20")]
             Self::Draft20(r) => r.draft(),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(r) => r.draft(),
         }
     }
 
@@ -1358,6 +1533,8 @@ impl AnyInboundRequest {
             Self::Draft19(r) => Some(r.stream_id()),
             #[cfg(feature = "draft20")]
             Self::Draft20(r) => Some(r.stream_id()),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(r) => Some(r.stream_id()),
         }
     }
 }
@@ -1406,7 +1583,7 @@ pub enum AnyArrival {
 
 /// One object on a subgroup stream, in the terms every draft shares.
 ///
-/// The fourteen drafts give a subgroup object five different struct shapes, and
+/// The drafts give a subgroup object five different struct shapes, and
 /// what varies between them is bookkeeping rather than content: whether the
 /// extension block is counted or measured, whether the status is a field that
 /// is always present or an `Option`, whether the declared length is stored
@@ -1419,7 +1596,7 @@ pub enum AnyArrival {
 /// of zero on a stream that carries one, which is why
 /// [`moqtap_codec::dispatch::AnySubgroupHeader::carries_extension_block`] is
 /// asked of the header. [`AnyConnection::open_subgroup`] opens streams that
-/// carry none wherever a draft has a way to say so — eleven of the fourteen;
+/// carry none wherever a draft has a way to say so — eleven of the drafts;
 /// [`AnyConnection::accept_subgroup`] reads whichever kind the peer opened, and
 /// hands the header over so a caller can ask.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1435,7 +1612,7 @@ pub struct AnyObject {
     /// The Object Status wire code, or `None` when the object carried a payload
     /// instead.
     ///
-    /// `None` means the same thing on all fourteen drafts, which is why this is
+    /// `None` means the same thing on all the drafts, which is why this is
     /// an `Option` even though half of them model the status as a field that is
     /// always there. Every draft writes the status **only** when the declared
     /// payload length is zero, because the status and the payload occupy the
@@ -1505,6 +1682,9 @@ pub enum AnySubgroupWriter {
     /// Draft-20's subgroup stream.
     #[cfg(feature = "draft20")]
     Draft20(crate::draft20::connection::FramedSendStream),
+    /// Draft-21's subgroup stream.
+    #[cfg(feature = "draft21")]
+    Draft21(crate::draft21::connection::FramedSendStream),
 }
 
 /// Expands one body per group of drafts that share a shape, over
@@ -1512,9 +1692,9 @@ pub enum AnySubgroupWriter {
 ///
 /// Every arm is `#[cfg]`-gated on its own draft feature and a catch-all closes
 /// the match, so a single-draft build compiles with thirteen arms removed and a
-/// no-draft build compiles with all fourteen removed. The same shape
+/// no-draft build compiles with all of them removed. The same shape
 /// `moqtap_codec`'s `subgroup_header_accessor!` generates, and for the same
-/// reason: the alternative is fourteen hand-written arms per method, of which
+/// reason: the alternative is a hand-written arm per draft per method, of which
 /// at most five differ.
 ///
 /// Named for data streams rather than for subgroups because a fetch stream is
@@ -1552,7 +1732,7 @@ impl AnySubgroupWriter {
                 Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
                 Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
                 Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-                Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |_s, draft| draft,
         }
     }
@@ -1579,7 +1759,7 @@ impl AnySubgroupWriter {
                 Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
                 Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
                 Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-                Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |s, _draft| s.stream_id(),
         }
     }
@@ -1622,7 +1802,7 @@ impl AnySubgroupWriter {
             .map_err(|e| AnyConnectionError::facade(format!("object id {object_id}: {e}")))?;
         let length = VarInt::from_usize(payload.len());
         let empty = payload.is_empty();
-        // Five shapes across the fourteen drafts, and each one is written once
+        // Five shapes across the drafts, and each one is written once
         // as a macro taking the draft's module. A macro rather than a shared
         // arm because the stream in hand is a different concrete type in every
         // variant: `FramedSendStream` names fourteen structs, not one, so a
@@ -1739,6 +1919,8 @@ impl AnySubgroupWriter {
             Self::Draft19(s) => declared!(s, draft19),
             #[cfg(feature = "draft20")]
             Self::Draft20(s) => declared!(s, draft20),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(s) => declared!(s, draft21),
             #[allow(unreachable_patterns)]
             _ => Err(AnyConnectionError::facade("no draft feature is enabled")),
         }
@@ -1758,7 +1940,7 @@ impl AnySubgroupWriter {
                 Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
                 Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
                 Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-                Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |s, _draft| {
                 s.finish().await.map_err(AnyConnectionError::from)
             },
@@ -1815,6 +1997,9 @@ pub enum AnySubgroupReader {
     /// Draft-20's subgroup stream.
     #[cfg(feature = "draft20")]
     Draft20(crate::draft20::connection::FramedRecvStream),
+    /// Draft-21's subgroup stream.
+    #[cfg(feature = "draft21")]
+    Draft21(crate::draft21::connection::FramedRecvStream),
 }
 
 impl AnySubgroupReader {
@@ -1827,7 +2012,7 @@ impl AnySubgroupReader {
                 Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
                 Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
                 Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-                Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |_s, draft| draft,
         }
     }
@@ -1842,7 +2027,7 @@ impl AnySubgroupReader {
                 Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
                 Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
                 Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-                Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |s, _draft| s.stream_id(),
         }
     }
@@ -1851,7 +2036,7 @@ impl AnySubgroupReader {
     ///
     /// # The stream's end arrives as an error, not as `None`
     ///
-    /// A subgroup ends when its stream ends, and none of the fourteen per-draft
+    /// A subgroup ends when its stream ends, and none of the per-draft
     /// readers can tell that end from a truncation: both leave the reader
     /// wanting bytes that never come, and both surface as
     /// `ConnectionError::UnexpectedEnd`. Returning `Option` here would have to
@@ -1898,7 +2083,7 @@ impl AnySubgroupReader {
             },
             [
                 Draft15 @ "draft15", Draft16 @ "draft16", Draft17 @ "draft17",
-                Draft18 @ "draft18", Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft18 @ "draft18", Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |s, _draft| {
                 let object = s.read_subgroup_object().await
                     .map_err(AnyConnectionError::from)?;
@@ -1970,7 +2155,7 @@ pub struct AnyFetchObject {
 /// Draft-16's fetch stream, carried with the resolver its objects need.
 ///
 /// The one variant of [`AnyFetchReader`] that is not a bare stream, and the
-/// reason is a gap one draft wide. Thirteen of the fourteen per-draft
+/// reason is a gap one draft wide. All but one of the per-draft
 /// `FramedRecvStream`s resolve a fetch object's elided fields themselves —
 /// drafts 07 through 14 have nothing to resolve, and 15, 17, 18, 19 and 20 each
 /// hold a `FetchObjectReader` on the stream. Draft-16's does not, though
@@ -2018,7 +2203,7 @@ impl Draft16FetchStream {
 /// holding the wrong message has a different problem than this can name.
 ///
 /// Written against [`moqtap_codec::dispatch::AnyControlMessage::fields`] rather
-/// than as fourteen arms, so a draft that moves the field again is one entry
+/// than as an arm per draft, so a draft that moves the field again is one entry
 /// here rather than a match that still compiles.
 pub fn fetch_group_order(
     message: &moqtap_codec::dispatch::AnyControlMessage,
@@ -2111,6 +2296,9 @@ pub enum AnyFetchReader {
     /// Draft-20's fetch stream.
     #[cfg(feature = "draft20")]
     Draft20(crate::draft20::connection::FramedRecvStream),
+    /// Draft-21's fetch stream.
+    #[cfg(feature = "draft21")]
+    Draft21(crate::draft21::connection::FramedRecvStream),
 }
 
 impl AnyFetchReader {
@@ -2123,7 +2311,7 @@ impl AnyFetchReader {
                 Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
                 Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
                 Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-                Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |_s, draft| draft,
         }
     }
@@ -2138,7 +2326,7 @@ impl AnyFetchReader {
                 Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
                 Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
                 Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-                Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |s, _draft| s.stream_id(),
         }
     }
@@ -2238,7 +2426,7 @@ impl AnyFetchReader {
             // draft-20 names three, so a shared body naming them would not
             // compile on all four.
             [
-                Draft17 @ "draft17", Draft19 @ "draft19", Draft20 @ "draft20",
+                Draft17 @ "draft17", Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
             ] => |s, _draft| {
                 let (object, payload) = s.read_fetch_object().await
                     .map_err(AnyConnectionError::from)?;
@@ -2293,7 +2481,8 @@ impl AnyConnection {
             feature = "draft17",
             feature = "draft18",
             feature = "draft19",
-            feature = "draft20"
+            feature = "draft20",
+            feature = "draft21"
         )))]
         let _ = addr;
         match config.draft {
@@ -2536,6 +2725,23 @@ impl AnyConnection {
                 let c = Connection::connect(addr, inner).await.map_err(AnyConnectionError::from)?;
                 Ok(AnyConnection::Draft20(c))
             }
+            #[cfg(feature = "draft21")]
+            DraftVersion::Draft21 => {
+                use crate::draft21::connection::{ClientConfig, Connection, TransportType};
+                let transport = match config.transport {
+                    AnyTransportType::Quic => TransportType::Quic,
+                    AnyTransportType::WebTransport { url } => TransportType::WebTransport { url },
+                };
+                let inner = ClientConfig {
+                    draft: config.draft,
+                    transport,
+                    skip_cert_verification: config.skip_cert_verification,
+                    ca_certs: config.ca_certs,
+                    setup_parameters: config.setup_parameters,
+                };
+                let c = Connection::connect(addr, inner).await.map_err(AnyConnectionError::from)?;
+                Ok(AnyConnection::Draft21(c))
+            }
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
                 "draft {other:?} not enabled in this build",
@@ -2550,7 +2756,7 @@ impl AnyConnection {
     /// how a peer behaves: choosing the address, the SNI, the ALPN offer or the
     /// certificate policy all mean dialling first and adopting after. Every
     /// draft module has `Connection::adopt` for exactly this, and this wrapper
-    /// is how a caller reaches it without re-implementing the fourteen-arm
+    /// is how a caller reaches it without re-implementing the per-draft
     /// match over `AnyConnection` for itself.
     ///
     /// `config.draft` selects the module. Nothing here re-checks it against the
@@ -2571,7 +2777,7 @@ impl AnyConnection {
     /// to reach for this is to offer a version no draft assigns — which an enum
     /// of drafts cannot name.
     ///
-    /// Drafts 07-14 only. Drafts 15-20 settle the version by ALPN and put no
+    /// Drafts 07-14 only. Drafts 15-21 settle the version by ALPN and put no
     /// version list on the wire, so there is nothing there to offer and a
     /// `Some` on one of them is refused rather than quietly ignored: silently
     /// sending the ordinary handshake would answer a question that was never
@@ -2594,7 +2800,7 @@ impl AnyConnection {
         //   07-13  no `draft` field (the module is the draft), offers a
         //          version list through `additional_versions`
         //   14     both — the last draft that can offer several versions at once
-        //   15-20  `draft` only. One connection offers exactly one version,
+        //   15-21  `draft` only. One connection offers exactly one version,
         //          which is why enumerating these costs a connection each.
         macro_rules! adopt_dispatch {
             (
@@ -2719,7 +2925,7 @@ impl AnyConnection {
     /// the versions offered. Offer 11 through 14 and a server that settles on
     /// 12 leaves `draft()` saying 14 and this saying 12.
     ///
-    /// `None` for drafts 15-20, which is a fact about those drafts rather than
+    /// `None` for drafts 15-21, which is a fact about those drafts rather than
     /// a gap here: they carry no `additional_versions`, so a connection offers
     /// exactly one version and there is nothing for a server to choose between.
     /// What a peer supports there is discovered by ALPN instead.
@@ -2807,6 +3013,10 @@ impl AnyConnection {
             Self::Draft20(c) => {
                 c.recv_and_dispatch().await.map(|_| ()).map_err(AnyConnectionError::from)
             }
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => {
+                c.recv_and_dispatch().await.map(|_| ()).map_err(AnyConnectionError::from)
+            }
             #[allow(unreachable_patterns)]
             _ => Err(AnyConnectionError::facade("AnyConnection has no enabled variants")),
         }
@@ -2816,7 +3026,7 @@ impl AnyConnection {
     /// negotiated draft carries it.
     ///
     /// This is the read half of the split [`AnyRequest`] describes, and without
-    /// it the facade can send a request on drafts 17-20 and then has no way to
+    /// it the facade can send a request on drafts 17-21 and then has no way to
     /// hear the answer: those drafts put every response on the request's own
     /// bidirectional stream, which [`recv_and_dispatch`](Self::recv_and_dispatch)
     /// — a control-stream read — never touches.
@@ -2832,7 +3042,7 @@ impl AnyConnection {
     ///   free to send MAX_REQUEST_ID or a PUBLISH_NAMESPACE of its own first.
     ///   Correlate on the `request_id` the response carries against
     ///   [`AnyRequest::request_id`], and read again if it is not this one.
-    /// - **Draft-16 namespace subscriptions and drafts 17-20.** The read is on
+    /// - **Draft-16 namespace subscriptions and drafts 17-21.** The read is on
     ///   the request's own stream, so nothing else can arrive on it. Those
     ///   drafts' responses carry no request id at all — the stream *is* the
     ///   correlation — which is exactly why the read has to be addressed by the
@@ -2842,7 +3052,7 @@ impl AnyConnection {
     ///
     /// The peer ended the stream cleanly without a message on it. Reachable
     /// today only on a draft-16 namespace stream, whose reader distinguishes a
-    /// FIN from a message; drafts 17-20 report the same event as an error. A
+    /// FIN from a message; drafts 17-21 report the same event as an error. A
     /// distinct value rather than an error because a peer that answered nothing
     /// and closed is a different fact from a read that failed, and a caller
     /// that has to tell them apart should not be reading either one out of a
@@ -2967,6 +3177,12 @@ impl AnyConnection {
                 .await
                 .map(|m| Some(AnyControlMessage::Draft20(m)))
                 .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            (Self::Draft21(c), AnyRequest::Draft21(s)) => c
+                .recv_on_request_stream(s)
+                .await
+                .map(|m| Some(AnyControlMessage::Draft21(m)))
+                .map_err(AnyConnectionError::from),
             // A handle from another draft, or a build with no drafts enabled.
             // Refused rather than read on whatever stream happens to be at
             // hand: the two kinds of handle address different streams, so
@@ -3040,8 +3256,8 @@ impl AnyConnection {
     }
 
     /// Send a SUBSCRIBE with the given filter, priority, and group order.
-    /// Supported on **every draft this build carries**, 07 through 20. Drafts
-    /// 15 onward carry priority/order/filter as parameters rather than fields;
+    /// Supported on **every draft this build carries**. Drafts 15 onward
+    /// carry priority/order/filter as parameters rather than fields;
     /// this helper passes an empty parameter list, so on those drafts all three
     /// take the protocol default and the three arguments here are ignored.
     ///
@@ -3050,7 +3266,7 @@ impl AnyConnection {
     /// Drafts 07 through 11 carry a Track Alias on SUBSCRIBE and make it the
     /// **subscriber's** to choose; draft-12 moved the field to SUBSCRIBE_OK and
     /// made it the publisher's. An argument here would therefore do nothing on
-    /// nine of the fourteen drafts, and a fixed value would collide the moment
+    /// nine of the drafts, and a fixed value would collide the moment
     /// a caller subscribed to a second track.
     ///
     /// So the value is read off the endpoint —
@@ -3075,7 +3291,7 @@ impl AnyConnection {
     /// through the variant with the parameters it wants.
     ///
     /// The returned [`AnyRequest`] must be held while the request is live: on
-    /// drafts 17-20 it owns the bidirectional stream the request went out on
+    /// drafts 17-21 it owns the bidirectional stream the request went out on
     /// and dropping it cancels the subscription. See [`AnyRequest`] for how
     /// the two kinds of handle differ.
     #[allow(unused_variables)]
@@ -3240,6 +3456,12 @@ impl AnyConnection {
                 .await
                 .map(AnyRequest::Draft20)
                 .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => c
+                .subscribe(namespace, track_name, Vec::new())
+                .await
+                .map(AnyRequest::Draft21)
+                .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
                 "subscribe: not yet wired up for draft {:?} via AnyConnection",
@@ -3249,8 +3471,7 @@ impl AnyConnection {
     }
 
     /// Send a SUBSCRIBE that names where the subscription starts, and
-    /// optionally where it stops. Wired on **every draft this build carries**,
-    /// 07 through 20.
+    /// optionally where it stops. Wired on **every draft this build carries**.
     ///
     /// This is the half of SUBSCRIBE [`AnyConnection::subscribe`] cannot reach.
     /// The two filters that ask a relay for anything it has **already carried**
@@ -3280,7 +3501,7 @@ impl AnyConnection {
     ///   written as a delta from the start.
     /// * **draft-20** — `LOCATION_FILTER`, whose shape comes from its field
     ///   count rather than from a Filter Type, and whose ranges are inclusive.
-    ///   [`SubscribeRange::location_filter`], which is also where the one value
+    ///   [`SubscribeRange::location_filter_draft20`], which is also where the one value
     ///   this facade refuses on one draft is documented.
     ///
     /// # What this does not carry
@@ -3303,7 +3524,7 @@ impl AnyConnection {
     /// and as the beginning of the track everywhere else.
     ///
     /// The returned [`AnyRequest`] must be held while the request is live: on
-    /// drafts 17-20 it owns the bidirectional stream the request went out on
+    /// drafts 17-21 it owns the bidirectional stream the request went out on
     /// and dropping it cancels the subscription.
     #[allow(unused_variables)]
     pub async fn subscribe_range(
@@ -3323,7 +3544,7 @@ impl AnyConnection {
             // Draft-07 alone carries an End Location rather than an End Group,
             // and carries it with FETCH's plus-one convention. The arithmetic
             // is `inline_end_location`'s, in one place, so it cannot reach the
-            // thirteen drafts that must not have it.
+            // drafts that must not have it.
             #[cfg(feature = "draft07")]
             Self::Draft07(c) => {
                 let end = range.inline_end_location()?;
@@ -3542,12 +3763,23 @@ impl AnyConnection {
             #[cfg(feature = "draft20")]
             Self::Draft20(c) => {
                 let filter = range
-                    .location_filter()?
+                    .location_filter_draft20()?
                     .parameter()
                     .map_err(|e| AnyConnectionError::facade(e.to_string()))?;
                 c.subscribe(namespace, track_name, vec![filter])
                     .await
                     .map(AnyRequest::Draft20)
+                    .map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => {
+                let filter = range
+                    .location_filter_draft21()?
+                    .parameter()
+                    .map_err(|e| AnyConnectionError::facade(e.to_string()))?;
+                c.subscribe(namespace, track_name, vec![filter])
+                    .await
+                    .map(AnyRequest::Draft21)
                     .map_err(AnyConnectionError::from)
             }
             #[allow(unreachable_patterns)]
@@ -3559,7 +3791,7 @@ impl AnyConnection {
     }
 
     /// Send a standalone FETCH for `range`. Wired on **every draft this build
-    /// carries**, 07 through 20.
+    /// carries**.
     ///
     /// # What the range means here
     ///
@@ -3586,7 +3818,7 @@ impl AnyConnection {
     /// meant one of those two things and looked like the other.
     ///
     /// The conversion is [`FetchRange::inline_end_object`] for the first group
-    /// and [`FetchRange::location_filter`] for draft-20. **The `+ 1` exists in
+    /// and [`FetchRange::location_filter_draft20`] for draft-20. **The `+ 1` exists in
     /// exactly one place**, the first of those, so it cannot reach draft-20 by
     /// being ported.
     ///
@@ -3608,7 +3840,7 @@ impl AnyConnection {
     /// inexpressible rather than merely unusual.
     ///
     /// The returned [`AnyRequest`] must be held while the request is live: on
-    /// drafts 17-20 it owns the bidirectional stream the request went out on
+    /// drafts 17-21 it owns the bidirectional stream the request went out on
     /// and dropping it cancels the fetch.
     #[allow(unused_variables)]
     pub async fn fetch(
@@ -3847,10 +4079,24 @@ impl AnyConnection {
                 // requires. Nothing here adds one to the end — Section 5.1.2
                 // makes the filter's range inclusive, and the `+ 1` the six
                 // arms above apply lives in `inline_end_object` alone.
-                let filter = range.location_filter()?;
+                let filter = range.location_filter_draft20()?;
                 c.fetch_range(namespace, track_name, &filter, Vec::new())
                     .await
                     .map(AnyRequest::Draft20)
+                    .map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => {
+                // Draft-21 Section 9.11 has no location fields to fill in:
+                // `fetch_range` puts the whole range in the `LOCATION_FILTER`
+                // parameter, at the position ascending Parameter Type order
+                // requires. Nothing here adds one to the end — Section 3.3.1
+                // makes the filter's range inclusive, and the `+ 1` the six
+                // arms above apply lives in `inline_end_object` alone.
+                let filter = range.location_filter_draft21()?;
+                c.fetch_range(namespace, track_name, &filter, Vec::new())
+                    .await
+                    .map(AnyRequest::Draft21)
                     .map_err(AnyConnectionError::from)
             }
             #[allow(unreachable_patterns)]
@@ -3936,7 +4182,7 @@ impl AnyConnection {
         // compile this closure without ever calling it: with only draft-20
         // enabled every arm that would have pinned `T` is gone, and inference
         // has nothing left to work from. Annotating it keeps `just draft-matrix`
-        // green on all fourteen single-draft rows.
+        // green on all single-draft rows.
         let absolute_unavailable = || -> Result<AnyRequest, AnyConnectionError> {
             Err(AnyConnectionError::facade(format!(
                 "fetch_joining: draft {draft:?} has no Absolute Joining Fetch — its FETCH offers \
@@ -4139,6 +4385,12 @@ impl AnyConnection {
                  mechanism (Section 10.13); a fetch there names its own track and range, which is \
                  AnyConnection::fetch",
             )),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(_) => Err(AnyConnectionError::facade(
+                "fetch_joining: draft-20 deleted the Fetch Type field and the whole Joining Fetch \
+                 mechanism and draft-21 keeps it gone (Section 9.11); a fetch there names its own \
+                 track and range, which is AnyConnection::fetch",
+            )),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
                 "fetch_joining: not yet wired up for draft {:?} via AnyConnection",
@@ -4176,7 +4428,7 @@ impl AnyConnection {
     /// or match it by name off `recv_and_dispatch`.
     ///
     /// The returned [`AnyRequest`] must be held until the answer arrives: on
-    /// drafts 17-20 it owns the bidirectional stream the query went out on and
+    /// drafts 17-21 it owns the bidirectional stream the query went out on and
     /// dropping it cancels the query.
     #[allow(unused_variables)]
     pub async fn track_status(
@@ -4273,6 +4525,12 @@ impl AnyConnection {
                 .await
                 .map(AnyRequest::Draft20)
                 .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => c
+                .track_status(namespace, track_name, Vec::new())
+                .await
+                .map(AnyRequest::Draft21)
+                .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
                 "track_status: not yet wired up for draft {:?} via AnyConnection",
@@ -4292,7 +4550,7 @@ impl AnyConnection {
     /// own `Connection::subscribe_tracks` through the variant.
     ///
     /// The returned [`AnyRequest`] must be held while the request is live: on
-    /// drafts 17-20 it owns the bidirectional stream the request went out on
+    /// drafts 17-21 it owns the bidirectional stream the request went out on
     /// and dropping it cancels the namespace subscription.
     #[allow(unused_variables)]
     pub async fn subscribe_namespace(
@@ -4370,6 +4628,12 @@ impl AnyConnection {
                 .await
                 .map(AnyRequest::Draft20)
                 .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => c
+                .subscribe_namespace(namespace_prefix, Vec::new())
+                .await
+                .map(AnyRequest::Draft21)
+                .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
                 "subscribe_namespace: not yet wired up for draft {:?} via AnyConnection",
@@ -4411,7 +4675,7 @@ impl AnyConnection {
     /// `Connection` if an older draft is the target.
     ///
     /// The returned [`AnyRequest`] must be held while the announcement is live:
-    /// on drafts 17-20 it owns the bidirectional stream the request went out on
+    /// on drafts 17-21 it owns the bidirectional stream the request went out on
     /// and dropping it withdraws the namespace, which on those drafts is the
     /// only way to withdraw one.
     #[allow(unused_variables)]
@@ -4487,6 +4751,12 @@ impl AnyConnection {
                 .publish_namespace(namespace, Vec::new())
                 .await
                 .map(AnyRequest::Draft20)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => c
+                .publish_namespace(namespace, Vec::new())
+                .await
+                .map(AnyRequest::Draft21)
                 .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
@@ -4673,6 +4943,8 @@ impl AnyConnection {
             Self::Draft19(c) => request_stream!(c, Draft19, draft19),
             #[cfg(feature = "draft20")]
             Self::Draft20(c) => request_stream!(c, Draft20, draft20),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => request_stream!(c, Draft21, draft21),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
                 "recv_inbound: not yet wired up for draft {:?} via AnyConnection",
@@ -4682,7 +4954,7 @@ impl AnyConnection {
     }
 
     /// Answer a peer's SUBSCRIBE with SUBSCRIBE_OK. Supported on **every draft
-    /// this build carries**, 07 through 20.
+    /// this build carries**.
     ///
     /// `request` is the handle from [`AnyArrival::Subscribe`]. What the unified
     /// shape cannot express is defaulted: no expiry, ascending group order, and
@@ -4881,6 +5153,20 @@ impl AnyConnection {
             #[cfg(feature = "draft20")]
             (Self::Draft20(c), AnyInboundRequest::Draft20(s)) => {
                 use moqtap_codec::draft20::message::SubscribeOk;
+                c.respond_subscribe_ok(
+                    s,
+                    SubscribeOk {
+                        track_alias,
+                        parameters: Vec::new(),
+                        track_properties: Vec::new(),
+                    },
+                )
+                .await
+                .map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft21")]
+            (Self::Draft21(c), AnyInboundRequest::Draft21(s)) => {
+                use moqtap_codec::draft21::message::SubscribeOk;
                 c.respond_subscribe_ok(
                     s,
                     SubscribeOk {
@@ -5159,6 +5445,18 @@ impl AnyConnection {
                     publisher_priority: Some(publisher_priority),
                 }
             ),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => open!(
+                c,
+                Draft21,
+                moqtap_codec::draft21::data_stream::SubgroupHeader {
+                    header_type: 0x14,
+                    track_alias: alias,
+                    group_id: group,
+                    subgroup_id: subgroup,
+                    publisher_priority: Some(publisher_priority),
+                }
+            ),
             #[allow(unreachable_patterns)]
             _ => Err(AnyConnectionError::facade("no draft feature is enabled")),
         }
@@ -5231,6 +5529,8 @@ impl AnyConnection {
             Self::Draft19(c) => accept!(c, Draft19),
             #[cfg(feature = "draft20")]
             Self::Draft20(c) => accept!(c, Draft20),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => accept!(c, Draft21),
             #[allow(unreachable_patterns)]
             _ => Err(AnyConnectionError::facade("no draft feature is enabled")),
         }
@@ -5252,8 +5552,8 @@ impl AnyConnection {
     ///
     /// # Why this takes a Group Order and `accept_subgroup` takes nothing
     ///
-    /// Because on three drafts the reader cannot be started without it, and
-    /// starting it wrong is silent. Drafts 18, 19 and 20 encode an object's
+    /// Because on four drafts the reader cannot be started without it, and
+    /// starting it wrong is silent. Drafts 18 through 21 encode an object's
     /// Group ID as a **delta**, and draft-18 Section 11.4.4.1 makes that delta
     /// count upward under Ascending and downward under Descending. A reader
     /// started in the wrong direction still parses every frame and reports Group
@@ -5266,7 +5566,7 @@ impl AnyConnection {
     /// already read. [`fetch_group_order`] takes it off that message so the
     /// lookup is written once rather than per caller.
     ///
-    /// On the other eleven drafts the argument is inert, and it is an argument
+    /// On the other drafts the argument is inert, and it is an argument
     /// rather than an `Option` because a caller that has a FETCH_OK in hand can
     /// always answer it, and one that cannot has not read the answer yet.
     #[allow(unused_variables)]
@@ -5351,6 +5651,8 @@ impl AnyConnection {
             Self::Draft19(c) => accept!(c, Draft19, draft19),
             #[cfg(feature = "draft20")]
             Self::Draft20(c) => accept!(c, Draft20, draft20),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => accept!(c, Draft21, draft21),
             #[allow(unreachable_patterns)]
             _ => Err(AnyConnectionError::facade("no draft feature is enabled")),
         }
@@ -5420,4 +5722,47 @@ pub struct NoOpObserver;
 
 impl AnyConnectionObserver for NoOpObserver {
     fn on_event(&self, _event: &AnyClientEvent) {}
+}
+
+/// One control message as it crossed the wire, lifted out of whichever draft's
+/// event carried it.
+///
+/// [`AnyClientEvent`] wraps a draft's own `ClientEvent`, so an observer holding
+/// one can read [`draft`](AnyClientEvent::draft) and nothing else without
+/// matching every enabled variant — which means a consumer outside this crate
+/// writing its own cascade over every draft, the exact duplication this module
+/// exists to hold in one place. [`AnyClientEvent::control_frame`] answers with
+/// this instead.
+///
+/// Everything here borrows from the event, so it is a view rather than a
+/// record: a consumer that wants to keep a frame copies the bytes out.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy)]
+pub struct ControlFrame<'a> {
+    /// The draft whose rules were used to decode it.
+    pub draft: DraftVersion,
+    /// Whether this endpoint sent it, as opposed to receiving it.
+    ///
+    /// A `bool` rather than a shared direction enum because each draft declares
+    /// its own `Direction` and there is no cross-draft one to lift them into;
+    /// inventing a sixteenth to convert the other fifteen into would be a type
+    /// whose only purpose is to be converted.
+    pub outbound: bool,
+    /// The decoded message. [`message_type_id`] and [`message_type_name`] name
+    /// the codepoint it arrived under.
+    ///
+    /// [`message_type_id`]: moqtap_codec::dispatch::AnyControlMessage::message_type_id
+    /// [`message_type_name`]: moqtap_codec::dispatch::AnyControlMessage::message_type_name
+    pub message: &'a moqtap_codec::dispatch::AnyControlMessage,
+    /// The framed wire bytes — type, length and payload — as they arrived.
+    ///
+    /// `None` when the connection was reading without an observer attached and
+    /// therefore never cloned them. That cannot happen for an event an observer
+    /// is being handed, so in practice this is `None` only for a frame built by
+    /// hand.
+    ///
+    /// Kept because the encoding is evidence the decoding discards: two peers
+    /// sending the same field can still disagree on how wide a varint they
+    /// wrote it in, and the decoded form answers the same either way.
+    pub raw: Option<&'a [u8]>,
 }

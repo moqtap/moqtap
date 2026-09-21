@@ -193,7 +193,7 @@ fn wide_type_refusal(
 /// Section 10.4.2 is about the subgroup form specifically, and the eight Types
 /// inside it that name the reserved SUBGROUP_ID_MODE. Those are not unknown —
 /// the form is assigned and the draft lists the values outright — but they are
-/// unreadable, and they are [`CodecError::InvalidTypeValue`].
+/// unreadable, and they are [`CodecError::InvalidStreamTypeValue`].
 ///
 /// Table 3 assigns three things, and two of them are not data streams at all:
 /// FETCH_HEADER, the subgroup form, and SETUP. A subgroup reader handed any of
@@ -205,7 +205,7 @@ fn stream_type_error(raw: u64) -> CodecError {
     if raw == FETCH_STREAM_TYPE || raw == SETUP_STREAM_TYPE || subgroup_type_is_valid(raw) {
         CodecError::InvalidField
     } else if subgroup_type_is_reserved_mode(raw) {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidStreamTypeValue {
             raw,
             detail: "its SUBGROUP_ID_MODE is 0b11, which this draft reserves",
         }
@@ -672,7 +672,7 @@ fn datagram_type_is_valid(raw: u64) -> bool {
 /// [`CodecError::UnknownDatagramType`]. A Type inside the form that sets both
 /// STATUS and END_OF_GROUP is named by Section 10.3.1 and forbidden there — an
 /// object status message cannot also mark the end of a group — so it is
-/// [`CodecError::InvalidTypeValue`].
+/// [`CodecError::InvalidDatagramTypeValue`].
 ///
 /// Nothing reaches the [`CodecError::InvalidField`] arm from a decoder: the
 /// stream Types all set bit 4 or exceed a byte, so they fail the form rather
@@ -686,7 +686,7 @@ fn datagram_type_error(raw: u64) -> CodecError {
         && raw as u8 & (DATAGRAM_STATUS_BIT | DATAGRAM_END_OF_GROUP_BIT)
             == (DATAGRAM_STATUS_BIT | DATAGRAM_END_OF_GROUP_BIT)
     {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidDatagramTypeValue {
             raw,
             detail: "it sets both the STATUS bit and the END_OF_GROUP bit",
         }

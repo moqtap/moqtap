@@ -1,6 +1,6 @@
 # moqtap development tasks
 
-# `draft-matrix` is a standing CI gate: the fourteen
+# `draft-matrix` is a standing CI gate: the
 # single-draft/zero-draft rows for `moqtap-client` and `moqtap-proxy`, with the
 # resolved feature list asserted rather than inferred from an exit code. It was
 # held out of this list while the `framer.rs` / `session.rs` draft collapse was
@@ -33,7 +33,7 @@
 # though somebody had checked it.
 #
 # Run all checks (except msrv, deny and versions — see the comment above)
-check: fmt-check clippy test test-features optional-features draft-cfg draft-parity drafts draft-matrix draft-pairs draft-targets doc-check determinism
+check: fmt-check clippy test test-features optional-features draft-cfg draft-parity draft-counts drafts draft-matrix draft-pairs draft-targets doc-check determinism
 
 # Run tests
 test:
@@ -149,7 +149,7 @@ corpus:
 test-features:
     #!/usr/bin/env bash
     set -euo pipefail
-    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20; do
+    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20 draft21; do
         echo "=== $d ==="
         cargo test -p moqtap-codec --no-default-features --features "$d"
     done
@@ -162,8 +162,8 @@ test-features:
     # 0 since it was written.
     echo "=== no drafts ==="
     RUSTFLAGS="-D warnings" cargo clippy -p moqtap-codec --no-default-features --all-targets -- -D warnings
-    echo "=== draft07 + draft20 ==="
-    cargo test -p moqtap-codec --no-default-features --features draft07,draft20
+    echo "=== draft07 + draft21 ==="
+    cargo test -p moqtap-codec --no-default-features --features draft07,draft21
     echo "=== draft13 + draft14 ==="
     cargo test -p moqtap-codec --no-default-features --features draft13,draft14
 
@@ -171,24 +171,24 @@ test-features:
 # build: if `default-features = false` is dropped from the root manifest's
 # `[workspace.dependencies]` entries, cargo silently resolves every draft and
 # warns only at the manifest level, where `RUSTFLAGS` cannot reach it. Measured:
-# in that state all fifteen rows compiled all fourteen drafts and exited 0.
+# in that state all rows compiled all the drafts and exited 0.
 # So assert the resolved feature LIST, and assert the whole list.
 #
 # `quinn-netem` is deliberately not a row here. It has no draft features —
 # impairment happens below the message layer, on datagram bytes, so a draft axis
 # would multiply the matrix without changing a decision — and every row asserts a
 # resolved draft string, so a crate with no drafts to resolve would report a
-# mismatch on all fourteen and mean nothing by it. Its feature axes are covered
+# mismatch on every row and mean nothing by it. Its feature axes are covered
 # by `optional-features`.
 #
 # Every per-draft rejection `cfg(any(feature = "draftNN", ...))` names all
-# thirteen other drafts.
+# other drafts.
 #
 # `draft-matrix` below compiles one draft at a time, which is the one
 # configuration in which this defect cannot appear: with a single draft every
 # `Any*` enum has one variant, the wildcard arm is compiled out, and a list that
 # is short by one draft is a list nothing reads. It takes two drafts to see it,
-# and there are 91 pairs — so this reads the lists rather than compiling them.
+# and there are 105 pairs — so this reads the lists rather than compiling them.
 # `draft-pairs` is the compile-side half; see the script for what went wrong.
 #
 # No cfg list may omit a sibling draft
@@ -210,6 +210,21 @@ draft-cfg:
 # Every per-draft construct names every draft
 draft-parity:
     python3 scripts/check-draft-parity.py
+
+# The fourth silent construct is prose, and one shape of it is checkable: a
+# comment that counts the whole draft set in words is wrong from the commit
+# that adds a draft, and the number was never carrying anything the sentence
+# did not already say: "all of them" and "every other draft" say it. This
+# reads the draft set off the tree, so it needs no edit when one lands; the day
+# it does, every phrase it asks about is a phrase that has just become false.
+#
+# A range that stops at the previous draft is the other half of that construct
+# and stays a judgement call — a draft really can end an era. See
+# `ARCHITECTURE.md` section 4 for the greps that find those.
+#
+# No comment may count the draft set in words
+draft-counts:
+    python3 scripts/check-draft-counts.py
 
 # Both halves of the `drafts` job in CI, over one cache of the renderings.
 #
@@ -248,7 +263,7 @@ draft-pairs:
     #!/usr/bin/env bash
     set -euo pipefail
     export RUSTFLAGS="-D warnings"
-    for pair in draft07,draft20 draft19,draft20; do
+    for pair in draft07,draft21 draft20,draft21; do
         for crate in moqtap-codec moqtap-client moqtap-proxy; do
             echo "=== $crate --features $pair ==="
             cargo check -q -p "$crate" --no-default-features --features "$pair" --all-targets
@@ -264,7 +279,7 @@ draft-pairs:
 # -- -D warnings` per draft since 2026-08-25, and its comment records why —
 # under a single draft the client's ~200 test targets and the proxy's ~37 were
 # compiled by no job at all, and when the flag was first added thirteen of the
-# fourteen drafts failed at the first line of `tests/common/mod.rs`. A local
+# then-drafts failed at the first line of `tests/common/mod.rs`. A local
 # recipe that checks less than CI is a local recipe that sends a red build.
 #
 # The zero-draft rows stay `--lib` because that is what CI asserts there too,
@@ -368,7 +383,7 @@ draft-matrix:
     }
     for crate in moqtap-client moqtap-proxy; do
         echo "=== $crate ==="
-        for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20; do
+        for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20 draft21; do
             run_row "$crate" "--features $d" "moqtap_client=$d moqtap_codec=$d" 0 --all-targets
         done
         # The proxy is the one crate that must refuse a zero-draft build, and

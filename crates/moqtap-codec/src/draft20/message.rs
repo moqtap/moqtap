@@ -2511,7 +2511,7 @@ mod tests {
         assert_eq!(out, bytes);
     }
 
-    /// Draft-20 Section 10.2.19: the TRACK_NAMESPACE_PREFIX parameter
+    /// Draft-20 Section 10.2.20: the TRACK_NAMESPACE_PREFIX parameter
     /// (Parameter Type 0x34) "uses the Track Namespace encoding described in
     /// Section 2.4.1" — a varint field count followed by that many
     /// length-prefixed fields, and nothing in front of it. That encoding is not

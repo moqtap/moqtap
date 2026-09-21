@@ -123,7 +123,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod common;
@@ -184,6 +185,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// The draft every fixture here is built for: the **newest** one this build
@@ -223,13 +226,13 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 }
 
 /// A subgroup stream header on `track_alias`: group 0, subgroup 0, publisher
-/// priority `0x80`. Five bytes on every draft 07-20.
+/// priority `0x80`. Five bytes on every draft 07-21.
 fn subgroup_header_bytes(track_alias: u64) -> Vec<u8> {
     assert!(track_alias < 64, "fixture: single-byte varint only");
     vec![subgroup_stream_type(DRAFT), track_alias as u8, 0x00, 0x00, 0x80]
 }
 
-/// The subgroup stream header's length, on every draft 07-20.
+/// The subgroup stream header's length, on every draft 07-21.
 fn header_len() -> usize {
     subgroup_header_bytes(0).len()
 }
@@ -1047,7 +1050,7 @@ const ATTRIBUTE_DEPTH: usize = 64;
 /// delivered, `per_leg[Client].uplink` and `per_leg[Upstream].uplink` are the
 /// same numbers and a mapping that swapped them would be invisible.
 ///
-/// The **last** object, and that is not arbitrary. Drafts 14-20 delta-encode
+/// The **last** object, and that is not arbitrary. Drafts 14-21 delta-encode
 /// Object IDs, so eliding an object obliges the framer to rewrite the *next*
 /// one — and a rewritten object is a different number of bytes on the wire
 /// from the one the fixture encoded. Eliding the tail leaves no next object,

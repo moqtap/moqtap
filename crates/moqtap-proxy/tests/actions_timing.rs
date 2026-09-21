@@ -166,7 +166,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod common;
@@ -201,7 +202,7 @@ use common::{Ending, FakeRelay, RecordingObserver, SpawnedProxy, TimedReceiver};
 /// Every draft this build compiled, oldest first.
 ///
 /// Each element carries its own `#[cfg]`, so the array is the enabled set
-/// and not a hardcoded fourteen — the same shape `action_matrix.rs` and
+/// and not a hardcoded list — the same shape `action_matrix.rs` and
 /// `actions_objects.rs` use for their sweep axes. The file-level gate above
 /// guarantees it is non-empty, which is what makes [`DRAFT`]'s index a
 /// compile-time fact rather than a panic.
@@ -234,6 +235,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// The draft every fixture in this file is built for: the **newest** one
@@ -281,7 +284,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 /// A subgroup stream header for `draft`: track alias 1, group 0, subgroup
 /// 0, publisher priority `0x80`.
 ///
-/// Five bytes on every draft 07-20 — the type field, three one-byte
+/// Five bytes on every draft 07-21 — the type field, three one-byte
 /// varints and the priority octet — which is why [`Rig`]'s promise that
 /// every test here starts with the same five header bytes holds whatever
 /// this build compiled.

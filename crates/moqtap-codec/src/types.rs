@@ -148,7 +148,7 @@ pub struct TrackNamespace(pub Vec<Vec<u8>>);
 /// "Track Naming".
 ///
 /// The rules arrive at different drafts and one of them is later withdrawn, so
-/// any single rule applied to all fourteen drafts is wrong somewhere:
+/// any single rule applied to all the drafts is wrong somewhere:
 ///
 /// - *At most 32 Track Namespace Fields.* Stated by every draft from 07 on, and
 ///   the only field-count rule drafts 17 and later state at all. It has never

@@ -151,33 +151,17 @@ pub enum AcceptedConn {
 /// Build the ALPN list the server advertises to clients — every MoQT
 /// QUIC ALPN we support, plus `h3` when the WebTransport feature is on.
 ///
-/// Each ALPN string comes from [`DraftVersion::quic_alpn`], but the set of
-/// drafts is the hardcoded list below — `DraftVersion` exposes no iterator.
-/// **A new draft must be added here by hand.** An earlier revision of this
-/// comment claimed the list derived itself; draft-20 was consequently missing
-/// for a while, and a draft-20 client failed the TLS handshake outright
-/// ("peer doesn't support any known protocol") before sending a single MoQT
-/// frame. `tests/control_plane_uni.rs` has a per-draft row that catches this.
+/// Each ALPN string comes from [`DraftVersion::quic_alpn`] and the set of
+/// drafts is [`DraftVersion::ALL`], so a draft joining the series is
+/// advertised without an edit here. That matters more than it looks: a draft
+/// missing from this list fails a client of that draft at the TLS handshake
+/// ("peer doesn't support any known protocol"), before it sends a single MoQT
+/// frame. `tests/control_plane_uni.rs` has a per-draft row that catches it.
 fn advertised_alpns() -> Vec<Vec<u8>> {
     // Dedup: drafts 07–14 all map to `moq-00`, so iterate every draft
     // and keep unique ALPNs.
     let mut out: Vec<Vec<u8>> = Vec::new();
-    for d in [
-        DraftVersion::Draft07,
-        DraftVersion::Draft08,
-        DraftVersion::Draft09,
-        DraftVersion::Draft10,
-        DraftVersion::Draft11,
-        DraftVersion::Draft12,
-        DraftVersion::Draft13,
-        DraftVersion::Draft14,
-        DraftVersion::Draft15,
-        DraftVersion::Draft16,
-        DraftVersion::Draft17,
-        DraftVersion::Draft18,
-        DraftVersion::Draft19,
-        DraftVersion::Draft20,
-    ] {
+    for d in DraftVersion::ALL {
         let alpn = d.quic_alpn().to_vec();
         if !out.iter().any(|existing| existing == &alpn) {
             out.push(alpn);

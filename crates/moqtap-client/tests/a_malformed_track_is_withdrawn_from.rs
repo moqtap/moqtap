@@ -17,7 +17,7 @@
 //!
 //! # Which drafts are here, and why not the ones next to them
 //!
-//! Checked with `re.finditer` over the raw HTML of all fourteen drafts, the
+//! Checked with `re.finditer` over the raw HTML of all the drafts, the
 //! section carries three answers and no draft carries two of them: drafts 12
 //! and 13 have the UNSUBSCRIBE above; drafts 14, 15 and 16 add the
 //! FETCH_CANCEL; and drafts 17 through 20 replace the messages with a

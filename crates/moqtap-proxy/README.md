@@ -2,11 +2,11 @@
 
 Transparent MoQT intercepting proxy — sits between a client and relay, forwarding all bytes bidirectionally while parsing MoQT frames inline to produce structured events.
 
-The proxy does **not** participate in MoQT state management. It observes and optionally mutates, but never acts as an endpoint. Supports every MoQT wire format from **draft-07 through draft-20** at runtime via `moqtap-codec`'s dispatch layer — the draft is selected from the observed setup exchange.
+The proxy does **not** participate in MoQT state management. It observes and optionally mutates, but never acts as an endpoint. Supports every MoQT wire format from **draft-07 through draft-21** at runtime via `moqtap-codec`'s dispatch layer — the draft is selected from the observed setup exchange.
 
 ## What it does
 
-1. **Listen** on a single UDP port that accepts raw-QUIC MoQT and WebTransport clients simultaneously. The client-facing transport is chosen by ALPN: every supported MoQT draft (`moq-00` for drafts 07-14, then `moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`, `moqt-19`, `moqt-20`) plus `h3` for WebTransport is advertised.
+1. **Listen** on a single UDP port that accepts raw-QUIC MoQT and WebTransport clients simultaneously. The client-facing transport is chosen by ALPN: every supported MoQT draft (`moq-00` for drafts 07-14, then one `moqt-NN` per draft from draft-15 on) plus `h3` for WebTransport is advertised.
 2. **Connect** upstream to a MoQT relay (QUIC or WebTransport)
 3. **Forward** all streams (bidirectional, unidirectional) and datagrams between the two
 4. **Parse** MoQT frames inline — control messages, data stream headers, individually addressable objects, datagrams
@@ -38,7 +38,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 | `Capabilities` | What is expressible at a site, on a draft, on a kind of stream. Ask before acting; the engine asks again and reports a `Refusal` |
 | `ShapeProfile` | Named token buckets and class rules that pace media egress with no hook code — configuration rather than callbacks |
 | `TransportProfile` | One leg's QUIC transport parameters as a value that can be written down, checked and stored |
-| `ObjectFramer` | Frames a unidirectional data stream into individually addressable objects on every draft 07-20, preserving the exact wire bytes |
+| `ObjectFramer` | Frames a unidirectional data stream into individually addressable objects on every draft 07-21, preserving the exact wire bytes |
 | `ControlStreamParser` | Stateful inline parser for control stream messages (draft-aware framing) |
 | `GeneratedCert` | Self-signed certificate for development/testing (behind `cert-gen` feature) |
 
@@ -88,7 +88,7 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
   bidirectional stream of its own, so every stream after the control stream is
   forwarded as a request stream — in both directions, because draft-16 Section 6.1 lets
   either endpoint be the subscriber.
-- Inline MoQT frame parsing for observation (drafts 07 through 20, via
+- Inline MoQT frame parsing for observation (drafts 07 through 21, via
   `moqtap-codec`'s dispatch enums)
 - Automatic stream type detection on unidirectional streams — subgroup, fetch, and on drafts 17-20 the control stream, which those drafts carry as a pair of unidirectional streams rather than a bidirectional one
 - Reading a fetch response against the Group Order its FETCH asked for, on drafts 18, 19 and 20, where an object's Group ID is a difference and the order decides whether it counts up or down. The order is on the control plane and never on the data stream, so the session files it under the FETCH's Request ID and hands it to the framer when the response opens. A response naming a request the session never carried is forwarded untouched and reported, rather than read against a guess — the wrong guess decodes every object under Group IDs walking the wrong way
@@ -129,8 +129,8 @@ would otherwise parse, arm, report shaping and shape nothing.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `all-drafts` | **yes** | Every draft 07-20. Reduced sets are opt-in with `--no-default-features --features draftNN` |
-| `draft07` … `draft20` | no | One draft each, in both `moqtap-codec` and `moqtap-client` |
+| `all-drafts` | **yes** | Every draft 07-21. Reduced sets are opt-in with `--no-default-features --features draftNN` |
+| `draft07` … `draft21` | no | One draft each, in both `moqtap-codec` and `moqtap-client` |
 | `cert-gen` | no | Self-signed certificate generation via `rcgen` |
 | `webtransport` | no | Enables the `h3` ALPN on the unified listener plus WebTransport upstream support via `wtransport` |
 | `impair` | no | Arm and clear a datagram impairment on a leg's socket at runtime, below QUIC, through `quinn-netem` |

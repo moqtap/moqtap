@@ -43,7 +43,7 @@ mod common;
 // hook fixtures, their impls and the five tests that drive them are gated
 // on `draft14` and vanish together on a row that did not compile it.
 // `the_context_types_stay_constructible_from_another_crate` names no
-// draft, so it, and the handful of imports it needs, stay on all fourteen
+// draft, so it, and the handful of imports it needs, stay on all
 // rows.
 #[cfg(feature = "draft14")]
 use std::sync::atomic::{AtomicUsize, Ordering};

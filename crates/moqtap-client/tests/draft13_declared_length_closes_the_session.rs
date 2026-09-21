@@ -19,7 +19,7 @@
 //!
 //! "Does not match" has two sides and they arrive as different failures. A
 //! Length larger than the fields leaves bytes unread; the codec has gated that
-//! on all fourteen drafts. A Length *smaller* than the fields makes
+//! on all the drafts. A Length *smaller* than the fields makes
 //! them run past the end of a buffer that cannot grow. Reported as
 //! `UnexpectedEnd` it would be invisible to every close table, which excludes
 //! the variant on purpose: everywhere else it means the message is still

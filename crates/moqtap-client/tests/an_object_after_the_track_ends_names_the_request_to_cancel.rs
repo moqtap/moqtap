@@ -1,4 +1,10 @@
-#![cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
+#![cfg(any(
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21"
+))]
 
 //! A track that carries on after its own final Object is given up, on the
 //! three drafts whose answer is a reset rather than a message.
@@ -636,3 +642,4 @@ cancel_gates!(draft17, "draft17", Draft17, "3.3.1");
 cancel_gates!(draft18, "draft18", Draft18, "3.3.2");
 cancel_gates!(draft19, "draft19", Draft19, "3.3.3");
 cancel_gates!(draft20, "draft20", Draft20, "3.3.3");
+cancel_gates!(draft21, "draft21", Draft21, "6.4.2.3");

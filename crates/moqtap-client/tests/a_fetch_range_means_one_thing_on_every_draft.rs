@@ -6,6 +6,7 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
+    feature = "draft21",
 ))]
 
 //! `AnyConnection::fetch` asks for the same three ranges on every draft it is
@@ -115,7 +116,7 @@ const INLINE_LOCATIONS: [(u64, u64, u64, u64); 3] = [(4, 0, 6, 10), (4, 0, 6, 0)
 /// Gated for the same reason as [`INLINE_LOCATIONS`], in the other direction:
 /// its readers only expand for draft-20, so a build without it — `draft14,draft19`,
 /// say — compiles a constant nothing can reach and fails under `-D warnings`.
-#[cfg(feature = "draft20")]
+#[cfg(any(feature = "draft20", feature = "draft21"))]
 const FILTER_VALUES: [&[u8]; 3] = [&[4, 0, 2, 9], &[4, 0, 2], &[4, 7, 0, 7]];
 
 fn namespace() -> TrackNamespace {
@@ -156,7 +157,13 @@ fn an_end_object_at_the_top_of_the_number_space_has_no_inline_encoding() {
     let err = range.inline_end_object().expect_err("the plus one overflows");
     assert!(err.to_string().contains("drafts 14"), "{err}");
     #[cfg(feature = "draft20")]
-    range.location_filter().expect("draft-20's end is the last Object, so this one is ordinary");
+    range
+        .location_filter_draft20()
+        .expect("draft-20's end is the last Object, so this one is ordinary");
+    #[cfg(feature = "draft21")]
+    range
+        .location_filter_draft21()
+        .expect("draft-21's end is the last Object, so this one is ordinary");
 }
 
 /// A range whose end Group is below its start has no draft-20 filter.
@@ -169,7 +176,20 @@ fn an_end_object_at_the_top_of_the_number_space_has_no_inline_encoding() {
 #[test]
 fn a_range_that_runs_backwards_has_no_draft20_filter() {
     let range = FetchRange::through_object(6, 0, 4, 9);
-    let err = range.location_filter().expect_err("an unsigned delta cannot count down");
+    let err = range.location_filter_draft20().expect_err("an unsigned delta cannot count down");
+    assert!(err.to_string().contains("backwards"), "{err}");
+}
+/// A range whose end Group is below its start has no draft-21 filter.
+///
+/// Section 3.3.1 encodes the end Group as `EndGroupDelta`, "delta encoded from
+/// StartGroup", and a delta is unsigned. Drafts 14 through 19 carry two
+/// absolute Groups and would put such a range on the wire for the publisher to
+/// answer with INVALID_RANGE; the difference is where it is refused.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_range_that_runs_backwards_has_no_draft21_filter() {
+    let range = FetchRange::through_object(6, 0, 4, 9);
+    let err = range.location_filter_draft21().expect_err("an unsigned delta cannot count down");
     assert!(err.to_string().contains("backwards"), "{err}");
 }
 
@@ -511,5 +531,25 @@ request_stream_gate!(
     },
     FILTER_VALUES.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
     "draft-20 Sections 5.1.2 and 10.13 make the filter's range inclusive: nothing adds one to \
+     the end, and a range that covers a whole Group has three fields rather than a fourth of 0"
+);
+request_stream_gate!(
+    draft21,
+    "draft21",
+    Draft21,
+    Vec<u8>,
+    |f| {
+        let filter = f
+            .parameters
+            .iter()
+            .find(|p| p.key.into_inner() == moqtap_codec::draft21::message::LOCATION_FILTER)
+            .expect("draft-21 carries the range in a LOCATION_FILTER and nowhere else");
+        match &filter.value {
+            moqtap_codec::kvp::KvpValue::Bytes(bytes) => bytes.clone(),
+            other => panic!("LOCATION_FILTER is length-prefixed, got {other:?}"),
+        }
+    },
+    FILTER_VALUES.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
+    "draft-21 Sections 3.3.1 and 9.11 make the filter's range inclusive: nothing adds one to \
      the end, and a range that covers a whole Group has three fields rather than a fourth of 0"
 );

@@ -12,7 +12,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 //! Every control message name this crate answers with, on every draft it
 //! implements, is checked against the shared vector corpus.
@@ -95,7 +96,7 @@ use test_vectors::{load_vectors, vectors_dir};
 
 /// Every draft this crate implements, with the corpus directory that holds its
 /// vectors.
-const DRAFTS: [(u8, &str); 14] = [
+const DRAFTS: [(u8, &str); 15] = [
     (7, "draft07"),
     (8, "draft08"),
     (9, "draft09"),
@@ -110,6 +111,7 @@ const DRAFTS: [(u8, &str); 14] = [
     (18, "draft18"),
     (19, "draft19"),
     (20, "draft20"),
+    (21, "draft21"),
 ];
 
 /// Highest id swept when reading a draft's names back out of this crate.
@@ -149,6 +151,7 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("draft18", "publish_ok", "request_ok"),
     ("draft19", "publish_ok", "request_ok"),
     ("draft20", "publish_ok", "request_ok"),
+    ("draft21", "publish_ok", "request_ok"),
 ];
 
 /// The `codec/messages` directory for one draft.
@@ -341,21 +344,27 @@ corpus_names_agree!(draft17_names_agree_with_the_corpus, "draft17", 17, "draft17
 corpus_names_agree!(draft18_names_agree_with_the_corpus, "draft18", 18, "draft18");
 corpus_names_agree!(draft19_names_agree_with_the_corpus, "draft19", 19, "draft19");
 corpus_names_agree!(draft20_names_agree_with_the_corpus, "draft20", 20, "draft20");
+corpus_names_agree!(draft21_names_agree_with_the_corpus, "draft21", 20, "draft21");
 
 /// The draft pairs whose whole name table coincides.
 ///
 /// A per-draft comparison catches an arm wired to the wrong draft only where the
 /// two drafts disagree about something, so which drafts agree completely is the
-/// measure of what the fourteen tests above cannot see. Drafts 08, 09 and 10
-/// assign exactly the same ids to exactly the same names, so those three arms
-/// are interchangeable as far as any corpus check can tell; every other pair in
-/// the range differs somewhere and is held apart by its own test.
+/// measure of what the tests above cannot see. Drafts 08, 09 and 10 assign
+/// exactly the same ids to exactly the same names, so those three arms are
+/// interchangeable as far as any corpus check can tell.
+///
+/// Drafts 20 and 21 are the second such group, and they are here for a
+/// different reason: draft-21 is draft-20 restructured, so the tables coincide
+/// because the drafts do. That pair is the claim, not a coincidence to be
+/// explained away — if it ever left this list, one of the two modules would
+/// have acquired a code point the other has not.
 ///
 /// Written down rather than derived, so a draft joining or leaving the run is a
 /// change to this list.
 ///
 /// Gated with the test that reads it: a build enabling some of the drafts can
-/// say nothing about which of the fourteen coincide.
+/// say nothing about which of them coincide.
 #[cfg(all(
     feature = "draft07",
     feature = "draft08",
@@ -372,7 +381,7 @@ corpus_names_agree!(draft20_names_agree_with_the_corpus, "draft20", 20, "draft20
     feature = "draft19",
     feature = "draft20"
 ))]
-const IDENTICAL_TABLES: [(u8, u8); 3] = [(8, 9), (8, 10), (9, 10)];
+const IDENTICAL_TABLES: [(u8, u8); 4] = [(8, 9), (8, 10), (9, 10), (20, 21)];
 
 #[cfg(all(
     feature = "draft07",

@@ -34,8 +34,8 @@
 //! produce — a draft whose whole corpus yields no status field at all.
 //!
 //! That last one is why [`test_vectors::statuses_in`] names two JSON keys. The
-//! corpus spells the field `object_status` in drafts 07-14 and on drafts 15-20's
-//! datagram headers, but `status` inside drafts 15-20's subgroup objects. A walk
+//! corpus spells the field `object_status` in drafts 07-14 and on drafts 15-21's
+//! datagram headers, but `status` inside drafts 15-21's subgroup objects. A walk
 //! that knew only the first name read none of those six drafts' subgroup
 //! objects and reported a clean sweep over vectors it had never opened.
 //!
@@ -91,7 +91,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod test_vectors;
@@ -233,6 +234,7 @@ corpus_sweep!(draft17_corpus_object_statuses, "draft17", draft17, "draft17");
 corpus_sweep!(draft18_corpus_object_statuses, "draft18", draft18, "draft18");
 corpus_sweep!(draft19_corpus_object_statuses, "draft19", draft19, "draft19");
 corpus_sweep!(draft20_corpus_object_statuses, "draft20", draft20, "draft20");
+corpus_sweep!(draft21_corpus_object_statuses, "draft21", draft21, "draft21");
 
 // ─────────────────────────────────────────────────────────────
 // Message vectors carrying a parameter their draft does not admit there
@@ -387,3 +389,4 @@ message_sweep!(draft17_message_vectors_decode, "draft17", draft17, "draft17");
 message_sweep!(draft18_message_vectors_decode, "draft18", draft18, "draft18");
 message_sweep!(draft19_message_vectors_decode, "draft19", draft19, "draft19");
 message_sweep!(draft20_message_vectors_decode, "draft20", draft20, "draft20");
+message_sweep!(draft21_message_vectors_decode, "draft21", draft21, "draft21");

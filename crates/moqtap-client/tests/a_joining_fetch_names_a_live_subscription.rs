@@ -469,7 +469,7 @@ macro_rules! joining_gates {
             /// ```
             ///
             /// Made by judging every fetch unjoinable, standalone ones included. It
-            /// reddens a hundred and forty-two tests across all twelve drafts that
+            /// reddens a hundred and forty-two tests across all the drafts that
             /// state the rule: a fetch that can never be answered is one no later gate
             /// can reach.
             #[test]

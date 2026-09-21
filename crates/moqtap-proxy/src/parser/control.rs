@@ -286,7 +286,7 @@ mod tests {
     /// A frame carrying a Message Type no draft assigns, with an honest
     /// zero length.
     ///
-    /// `0x3A` is unassigned on all fourteen drafts and is below `0x40`, so
+    /// `0x3A` is unassigned on all the drafts and is below `0x40`, so
     /// it is a single byte under RFC 9000's encoding and under MoQT's
     /// alike; the two-byte big-endian length is draft-11-and-later framing,
     /// which is what draft-19 uses. Nothing about it is malformed — the

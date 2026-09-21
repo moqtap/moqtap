@@ -237,7 +237,7 @@ fn subgroup_type_is_valid(raw: u64) -> bool {
 /// conditions on a `Type Flags` value *inside* it. Those values are not unknown
 /// — the registry pattern 0b0XX1XXXX assigns the space and the draft rules
 /// particular values out within it — but they are unreadable, and they are
-/// [`CodecError::InvalidTypeValue`], one arm per condition so a log names which.
+/// [`CodecError::InvalidStreamTypeValue`], one arm per condition so a log names which.
 ///
 /// Table 3 assigns four things, and two of them carry no Objects at all:
 /// FETCH_HEADER, the subgroup form, SETUP and PADDING. A subgroup reader handed
@@ -271,14 +271,14 @@ fn stream_type_error(raw: u64) -> CodecError {
     // Third condition first: it is the coarsest, and 128 or more can also set
     // the other two bits in ways that would misreport it.
     if raw >= 0x80 {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidStreamTypeValue {
             raw,
             detail: "SUBGROUP_HEADER Type Flags of 128 or greater are invalid",
         }
     } else if t & SUBGROUP_BASE_BIT == 0 {
-        CodecError::InvalidTypeValue { raw, detail: "bit 4 must be 1 for SUBGROUP_HEADER" }
+        CodecError::InvalidStreamTypeValue { raw, detail: "bit 4 must be 1 for SUBGROUP_HEADER" }
     } else {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidStreamTypeValue {
             raw,
             detail: "its SUBGROUP_ID_MODE is 0b11, which this draft reserves",
         }
@@ -846,17 +846,17 @@ fn datagram_type_error(raw: u64) -> CodecError {
     }
     let t = raw as u8;
     if t & DATAGRAM_RESERVED_BIT != 0 {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidDatagramTypeValue {
             raw,
             detail: "bit 4 (0x10) is reserved for a datagram and must be zero",
         }
     } else if t & DATAGRAM_STATUS_BIT != 0 && t & DATAGRAM_END_OF_GROUP_BIT != 0 {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidDatagramTypeValue {
             raw,
             detail: "it sets both the STATUS bit and the END_OF_GROUP bit",
         }
     } else {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidDatagramTypeValue {
             raw,
             detail: "it sets a bit whose meaning is not specified for a datagram",
         }

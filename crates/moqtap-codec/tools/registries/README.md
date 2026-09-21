@@ -79,7 +79,7 @@ Per draft, as committed:
 | parameter rows | 0 | 0 | 0 | 0 | 4 | 4 | 4 | 4 | 16 | 21 | 25 | 40 | 47 | 60 |
 
 `\*` is `prose-list`: bullets under the section that defines the field, no
-IANA registry. Drafts 19 and 20 are the only drafts of the fourteen with an
+IANA registry. Drafts 19 and 20 are the only drafts with an
 IANA table for Object Status, and the only ones with a `Payload` column.
 
 The three row counts are never added. 763 outcome rows, 55 object statuses and
@@ -138,7 +138,7 @@ document that degraded it is not available.
 
 ## What the tests do with these files
 
-- `tests/registry_conformance.rs` compares all fourteen drafts against the
+- `tests/registry_conformance.rs` compares all the drafts against the
   crate's own enums in both directions — a code point the draft assigns and the
   crate refuses, and one the crate accepts and the draft does not assign, are
   separate failures with separate messages — and compares names as well as code

@@ -39,7 +39,7 @@
 //!   trip, and that the legal direction — an empty block on a stream that
 //!   carries one — is not refused with it;
 //! * that the framing is now reachable from a header without naming its draft,
-//!   and that the answer agrees on all fourteen drafts with the writer that
+//!   and that the answer agrees on all the drafts with the writer that
 //!   already had it.
 
 #![cfg(all(feature = "draft11", feature = "draft12", feature = "draft13"))]
@@ -371,6 +371,7 @@ fn headers() -> Vec<(&'static str, AnySubgroupHeader, bool)> {
     typed!(draft18, Draft18, "draft-18");
     typed!(draft19, Draft19, "draft-19");
     typed!(draft20, Draft20, "draft-20");
+    typed!(draft21, Draft21, "draft-21");
 
     cases
 }
@@ -378,7 +379,7 @@ fn headers() -> Vec<(&'static str, AnySubgroupHeader, bool)> {
 /// The accessor answers what the header fixes, and the answer survives the
 /// wire.
 ///
-/// Twenty-four headers: fourteen drafts, both columns of the Extensions Present
+/// Twenty-four headers: drafts, both columns of the Extensions Present
 /// table on the ten drafts that have one. Encoding and re-decoding each header
 /// is what makes this a test of the type byte rather than of a struct field a
 /// caller happened to set.

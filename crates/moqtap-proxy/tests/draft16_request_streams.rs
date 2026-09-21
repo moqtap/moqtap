@@ -26,7 +26,7 @@
 //! where the two answers differ, which is why it needs a gate of its own: a
 //! proxy with a single predicate for whether the control plane is
 //! bidirectional and whether bidirectional streams carry requests is right on
-//! thirteen drafts and silently wrong here.
+//! drafts and silently wrong here.
 //!
 //! # Why the claims are about decoded messages
 //!

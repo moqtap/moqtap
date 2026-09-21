@@ -532,7 +532,7 @@ impl Default for QueueConfig {
 ///
 /// There is deliberately no `DropHead`. Dropping an *already queued* unit
 /// happens after the framer's positional cursor has moved past it, so the
-/// elide fix-up can no longer be armed — and on drafts 14-20 object IDs are
+/// elide fix-up can no longer be armed — and on drafts 14-21 object IDs are
 /// delta-encoded, so the result is not a gap but every successor decoding
 /// with a wrong absolute ID. [`Overflow::DropTail`] is sound for exactly
 /// the reason `DropHead` is not: it discards the *arriving* unit, at
@@ -551,7 +551,7 @@ pub enum Overflow {
     #[default]
     Block,
     /// Discard the *arriving* unit. Renumbers via the framer's own elide
-    /// fix-up, so absolute object IDs stay correct on drafts 14-20.
+    /// fix-up, so absolute object IDs stay correct on drafts 14-21.
     ///
     /// When an elide guard refuses the fix-up the unit is admitted anyway —
     /// the queue overshoots by one — and the refusal is reported. A shaper
@@ -572,7 +572,7 @@ pub enum Overflow {
 ///
 /// There is deliberately **no** `Drop` variant. An expiry is decided at
 /// release time, long after the framer's positional cursor has advanced
-/// past the object, so the elide fix-up cannot be armed; on drafts 14-20
+/// past the object, so the elide fix-up cannot be armed; on drafts 14-21
 /// that corrupts every successor's absolute ID. A variant that is
 /// constructible and always refused is worse than an absent one.
 ///

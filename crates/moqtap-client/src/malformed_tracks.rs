@@ -87,7 +87,7 @@ pub enum MalformedTrackCondition {
     /// It reaches drafts the condition beside it does not. Draft-16 made the
     /// Forwarding Preference a property of an Object rather than of a Track, so
     /// there is nothing on that draft for a mixed-framing record to contradict;
-    /// this condition is stated unchanged from draft-12 through draft-20 and
+    /// this condition is stated unchanged from draft-12 on and
     /// depends on nothing that moved.
     ObjectPastFinalObject,
 }

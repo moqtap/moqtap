@@ -31,7 +31,7 @@
 //!   selects the shape from how many fields the value holds, ranges are
 //!   inclusive, and an End Object is back.
 //!
-//! # Why the loopbacks are drafts 15 through 20 and not all fourteen
+//! # Why the loopbacks are drafts 15 through 20 and not all of them
 //!
 //! Deliberate, and it is about where a mistake survives compilation.
 //!
@@ -65,6 +65,7 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
+    feature = "draft21",
 ))]
 
 mod common;
@@ -95,7 +96,7 @@ const FILTER_KEY: u64 = 0x21;
 ///
 /// From Group 4 Object 0 with no end, and the same start through the whole of
 /// Group 6. The third range — one that ends *inside* a group — is asked for
-/// separately, because ten of the fourteen drafts cannot express it.
+/// separately, because ten of the drafts cannot express it.
 fn ranges() -> [SubscribeRange; 2] {
     [SubscribeRange::starting_at(4, 0), SubscribeRange::through_end_of_group(4, 0, 6)]
 }
@@ -205,20 +206,50 @@ fn the_end_group_travels_as_a_delta_from_the_start() {
 #[test]
 fn a_zero_start_with_no_end_has_no_draft20_filter() {
     let err = SubscribeRange::starting_at(0, 0)
-        .location_filter()
+        .location_filter_draft20()
         .expect_err("{0, 0} is Next Object on draft-20");
     assert!(err.to_string().contains("Next Object"), "{err}");
 
     assert_eq!(
         SubscribeRange::through_end_of_group(0, 0, 1)
-            .location_filter()
+            .location_filter_draft20()
             .expect("a range from {0,0} says what it means")
             .fields(),
         &[0, 0, 1]
     );
     assert_eq!(
         SubscribeRange::starting_at(0, 1)
-            .location_filter()
+            .location_filter_draft20()
+            .expect("any other start is unambiguous")
+            .fields(),
+        &[0, 1]
+    );
+}
+/// Draft-21 reads `{0, 0}` as the live edge where every earlier draft reads it
+/// as the beginning of the track, so the facade refuses it rather than sending
+/// one draft the opposite of what the other thirteen were sent.
+///
+/// The refusal is that one value with no end beside it and nothing else: the
+/// same start with an end is three fields and unambiguous, and any other start
+/// is unambiguous either way.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_zero_start_with_no_end_has_no_draft21_filter() {
+    let err = SubscribeRange::starting_at(0, 0)
+        .location_filter_draft21()
+        .expect_err("{0, 0} is Next Object on draft-21");
+    assert!(err.to_string().contains("Next Object"), "{err}");
+
+    assert_eq!(
+        SubscribeRange::through_end_of_group(0, 0, 1)
+            .location_filter_draft21()
+            .expect("a range from {0,0} says what it means")
+            .fields(),
+        &[0, 0, 1]
+    );
+    assert_eq!(
+        SubscribeRange::starting_at(0, 1)
+            .location_filter_draft21()
             .expect("any other start is unambiguous")
             .fields(),
         &[0, 1]
@@ -237,7 +268,12 @@ fn a_range_ending_inside_a_group_is_two_drafts_and_not_fourteen() {
     ends_inside_a_group().inline_end_location().expect("draft-07 carries an End Object");
     #[cfg(feature = "draft20")]
     assert_eq!(
-        ends_inside_a_group().location_filter().expect("draft-20 carries one too").fields(),
+        ends_inside_a_group().location_filter_draft20().expect("draft-20 carries one too").fields(),
+        &[4, 0, 2, 9]
+    );
+    #[cfg(feature = "draft21")]
+    assert_eq!(
+        ends_inside_a_group().location_filter_draft21().expect("draft-21 carries one too").fields(),
         &[4, 0, 2, 9]
     );
 }
@@ -587,7 +623,7 @@ const DELTA_END: [&[u8]; 2] = [&[0x03, 4, 0], &[0x04, 4, 0, 2]];
 /// `draft07,draft20` row enables the reader below: only the thirteen
 /// single-draft matrix rows that are not draft-20 see this one unread, which is
 /// why it is gated here rather than after a red build reported it.
-#[cfg(feature = "draft20")]
+#[cfg(any(feature = "draft20", feature = "draft21"))]
 const FIELD_COUNT: [&[u8]; 3] = [&[4, 0], &[4, 0, 2], &[4, 0, 2, 9]];
 
 request_stream_gate!(
@@ -621,5 +657,14 @@ request_stream_gate!(
     true,
     FIELD_COUNT,
     "draft-20 Section 5.1.2 reads the shape off the field count and its ranges are inclusive: \
+     no Filter Type, and an end Object of 9 rather than 10"
+);
+request_stream_gate!(
+    draft21,
+    "draft21",
+    Draft21,
+    true,
+    FIELD_COUNT,
+    "draft-21 Section 3.3.1 reads the shape off the field count and its ranges are inclusive: \
      no Filter Type, and an end Object of 9 rather than 10"
 );

@@ -230,7 +230,10 @@ fn assert_refusal(ty: u8, got: &CodecError, want: Refusal) {
         Refusal::Unknown => {
             matches!(got, CodecError::UnknownStreamType(_) | CodecError::UnknownDatagramType(_))
         }
-        Refusal::NamedInvalid => matches!(got, CodecError::InvalidTypeValue { .. }),
+        Refusal::NamedInvalid => matches!(
+            got,
+            CodecError::InvalidStreamTypeValue { .. } | CodecError::InvalidDatagramTypeValue { .. }
+        ),
         Refusal::NotThisReader => matches!(got, CodecError::InvalidField),
     };
     assert!(ok, "type {ty:#04x} was refused with {got:?}, which is not {want:?}");

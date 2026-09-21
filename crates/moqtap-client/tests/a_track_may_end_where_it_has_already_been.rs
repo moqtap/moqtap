@@ -6,7 +6,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 //! An object that says a track ended somewhere the track has already passed,
@@ -1224,3 +1225,4 @@ unidirectional_control_gates!(draft17, "draft17", Draft17, "10.2.1.1");
 unidirectional_control_gates!(draft18, "draft18", Draft18, "11.2.1.1");
 unidirectional_control_gates!(draft19, "draft19", Draft19, "11.2.1.1");
 unidirectional_control_gates!(draft20, "draft20", Draft20, "11.2.1.1");
+unidirectional_control_gates!(draft21, "draft21", Draft21, "11.1.2");

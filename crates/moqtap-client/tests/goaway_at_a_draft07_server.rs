@@ -10,7 +10,7 @@
 //! receives a GOAWAY with a non-zero New Session URI Length it MUST terminate
 //! the session with a Protocol Violation" - which every draft from 08 to 20
 //! carries and which is gated in `goaway_uri_at_a_server.rs`. Enumerated over
-//! the raw text of all fourteen drafts, "if it receives a GOAWAY message"
+//! the raw text of all the drafts, "if it receives a GOAWAY message"
 //! appears once, on draft-07, and "non-zero New Session URI Length" appears
 //! once on each of the other thirteen and not on draft-07.
 //!

@@ -13,6 +13,7 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
+    feature = "draft21",
 ))]
 
 //! `AnyConnection::fetch_joining` names a subscription and a starting point,
@@ -67,7 +68,7 @@
 //! and `0x2` only, so the *absolute* form has no encoding there; draft-11 is
 //! where the pair arrives.
 //!
-//! All five refusals have gates, and they are why this file spans fourteen
+//! All five refusals have gates, and they are why this file spans all the
 //! drafts rather than twelve. A refusal is the measurement on those drafts:
 //! **this is the entry point behind "one suite run per draft rather than one
 //! against the newest"**, because a relay speaking 14 and 20 can be asked this
@@ -109,7 +110,7 @@
 //! is not hypothetical: `just draft-pairs` runs `--features draft07,draft20`
 //! under `RUSTFLAGS="-D warnings"` precisely because it is the pair that
 //! exercises the dispatch path, and `just draft-matrix` compiles `draft07`
-//! alone and `draft20` alone as two of its fourteen rows.
+//! alone and `draft20` alone as two of its rows.
 //!
 //! The obvious repair is `#[cfg(any(feature = "draft08", …, feature =
 //! "draft19"))]` on each shared item. **It is not available here**, and the
@@ -134,7 +135,7 @@
 //! An `allow` has no second copy to fall out of step with, and it conceals
 //! nothing that matters: any build enabling one of the twelve drafts in the
 //! middle reads every item below, so the lints are live on twelve of the
-//! fourteen matrix rows and on the default all-drafts build that `just test`
+//! matrix rows and on the default all-drafts build that `just test`
 //! and `just clippy` run. What they cover is the build in which these items are
 //! *correctly* unread.
 
@@ -315,7 +316,7 @@ impl PeerStream {
     }
 }
 
-/// The setup exchange, in the three shapes the fourteen drafts give it.
+/// The setup exchange, in the three shapes the drafts give it.
 ///
 /// `a_fetch_stream_reads_back_through_the_facade`'s macro, and held for the same
 /// reason: dropping the peer's half of the control stream resets it, and the
@@ -847,6 +848,15 @@ no_joining_gate!(
     Vec::new(),
     "Section 10.13",
     "draft-20 deleted the joining mechanism"
+);
+no_joining_gate!(
+    draft21,
+    "draft21",
+    Draft21,
+    uni,
+    Vec::new(),
+    "Section 9.11",
+    "draft-21 deleted the joining mechanism"
 );
 
 // ── Drafts 08 through 10: one joining Fetch Type, and a flat FETCH ──────────

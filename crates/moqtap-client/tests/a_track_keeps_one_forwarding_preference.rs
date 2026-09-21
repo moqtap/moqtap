@@ -179,7 +179,7 @@ macro_rules! forwarding_preference_gate {
             /// A ceiling large enough that no refusal here can be the
             /// ceiling's, plus whatever else the draft insists on.
             fn setup_parameters() -> Vec<KeyValuePair> {
-                // Nothing to add on thirteen of the fourteen, and nothing that
+                // Nothing to add on all but one draft, and nothing that
                 // needs a second `Vec` on the one that does.
                 #[allow(unused_mut)]
                 let mut out = vec![KeyValuePair { key: v(0x02), value: KvpValue::Varint(v(100)) }];

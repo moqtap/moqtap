@@ -41,7 +41,7 @@
 //! merely that draft-19 works.
 //!
 //! That makes this file the place a change to draft-18 has to argue with. The
-//! conversion helpers this crate shares across drafts 07-20 make it easy to
+//! conversion helpers this crate shares across drafts 07-21 make it easy to
 //! give every draft one rule; doing so would move draft-19's registry into
 //! drafts that have no registry, and would fail here.
 
@@ -612,6 +612,8 @@ fn the_shared_writer_lets_a_normal_object_carry_a_payload() {
         DraftVersion::Draft19,
         #[cfg(feature = "draft20")]
         DraftVersion::Draft20,
+        #[cfg(feature = "draft21")]
+        DraftVersion::Draft21,
     ];
 
     for &draft in drafts {

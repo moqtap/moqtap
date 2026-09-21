@@ -9,6 +9,7 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
+    feature = "draft21",
 ))]
 
 //! `AnyConnection::publish_namespace` offers a namespace on every draft that
@@ -17,7 +18,7 @@
 //!
 //! # The type number never moved and everything else did
 //!
-//! The offer is message type `0x06` on all fourteen drafts and the withdrawal
+//! The offer is message type `0x06` on all the drafts and the withdrawal
 //! is `0x09` on every draft that has one. Nothing else about the pair held
 //! still:
 //!
@@ -625,3 +626,4 @@ request_stream_gate!(draft17, "draft17", Draft17);
 request_stream_gate!(draft18, "draft18", Draft18);
 request_stream_gate!(draft19, "draft19", Draft19);
 request_stream_gate!(draft20, "draft20", Draft20);
+request_stream_gate!(draft21, "draft21", Draft21);

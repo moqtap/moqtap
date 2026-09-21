@@ -33,7 +33,7 @@
 //!
 //! # The dispatch is shared; the answer is not
 //!
-//! The fourteen-armed, catch-all-free `match` this dispatch needs is
+//! The one-arm-per-draft, catch-all-free `match` this dispatch needs is
 //! `crate::draft_table::by_draft` — private, so not a link — and
 //! [`crate::message_names`] spells the
 //! same one. Only the dispatch is shared: this table takes a whole parameter,
@@ -81,8 +81,8 @@ use crate::kvp::KeyValuePair;
 //
 // An `allow` rather than a `cfg`, and the choice is forced rather than
 // preferred. Spelling the condition would mean writing
-// `any(feature = "draft07", ..., feature = "draft20")` — all fourteen — beside a
-// list of the same fourteen, with nothing holding the two level. That is the
+// `any(feature = "draft07", ..., feature = "draft20", feature = "draft21")` — every draft — beside a
+// list of the same drafts, with nothing holding the two level. That is the
 // drift `scripts/check-draft-parity.py` exists to catch and would not catch
 // here: a fifteenth draft added to the table and forgotten in the `cfg` compiles
 // clean and silently stops naming anything.
@@ -118,6 +118,7 @@ pub fn setup_option_name(draft: u8, param: &KeyValuePair) -> Option<String> {
         ("draft18", Draft18) => crate::draft18::fields::options_to_json(one),
         ("draft19", Draft19) => crate::draft19::fields::options_to_json(one),
         ("draft20", Draft20) => crate::draft20::fields::options_to_json(one),
+        ("draft21", Draft21) => crate::draft21::fields::options_to_json(one),
     };
     name_in(&rendered)
 }
@@ -158,7 +159,7 @@ fn name_in(rendered: &crate::fields::FieldValue) -> Option<String> {
 /// rather than being switched off whole because one is missing.
 ///
 /// The two negative claims — a codepoint nobody assigned, and a draft number
-/// outside 7..=20 — are left ungated because they are true under every feature
+/// outside 7..=21 — are left ungated because they are true under every feature
 /// set and no build can make them false. They are *vacuous* for a draft that
 /// was left out, since it answers `None` for every parameter; that is a
 /// weakening the all-drafts `cargo test --workspace` run in `just test` covers,
@@ -199,7 +200,7 @@ mod tests {
         assert_eq!(setup_option_name(11, &max).as_deref(), Some("max_request_id"));
         #[cfg(feature = "draft16")]
         assert_eq!(setup_option_name(16, &max).as_deref(), Some("max_request_id"));
-        for draft in 17..=20 {
+        for draft in 17..=21 {
             assert_eq!(setup_option_name(draft, &max), None, "draft-{draft} still names 0x02");
         }
     }
@@ -208,7 +209,7 @@ mod tests {
     #[test]
     fn an_unassigned_codepoint_is_named_by_nobody() {
         let odd = bytes(0x21, b"\x01\xff");
-        for draft in 7..=20 {
+        for draft in 7..=21 {
             assert_eq!(setup_option_name(draft, &odd), None, "draft-{draft} names 0x21");
         }
     }

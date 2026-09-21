@@ -1,5 +1,5 @@
 //! A subscription this endpoint withdrew still accepts the message that ends
-//! it, on all fourteen drafts.
+//! it, on all the drafts.
 //!
 //! # The bug this pins, and how it was found
 //!
@@ -226,3 +226,4 @@ withdrawal_gate!(draft17, "draft17", on_publish_done);
 withdrawal_gate!(draft18, "draft18", on_publish_done);
 withdrawal_gate!(draft19, "draft19", on_publish_done);
 withdrawal_gate!(draft20, "draft20", on_publish_done);
+withdrawal_gate!(draft21, "draft21", on_publish_done);

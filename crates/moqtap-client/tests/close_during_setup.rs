@@ -1,5 +1,5 @@
 //! A session that closes while the Setup exchange is still in progress, on all
-//! fourteen drafts.
+//! drafts.
 //!
 //! Every draft says the same thing in its Termination section: "The Transport
 //! Session can be terminated at any point." Eight of them then oblige an
@@ -15,7 +15,7 @@
 //! Setup exchange, so a state machine that cannot close there cannot carry out
 //! the close those drafts demand. A machine whose `on_close` accepts only
 //! `Active` and `Draining` cannot, and the arm that admits `SetupExchange` is
-//! one line in one place in each of the fourteen modules, which is why every
+//! one line in one place in each of the every draft's modules, which is why every
 //! draft is gated separately.
 //!
 //! # Draft-20 is here for the first sentence only
@@ -136,3 +136,4 @@ close_during_setup_gates!(draft17, "draft17", moqtap_client::draft17::session::r
 close_during_setup_gates!(draft18, "draft18", moqtap_client::draft18::session::request_id::Role);
 close_during_setup_gates!(draft19, "draft19", moqtap_client::draft19::session::request_id::Role);
 close_during_setup_gates!(draft20, "draft20", moqtap_client::draft20::session::request_id::Role);
+close_during_setup_gates!(draft21, "draft21", moqtap_client::draft21::session::request_id::Role);

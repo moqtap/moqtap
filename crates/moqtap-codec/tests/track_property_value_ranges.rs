@@ -56,7 +56,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 /// DEFAULT_PUBLISHER_GROUP_ORDER.
@@ -480,6 +481,26 @@ track_property_range_gate!(
     draft20,
     "draft20",
     draft20,
+    track_properties,
+    put_varint = fn put_varint(v: u64, out: &mut Vec<u8>) {
+        VarInt::from_u64_moqt(v).encode_moqt::<Moqt18>(out);
+    },
+    prelude = |payload: &mut Vec<u8>| {
+        put_varint(7, payload);
+        put_varint(0, payload);
+    },
+    shell = SubscribeOk {
+        track_alias: VarInt::from_u64(7).unwrap(),
+        parameters: Vec::new(),
+        track_properties: Vec::new(),
+    },
+    also_refused = &[]
+);
+#[cfg(feature = "draft21")]
+track_property_range_gate!(
+    draft21,
+    "draft21",
+    draft21,
     track_properties,
     put_varint = fn put_varint(v: u64, out: &mut Vec<u8>) {
         VarInt::from_u64_moqt(v).encode_moqt::<Moqt18>(out);

@@ -44,7 +44,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 use moqtap_codec::types::TrackNamespace;
 #[cfg(any(
@@ -57,7 +58,8 @@ use moqtap_codec::types::TrackNamespace;
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -72,7 +74,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 fn namespace(bytes: usize) -> TrackNamespace {
     TrackNamespace(vec![vec![b'n'; bytes]])
@@ -89,7 +92,8 @@ fn namespace(bytes: usize) -> TrackNamespace {
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 fn name(bytes: usize) -> Vec<u8> {
     vec![b't'; bytes]
@@ -105,7 +109,8 @@ fn name(bytes: usize) -> Vec<u8> {
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 fn v(n: u64) -> VarInt {
     VarInt::from_u64(n).expect("fixture value fits a varint")
@@ -1204,6 +1209,131 @@ mod draft20 {
             // Draft-20's FETCH holds the namespace and the name inline rather
             // than inside a Standalone Fetch, and has no Fetch Type and no
             // inline range (Section 10.13). Same two fields, same cap, one
+            // level shallower.
+            (
+                "FETCH",
+                ControlMessage::Fetch(Fetch {
+                    request_id: v(0),
+                    track_namespace: ns.clone(),
+                    track_name: tn.clone(),
+                    parameters: vec![],
+                }),
+            ),
+            (
+                "PUBLISH",
+                ControlMessage::Publish(Publish {
+                    request_id: v(0),
+                    track_namespace: ns.clone(),
+                    track_name: tn.clone(),
+                    track_alias: v(1),
+                    parameters: vec![],
+                    track_properties: vec![],
+                }),
+            ),
+            (
+                "PUBLISH_SKIPPED",
+                ControlMessage::PublishSkipped(PublishSkipped {
+                    namespace_suffix: ns.clone(),
+                    track_name: tn.clone(),
+                }),
+            ),
+            (
+                "REQUEST_ERROR",
+                ControlMessage::RequestError(RequestError {
+                    // The Redirect body is written only under the code that defines it,
+                    // so any other code would encode a message with no Full Track Name
+                    // in it at all and the case would measure nothing.
+                    error_code: v(0x34),
+                    retry_interval: v(0),
+                    reason_phrase: b"go elsewhere".to_vec(),
+                    redirect: Some(Redirect {
+                        connect_uri: Vec::new(),
+                        track_namespace: ns.clone(),
+                        track_name: tn.clone(),
+                    }),
+                }),
+            ),
+        ]
+    }
+
+    /// One byte over the cap is refused, on every message that carries a name.
+    ///
+    /// Ablation: removing the `check_full_track_name` call from any one arm of
+    /// this draft's `encode_payload` fails with that arm's name, as
+    ///
+    /// ```text
+    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
+    /// ```
+    #[test]
+    fn a_full_track_name_one_byte_over_the_cap_is_refused() {
+        for (label, msg) in messages(namespace(4000), name(97)) {
+            let mut wire = Vec::new();
+            let result = msg.encode(&mut wire);
+            assert!(
+                matches!(result, Err(CodecError::TrackNameTooLong)),
+                "{label}: a 4,097-byte Full Track Name must be refused, got {result:?}",
+            );
+            assert!(
+                wire.is_empty(),
+                "{label}: a refused message must leave the caller's buffer alone, \
+                 and it wrote {} bytes",
+                wire.len(),
+            );
+        }
+    }
+
+    /// One byte under is written, on every one of them.
+    ///
+    /// Without this the gate above would pass against a codec that refused
+    /// every namespace of any size, which is a different rule and a worse one.
+    #[test]
+    fn a_full_track_name_at_the_cap_is_written() {
+        for (label, msg) in messages(namespace(4000), name(96)) {
+            let mut wire = Vec::new();
+            msg.encode(&mut wire)
+                .unwrap_or_else(|e| panic!("{label}: 4,096 bytes is within the cap: {e:?}"));
+            assert!(!wire.is_empty(), "{label}: an accepted message must write something");
+        }
+    }
+}
+#[cfg(feature = "draft21")]
+mod draft21 {
+    use super::{name, namespace, v};
+    use moqtap_codec::draft21::message::{
+        ControlMessage, Fetch, Publish, PublishSkipped, Redirect, RequestError, Subscribe,
+        TrackStatus,
+    };
+    use moqtap_codec::error::CodecError;
+    use moqtap_codec::types::TrackNamespace;
+
+    /// Every message this draft gives a Full Track Name, built around one.
+    ///
+    /// The namespace carries 4,000 bytes and the name carries the rest, so the
+    /// two lengths together are what crosses the cap - which is what the drafts
+    /// define, rather than a bound on either field alone.
+    fn messages(ns: TrackNamespace, tn: Vec<u8>) -> Vec<(&'static str, ControlMessage)> {
+        vec![
+            (
+                "SUBSCRIBE",
+                ControlMessage::Subscribe(Subscribe {
+                    request_id: v(0),
+                    track_namespace: ns.clone(),
+                    track_name: tn.clone(),
+                    parameters: vec![],
+                }),
+            ),
+            (
+                "TRACK_STATUS",
+                ControlMessage::TrackStatus(TrackStatus {
+                    request_id: v(0),
+                    track_namespace: ns.clone(),
+                    track_name: tn.clone(),
+                    parameters: vec![],
+                }),
+            ),
+            // Draft-21's FETCH holds the namespace and the name inline rather
+            // than inside a Standalone Fetch, and has no Fetch Type and no
+            // inline range (Section 9.11). Same two fields, same cap, one
             // level shallower.
             (
                 "FETCH",

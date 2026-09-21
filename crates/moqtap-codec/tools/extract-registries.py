@@ -168,7 +168,7 @@ a given draft, so the spread between them is reproducible rather than asserted.
 WHICH TABLES ARE REGISTRIES
 ================================================================================
 
-The registry set is not stable across the fourteen drafts, in two ways.
+The registry set is not stable across the drafts, in two ways.
 
 Location. Drafts 07-13 have no IANA registry for these codes at all. Draft 07's
 IANA Considerations section is literally a TODO list of registries that do not
@@ -178,7 +178,7 @@ in the Termination section of the session chapter, per-message error codes under
 each ``*_ERROR`` message, status codes under ``SUBSCRIBE_DONE``, stream reset
 codes under "Closing Subgroup Streams". Drafts 14-20 collect them into an IANA
 "Error Codes" section with one subsection per registry. A tool that looks under
-IANA Considerations finds nothing for seven of the fourteen drafts and reports a
+IANA Considerations finds nothing for seven of the drafts and reports a
 clean, confident, empty result for the entire early cohort.
 
 Membership. The set of registries also changes: draft 07 has three, draft 12 has
@@ -262,8 +262,7 @@ Two things about Object Status put it outside (C):
     as a table. In drafts 07 through 18 the same code points are assigned by a
     run of bullets under an "Object Status" heading, one bullet per code
     (``0x0 := Normal object. ...``), and there is no IANA registry for them at
-    all. A ``<tr>``-anchored definition scores zero on twelve of the fourteen
-    drafts.
+    all. A ``<tr>``-anchored definition scores zero on twelve of the drafts.
 
 So the extension is:
 

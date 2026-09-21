@@ -23,7 +23,7 @@
 //! direct assertion on the engine's offset arithmetic.
 //!
 //! Every fixture here opens with the datagram's own type field, on all
-//! fourteen drafts. That was not always true: drafts 07-13 model the type
+//! drafts. That was not always true: drafts 07-13 model the type
 //! separately from `DatagramHeader`, and for a while nothing between the
 //! fixtures and the client wrote it, so the whole family put headerless
 //! datagrams on the wire and read a peer's type octet as the first byte of
@@ -84,7 +84,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod common;
@@ -108,7 +109,7 @@ use moqtap_proxy::observer::{NoOpProxyObserver, ProxyObserver};
 
 use common::{FakeRelay, RecordingObserver};
 
-/// Every draft whose datagram header delimits its payload — all fourteen
+/// Every draft whose datagram header delimits its payload — all of them
 /// except draft-14, whose header decode swallows it.
 const DELIMITED: &[DraftVersion] = &[
     #[cfg(feature = "draft07")]
@@ -137,6 +138,8 @@ const DELIMITED: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// Every draft this build compiled, delimited or not.
@@ -177,9 +180,11 @@ const COMPILED: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
-/// Drafts 15-20, whose datagram type carries a status flag at bit 5 and,
+/// Drafts 15-21, whose datagram type carries a status flag at bit 5 and,
 /// when it is set, ends the header with a status field and no payload.
 ///
 /// Draft-14 is left out although it has the same flag: its header decode
@@ -199,6 +204,8 @@ const STATUS_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// The draft the single-session tests below run on: whichever this build
@@ -312,7 +319,8 @@ fn datagram_header(draft: DraftVersion, payload_len: usize) -> Vec<u8> {
         | DraftVersion::Draft17
         | DraftVersion::Draft18
         | DraftVersion::Draft19
-        | DraftVersion::Draft20 => {
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21 => {
             h.push(0x00);
             varint(TRACK_ALIAS, &mut h);
             varint(GROUP_ID, &mut h);
@@ -445,7 +453,8 @@ fn the_hand_built_fixtures_decode_on_every_draft() {
                 feature = "draft16",
                 feature = "draft17",
                 feature = "draft18",
-                feature = "draft20"
+                feature = "draft20",
+                feature = "draft21"
             ))]
             other => panic!("expected a draft-19 header, got {other:?}"),
         }

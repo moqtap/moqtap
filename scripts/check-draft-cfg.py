@@ -37,13 +37,13 @@ three in `draft11` through `draft13` that never gained `draft20`.
 drafts, one of them missing from the list, and the CI sweep compiles one draft
 at a time. The two-draft row it runs is `draft07,draft20`, and `draft07` is the
 first entry of every defective list. Adding rows does not scale either: there
-are 91 pairs of fourteen drafts and the defect can hide in any of them. So this
+are 91 pairs of drafts and the defect can hide in any of them. So this
 script read the lists instead — it compiles nothing, needs no toolchain, and
 covered every pair at once.
 
 The forty-one lists in `moqtap-client/src/draftNN/connection.rs` have since
 been replaced by the `#[allow(unreachable_patterns)]` form, which is total
-under all 2^14 feature sets and needs no edit when a draft is added. **That
+under every feature set and needs no edit when a draft is added. **That
 conversion also deleted a signal**, and rule 2 below is what replaces it: the
 old list, wrong as it usually was, at least had to be looked at once per draft.
 The new form never has to be looked at at all, which is the point and also the
@@ -58,19 +58,28 @@ Every `#[cfg(any(...))]` under `crates/` whose condition is **only**
 another crate feature, a `not(...)` — is a different thing and is left alone.
 
 The owning draft comes from the path when there is one: a file under
-`src/draftNN/` rejects the other thirteen, and which thirteen is not a guess.
+`src/draftNN/` rejects every other draft, and which ones is not a guess.
 
 **A draft-neutral file can hold one too**, and one did: a `moqtap-proxy` test
 asserts a draft-19 header inside a `#[cfg(feature = "draft19")]` block and
 rejects the rest with the same kind of arm, whose list ran to draft-18. The path
-says nothing there, so the count does. A complete rejection list names thirteen
-of the fourteen drafts; a list naming **twelve** is a rejection list with a
-draft missing, because no deliberate subset stops one short of all-but-one. The
-workspace bears that out — of the lists naming eleven or more, the elevens are a
-real feature boundary (the authorization token, which exists from draft-10), the
-fourteens are "any draft at all", the thirteens are rejection lists, and the
-only twelve was the defect. So twelve is reported wherever it appears, and the
-message names both omissions rather than guessing which was the owner.
+says nothing there, so the count does. A complete rejection list names all but
+one draft; a list naming all but **two** is a rejection list with a draft
+missing, because a deliberate subset rarely stops one short of all-but-one. The
+workspace bore that out at drafts — of the lists naming eleven or more,
+the elevens were a real feature boundary (the authorization token, which exists
+from draft-10), the fourteens "any draft at all", the thirteens rejection lists,
+and the only twelve was the defect. So all-but-two is reported wherever it
+appears, and the message names both omissions rather than guessing which was the
+owner.
+
+**Draft-21 found the one counter-example, and it is a marker rather than a
+floor.** `tests/requested_range_order.rs` names drafts 07 through 19 — every
+draft whose FETCH still carries an inline range to move — which was all-but-one
+until draft-21 landed beside draft-20 and made it all-but-two. Nothing is wrong with the list and draft-21 cannot be added to
+it. A file in that position says so in its own text, with `NOT_A_REJECTION_LIST`
+beside the lists it excuses, so the exemption moves and dies with them instead
+of ageing in a table here; every one honoured is printed on every run.
 
 **A crate that holds none of these is said so out loud.** Reporting `checked 0`
 and passing is how a gate goes blind when the construct it watches is renamed
@@ -161,10 +170,18 @@ def implemented_drafts() -> list[str]:
     return sorted(found)
 
 
+#: What a draft-neutral file writes to say its `cfg` draft lists are a
+#: feature boundary and not a rejection list, so the count must not be read
+#: as one. Written next to the lists, with the reason, and reported here on
+#: every run.
+NOT_A_REJECTION_LIST = "check-draft-cfg: a feature boundary, not a rejection list"
+
+
 def rule_1_cfg_lists(all_drafts: list[str]) -> tuple[dict[str, int], list[str]]:
     """The surviving `cfg` rejection lists, per crate."""
     per_crate: dict[str, int] = {c.name: 0 for c in sorted(CRATES.iterdir()) if c.is_dir()}
     failures: list[str] = []
+    exempt: list[str] = []
 
     for path in sorted(CRATES.glob("**/*.rs")):
         if "target" in path.parts:
@@ -211,6 +228,9 @@ def rule_1_cfg_lists(all_drafts: list[str]) -> tuple[dict[str, int], list[str]]:
             if len(named) == len(all_drafts) - 1:
                 per_crate[crate] += 1
             elif len(named) == len(all_drafts) - 2:
+                if NOT_A_REJECTION_LIST in text:
+                    exempt.append(where)
+                    continue
                 per_crate[crate] += 1
                 missing = [d for d in all_drafts if d not in named]
                 failures.append(
@@ -221,6 +241,8 @@ def rule_1_cfg_lists(all_drafts: list[str]) -> tuple[dict[str, int], list[str]]:
                     f"match non-exhaustive"
                 )
 
+    for where in exempt:
+        print(f"  exempt: {where} says it is a feature boundary")
     return per_crate, failures
 
 

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-21
+
+### Added
+
+- **`draft21`**, a feature, in `all-drafts`, forwarded to `moqtap-codec` and `moqtap-client`. Every capability predicate, framer rule and session check that answered for draft-20 answers the same for draft-21, because the two drafts put the same bytes on the wire.
+
+### Changed
+
+- **Breaking.** `DraftVersion` gains `Draft21` (see `moqtap-codec`), which stops a downstream `match` over its variants compiling. `DEFAULT_DRAFT_ORDER` takes draft-21 ahead of draft-20, after draft-14: the order is draft-14 first and the newest draft downwards.
+- Requires `moqtap-codec` and `moqtap-client` 0.7.0, both breaking in this cycle.
+
 ## [0.6.0] - 2026-09-20
 
 No public item was added, removed or renamed. The number moves because `moqtap-codec` and `moqtap-client` both carry breaking changes this cycle and this crate's published manifest requires them, and because the change below is breaking for anyone reading profiles through the `serde` feature.
@@ -21,351 +32,102 @@ No public item was added, removed or renamed. The number moves because `moqtap-c
 
 ## [0.5.0] - 2026-09-03
 
-Draft-20 support. Additive at this crate's own API — nothing public was removed
-and no signature moved — but `moqtap_codec::version::DraftVersion` gained a
-variant and is not `#[non_exhaustive]`, so a downstream `match` enumerating its
-variants stops compiling.
-
-Draft-20 is not a default anywhere. `capability::DEFAULT_DRAFT` is still
-draft-14 on any build that compiled it, exactly as before.
-
 ### Added
 
-- **`draft20`**, a feature forwarding to both `moqtap-client/draft20` and
-  `moqtap-codec/draft20`. Included in `all-drafts`.
-- Draft-20 is advertised in the listener's ALPN list (`moqt-20`), admitted by
-  `session`'s draft check, framed by `ObjectFramer`, and answered by every
-  column of the capability table. Its data plane is draft-19's: Section 11.4.2
-  renamed the header's leading field from `Type` to `Type Flags` and changed
-  none of its bits, so the subgroup stream types, the SUBGROUP_ID_MODE values,
-  the Object ID delta encoding and the fetch Serialization Flags are all the
-  ones drafts 18 and 19 use.
-
-### Fixed
-
-- **A draft-20 client could not complete a TLS handshake against the proxy.**
-  `listener::advertised_alpns` builds its list from a hardcoded array of
-  drafts rather than from `DraftVersion` itself — the doc comment beside it
-  claimed the opposite — so `moqt-20` was never offered and the handshake
-  failed with "peer doesn't support any known protocol" before any MoQT frame
-  was written. The same shape will recur on draft-21; the array is the thing to
-  add to.
-- **`--features draft19,draft20 --all-targets` did not compile.**
-  `tests/actions_datagrams.rs` rejects every non-draft-19 `AnyDatagramHeader`
-  with a wildcard arm under a `cfg(any(feature = "draftNN", ...))` that has to
-  name every other draft, and the list ran to draft-18. Only a build enabling
-  both draft-19 and draft-20 could see it. `scripts/check-draft-cfg.py` reads
-  every such list in the workspace and refuses one that is short; CI gained a
-  `draft19,draft20` row.
+- **`draft20`**, a feature forwarding to both `moqtap-client/draft20` and `moqtap-codec/draft20` and included in `all-drafts`. Draft-20 is advertised in the listener's ALPN list (`moqt-20`), admitted by `session`'s draft check, framed by `ObjectFramer`, and answered by every column of the capability table. Its data plane is draft-19's: Section 11.4.2 renamed the header's leading field from `Type` to `Type Flags` and changed none of its bits, so the subgroup stream types, the SUBGROUP_ID_MODE values, the Object ID delta encoding and the fetch Serialization Flags are all the ones drafts 18 and 19 use. Draft-20 is not a default anywhere: `capability::DEFAULT_DRAFT` is still draft-14 on any build that compiled it, exactly as before.
 
 ### Changed
 
-- `capability::fetch_group_order_is_needed`, `has_implicit_subgroup_id_mode`
-  and `subgroup_id_mode_must_be_consulted` include draft-20, as do the framer's
-  `delta_encodes_object_ids`, `elide_owes_a_fixup` and `measuring_pad`, and
-  `session`'s `control_plane_is_unidirectional` and
-  `bidi_streams_carry_requests`. Every one of these was a list ending at
-  draft-19, and every one of them answers the same for draft-20.
-- `session`'s datagram status probe gained its draft-20 arm. The match ends in
-  a `_ => false`, so a draft-20 status datagram was reported as an ordinary
-  payload datagram rather than refused.
-- **The thirteen `matches!(draft, ...)` per-draft predicates are exhaustive
-  `match`es.** `capability::fetch_group_order_is_needed`,
-  `has_implicit_subgroup_id_mode` and `subgroup_id_mode_must_be_consulted`;
-  `exec::stream_reset_code_defined` and both arms of
-  `elide_renumbers_successor`; the framer's `delta_encodes_object_ids`,
-  `elide_owes_a_fixup` and both arms of `measuring_pad`; and `session`'s
-  `stream_reset_code_defined`, `control_plane_is_unidirectional` and
-  `bidi_streams_carry_requests`. Every answer is unchanged. What changes is
-  what happens to draft-21: a `matches!` desugars to `_ => false`, so it
-  answered for a draft nobody had read, and the answers it gave were things
-  like "this fetch stream needs no Group Order", "eliding this object costs
-  the next one nothing" and "this draft's control plane is bidirectional" —
-  each of which forwards a stream wrongly rather than refusing it. They are
-  now compile errors until someone reads the draft. Two of the thirteen were
-  `!matches!(..)` and leaned the other way, granting a stream-reset error-code
-  vocabulary to a draft that may not define one; those are written out too.
-  `has_implicit_subgroup_id_mode` keeps its independent-restatement discipline
-  beside the new exhaustiveness: restatement catches a *wrong* answer about a
-  draft that is named, exhaustiveness catches a *missing* one.
-- `framer::measuring_pad`'s fetch arm states the drafts that copy as well as
-  the one that does not. Only draft-14 measures a fetch object without a copy;
-  drafts 15 through 20 read the frame through
-  `FetchObjectReader::read_object_header`, which materialises its properties,
-  so they keep the bounded pad. That was already the behaviour — the arm read
-  `matches!(self.draft, DraftVersion::Draft14)` — but it was true by omission,
-  and the doc comment above it still said "drafts 14-19" of the subgroup arm
-  that had gained draft-20.
+- **Breaking.** `moqtap_codec::version::DraftVersion` gained a variant and is not `#[non_exhaustive]`, so a downstream `match` enumerating its variants stops compiling. This crate's own API is additive: nothing public was removed and no signature moved.
+- `capability::fetch_group_order_is_needed`, `has_implicit_subgroup_id_mode` and `subgroup_id_mode_must_be_consulted` include draft-20, as do the framer's `delta_encodes_object_ids`, `elide_owes_a_fixup` and `measuring_pad`, and `session`'s `control_plane_is_unidirectional` and `bidi_streams_carry_requests`. Every one of these was a list ending at draft-19, and every one of them answers the same for draft-20.
+- `session`'s datagram status probe gained its draft-20 arm. The match ends in a `_ => false`, so a draft-20 status datagram was reported as an ordinary payload datagram rather than refused.
+- **The thirteen `matches!(draft, ...)` per-draft predicates are exhaustive `match`es** — `capability::fetch_group_order_is_needed`, `has_implicit_subgroup_id_mode` and `subgroup_id_mode_must_be_consulted`; `exec::stream_reset_code_defined` and both arms of `elide_renumbers_successor`; the framer's `delta_encodes_object_ids`, `elide_owes_a_fixup` and both arms of `measuring_pad`; and `session`'s `stream_reset_code_defined`, `control_plane_is_unidirectional` and `bidi_streams_carry_requests` — with every answer unchanged. What changes is what happens to draft-21: a `matches!` desugars to `_ => false`, so it answered for a draft nobody had read, and the answers it gave were things like "this fetch stream needs no Group Order", "eliding this object costs the next one nothing" and "this draft's control plane is bidirectional" — each of which forwards a stream wrongly rather than refusing it. They are now compile errors until someone reads the draft. Two of the thirteen were `!matches!(..)` and leaned the other way, granting a stream-reset error-code vocabulary to a draft that may not define one; those are written out too. `has_implicit_subgroup_id_mode` keeps its independent-restatement discipline beside the new exhaustiveness: restatement catches a *wrong* answer about a draft that is named, exhaustiveness catches a *missing* one.
+- `framer::measuring_pad`'s fetch arm states the drafts that copy as well as the one that does not. Only draft-14 measures a fetch object without a copy; drafts 15 through 20 read the frame through `FetchObjectReader::read_object_header`, which materialises its properties, so they keep the bounded pad. That was already the behaviour — the arm read `matches!(self.draft, DraftVersion::Draft14)` — but it was true by omission, and the doc comment above it still said "drafts 14-19" of the subgroup arm that had gained draft-20.
+
+### Fixed
+
+- **A draft-20 client could not complete a TLS handshake against the proxy.** `listener::advertised_alpns` builds its list from a hardcoded array of drafts rather than from `DraftVersion` itself — the doc comment beside it claimed the opposite — so `moqt-20` was never offered and the handshake failed with "peer doesn't support any known protocol" before any MoQT frame was written. The same shape will recur on draft-21; the array is the thing to add to.
+- **`--features draft19,draft20 --all-targets` did not compile.** `tests/actions_datagrams.rs` rejects every non-draft-19 `AnyDatagramHeader` with a wildcard arm under a `cfg(any(feature = "draftNN", ...))` that has to name every other draft, and the list ran to draft-18, so only a build enabling both draft-19 and draft-20 could see it. `scripts/check-draft-cfg.py` reads every such list in the workspace and refuses one that is short; CI gained a `draft19,draft20` row.
 
 ### Fixed (test-only)
 
-- **`shape::matcher`'s draft sweep was skipping draft-20.** Its
-  `const DRAFTS` was `[DraftVersion; 13]` ending at `Draft19` under a doc
-  comment reading "All fourteen, so a claim about 'every draft' is one rather
-  than a sample". The three unit tests that iterate it —
-  `naming_a_stream_kind_never_makes_a_rule_unmatchable` among them — therefore
-  made a thirteen-draft claim while asserting a fourteen-draft one. A short
-  array is not a failing test, it is a smaller one, which is why nothing said
-  so. `capability.rs` and `exec.rs` hold `[DraftVersion; 14]` and were
-  correct.
+- **`shape::matcher`'s draft sweep was skipping draft-20.** Its `const DRAFTS` was `[DraftVersion; 13]` ending at `Draft19` under a doc comment reading "All fourteen, so a claim about 'every draft' is one rather than a sample", so the three unit tests that iterate it — `naming_a_stream_kind_never_makes_a_rule_unmatchable` among them — made a thirteen-draft claim while asserting a fourteen-draft one. A short array is not a failing test, it is a smaller one, which is why nothing said so. `capability.rs` and `exec.rs` hold `[DraftVersion; 14]` and were correct.
 
 ## [0.4.1] - 2026-09-02
 
-Documentation only. No behaviour change, no API change, and no value this
-crate emits is different.
-
 ### Changed
 
-- Module and item prose across the crate now describes callers and runs in the
-  vocabulary of the types it documents.
-- Two doc pointers were wrong rather than merely stale. `shape::Matcher`
-  attributed the kebab-case spelling of its `side` field to a mapping in a
-  module that is not part of this crate, when it is `side_serde` a few hundred
-  lines below it. `tests/leaf_type_paths.rs` justified its exhaustive
-  `ProxySide` match by describing a particular downstream consumer rather than
-  the property it actually pins, which is that the enum is not
-  `#[non_exhaustive]` and so any downstream match without a wildcard arm breaks
-  on a fifth variant.
+- Module and item prose across the crate now describes callers and runs in the vocabulary of the types it documents. Documentation only: no behaviour change, no API change, and no value this crate emits is different.
+- Two doc pointers were wrong rather than merely stale. `shape::Matcher` attributed the kebab-case spelling of its `side` field to a mapping in a module that is not part of this crate, when it is `side_serde` a few hundred lines below it. `tests/leaf_type_paths.rs` justified its exhaustive `ProxySide` match by describing a particular downstream consumer rather than the property it actually pins, which is that the enum is not `#[non_exhaustive]` and so any downstream match without a wildcard arm breaks on a fifth variant.
 
 ## [0.4.0] - 2026-08-31
 
-The release that turns an inspecting proxy into an acting one. 0.3.0 could
-watch a session and report what it saw; this version frames objects
-individually on all thirteen drafts, hands each one to a hook that returns a
-decision, paces media egress from a shaping profile, sets QUIC transport
-parameters per leg, and carries a datagram impairment underneath both. Drafts
-17, 18 and 19 also gain the stream topology those drafts specify — a control
-plane on a pair of unidirectional streams, with each request on a bidirectional
-stream of its own — so a session against a conforming peer on those drafts
-completes for the first time.
-
-Under Cargo's 0.x rules the minor position is the major position, so this is
-0.4.0 rather than 0.3.1: `ProxySessionConfig` and `ListenerConfig` gained
-required fields and `StreamCtx::new` a seventh argument, and `^0.3.0` will not
-resolve a patch away from a consumer.
-
 ### Added
 
-- **Hook v2 — six methods, each returning a decision rather than performing
-  one.** `on_control_message`, `on_stream_open`, `on_stream_header`,
-  `on_object`, `on_datagram` and `on_stream_end`. Every one is defaulted, so a
-  hook implements only what it cares about, and all six are synchronous and
-  return data: a hook can never stall a read loop by awaiting inside one.
-  `hook::LegacyProxyHook` adapts a 0.3.x hook unchanged.
-- **`action::Interest`, sampled once at session start.** It decides how much of
-  the session is parsed at all. `Interest::NONE` leaves the forwarding path a
-  byte pump with no framer armed, which is what makes "this hook cost nothing"
-  a measurable claim rather than a promise — a session that declared no
-  interest ends with an all-zero `Counters`.
-- **Nine actions and four stream-open decisions.** `Action::{Pass, Delay, Hold,
-  Drop, Truncate, ResetStream, CloseSession, Replace, ReplacePayload}`, and
-  `StreamAction::{Open, Reject, OpenAfter, SerializeAfter}`. `Delay` resolves
-  below a millisecond on every platform, Windows included.
-- **`capability`, a queryable table of what each draft and each site can
-  express, and why not.** `Capabilities::for_draft`, `Support`, `Refusal`,
-  `Instead`, `supports_matcher`. `tests/action_matrix.rs` asserts the table
-  against observed behaviour on all thirteen drafts, so it cannot drift into a
-  documented lie about the engine. Every refusal is reported as
-  `ProxyEvent::ActionRefused` with the reason, never dropped in silence.
-- **`framer::ObjectFramer` frames a unidirectional data stream into
-  individually addressable objects on every draft 07-19**, preserving stream
-  boundaries and extension bytes. `ProxyEvent::Object` reports each one as an
-  `ObjectMeta`; a stream the framer cannot follow emits one
-  `FramerOut::Bypassed` with a `BypassReason` rather than going quiet, which is
-  what lets a reader tell "nothing matched" from "nothing was looked at".
-- **Egress shaping.** `ShapeProfile` is token buckets plus ordered class rules
-  plus a queue policy plus an arbitration discipline; `Matcher` is the AND of
-  eight keys, where an absent key never matches. `ShapeProfile::try_new` is the
-  only constructor and refuses seven configurations that would otherwise arm
-  and do nothing — among them a class naming a bucket that does not exist, and
-  a matcher naming a key that can never claim a unit. A configured `rate_bps`
-  is enforced on the wire.
-- **Shaping statistics, three ways.** `ShapeStats` reports one row per
-  configured class plus a default row, an unshapeable row and the session
-  totals; a class that saw nothing reports a zero row and never an absent one.
-  Every session total appears flat and again under `uplink` and `downlink`,
-  with the flat figure defined as the sum of the two, so the views cannot
-  disagree.
-- **`control::ProxyControl` reconfigures a proxy that is already running** —
-  `set_transport`, `set_shape`, `set_shaper_enabled`, `set_impair`,
-  `clear_impair`, `close_session`, `reset_stream` and `inject_control`, with
-  `sessions`, `stats`, `reset_stats` and `local_addr` to read back what it did.
-- **`transport::TransportProfile`, per leg.** Windows, idle timeout, keep-alive,
-  loss-detection thresholds, congestion controller, MTU discovery, datagram
-  buffers, both stream ceilings and the persistent-congestion threshold. Each
-  field is an `Option` whose `None` means leave alone, and a leg refuses a
-  profile and a raw `quinn::TransportConfig` together rather than silently
-  preferring one.
-- **A socket seam on both legs**, for carrying a datagram impairment beneath
-  QUIC: `Listener::bind_with_socket` and `ProxySessionConfig::upstream_socket`,
-  both taking an `Arc<dyn quinn::AsyncUdpSocket>`. The forwarding path stays
-  agnostic — it knows nothing about impairment — and the `impair` feature adds
-  only the control-plane verb that installs one.
-- **`ProxyEvent::Impairment` with `ImpairmentKind`**, the evidence layer for
-  everything the proxy declined to do or did differently: a framer bypass, an
-  undecodable control frame, a shaping rule that cannot match on this draft, a
-  class that changed mid-stream, a serialize target it never saw.
-- **Always-on instrumentation.** `ProxySession::counters()` and the
-  `instrument` module count the slow paths — framers created, objects elided,
-  actions refused, egress items queued, release lateness.
-- **A QUIC-level capture per connection, behind the off-by-default `qlog`
-  feature.** Each leg config carries its own `QlogSpec`; the capture is written
-  by quinn and sits underneath everything else this crate reports.
-- **The configuration types can be written down, behind the new off-by-default
-  `serde` feature.** `TransportProfile` and its enums, `ShapeProfile`,
-  `Matcher`, `MatchKind`, `ClassRule`, `QueueConfig`, `BucketConfig`,
-  `Overflow`, `Expiry`, `Discipline` and `RangeSet` gain `Serialize` and
-  `Deserialize` under this feature only. It buys the derives and nothing more:
-  this crate reads no file and chooses no format, so the parser is the caller's
-  dependency.
-  - Two are not plain derives, and both would have been silent bugs.
-    `ShapeProfile` deserializes `try_from = "ShapeProfileSpec"` so that every
-    read runs `try_new`; a derive onto the private fields would let a class
-    naming a missing bucket arm and charge nothing. `RangeSet` reads through
-    `Vec<RangeInclusive<u64>>` because its constructor sorts and coalesces, and
-    a derive filling the field directly would leave it unsorted, at which point
-    `contains` — a binary search — answers false for values that are in the set.
-- **`Matcher::inert_key` is public.** It answers whether a matcher names a key
-  that can never claim a unit, from the configuration alone and with no
-  traffic. `ShapeProfile::try_new` calls it, so a shaping class gets that
-  refusal for free; a caller building matchers for a hook of its own reaches no
-  constructor that could run the check.
-- **Thirteen `draftNN` features plus `all-drafts`**, so a build can carry one
-  draft instead of all of them. A session naming a draft the build did not
-  compile is refused with `ProxyError::DraftNotCompiled`.
-- **`moqtap_proxy::types`**, one module holding the five leaf types the rest of
-  the crate keys on — `ProxySide`, `Leg`, `ObjectMeta`, `BypassReason` and
-  `DataStreamType`. Every one is still exported where it was.
+- **Hook v2 turns an inspecting proxy into an acting one — six methods, each returning a decision rather than performing one.** `on_control_message`, `on_stream_open`, `on_stream_header`, `on_object`, `on_datagram` and `on_stream_end`, where 0.3.0 could only watch a session and report what it saw. Every one is defaulted, so a hook implements only what it cares about, and all six are synchronous and return data: a hook can never stall a read loop by awaiting inside one. `hook::LegacyProxyHook` adapts a 0.3.x hook unchanged.
+- **`action::Interest`, sampled once at session start**, decides how much of the session is parsed at all. `Interest::NONE` leaves the forwarding path a byte pump with no framer armed, which is what makes "this hook cost nothing" a measurable claim rather than a promise — a session that declared no interest ends with an all-zero `Counters`.
+- **Nine actions and four stream-open decisions.** `Action::{Pass, Delay, Hold, Drop, Truncate, ResetStream, CloseSession, Replace, ReplacePayload}`, and `StreamAction::{Open, Reject, OpenAfter, SerializeAfter}`. `Delay` resolves below a millisecond on every platform, Windows included.
+- **`capability`, a queryable table of what each draft and each site can express, and why not.** `Capabilities::for_draft`, `Support`, `Refusal`, `Instead`, `supports_matcher`. `tests/action_matrix.rs` asserts the table against observed behaviour on all thirteen drafts, so it cannot drift into a documented lie about the engine. Every refusal is reported as `ProxyEvent::ActionRefused` with the reason, never dropped in silence.
+- **`framer::ObjectFramer` frames a unidirectional data stream into individually addressable objects on every draft 07-19**, all thirteen drafts, preserving stream boundaries and extension bytes. `ProxyEvent::Object` reports each one as an `ObjectMeta`; a stream the framer cannot follow emits one `FramerOut::Bypassed` with a `BypassReason` rather than going quiet, which is what lets a reader tell "nothing matched" from "nothing was looked at".
+- **Egress shaping.** `ShapeProfile` is token buckets plus ordered class rules plus a queue policy plus an arbitration discipline; `Matcher` is the AND of eight keys, where an absent key never matches. `ShapeProfile::try_new` is the only constructor and refuses seven configurations that would otherwise arm and do nothing — among them a class naming a bucket that does not exist, and a matcher naming a key that can never claim a unit. A configured `rate_bps` is enforced on the wire.
+- **Shaping statistics, three ways.** `ShapeStats` reports one row per configured class plus a default row, an unshapeable row and the session totals; a class that saw nothing reports a zero row and never an absent one. Every session total appears flat and again under `uplink` and `downlink`, with the flat figure defined as the sum of the two, so the views cannot disagree.
+- **`control::ProxyControl` reconfigures a proxy that is already running** — `set_transport`, `set_shape`, `set_shaper_enabled`, `set_impair`, `clear_impair`, `close_session`, `reset_stream` and `inject_control`, with `sessions`, `stats`, `reset_stats` and `local_addr` to read back what it did.
+- **`transport::TransportProfile`, per leg.** Windows, idle timeout, keep-alive, loss-detection thresholds, congestion controller, MTU discovery, datagram buffers, both stream ceilings and the persistent-congestion threshold. Each field is an `Option` whose `None` means leave alone, and a leg refuses a profile and a raw `quinn::TransportConfig` together rather than silently preferring one.
+- **A socket seam on both legs**, for carrying a datagram impairment beneath QUIC: `Listener::bind_with_socket` and `ProxySessionConfig::upstream_socket`, both taking an `Arc<dyn quinn::AsyncUdpSocket>`. The forwarding path stays agnostic — it knows nothing about impairment — and the `impair` feature adds only the control-plane verb that installs one.
+- **`ProxyEvent::Impairment` with `ImpairmentKind`**, the evidence layer for everything the proxy declined to do or did differently: a framer bypass, an undecodable control frame, a shaping rule that cannot match on this draft, a class that changed mid-stream, a serialize target it never saw.
+- **Always-on instrumentation.** `ProxySession::counters()` and the `instrument` module count the slow paths — framers created, objects elided, actions refused, egress items queued, release lateness.
+- **A QUIC-level capture per connection, behind the off-by-default `qlog` feature.** Each leg config carries its own `QlogSpec`; the capture is written by quinn and sits underneath everything else this crate reports.
+- **The configuration types can be written down, behind the new off-by-default `serde` feature.** `TransportProfile` and its enums, `ShapeProfile`, `Matcher`, `MatchKind`, `ClassRule`, `QueueConfig`, `BucketConfig`, `Overflow`, `Expiry`, `Discipline` and `RangeSet` gain `Serialize` and `Deserialize` under this feature only. It buys the derives and nothing more: this crate reads no file and chooses no format, so the parser is the caller's dependency. Two are not plain derives, and both would have been silent bugs: `ShapeProfile` deserializes `try_from = "ShapeProfileSpec"` so that every read runs `try_new`, where a derive onto the private fields would let a class naming a missing bucket arm and charge nothing; and `RangeSet` reads through `Vec<RangeInclusive<u64>>` because its constructor sorts and coalesces, where a derive filling the field directly would leave it unsorted, at which point `contains` — a binary search — answers false for values that are in the set.
+- **`Matcher::inert_key` is public.** It answers whether a matcher names a key that can never claim a unit, from the configuration alone and with no traffic. `ShapeProfile::try_new` calls it, so a shaping class gets that refusal for free; a caller building matchers for a hook of its own reaches no constructor that could run the check.
+- **Thirteen `draftNN` features plus `all-drafts`**, so a build can carry one draft instead of all of them. A session naming a draft the build did not compile is refused with `ProxyError::DraftNotCompiled`.
+- **`moqtap_proxy::types`**, one module holding the five leaf types the rest of the crate keys on — `ProxySide`, `Leg`, `ObjectMeta`, `BypassReason` and `DataStreamType`. Every one is still exported where it was.
 
-### Changed (breaking)
+### Changed
 
-- **`ProxySessionConfig` gains four required fields** — `shape`,
-  `upstream_socket`, `upstream_transport_profile`, `upstream_installer` — and
-  **`ListenerConfig` gains two**, `transport_profile` and `installer`. Under
-  `qlog` each gains one more. Neither type is `#[non_exhaustive]`, so an
-  exhaustive struct literal must name them; `ProxySessionConfig::default()` is
-  unaffected, `ListenerConfig` has no `Default` and no escape.
-- **`StreamCtx::new` takes a seventh argument**, the stream key a hook needs to
-  name a serialization target.
-- **The hook trait is v2.** A 0.3.x hook compiles unchanged through
-  `hook::LegacyProxyHook`, which yields `DATAGRAMS`, plus `CONTROL` only when
-  the wrapped hook asks for control mutation.
-- **`ControlStreamParser::feed` hands back every frame it located, decoded or
-  not.** `ParseResult::Messages` now carries `Vec<ParsedFrame>`. A control
-  message this proxy cannot read was previously indistinguishable, to
-  everything downstream, from one the peer never sent — and those two call for
-  opposite conclusions.
-- **`capability::Support::Unreachable`'s `instead` field is
-  `capability::Instead`, not `framer::BypassReason`.**
-- **`ProxyEvent::Impairment` gains a `leg: Option<Leg>` field.**
-- **A rule aimed at `MatchKind::Datagram` no longer reports
-  `ImpairmentKind::ShapeRuleUnmatchable`.** A datagram-aimed class now claims
-  and polices datagrams, so the report would be false.
-- **`capability::Refusal::WouldRenumberFetchObjects` is gone**, along with the
-  refusal: fetch objects are addressable on drafts 15, 16 and 17, and an elide
-  on one is carried out.
-- **`ObjectMeta::subgroup_id` is `None` where a fetch frame carries no Subgroup
-  ID**, rather than the placeholder zero it used to report.
-- **A control-plane close is no longer reported as a hook's**, and three
-  impairment reports moved to after the thing they report rather than before.
-- **The declared MSRV moves from 1.83 to 1.88.** Not a consequence of this
-  release's code: 1.83 had already stopped building the workspace, because
-  `time` requires 1.88. The CI job that should have caught it was running
-  `@stable` and therefore checking nothing.
+- **Breaking.** `ProxySessionConfig` gains four required fields — `shape`, `upstream_socket`, `upstream_transport_profile`, `upstream_installer` — and `ListenerConfig` gains two, `transport_profile` and `installer`; under `qlog` each gains one more. Neither type is `#[non_exhaustive]`, so an exhaustive struct literal must name them; `ProxySessionConfig::default()` is unaffected, `ListenerConfig` has no `Default` and no escape. Under Cargo's 0.x rules the minor position is the major position, so these fields and the `StreamCtx::new` change below make this 0.4.0 rather than 0.3.1: `^0.3.0` will not resolve a patch away from a consumer.
+- **Breaking.** `StreamCtx::new` takes a seventh argument, the stream key a hook needs to name a serialization target.
+- **Breaking.** The hook trait is v2. A 0.3.x hook compiles unchanged through `hook::LegacyProxyHook`, which yields `DATAGRAMS`, plus `CONTROL` only when the wrapped hook asks for control mutation.
+- **Breaking.** `ControlStreamParser::feed` hands back every frame it located, decoded or not: `ParseResult::Messages` now carries `Vec<ParsedFrame>`. A control message this proxy cannot read was previously indistinguishable, to everything downstream, from one the peer never sent — and those two call for opposite conclusions.
+- **Breaking.** `capability::Support::Unreachable`'s `instead` field is `capability::Instead`, not `framer::BypassReason`.
+- **Breaking.** `ProxyEvent::Impairment` gains a `leg: Option<Leg>` field.
+- **Breaking.** A rule aimed at `MatchKind::Datagram` no longer reports `ImpairmentKind::ShapeRuleUnmatchable`. A datagram-aimed class now claims and polices datagrams, so the report would be false.
+- **Breaking.** `capability::Refusal::WouldRenumberFetchObjects` is gone, along with the refusal: fetch objects are addressable on drafts 15, 16 and 17, and an elide on one is carried out.
+- **Breaking.** `ObjectMeta::subgroup_id` is `None` where a fetch frame carries no Subgroup ID, rather than the placeholder zero it used to report.
+- **Breaking.** A control-plane close is no longer reported as a hook's, and three impairment reports moved to after the thing they report rather than before.
+- **Breaking.** The declared MSRV moves from 1.83 to 1.88. Not a consequence of this release's code: 1.83 had already stopped building the workspace, because `time` requires 1.88. The CI job that should have caught it was running `@stable` and therefore checking nothing.
 
 ### Fixed
 
-- **On drafts 17-19 the control plane is the pair of unidirectional streams,
-  and a bidirectional stream is a request stream.** Those drafts moved the
-  control plane off the bidirectional stream every earlier draft uses; this
-  proxy still treated the first bidirectional stream as the control plane and
-  unidirectional control streams as data. A session against a conforming peer
-  on those drafts could not complete.
-- **The draft the peers name in SETUP now reaches the tasks that parse with
-  it.** The session peeked at SETUP and every parsing task kept the configured
-  guess, so on the drafts where one ALPN covers several versions the whole
-  session was parsed against the wrong one.
-- **The control stream parser frames drafts 17-19 with MoQT's own
-  variable-length integer** rather than the RFC 9000 form, which disagree above
-  63.
-- **A default session configuration names a draft the build actually
-  compiled.** `ProxySessionConfig::default()` returned a fixed draft that a
-  reduced-draft build may not have, so the default was unusable there.
-- **Eliding the first object of a draft-15 subgroup stream is refused**, as it
-  already was on the eight other drafts that define the mode. Draft-15 was
-  missing from the gate, so the guard was not narrower there — it was skipped,
-  and the receiver got a stream whose subgroup ID had silently become the
-  second object's.
-- **A reserved subgroup-ID mode on a draft-15 or draft-16 stream is refused as
-  itself**, not as a redefined Subgroup ID, and a draft-16 subgroup header
-  setting that mode is no longer framed at all.
-- **A control frame the decoder refuses is no longer deleted from a session
-  whose hook declared `Interest::CONTROL`.** It is forwarded and reported as
-  `ImpairmentKind::ControlFrameNotDecodable`. A Message Type the draft does not
-  assign, a body that disagrees with its own length, and anything an extension
-  adds all arrive this way.
-- **A draft-18 or draft-19 fetch response is read.** Those drafts write a fetch
-  object's Group ID as a difference whose sign the fetch's Group Order settles;
-  the order is on the control plane and never on the data stream, so the
-  session now files it under the request's ID and hands it to the framer when
-  the response opens. A response naming a request the session never carried is
-  forwarded untouched and reported rather than read against a guess.
-- **A draft-16 namespace subscription is forwarded.** That draft puts
-  SUBSCRIBE_NAMESPACE on a bidirectional stream of its own, which this proxy
-  had treated as a second control stream.
-- **Stream resets are no longer laundered into clean FINs**, and a peer's
-  `STOP_SENDING` is forwarded to the source with its original code.
-  `ProxyEvent::StreamReset` reports an observed reset.
-- **An idle stream is now stopped too** on teardown, rather than only a stream
-  with bytes in flight.
-- **The internal release timer no longer deadlocks when it is dropped from its
-  own thread.**
+- **On drafts 17-19 the control plane is the pair of unidirectional streams, and a bidirectional stream is a request stream.** Those drafts moved the control plane off the bidirectional stream every earlier draft uses; this proxy still treated the first bidirectional stream as the control plane and unidirectional control streams as data, so a session against a conforming peer on those drafts could not complete.
+- **The draft the peers name in SETUP now reaches the tasks that parse with it.** The session peeked at SETUP and every parsing task kept the configured guess, so on the drafts where one ALPN covers several versions the whole session was parsed against the wrong one.
+- **The control stream parser frames drafts 17-19 with MoQT's own variable-length integer** rather than the RFC 9000 form, which disagree above 63.
+- **A default session configuration names a draft the build actually compiled.** `ProxySessionConfig::default()` returned a fixed draft that a reduced-draft build may not have, so the default was unusable there.
+- **Eliding the first object of a draft-15 subgroup stream is refused**, as it already was on the eight other drafts that define the mode. Draft-15 was missing from the gate, so the guard was not narrower there — it was skipped, and the receiver got a stream whose subgroup ID had silently become the second object's.
+- **A reserved subgroup-ID mode on a draft-15 or draft-16 stream is refused as itself**, not as a redefined Subgroup ID, and a draft-16 subgroup header setting that mode is no longer framed at all.
+- **A control frame the decoder refuses is no longer deleted from a session whose hook declared `Interest::CONTROL`.** It is forwarded and reported as `ImpairmentKind::ControlFrameNotDecodable`. A Message Type the draft does not assign, a body that disagrees with its own length, and anything an extension adds all arrive this way.
+- **A draft-18 or draft-19 fetch response is read.** Those drafts write a fetch object's Group ID as a difference whose sign the fetch's Group Order settles; the order is on the control plane and never on the data stream, so the session now files it under the request's ID and hands it to the framer when the response opens. A response naming a request the session never carried is forwarded untouched and reported rather than read against a guess.
+- **A draft-16 namespace subscription is forwarded.** That draft puts SUBSCRIBE_NAMESPACE on a bidirectional stream of its own, which this proxy had treated as a second control stream.
+- **Stream resets are no longer laundered into clean FINs**, and a peer's `STOP_SENDING` is forwarded to the source with its original code. `ProxyEvent::StreamReset` reports an observed reset.
+- **An idle stream is now stopped too** on teardown, rather than only a stream with bytes in flight.
+- **The internal release timer no longer deadlocks when it is dropped from its own thread.**
 - **The rustdoc for this crate builds on its default feature set.**
 
 ### Limits
 
-Things this release does not do, listed because each one is reachable through a
-configuration that looks applied.
+Things this release does not do, listed because each one is reachable through a configuration that looks applied.
 
-- **`ProxyControl::set_transport` can be a permanent silent no-op, and the
-  return value cannot tell you.** quinn takes a transport configuration when a
-  connection is made, so a profile set on the upstream leg reaches the next
-  connection the proxy opens and one set on the client leg reaches the next it
-  accepts — which it does not initiate and which may never arrive. The one
-  instrument that makes it bite on a running session is `close_session`.
-- **A WebTransport upstream cannot be given a socket**, and no version of this
-  release fixes it: `wtransport` builds the upstream endpoint internally, so
-  there is no seam. It is refused with `ProxyError::UpstreamSocketUnsupported`
-  ahead of both feature arms rather than connected around. An upstream qlog
-  spec is likewise ignored there. The client-facing leg carries both transports
-  fully.
-- **`set_shape` will not move a running session onto a different class list.**
-  A session takes a new profile only if its class names match; otherwise the
-  statistics it has already reported would stop meaning what they said.
-- **`set_shaper_enabled(false)` does not promptly release a stream held by a
-  class configured at zero.** The switch is read on the next release decision,
-  which such a stream is not making.
-- **`Overflow::Block` stops this proxy's read loop; it does not stall the
-  peer.** At quinn's defaults the peer keeps writing into its receive window.
-- **A shaping profile is admitted twice on the drafts sharing one ALPN, and the
-  first time is against a guess.** The pre-connection check is the only one
-  that can refuse before a byte moves, so it stays; a second admission runs
-  against the draft the peers actually name, and a profile that clears the
-  guess can still end the session once SETUP arrives.
-- **A subgroup header carrying drafts 17-19's reserved SUBGROUP_ID_MODE is
-  forwarded, not refused.**
-- **Unshapeable bytes are not paced**, and nothing outside a data stream is
-  shaped: control streams and handshake traffic move at line rate whatever the
-  profile says.
+- **`ProxyControl::set_transport` can be a permanent silent no-op, and the return value cannot tell you.** quinn takes a transport configuration when a connection is made, so a profile set on the upstream leg reaches the next connection the proxy opens and one set on the client leg reaches the next it accepts — which it does not initiate and which may never arrive. The one instrument that makes it bite on a running session is `close_session`.
+- **A WebTransport upstream cannot be given a socket**, and no version of this release fixes it: `wtransport` builds the upstream endpoint internally, so there is no seam. It is refused with `ProxyError::UpstreamSocketUnsupported` ahead of both feature arms rather than connected around. An upstream qlog spec is likewise ignored there. The client-facing leg carries both transports fully.
+- **`set_shape` will not move a running session onto a different class list.** A session takes a new profile only if its class names match; otherwise the statistics it has already reported would stop meaning what they said.
+- **`set_shaper_enabled(false)` does not promptly release a stream held by a class configured at zero.** The switch is read on the next release decision, which such a stream is not making.
+- **`Overflow::Block` stops this proxy's read loop; it does not stall the peer.** At quinn's defaults the peer keeps writing into its receive window.
+- **A shaping profile is admitted twice on the drafts sharing one ALPN, and the first time is against a guess.** The pre-connection check is the only one that can refuse before a byte moves, so it stays; a second admission runs against the draft the peers actually name, and a profile that clears the guess can still end the session once SETUP arrives.
+- **A subgroup header carrying drafts 17-19's reserved SUBGROUP_ID_MODE is forwarded, not refused.**
+- **Unshapeable bytes are not paced**, and nothing outside a data stream is shaped: control streams and handshake traffic move at line rate whatever the profile says.
 - **A `MatchKind::Fetch` class is live on drafts 07-14 and dead on 15-19.**
-- **This proxy sets quinn's acknowledgement-frequency parameters and the
-  persistent-congestion threshold without demonstrating their effect.** Both
-  are carried because refusing them would deny a caller a knob quinn has; no
-  test here asserts what either does.
-- **Actions are untested on WebTransport**, and every reset this crate emits is
-  a plain `RESET_STREAM` with a raw integer code.
-- **`Truncate` guarantees a prefix, not a byte count**, and `Delay` and `Hold`
-  use a real clock rather than tokio's.
+- **This proxy sets quinn's acknowledgement-frequency parameters and the persistent-congestion threshold without demonstrating their effect.** Both are carried because refusing them would deny a caller a knob quinn has; no test here asserts what either does.
+- **Actions are untested on WebTransport**, and every reset this crate emits is a plain `RESET_STREAM` with a raw integer code.
+- **`Truncate` guarantees a prefix, not a byte count**, and `Delay` and `Hold` use a real clock rather than tokio's.
 
 ### Migration from 0.3.0
 
@@ -389,96 +151,51 @@ let listener = ListenerConfig {
 // `ListenerConfig` has no `Default`, so this one has no escape.
 ```
 
-`ProxySessionConfig` is not `#[non_exhaustive]` and is not `Clone` — and
-`ShapeProfile` is not `Copy` — so a config built per-connection from a template
-clones the profile explicitly. Building with `qlog` adds `upstream_qlog: None`
-and `qlog: None` to those literals.
+`ProxySessionConfig` is not `#[non_exhaustive]` and is not `Clone` — and `ShapeProfile` is not `Copy` — so a config built per-connection from a template clones the profile explicitly. Building with `qlog` adds `upstream_qlog: None` and `qlog: None` to those literals.
 
-A 0.3.x hook needs no changes: wrap it in `hook::LegacyProxyHook`. Written
-against v2 directly, the two behaviours to know are that `Interest` is sampled
-once at session start and decides what is parsed, and that a hook returning
-`Some(bytes)` for a control message must declare `Interest::CONTROL` to be
-asked at all.
-
+A 0.3.x hook needs no changes: wrap it in `hook::LegacyProxyHook`. Written against v2 directly, the two behaviours to know are that `Interest` is sampled once at session start and decides what is parsed, and that a hook returning `Some(bytes)` for a control message must declare `Interest::CONTROL` to be asked at all.
 
 ## [0.3.0] - 2026-07-08
 
-Draft-19 support, on top of 0.2.1 and nothing else.
-
-Written retroactively from the `proxy-v0.3.0` tag. This section did not exist
-while 0.3.0 was the published version, and its absence was read by later work
-as evidence that 0.3.0 had never shipped — which is how the next release came
-to be numbered 0.5.0 for a while. A published version with no section here is
-not a bookkeeping detail; it is a missing release, to anyone reading the file
-instead of the registry.
+Written retroactively from the `proxy-v0.3.0` tag. This section did not exist while 0.3.0 was the published version, and its absence was read by later work as evidence that 0.3.0 had never shipped — which is how the next release came to be numbered 0.5.0 for a while. A published version with no section here is not a bookkeeping detail; it is a missing release, to anyone reading the file instead of the registry.
 
 ### Added
 
-- Draft-19 across the proxy's per-draft modules, alongside drafts 07-18.
-- `moqtap-client` and `moqtap-codec` dependencies bumped to their own
-  draft-19 releases.
+- Draft-19 across the proxy's per-draft modules, alongside drafts 07-18 — draft-19 support on top of 0.2.1 and nothing else.
+- `moqtap-client` and `moqtap-codec` dependencies bumped to their own draft-19 releases.
 
 ## [0.2.1] - 2026-05-13
 
-Bumps `moqtap-client` to `0.2.1` to pick up the draft-16 / draft-17
-`SetupComplete` `negotiated_version` fix. No proxy-side code changes.
-
 ### Changed
 
-- `moqtap-client` dependency bumped from `0.2.0` to `0.2.1`.
+- `moqtap-client` dependency bumped from `0.2.0` to `0.2.1`, to pick up the draft-16 / draft-17 `SetupComplete` `negotiated_version` fix. No proxy-side code changes.
 
 ## [0.2.0] - 2026-05-13
 
-Adds MoQT draft-18 to the advertised ALPN set and unifies the client-facing
-listener. Bumps `moqtap-codec` and `moqtap-client` to `0.2`.
-
 ### Added
 
-- `moqt-18` ALPN is now advertised by `Listener`, so draft-18 clients can
-  connect to the proxy without any further configuration.
-- `AcceptedConn` enum returned by `Listener::accept` — carries either a
-  raw `quinn::Connection` plus the negotiated ALPN, or a
-  `wtransport::Connection` for WebTransport clients (behind the
-  `webtransport` feature).
-- `ProxyEvent::Connected` gains a `client_transport` field so observers
-  can label per-client sessions by transport (`"QUIC"` /
-  `"WebTransport"`).
-- New integration tests `proxy_forward.rs` and `proxy_hook_rewrite.rs`
-  covering end-to-end forwarding and `ProxyHook`-driven byte mutation
-  against a fake relay; shared scaffolding lives in
-  `tests/common/mod.rs`.
+- `moqt-18` ALPN is now advertised by `Listener`, so draft-18 clients can connect to the proxy without any further configuration.
+- `AcceptedConn` enum returned by `Listener::accept` — carries either a raw `quinn::Connection` plus the negotiated ALPN, or a `wtransport::Connection` for WebTransport clients (behind the `webtransport` feature).
+- `ProxyEvent::Connected` gains a `client_transport` field so observers can label per-client sessions by transport (`"QUIC"` / `"WebTransport"`).
+- New integration tests `proxy_forward.rs` and `proxy_hook_rewrite.rs` covering end-to-end forwarding and `ProxyHook`-driven byte mutation against a fake relay; shared scaffolding lives in `tests/common/mod.rs`.
 
 ### Changed
 
-- Unified the client-facing listener. `Listener` now owns a single
-  `quinn::Endpoint` that advertises every supported MoQT draft ALPN
-  (`moq-00`, `moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`) plus `h3`
-  (behind the `webtransport` feature). Each accepted connection is
-  dispatched to raw QUIC or WebTransport based on the negotiated ALPN.
-  No listener-mode configuration is required — clients pick their
-  transport via ALPN.
+- Unified the client-facing listener. `Listener` now owns a single `quinn::Endpoint` that advertises every supported MoQT draft ALPN (`moq-00`, `moqt-15`, `moqt-16`, `moqt-17`, `moqt-18`) plus `h3` (behind the `webtransport` feature), and each accepted connection is dispatched to raw QUIC or WebTransport based on the negotiated ALPN. No listener-mode configuration is required — clients pick their transport via ALPN.
+- `moqtap-codec` and `moqtap-client` dependencies bumped to `0.2`.
 
 ### Removed
 
 - `ListenerMode` enum and the `ProxyConfig::listener_mode` field.
-- Standalone `WtListener` type. The unified `Listener` handles both
-  transports when the `webtransport` feature is enabled.
-- `ListenerConfig::alpn` field. ALPNs are derived from the supported
-  drafts and the `webtransport` feature.
+- Standalone `WtListener` type. The unified `Listener` handles both transports when the `webtransport` feature is enabled.
+- `ListenerConfig::alpn` field. ALPNs are derived from the supported drafts and the `webtransport` feature.
 
 ## [0.1.0] - 2026-04-16
 
-Initial release — transparent MoQT intercepting proxy. Covers MoQT drafts
-draft-07 through draft-17.
-
 ### Added
 
-- Transparent proxy that forwards all streams and datagrams between client and relay
-- Inline MoQT frame parsing for control messages, data stream headers, and datagrams
-  via `moqtap-codec`'s runtime dispatch (`AnyControlMessage`,
-  `AnySubgroupHeader`, `AnyFetchHeader`, `AnyDatagramHeader`). The draft
-  used for parsing is selected from the observed setup exchange rather
-  than a compile-time flag.
+- Initial release: a transparent MoQT intercepting proxy covering MoQT drafts draft-07 through draft-17, forwarding all streams and datagrams between client and relay.
+- Inline MoQT frame parsing for control messages, data stream headers, and datagrams via `moqtap-codec`'s runtime dispatch (`AnyControlMessage`, `AnySubgroupHeader`, `AnyFetchHeader`, `AnyDatagramHeader`). The draft used for parsing is selected from the observed setup exchange rather than a compile-time flag.
 - `ProxyObserver` trait for structured event emission (11 event types)
 - `ProxyHook` trait for optional frame mutation before forwarding
 - QUIC listener (`Listener`) for accepting inbound client connections

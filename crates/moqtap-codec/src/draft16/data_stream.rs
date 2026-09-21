@@ -267,7 +267,7 @@ fn subgroup_type_is_reserved_mode(raw: u64) -> bool {
 /// Section 10.4.2 is about the subgroup form specifically, and the eight Types
 /// inside it that name the reserved SUBGROUP_ID_MODE. Those are not unknown —
 /// the form is assigned and the draft lists the values outright — but they are
-/// unreadable, and they are [`CodecError::InvalidTypeValue`].
+/// unreadable, and they are [`CodecError::InvalidStreamTypeValue`].
 ///
 /// A fetch stream at the subgroup reader is neither. The value is one this
 /// draft defines, the disagreement is with the reader that was called, and the
@@ -276,7 +276,7 @@ fn stream_type_error(raw: u64) -> CodecError {
     if raw == FETCH_STREAM_TYPE || subgroup_type_is_valid(raw) {
         CodecError::InvalidField
     } else if subgroup_type_is_reserved_mode(raw) {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidStreamTypeValue {
             raw,
             detail: "its SUBGROUP_ID_MODE is 0b11, which this draft reserves",
         }
@@ -311,12 +311,12 @@ const DATAGRAM_FORM_FORBIDDEN_BITS: u8 = 0xD0;
 /// The two lists are not the same failure. A Type outside the form is one no
 /// table assigns, and so is [`CodecError::UnknownDatagramType`]; a Type inside
 /// the form setting STATUS and END_OF_GROUP together is one this draft names
-/// and forbids, and so is [`CodecError::InvalidTypeValue`].
+/// and forbids, and so is [`CodecError::InvalidDatagramTypeValue`].
 fn validate_datagram_type(raw: u64) -> Result<(), CodecError> {
     if datagram_type_is_valid(raw) {
         Ok(())
     } else if datagram_type_is_status_end_of_group(raw) {
-        Err(CodecError::InvalidTypeValue {
+        Err(CodecError::InvalidDatagramTypeValue {
             raw,
             detail: "it sets both the STATUS bit and the END_OF_GROUP bit",
         })
@@ -417,7 +417,7 @@ impl SubgroupHeader {
     /// than dropping the byte. Draft-16 Section 11.1.1.1: "A subscription has
     /// Publisher Priorty 128 if this extension is omitted", so 128 is this
     /// draft's own name for an unstated priority and not an invented filler.
-    /// Drafts 17-20 write the same value in the same place. Use
+    /// Drafts 17-21 write the same value in the same place. Use
     /// [`Self::encode_checked`] to be told about the disagreement rather than
     /// having it resolved silently.
     pub fn encode(&self, buf: &mut impl BufMut) {

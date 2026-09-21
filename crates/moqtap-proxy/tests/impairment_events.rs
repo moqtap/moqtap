@@ -91,7 +91,7 @@
 //! reason `actions_timing.rs` sets out at length: a hardcoded draft makes
 //! every other single-draft CI row green by absence. Nothing asserted here
 //! is draft-specific — the refusal is a length comparison, the clamp is
-//! arithmetic, and the bypass byte was checked against all fourteen drafts
+//! arithmetic, and the bypass byte was checked against all the drafts
 //! (`0x00` is not a legal leading byte for a subgroup stream header on any
 //! of them). A build with no draft compiled has no framer to drive, so the
 //! whole file is gated out.
@@ -110,7 +110,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod common;
@@ -167,6 +168,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// The draft every fixture here is built for: the newest compiled.
@@ -212,7 +215,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 }
 
 /// A subgroup stream header for [`DRAFT`]: track alias 1, group 0, subgroup
-/// 0, publisher priority `0x80`. Five bytes on every draft 07-20.
+/// 0, publisher priority `0x80`. Five bytes on every draft 07-21.
 fn subgroup_header_bytes() -> Vec<u8> {
     vec![subgroup_stream_type(DRAFT), 0x01, 0x00, 0x00, 0x80]
 }
@@ -244,10 +247,10 @@ fn subgroup_stream(count: u64) -> (Vec<u8>, Vec<Vec<u8>>) {
     (head, objects)
 }
 
-/// Stream B: bytes whose first octet is a data stream type no draft 07-20
+/// Stream B: bytes whose first octet is a data stream type no draft 07-21
 /// decodes as a subgroup header.
 ///
-/// `0x00` was chosen by feeding it to `ObjectFramer` on each of the fourteen
+/// `0x00` was chosen by feeding it to `ObjectFramer` on each of the
 /// drafts in turn, in an all-drafts build. Every one answers `data stream
 /// header decode: invalid field value` — a hard decode failure rather than an
 /// incomplete read, so the framer latches [`BypassReason::DecodeError`]

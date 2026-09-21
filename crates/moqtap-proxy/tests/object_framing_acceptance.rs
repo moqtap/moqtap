@@ -127,6 +127,7 @@ fn delta_encoded(draft: DraftVersion) -> bool {
             | DraftVersion::Draft18
             | DraftVersion::Draft19
             | DraftVersion::Draft20
+            | DraftVersion::Draft21
     )
 }
 
@@ -338,6 +339,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 // ============================================================
@@ -353,7 +356,7 @@ const DRAFTS: &[DraftVersion] = &[
 /// — `framer_tests` uses objects at 1.5x and 8x the cap, where `<` and
 /// `<=` are indistinguishable. It also pins the promise that an oversized
 /// object costs addressability for itself alone: the object *after* it must
-/// still be framed with the correct ID, which on drafts 14-20 requires the
+/// still be framed with the correct ID, which on drafts 14-21 requires the
 /// framer to have advanced its delta state across an object it never
 /// framed.
 ///
@@ -460,7 +463,7 @@ fn an_oversized_object_keeps_buffering_bounded() {
 /// bytes the codec did not write.
 ///
 /// This is the framer-level guard against one specific misreading: on
-/// drafts 17-20 the property block is byte-length-prefixed, and a reader
+/// drafts 17-21 the property block is byte-length-prefixed, and a reader
 /// that took the
 /// prefix for a KVP count would consume past the payload-length field and
 /// mis-frame every following object. Because the framer forwards raw
@@ -532,6 +535,8 @@ fn fetch_streams_whose_group_order_is_unknown_are_forwarded_intact() {
         DraftVersion::Draft19,
         #[cfg(feature = "draft20")]
         DraftVersion::Draft20,
+        #[cfg(feature = "draft21")]
+        DraftVersion::Draft21,
     ] {
         for chunk in [1usize, 7, stream.len()] {
             let out =
@@ -623,7 +628,7 @@ fn omitting_fetch_stream(draft: DraftVersion) -> Vec<u8> {
 ///
 /// Exactly two tests redden — this one and
 /// [`a_fetch_frame_with_no_subgroup_of_its_own_reports_none`] — while the
-/// drafts 07-14 and 18-20 gates stay green, so the cut is attributable to
+/// drafts 07-14 and 18-21 gates stay green, so the cut is attributable to
 /// the three drafts it names. It also shows why byte identity is not on its
 /// own a measurement of anything: the byte-identity assertion above the
 /// bypass one passes under the ablation, because a bypassed stream is

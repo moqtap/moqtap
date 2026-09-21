@@ -229,7 +229,7 @@ fn session_cannot_close_from_connecting() {
 /// mismatch is discoverable only during the Setup exchange, and "the
 /// corresponding peer MUST close the session with VERSION_NEGOTIATION_FAILED".
 ///
-/// The same close is asserted on the other twelve drafts in
+/// The same close is asserted on the other drafts in
 /// `close_during_setup.rs`, which is where the ablation for it lives.
 #[test]
 fn session_closes_from_setup_exchange() {

@@ -1,4 +1,4 @@
-#![cfg(any(feature = "draft18", feature = "draft19", feature = "draft20"))]
+#![cfg(any(feature = "draft18", feature = "draft19", feature = "draft20", feature = "draft21"))]
 
 //! A REQUEST_UPDATE can move a namespace subscription's prefix, and the prefix
 //! it moves to is judged before the move is allowed.
@@ -60,7 +60,7 @@
 //! It has REQUEST_UPDATE and it has the overlap rule, and it does not have this
 //! parameter: `TRACK_NAMESPACE_PREFIX` and `0x34` as a Parameter Type match
 //! nothing in draft-17. Nothing before draft-18 lets a request change its
-//! prefix at all, so on the other eleven drafts there is no third statement to
+//! prefix at all, so on the other drafts there is no third statement to
 //! enforce.
 //!
 //! # What this endpoint cannot do
@@ -927,3 +927,4 @@ macro_rules! gates {
 gates!(draft18, "draft18");
 gates!(draft19, "draft19");
 gates!(draft20, "draft20");
+gates!(draft21, "draft21");

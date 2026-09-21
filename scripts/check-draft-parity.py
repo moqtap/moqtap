@@ -52,7 +52,7 @@ which drafts exist:
 Any axis that differs from the union is reported, named, with the drafts it is
 short of. This is where "a `draft21` directory landed and `lib.rs` /
 `Cargo.toml` / `version.rs` were not touched" turns up, and where "the CI matrix
-was not extended, so none of the fourteen per-draft rows ever compiled the new
+was not extended, so none of the per-draft rows ever compiled the new
 draft" turns up. It is set equality rather than an N-1/N comparison, so it does
 not care in which order the axes were edited.
 
@@ -90,9 +90,20 @@ counterpart for every draft-N-1 construct reports both of those, and they are
 the specification talking. Only a list that reaches N-1 is claiming to be
 current.
 
+**A baselined list answers to N from wherever it is.** The ladder is what a
+list gets for not having been read yet, and it expires when somebody reads
+it: an entry in `KNOWN` has been judged not to be one of the specification's
+own boundaries. Without the exemption a judged list leaves this rule by
+falling *further* behind - adding a draft turns every N-1 finding into an
+N-2 one - and the baseline then retires it as fixed. Measured: five entries
+did exactly that when draft-21 landed, and all five were still wrong.
+Rule 3 carries the same exemption for the same reason. Ablated by putting
+the newest draft into one of the baselined sweeps: that entry, and only that
+entry, moves to "no longer reported".
+
 **A file under `src/draftNN/` is skipped by rule 2 entirely.** The one
 cross-draft list such a file writes is the rejection `cfg`, which names the
-other thirteen drafts on purpose and has its own gate in
+other drafts on purpose and has its own gate in
 `scripts/check-draft-cfg.py` asking a stronger question than this could.
 Reading them here reported a draft-17 module's test offering the ALPNs of
 drafts 17, 18 and 19 - three of them, which is what "several" is for - as a list
@@ -117,11 +128,12 @@ wire byte - is a wrong answer that nothing distinguishes from a right one.
 The count of draft arms is what separates this from the per-draft modules'
 rejection guards, and the separation is clean rather than tuned: a guard in
 `src/draft20/connection.rs` names **one** draft variant - its own - and rejects
-everything else, which stays correct when draft-21 arrives, because a draft-21
-header really is not draft-20's. A dispatcher names **all of them** and then
-guesses. Measured on this tree: 59 catch-alls sit in one-variant matches and
-none of them is reported, while the four the rule finds in `src/` name six
-drafts or more.
+everything else, which stays correct when a draft arrives, because the arm
+matches a *variant* and a draft-21 header is draft-21's whatever its bytes look
+like - and draft-21's look exactly like draft-20's. A dispatcher names **all of
+them** and then guesses. Measured on this tree: 59 catch-alls sit in one-variant
+matches and none of them is reported, while the one the rule finds in `src/`
+names every draft.
 
 ## What it does not check, and what does check it
 
@@ -322,7 +334,7 @@ def axes():
     oldest = min(min(s) for _, s in out) if out else None
 
     # The gates' own enumerations. `justfile` writes `for d in draft07 ...
-    # draft20` twice and `.github/workflows/ci.yml` writes a fourteen-row
+    # draft20` twice and `.github/workflows/ci.yml` writes a one-row-per-draft
     # matrix, and those lists are what decide which drafts are *checked at all*.
     # A draft missing from them is the sharpest version of the defect in this
     # whole file: every other gate goes on passing, because nothing ran them
@@ -704,17 +716,30 @@ def rule_2(everything, known, used):
         text = read(path)
         code = strip_noncode(text)
         for kind, got, off in draft_lists(text, code):
-            if previous not in got:
-                continue
-            checked += 1
-            if newest in got:
-                continue
             where = rel(path)
             fn = enclosing_fn(code, off)
+            key = (where, fn, kind)
+            # The ladder - only a list reaching N-1 is asked about N - is what
+            # keeps this rule off the boundaries the specification itself drew,
+            # and it is the whole of the false-positive argument above. It also
+            # means a list falls out of the rule by falling further behind: the
+            # run that adds a draft turns every N-1 finding into an N-2 one and
+            # reports it as gone. For an unjudged list that is the right trade.
+            # For one in `KNOWN` it is not - a person has read that list and
+            # found it is not a boundary - so a judged list answers to the
+            # newest draft from wherever it has got to, and retiring means it
+            # was fixed. Measured: five entries left the ladder when draft-21
+            # landed, every one of them still wrong.
+            on_the_ladder = previous in got
+            if not on_the_ladder and key not in known:
+                continue
+            if on_the_ladder:
+                checked += 1
+            if newest in got:
+                continue
             if kind == CFG_KIND and not cfg_is_gated(where):
                 ungated.append(where)
                 continue
-            key = (where, fn, kind)
             if key in known:
                 used.add(key)
                 continue
@@ -774,15 +799,23 @@ def rule_3(everything, known, used):
             # stays right when a draft is added: a draft-21 header really is
             # not draft-20's. Two or more is a construct answering *for* the
             # drafts, and the catch-all is then a draft it has not met.
-            if len(got) < 2 or newest not in got or catchall is None:
+            if len(got) < 2 or catchall is None:
                 continue
-            checked += 1
             body, off = catchall
-            if LOUD.search(body):
-                continue
             where = rel(path)
             fn = enclosing_fn(code, off)
             key = (where, fn, "quiet catch-all")
+            # A match that has not met the newest draft is rule 2's finding and
+            # not this one, so it is skipped here - unless it is already in
+            # `KNOWN`, where skipping it would retire a judged defect for
+            # having fallen further behind. Same exemption as rule 2, same
+            # reason.
+            if newest not in got and key not in known:
+                continue
+            if newest in got:
+                checked += 1
+            if LOUD.search(body):
+                continue
             if key in known:
                 used.add(key)
                 continue
@@ -816,51 +849,39 @@ KNOWN = {
         "which is why nothing has reported it. Drop this entry when Draft20 is "
         "in the match.",
 
-    ("crates/moqtap-codec/src/dispatch.rs", "is_setup", "quiet catch-all"):
-        "REAL DEFECT, owned by moqtap-codec (found and surfaced by that "
-        "session). Fourteen arms and `_ => false`: an unknown draft's SETUP is "
-        "answered \"not a setup message\".",
-
-    ("crates/moqtap-codec/src/dispatch.rs", "fields", "quiet catch-all"):
-        "REAL DEFECT, owned by moqtap-codec (found and surfaced by that "
-        "session). Fourteen arms and `_ => FieldMap::new()`. `fields()` is the "
-        "rendering entry point for the trace writer, the vector tests and the "
-        "inspector, so an unknown draft's message renders as one that carried "
-        "no fields - indistinguishable from one that genuinely had none.",
-
-    ("crates/moqtap-codec/src/dispatch.rs", "fetch_group_order", "quiet catch-all"):
-        "REAL DEFECT, owned by moqtap-codec (found and surfaced by that "
-        "session). Six arms and a bare `_ => None` with no `allow` attribute. "
-        "The arm fuses two cases - \"this message is not a FETCH\", which is "
-        "right, and \"this is a draft I do not know\", which is not.",
-
     # `message_type_name` and `setup_option_name` are not baselined here, and
     # this rule does not see them at all. They share
     # `moqtap_codec::draft_table::by_draft`, which writes an arm per draft under
     # `#[cfg(feature)]` and another under `#[cfg(not(feature))]` and so leaves no
-    # `_` to fall into: a fifteenth `DraftVersion` variant stops that crate
+    # `_` to fall into: a sixteenth `DraftVersion` variant stops that crate
     # compiling instead of being answered quietly. The macro invocation writes
     # `Draft07` rather than `DraftVersion::Draft07`, which is the "anything a
     # macro spells by token concatenation" this file's own summary already excludes.
     #
-    # That is a smaller census and a stronger guarantee, and it is the shape the
-    # three entries above should be fixed into rather than made louder in place.
+    # `AnyControlMessage::is_setup`, `::fields` and `::fetch_group_order` reach
+    # the same guarantee from the other end and are invisible here for a
+    # different reason: they match the cfg-gated `AnyControlMessage` rather than
+    # `DraftVersion`, so a draft with no feature has no variant to answer for and
+    # the arms are exactly the variants under every feature set. Nothing is left
+    # for a `_` to catch, so the rule finds no catch-all to read, and a draft
+    # added to the enum without an arm is a compile error rather than a plausible
+    # value.
 
     ("crates/moqtap-proxy/src/session.rs", "datagram_is_status", "quiet catch-all"):
         "REAL DEFECT, owned by moqtap-proxy, and the sharpest of the set "
         "because the seam analysis holds this exact site up as the *correct* "
         "pattern at 2.3 - `#[allow(unreachable_patterns)] _ => false` is total "
-        "under all 2^14 feature sets, which is what that section is about. It "
+        "under every feature set, which is what that section is about. It "
         "is still a quiet answer for a draft the match has not met. Both "
         "readings are true; the fix is an arm that is total AND loud.",
 
     ("crates/moqtap-codec/tests/dispatch_tests.rs", "put_varint_for", "quiet catch-all"):
-        "Test helper. Four arms (drafts 17-20) and `_ => put_varint(v, out)`, "
+        "Test helper. An arm per draft from 17 on and `_ => put_varint(v, out)`, "
         "so a new draft silently gets the pre-delta encoding. Owned by the "
         "codec test suite; harmless today and wrong the day it is not.",
 
     ("crates/moqtap-proxy/tests/action_matrix.rs", "fetch_frame", "quiet catch-all"):
-        "Test helper. Three arms (drafts 18-20) and `_ => return None`, so a "
+        "Test helper. An arm per draft from 18 on and `_ => return None`, so a "
         "new draft is silently skipped by the rows that use it rather than "
         "covered by them. Owned by the proxy test suite.",
 

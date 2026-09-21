@@ -6,7 +6,7 @@
 //! [`crate::setup_option_names::setup_option_name`] for setup parameters. Both
 //! have to take the draft as well as the codepoint, because the codepoints are
 //! reused and retired rather than reserved, and each one's per-draft half lives
-//! in that draft's own module. So both are the same fourteen-armed dispatch
+//! in that draft's own module. So both are the same one-arm-per-draft dispatch
 //! over [`crate::version::DraftVersion`], and the interesting part is not the
 //! arms but what
 //! happens at the end of them.
@@ -67,11 +67,11 @@
 /// by_draft! { draft, <absent>,
 ///     ("draft07", Draft07) => <the answer draft-07 gives>,
 ///     ...
-///     ("draft20", Draft20) => <the answer draft-20 gives>,
+///     ("draft21", Draft21) => <the answer draft-21 gives>,
 /// }
 /// ```
 ///
-/// `draft` is the draft number as the IETF writes it — 7 through 20, matching
+/// `draft` is the draft number as the IETF writes it — 7 through 21, matching
 /// [`crate::version::DraftVersion::number`]. `<absent>` is the answer for a
 /// draft this crate does not implement **and** for one whose feature flag is off
 /// in this build, which are two different facts with one honest answer: this

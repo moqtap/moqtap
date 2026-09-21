@@ -1,6 +1,6 @@
 # Cross-draft architecture
 
-This workspace implements fourteen versions of one protocol. Every crate here
+This workspace implements every draft of one protocol from draft-07 on. Every crate here
 answers the question "how do you span drafts" and **three of them answer it
 differently**. That was never written down, and this file is that omission being
 fixed.
@@ -40,12 +40,19 @@ a draft means editing the shared module, the sharing did not work.
 ### The three corollaries
 
 **(a) Wire format is never shared.** Not between drafts, not between eras, not
-"just the header". The correctness of this workspace is conformance to fourteen
-separate specifications that were each edited by hand, and the measurement bears
+"just the header". The correctness of this workspace is conformance to one separate
+specification per draft that were each edited by hand, and the measurement bears
 it out: `moqtap-codec/src/draftNN/message.rs` and `error_codes.rs` have
-**fourteen distinct variants across fourteen drafts** — zero redundancy. There is
+**a distinct variant per draft** — zero redundancy. There is
 nothing there to extract. A shared encoder is a place where a change made for
-draft-21 silently reaches draft-11.
+draft-22 silently reaches draft-11.
+
+Draft-21 is the first draft to test that claim rather than restate it. It
+changes nothing on the wire, so `fields.rs` and `types.rs` are now one variant
+across two drafts — the codec's first real duplication. It stays duplicated: a
+draft is the unit this workspace is correct in, the pair coincides by the
+accident of one revision being editorial, and the draft that ends the
+coincidence would otherwise end it by editing draft-20's file.
 
 **(b) A shared module must not name a draft.** No `DraftVersion` parameter, no
 `d07` suffix, no `if draft >= 15`. Where drafts genuinely need different
@@ -76,11 +83,11 @@ How often does it diverge? Public function names in
 
 | window | drafts | common | union | overlap |
 |---|---|---|---|---|
-| 07-20 (all) | 14 | 34 | 122 | **28%** |
-| 17-20 | 4 | 64 | 78 | 82% |
-| 19-20 | 2 | 72 | 76 | 95% |
+| 07-21 (all) | 15 | 34 | 122 | **28%** |
+| 17-21 | 5 | 64 | 78 | 82% |
+| 19-21 | 3 | 72 | 76 | 95% |
 
-A universal fourteen-draft trait could cover 28% of the surface. It is not hard;
+A universal all-draft trait could cover 28% of the surface. It is not hard;
 it is impossible. Within an *era* the overlap is 82-95%, which is why the
 era-grouped macros in `data_dispatch.rs` work — and note that the era boundary
 there has already moved twice (subgroup at draft-14, fetch at draft-15), which
@@ -103,7 +110,7 @@ from what each crate holds.
 
 ### `moqtap-codec` — per-draft modules, and this is not negotiable
 
-The codec holds fourteen wire formats. Each is `src/draftNN/`, behind a
+The codec holds one wire format per draft. Each is `src/draftNN/`, behind a
 `draftNN` cargo feature, with an independent `message.rs`, `data_stream.rs`,
 `error_codes.rs`, `fields.rs`, `types.rs` and `mod.rs`. A build that enables one
 draft compiles one draft.
@@ -114,26 +121,26 @@ reach draft-11's shipped behaviour, and the compiler proves it.
 
 ### `moqtap-client` — per-draft modules, same seam, for a different reason
 
-The client holds fourteen session state machines. Same layout, same features,
+The client holds one session state machine per draft. Same layout, same features,
 same `Any*` facade.
 
 **Why:** not because the code is all distinct — 79.9% of it is duplicated, and
-twelve of its fourteen per-draft files have seven or fewer distinct variants
-across all fourteen drafts. It is because 77% of the *mass* sits in
+twelve of its per-draft files have seven or fewer distinct variants
+across all the drafts. It is because 77% of the *mass* sits in
 `connection.rs` and `endpoint.rs`, which have fourteen and twelve distinct
 variants respectively, and because those files are where every draft's real work
 and every draft's real bug lives. The duplication in the other twelve files is a
 **write-once** cost against shipped drafts nobody edits again.
 
 If that ever changes, `fetch.rs` is the one to look at first — two distinct
-variants across fourteen drafts, and
+variants across drafts, and
 `crates/moqtap-client/tests/fetch_answer_order_on_every_draft.rs` already proves
-the `FetchStateMachine` API is identical on all fourteen. It is the only
+the `FetchStateMachine` API is identical on every draft. It is the only
 candidate in the crate where the evidence is already in.
 
 ### `moqtap-proxy` — no draft modules, runtime dispatch
 
-The proxy has **no `src/draftNN/` directory at all**. It spans fourteen drafts
+The proxy has **no `src/draftNN/` directory at all**. It spans every draft
 with several hundred `DraftVersion::` references and a handful of
 `cfg(any(...))` sites, every one of which is inside a `#[cfg(test)]` module.
 
@@ -201,21 +208,21 @@ Sharing a table across drafts shares its failure modes too.
 
 These are **wire-level code at the crate root**. They decode and encode object
 headers, extension blocks, delta-encoded object IDs and stream-type fields
-across all fourteen drafts. Calling them "shared primitives" would be false.
+across all the drafts. Calling them "shared primitives" would be false.
 
 What makes them acceptable under §1 is that they are *dispatchers* rather than
 implementations: `dispatch_enum!` and the three macro families in
 `data_dispatch.rs` generate one arm per draft that forwards to that draft's own
 module. No draft's format is decided here; the arm decides which draft's decoder
 runs. `data_dispatch.rs` groups its macro families by **wire era**
-(`legacy_subgroup_glue!` for drafts 07-13, `modern_subgroup_glue!` for 14-20,
-`fetch_glue!` for 07-13) with hand-written modules `fo14`..`fo20` where no macro
-shape captured the flags — and the era boundary having moved twice is why there
+(`legacy_subgroup_glue!` for drafts 07-13, `modern_subgroup_glue!` for draft-14
+on, `fetch_glue!` for 07-13) with hand-written modules from `fo14` on where no
+macro shape captured the flags — and the era boundary having moved twice is why there
 are three families and a hand-written tail.
 
 **The rule for this layer:** an arm per draft, forwarding. The moment a
 dispatcher's arm contains protocol logic that is not in some draft's module, it
-has become a fifteenth implementation.
+has become an implementation beside the drafts' own.
 
 And see §4 — a dispatcher's `_` arm is the single most dangerous construct in
 this workspace.
@@ -245,10 +252,11 @@ and in CI.
 
 | gate | recipe | what it answers |
 |---|---|---|
-| `scripts/check-draft-parity.py` | `just draft-parity` | the draft set agrees on every axis that states it — including the per-draft rows in the `justfile` and in CI, so a matrix that was not extended is a failure rather than fourteen green rows that skipped the new draft; no list of drafts names draft N-1 and stops; no draft-enumerating `match` closes with a quiet catch-all |
-| `scripts/check-draft-cfg.py` | `just draft-cfg` | every per-draft rejection `cfg(any(...))` names all thirteen other drafts — all 91 pairs, without compiling any of them |
+| `scripts/check-draft-parity.py` | `just draft-parity` | the draft set agrees on every axis that states it — including the per-draft rows in the `justfile` and in CI, so a matrix that was not extended is a failure rather than green rows that skipped the new draft; no list of drafts names draft N-1 and stops; no draft-enumerating `match` closes with a quiet catch-all |
+| `scripts/check-draft-cfg.py` | `just draft-cfg` | every per-draft rejection `cfg(any(...))` names all other drafts — all 105 pairs, without compiling any of them |
 | the per-draft CI matrix | `just draft-matrix`, `just draft-pairs`, `just draft-targets` | each draft alone, `--all-targets`, `-D warnings`, with the *resolved feature list* asserted rather than inferred from an exit code; plus the two-draft rows |
 | `scripts/check-drafts.py` | `just drafts` | every citation and every quotation under `crates/` against the draft it names |
+| `scripts/check-draft-counts.py` | `just draft-counts` | no comment counts the whole draft set in words — the half of the prose construct below that a gate can read, with the set derived from the tree so the gate never needs editing |
 
 **None of the three python gates writes a draft number down**, and where the
 `justfile` and CI necessarily do — a matrix is a list of rows — those lists are
@@ -271,9 +279,9 @@ when this draft is the only one enabled. Written as
 `#[cfg(any(feature = "draft07", ...))]` it must name every other draft, a copy
 from the previous draft names one too few, and the failure needs *two* drafts
 enabled to appear. Eight of forty-one were wrong when this was measured.
-`check-draft-cfg.py` covers all 91 pairs; `just draft-pairs` compiles the two
+`check-draft-cfg.py` covers all 105 pairs; `just draft-pairs` compiles the two
 that matter. Prefer the always-compiled form — `#[allow(unreachable_patterns)]
-_ => {}` — which is total under all 2^14 feature sets and needs no edit per
+_ => {}` — which is total under every feature set and needs no edit per
 draft.
 
 **(b) The quiet catch-all in a dispatcher.** The other side of (a). A `match`
@@ -284,8 +292,33 @@ has never met, and nothing distinguishes that from a right answer. An arm that
 `check-draft-parity.py` rule 3 reports the quiet ones.
 
 The distinction that matters: a match naming **one** draft variant is a
-rejection guard and stays correct forever — a draft-21 header really is not
-draft-20's. A match naming **all of them** and then guessing is the defect.
+rejection guard and stays correct forever, and draft-21 is the case that shows
+why. Its headers are draft-20's byte for byte, so the guard is not separating
+two wire formats — it is separating two *variants*, and an
+`AnySubgroupHeader::Draft21` is draft-21's because that is what decoded it,
+whatever the bytes were. A match naming **all of them** and then guessing is
+the defect.
+
+**(b2) A citation to a section that *split*.** Draft-21 is the first
+restructure this workspace has ported, and it moved 200 numbered sections into
+214. A remap matched on heading titles gets 182 of them right and is wrong in
+one specific way: where a draft-20 section became **two** draft-21 sections, the
+title stays with the half that kept the concept and the wire rules go to the
+other half. Draft-20's Section 5.1.2 "Location Filters" is draft-21's 3.3.1 of
+the same name *and* 9.20.10 "LOCATION FILTER Parameter", and a citation to the
+field count retargeted by title lands on prose about which Objects pass a
+filter. Six sections split that way; forty-odd citations needed placing by hand.
+
+`check-drafts.py` reports the ones with a quotation beside them — rules 3 and 4
+place the sentence — and cannot see the rest, because the section it lands on
+exists and the citation resolves. What finds them is reading each draft-20
+section's own sentences and asking which draft-21 sections hold them; a section
+whose text lands under two different top-level sections has split.
+
+Draft-21 also reworded two normative sentences while claiming to move text
+unchanged, which no gate catches either: rule 3 lets a quotation pass when the
+block names a neighbouring draft that has it, and the old wording is exactly
+that. Check every quotation in the new modules against the new draft directly.
 
 **(c) The `matches!` predicate over `DraftVersion`.** `matches!(draft,
 DraftVersion::Draft15 | ... | DraftVersion::Draft20)` desugars to `_ => false`,
@@ -306,21 +339,27 @@ nothing here reads English. A doc comment saying "all thirteen drafts" or
 for it. `shape/matcher.rs` declaring `[DraftVersion; 13]` under a doc comment
 reading "All fourteen" is this defect with one half gated and the other not.
 
-Run these after the mechanical port, reading **19** as the draft the tree had
+Run these after the mechanical port, reading **20** as the draft the tree had
 before yours. Each is a **to-do list, not a defect list** — the draft-20 port
 left 86 range hits alone because draft-20 really did delete the Filter Type and
 Fetch Type fields. A range ending at N-1 is a question.
 
+The draft-21 port is the other extreme and worth knowing as a calibration: it
+answered every one of them the same way, because draft-21 changes nothing, so
+196 ranges and 166 count words all moved on. A port where every hit is a defect
+and a port where none of them is are both possible; what is not possible is
+knowing which without reading them.
+
 A range that stops at the previous draft:
 
 ```sh
-grep -rn "[0-9]\{2\}-19" --include=*.rs crates/
+grep -rn "[0-9]\{2\}-20" --include=*.rs crates/
 ```
 
 A count word one short, and a hard-coded length:
 
 ```sh
-grep -rn "eleven drafts\|twelve drafts\|thirteen drafts\|all thirteen" --include=*.rs crates/
+grep -rn "twelve drafts\|thirteen drafts\|drafts\|all fourteen" --include=*.rs crates/
 grep -rn "DraftVersion; [0-9]\+\]" --include=*.rs crates/
 ```
 
@@ -342,12 +381,12 @@ At draft-20 those read 56 / 76 / 7 / 4 / 7 / 0. The counts are not the
 point; a count that has not moved after a port is.
 
 **The fastest way to a real defect is a file that fails two of them at once.** A
-file saying "all thirteen drafts" *and* "drafts 15-19" states two things that
+file saying "all the drafts" *and* "drafts 15-20" states two things that
 cannot both be current, so one is wrong before any draft is opened:
 
 ```sh
-for f in $(grep -rl "thirteen drafts\|all thirteen" --include=*.rs crates/); do
-  grep -q "[0-9]\{2\}-19" "$f" && echo "$f"
+for f in $(grep -rl "drafts\|all fourteen" --include=*.rs crates/); do
+  grep -q "[0-9]\{2\}-20" "$f" && echo "$f"
 done
 ```
 

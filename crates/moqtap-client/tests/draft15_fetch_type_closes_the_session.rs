@@ -101,7 +101,7 @@ fn fetch_with_an_unassigned_type() -> Vec<u8> {
 ///
 /// Sending `CodecError::InvalidFetchType` to the no-close arm of draft-15's
 /// `codec_session_error_code` — where the rule effectively was, reported under
-/// the shared malformed-field variant, on all twelve drafts that have the field:
+/// the shared malformed-field variant, on all the drafts that have the field:
 ///
 /// ```text
 /// ---- an_unassigned_fetch_type_closes_the_quic_connection stdout ----

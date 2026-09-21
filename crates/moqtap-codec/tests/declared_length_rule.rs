@@ -1,6 +1,6 @@
 //! The declared Length of a control message is part of the message.
 //!
-//! Every draft from 07 through 20 carries the same sentence in its control
+//! Every draft carries the same sentence in its control
 //! message section: control messages have a length to make parsing easier, but
 //! no control message is intended to be ignored, and if the length does not
 //! match the length of the message payload the receiver MUST close the session.
@@ -211,6 +211,13 @@ declared_length_gate!(
     draft20_reads_its_whole_declared_payload,
     "draft20",
     draft20,
+    2, 1,
+    timeout: vi(0),
+);
+declared_length_gate!(
+    draft21_reads_its_whole_declared_payload,
+    "draft21",
+    draft21,
     2, 1,
     timeout: vi(0),
 );

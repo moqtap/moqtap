@@ -3,7 +3,7 @@
 //! Proves the two framing promises together: a subgroup stream
 //! arrives at the far end byte-identical, *and* one
 //! [`ProxyEvent::Object`] fires per object — on every draft the build
-//! compiled, 07 through 20.
+//! compiled.
 
 //! `DRAFTS` is cfg-built, so the sweep is the compiled set. A build with
 //! no draft at all has no subgroup codec to build a stream with, and
@@ -23,7 +23,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod common;
@@ -69,6 +70,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// Collects object events. `wants_events()` is left at its `true` default

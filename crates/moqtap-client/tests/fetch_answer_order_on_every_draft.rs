@@ -1,7 +1,7 @@
 //! Every draft's fetch state machine answers in either order.
 //!
 //! `fetch_tests.rs` drives draft-14's machine through the whole transition
-//! table. There are fourteen of those machines, one per draft module, and they
+//! table. There is one of those machines per draft module, and they
 //! are separate types with separate copies of the same graph — so a change made
 //! to one of them and not to its thirteen siblings compiles, passes that file, and
 //! ships. This file drives the two orders and the late close on every draft the
@@ -93,3 +93,5 @@ fetch_answer_order!(draft18_answers_in_either_order, "draft-18", moqtap_client::
 fetch_answer_order!(draft19_answers_in_either_order, "draft-19", moqtap_client::draft19::fetch);
 #[cfg(feature = "draft20")]
 fetch_answer_order!(draft20_answers_in_either_order, "draft-20", moqtap_client::draft20::fetch);
+#[cfg(feature = "draft21")]
+fetch_answer_order!(draft21_answers_in_either_order, "draft-21", moqtap_client::draft21::fetch);

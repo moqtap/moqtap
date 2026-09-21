@@ -125,7 +125,7 @@ fn elsewhere() -> TrackNamespace {
     TrackNamespace(vec![b"elsewhere".to_vec()])
 }
 
-// -- The shapes one rule takes across fourteen drafts ------------------
+// -- The shapes one rule takes across drafts ------------------
 
 /// The request the peer sends. Drafts 07 through 10 name only the prefix,
 /// draft-11 adds a Request ID, draft-13 renames the message, drafts 14 and 15
@@ -335,7 +335,7 @@ macro_rules! we_subscribe {
 }
 
 /// The setup parameters each draft requires. Draft-07 requires a ROLE of both
-/// endpoints and is the only one of the fourteen that does.
+/// endpoints and is the only draft that does.
 #[macro_export]
 macro_rules! setup_params {
     (role) => {
@@ -1469,4 +1469,28 @@ id_keyed_gates!(
     dropped,
     present,
     "10.19"
+);
+id_keyed_gates!(
+    draft21,
+    "draft21",
+    0xff00_0014,
+    moqtap_client::draft21::session::request_id::Role,
+    Server,
+    in_setup,
+    none,
+    one_message,
+    d18,
+    stream,
+    stream18,
+    stream18,
+    cancel,
+    params,
+    0,
+    2,
+    1,
+    0x30,
+    ignored,
+    dropped,
+    present,
+    "9.15"
 );

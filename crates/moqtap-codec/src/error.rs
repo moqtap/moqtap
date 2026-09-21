@@ -15,7 +15,7 @@ pub const MAX_NAMESPACE_TUPLE_SIZE: usize = 32;
 ///
 /// This enum is deliberately **not** `#[non_exhaustive]`, so that a session-close
 /// table matching it exhaustively fails to compile until a new variant has been
-/// placed on each of the fourteen drafts — either among the rules that draft
+/// placed on each of the drafts — either among the rules that draft
 /// answers with a close or among the ones it names and does not. A wildcard arm
 /// would make those fourteen decisions silently, all in the direction of "no
 /// rule", and a missing arm and a deliberate exclusion look identical from
@@ -164,7 +164,7 @@ pub enum CodecError {
     /// not name.
     ///
     /// Drafts 17, 18 and 19 only, and the split is the whole reason this is a
-    /// variant rather than a shared rule. All fourteen drafts state the first
+    /// variant rather than a shared rule. All the drafts state the first
     /// half the same way and ten of them state the opposite consequence.
     /// Draft-19 Section 10.2.1, draft-18 Section 10.2.1 and draft-17 Section
     /// 9.3.1: "Each Message Parameter definition indicates the message types in
@@ -317,7 +317,7 @@ pub enum CodecError {
     InvalidForward(u8),
     /// A subscription filter names a Filter Type no draft in its range assigns.
     ///
-    /// All fourteen drafts state the rule and they do not state the same
+    /// All the drafts state the rule and they do not state the same
     /// consequence. Drafts 07 through 13: "A filter type other than the above
     /// MUST be treated as error", which names no code and no close. Draft-14:
     /// "An endpoint that receives a filter type other than the above MUST be
@@ -474,13 +474,17 @@ pub enum CodecError {
     /// A delta-encoded Object ID would exceed 2^64 - 1 once the delta is added
     /// to the previous Object ID on the same stream.
     ///
-    /// Draft-18 Section 11.4.2 and draft-19 Section 11.4.2: "The Object ID
-    /// Delta + 1 is added to the previous Object ID in the Subgroup stream if
-    /// there was one... If the resulting Object ID would be greater than
-    /// 2^64 - 1, the endpoint MUST close the session with a
-    /// PROTOCOL_VIOLATION." Draft-17
-    /// Section 10.4.2 describes the same arithmetic and states no consequence,
-    /// so on that draft this is a decode failure and nothing more.
+    /// Drafts 18 through 20 Section 11.4.2, and draft-21 Section 11.3.1: "The
+    /// Object ID Delta + 1 is added to the previous Object ID in the Subgroup
+    /// stream if there was one... If the resulting Object ID would be greater
+    /// than 2^64 - 1, the endpoint MUST close the session with a
+    /// PROTOCOL_VIOLATION."
+    ///
+    /// Drafts 14 through 17 Section 10.4.2 describe the same arithmetic and
+    /// state no consequence, so on those four this is a decode failure and
+    /// nothing more. The delta encoding does not exist before draft-14, which
+    /// is why the range starts there rather than at the first draft with a
+    /// subgroup stream.
     ///
     /// Distinct from [`CodecError::InvalidField`], which is too coarse for this
     /// rule: a caller could not tell the wrap from a dozen unrelated
@@ -520,7 +524,7 @@ pub enum CodecError {
     ExtensionsOnNonExistentObject(usize),
     /// An object arrived carrying a payload the draft gives it no room for.
     ///
-    /// All fourteen drafts state the rule, in two phrasings. Drafts 07 through
+    /// All the drafts state the rule, in two phrasings. Drafts 07 through
     /// 18 say it of the status code — draft-07 Section 7.1.1.1, drafts 08 and
     /// 09 Section 8.1.1.1, drafts 10 and 11 Section 9.1.1.1, drafts 12 and 13
     /// Section 9.2.1.1, drafts 14 through 17 Section 10.2.1.1, draft-18 Section
@@ -549,7 +553,7 @@ pub enum CodecError {
     /// **No draft turns this into a close.** The sentence is a MUST on the
     /// sender with no receiver action named, and the "SHOULD be treated as a
     /// protocol error" beside it belongs to the neighbouring rule about
-    /// unassigned status values. So all fourteen session-close tables place it
+    /// unassigned status values. So every draft's session-close table places it
     /// among the rules they state and do not end a session over — which is a
     /// decision this variant makes visible, and one
     /// [`CodecError::InvalidField`] was making by accident.
@@ -603,7 +607,7 @@ pub enum CodecError {
     UnknownStreamType(u64),
     /// A datagram announced a type its draft's datagram table does not assign.
     ///
-    /// The datagram half of the rule above, and stated by all fourteen drafts
+    /// The datagram half of the rule above, and stated by all the drafts
     /// for the same reason: drafts 08 through 16 name streams and datagrams in
     /// one sentence, and drafts 17, 18 and 19 give the datagrams their own —
     /// "An endpoint that receives an unknown datagram type MUST close the
@@ -617,23 +621,52 @@ pub enum CodecError {
     /// single variant could not say which table had been consulted.
     #[error("datagram type {0} is not one this draft assigns")]
     UnknownDatagramType(u64),
-    /// A Type value inside the form its draft defines, but one the draft
-    /// separately names as invalid.
+    /// A subgroup stream header's Type was inside the form its draft defines,
+    /// but held a combination the draft separately names as invalid.
     ///
-    /// Distinct from the two variants above, which report a value no table
-    /// assigns. Drafts 16 through 19 describe their subgroup and datagram Types
-    /// as bit fields rather than as a list of code points, and then rule out
-    /// particular bit combinations *within* the form — a subgroup Type whose
-    /// SUBGROUP_ID_MODE holds the reserved value, or a datagram Type asking to
-    /// be both an object status and an end-of-group marker. The enclosing form
-    /// is assigned, so calling these unknown would misname them; the drafts
-    /// call them invalid and require a close with PROTOCOL_VIOLATION.
+    /// Distinct from [`CodecError::UnknownStreamType`], which reports a value
+    /// no table assigns. Drafts 16 through 21 describe the subgroup Type as a
+    /// bit field rather than as a list of code points, and then rule
+    /// combinations out *within* the form: on all six a SUBGROUP_ID_MODE of
+    /// 0b11, and from draft-20 also a Type that leaves the subgroup form's own
+    /// bit clear or that runs past the one-byte flags space. The enclosing
+    /// form is assigned, so calling these unknown would misname them; the
+    /// drafts call them invalid and require a close with PROTOCOL_VIOLATION.
+    ///
+    /// Separate from [`CodecError::InvalidDatagramTypeValue`] because the
+    /// drafts state the two as separate sentences in separate sections — "If
+    /// an endpoint receives a stream header with any of these" against "If an
+    /// endpoint receives a datagram with any of these". A single variant
+    /// spanning both could not say which of the two sentences a frame broke,
+    /// and `raw` cannot be made to say it either: the two Type spaces overlap,
+    /// so deriving the namespace from the number would be this crate guessing
+    /// which table had been consulted. A consumer that publishes the rule
+    /// beside the refusal would then be right on half the frames and wrong on
+    /// the other half, with nothing in the row to say which.
     ///
     /// `detail` names which combination was seen, because the rule is a list
     /// rather than a single condition and a log that says only "invalid" leaves
     /// the reader to re-derive the bits.
-    #[error("type {raw:#x} is one this draft names as invalid: {detail}")]
-    InvalidTypeValue {
+    #[error("stream header type {raw:#x} is one this draft names as invalid: {detail}")]
+    InvalidStreamTypeValue {
+        /// The Type value as it arrived, before any narrowing to a byte.
+        raw: u64,
+        /// Which of the draft's lists it fell into.
+        detail: &'static str,
+    },
+    /// A datagram's Type was inside the form its draft defines, but held a
+    /// combination the draft separately names as invalid.
+    ///
+    /// The datagram half of [`CodecError::InvalidStreamTypeValue`], which
+    /// carries the reason the two are separate variants rather than one.
+    /// Drafts 16 through 21 rule out a Type asking to be both an object status
+    /// and an end-of-group marker; drafts 20 and 21 add the bit reserved for a
+    /// datagram, and any other bit their form leaves unspecified.
+    ///
+    /// `detail` names which combination was seen, for the reason the stream
+    /// variant gives.
+    #[error("datagram type {raw:#x} is one this draft names as invalid: {detail}")]
+    InvalidDatagramTypeValue {
         /// The Type value as it arrived, before any narrowing to a byte.
         raw: u64,
         /// Which of the draft's lists it fell into.
@@ -660,7 +693,7 @@ pub enum CodecError {
     /// A control message's declared Length disagrees with the fields it
     /// carries.
     ///
-    /// All fourteen drafts state it in the same paragraph that gives the
+    /// All the drafts state it in the same paragraph that gives the
     /// message type registry, and only the code changes: drafts 07 through 10
     /// say "If the length does not match the length of the message content, the
     /// receiver MUST close the session", naming no code; drafts 11 through 18

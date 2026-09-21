@@ -56,7 +56,7 @@
 //! `note_elided` is legal: at admission, on the *arriving* unit, before the
 //! framer's positional cursor has moved past it. Dropping an
 //! already-queued unit at release time would not leave a gap in absolute
-//! object IDs on drafts 14-20 — it would leave every successor decoding a
+//! object IDs on drafts 14-21 — it would leave every successor decoding a
 //! *wrong* ID. That single fact is why [`Overflow::DropTail`] exists and
 //! `DropHead` does not.
 
@@ -123,7 +123,7 @@ pub(crate) enum Admission {
     /// Forward it, exactly as an unshaped session would.
     Admit,
     /// Discard it. The caller must run it through the framer's elide path
-    /// so absolute object IDs on drafts 14-20 stay correct, and must admit
+    /// so absolute object IDs on drafts 14-21 stay correct, and must admit
     /// it anyway if an elide guard refuses.
     DropTail,
     /// Abandon the destination stream with `code`.

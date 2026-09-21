@@ -41,7 +41,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 use moqtap_codec::error::CodecError;
 #[cfg(any(
@@ -54,14 +55,16 @@ use moqtap_codec::error::CodecError;
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 use moqtap_codec::types::TrackNamespace;
 #[cfg(any(
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 use moqtap_codec::varint::MoqtProfile;
 #[cfg(any(
@@ -74,7 +77,8 @@ use moqtap_codec::varint::MoqtProfile;
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -90,7 +94,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     let mut wire = vec![type_id];
@@ -134,7 +139,13 @@ fn subscribe_prefix(leading_varints: usize, namespace_bytes: usize, name_bytes: 
 /// name lengths are not - 4,000 needs two bytes under one scheme and three
 /// under the other - so the payload has to be written with the draft's own
 /// profile rather than reused from above.
-#[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
+#[cfg(any(
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21"
+))]
 fn subscribe_prefix_moqt<P: MoqtProfile>(
     leading_varints: usize,
     namespace_bytes: usize,
@@ -273,6 +284,13 @@ full_track_name_cap_gate_moqt!(
     draft20_caps_the_full_track_name,
     "draft20",
     draft20,
+    moqtap_codec::varint::Moqt18,
+    1
+);
+full_track_name_cap_gate_moqt!(
+    draft21_caps_the_full_track_name,
+    "draft21",
+    draft21,
     moqtap_codec::varint::Moqt18,
     1
 );

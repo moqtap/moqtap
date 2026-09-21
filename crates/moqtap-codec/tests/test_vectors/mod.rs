@@ -101,9 +101,11 @@ impl TestVector {
 /// - `unknown_message` — a type code this draft does not assign, on a control
 ///   message, a data stream or a datagram.
 /// - `invalid_type` — a type code inside the form its draft defines, which the
-///   draft separately names as invalid. Drafts 16 through 20 describe their
+///   draft separately names as invalid. Drafts 16 through 21 describe their
 ///   data-plane types as bit fields and then rule out particular combinations
 ///   within the form, so the enclosing form is assigned and the value is not.
+///   One category for both spaces, because the two error variants that reach it
+///   differ in which Type space was consulted and not in what went wrong.
 /// - `invalid_parameter` — a parameter or property is wrong in itself: its
 ///   type, its length, its value's range, or its position in a delta-coded run.
 ///   A malformed filter value belongs here too, on both counts.
@@ -137,7 +139,7 @@ pub fn error_category(err: &CodecError) -> &'static str {
         // them, so this reads the prose.
         //
         // Reword either string in the codec and every truncated-frame vector
-        // across the fourteen drafts stops being `incomplete` and starts being
+        // across the drafts stops being `incomplete` and starts being
         // `invalid_value`, which every one of them will say so about. The
         // coupling is real and it is loud, which is the pair of properties that
         // makes it safe to leave.
@@ -160,7 +162,8 @@ pub fn error_category(err: &CodecError) -> &'static str {
         // a fact about the draft rather than about the corpus.
         CodecError::ParameterOutOfScope { .. } => "parameter_out_of_scope",
 
-        CodecError::InvalidTypeValue { .. } => "invalid_type",
+        CodecError::InvalidStreamTypeValue { .. }
+        | CodecError::InvalidDatagramTypeValue { .. } => "invalid_type",
 
         CodecError::PayloadNotPermitted { .. } => "payload_not_permitted",
 
@@ -343,9 +346,9 @@ pub fn unassigned_statuses(vector: &TestVector, assigned: &[u64]) -> Vec<u64> {
 ///
 /// # Which JSON keys count
 ///
-/// `object_status`, which drafts 07-14 use everywhere and drafts 15-20 keep on
-/// the datagram header, and `status`, which is what drafts 15-20 call the same
-/// field inside a subgroup object. Drafts 15-20's `subgroup.json` and
+/// `object_status`, which drafts 07-14 use everywhere and drafts 15-21 keep on
+/// the datagram header, and `status`, which is what drafts 15-21 call the same
+/// field inside a subgroup object. Drafts 15-21's `subgroup.json` and
 /// `fetch-header.json` carry no `object_status` key at all, so a walk that knew
 /// only the first name read none of those six drafts' subgroup objects — and
 /// reported a clean sweep over a corpus it had not opened.

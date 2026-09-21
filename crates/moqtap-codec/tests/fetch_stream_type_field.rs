@@ -106,3 +106,4 @@ fetch_stream_suite!("draft17", draft17, Draft17, DraftVersion::Draft17, request_
 fetch_stream_suite!("draft18", draft18, Draft18, DraftVersion::Draft18, request_id, false);
 fetch_stream_suite!("draft19", draft19, Draft19, DraftVersion::Draft19, request_id, false);
 fetch_stream_suite!("draft20", draft20, Draft20, DraftVersion::Draft20, request_id, false);
+fetch_stream_suite!("draft21", draft21, Draft21, DraftVersion::Draft21, request_id, false);

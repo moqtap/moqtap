@@ -3,7 +3,7 @@
 //! What `AnyConnectionError` answers that its message could not.
 //!
 //! The facade exists so that a caller holding a MoQT connection never has to
-//! branch on which of fourteen drafts was negotiated. It buys that by
+//! branch on which of drafts was negotiated. It buys that by
 //! rendering every draft's `ConnectionError` through `Display`, and the price
 //! of prose alone is the variant, which is the half most callers actually
 //! need. Three questions a sentence cannot answer:
@@ -516,7 +516,7 @@ fn a_call_this_facade_refused_is_not_the_peers_doing() {
 /// A dial that never sent a packet is not a relay refusing one.
 ///
 /// `DialError` grew a `LocalSocket` variant so that a socket this machine would
-/// not open stops being spelled as an invalid address, and the fourteen
+/// not open stops being spelled as an invalid address, and the per-draft
 /// `From<DialError>` impls fold it back onto `ConnectionError::InvalidAddress`
 /// on the way here **on purpose**: that is the variant this facade reads as
 /// [`ErrorCause::Facade`], and `is_local` therefore answers true. Routing the
@@ -662,8 +662,8 @@ fn the_two_names_one_rule_has_are_one_rule_here() {
 /// every draft.
 ///
 /// `DataStreamState` is the tenth variant every draft carries — an object asked
-/// for before the header it is framed against — and being shared by all
-/// fourteen, nothing about the negotiated draft settles it. A caller reaching
+/// for before the header it is framed against — and being shared by every
+/// draft, nothing about the negotiated draft settles it. A caller reaching
 /// for a stream in the wrong order is this side's mistake, not the relay's.
 #[test]
 fn an_out_of_order_call_on_a_data_stream_is_this_sides_mistake() {

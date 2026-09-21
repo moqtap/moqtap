@@ -226,7 +226,7 @@ fn a_well_formed_draft_15_largest_object_still_renders_its_two_fields() {
 /// Namespace, Track Name, then a count-prefixed parameter block with
 /// delta-encoded types — and give 0x25 through 0x29 the length-prefixed
 /// encoding, which stores the value verbatim.
-#[cfg(any(feature = "draft19", feature = "draft20"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
 fn subscribe_with_parameter(parameter_type: u64, value: &[u8]) -> Vec<u8> {
     use moqtap_codec::varint::{Moqt18, VarInt};
 
@@ -261,7 +261,7 @@ fn subscribe_with_parameter(parameter_type: u64, value: &[u8]) -> Vec<u8> {
 /// The third trigger, the delta overflow, is deliberately **not** here: it is
 /// the one whose ablation fails as an assertion rather than as a panic, and
 /// putting it in the same loop as a panicking case would let the panic mask it.
-#[cfg(any(feature = "draft19", feature = "draft20"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
 fn the_truncating_triggers() -> Vec<(&'static str, u64, Vec<u8>)> {
     vec![
         // OBJECT_PROPERTY_FILTER carries a Property Type after its SetID, and a
@@ -278,7 +278,7 @@ fn the_truncating_triggers() -> Vec<(&'static str, u64, Vec<u8>)> {
 /// A nine-byte MoQT varint is `0xFF` followed by the full 64-bit value, so this
 /// is the largest Start the encoding can name, and one more than that has
 /// nowhere to go.
-#[cfg(any(feature = "draft19", feature = "draft20"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
 fn a_value_whose_delta_runs_off_the_end() -> Vec<u8> {
     let mut value = vec![0x00]; // SetID
     value.push(0xff);
@@ -290,7 +290,7 @@ fn a_value_whose_delta_runs_off_the_end() -> Vec<u8> {
 
 /// The name a parameter type renders under, for a failure that says which
 /// filter it was about.
-#[cfg(any(feature = "draft19", feature = "draft20"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
 fn filter_name(parameter_type: u64) -> &'static str {
     match parameter_type {
         0x25 => "subgroup_filter",
@@ -340,6 +340,54 @@ fn a_truncated_draft_20_range_filter_renders() {
         });
 
         let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
+        assert_eq!(
+            parameters(&fields).get(filter_name(parameter_type)),
+            Some(&FieldValue::Bytes(value.clone())),
+            "{what}: the bytes a peer sent, not a structure invented from them"
+        );
+    }
+}
+/// Draft-21: a Range Filter value that runs out mid-field renders, and does not
+/// panic.
+///
+/// `param_encoding` gives 0x25-0x29 the length-prefixed encoding and
+/// `check_location_filters` covers 0x21 and 0x23 and skips these five
+/// entirely, so the bytes reaching `decode_range_filter` are arbitrary. It read
+/// three varints with `unwrap`, on a value where `has_remaining` promises one
+/// byte and a MoQT varint may need nine.
+///
+/// *Ablation:* restore the hand-written parse in
+/// `draft21/fields.rs::decode_range_filter` and this does not fail — it panics
+/// inside the function under test, in debug and in release alike:
+///
+/// ```text
+/// thread 'a_truncated_draft_20_range_filter_renders_draft21' panicked at
+/// crates\moqtap-codec\src\draft21\fields.rs:
+/// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
+/// ```
+#[cfg(feature = "draft21")]
+#[test]
+fn a_truncated_draft_20_range_filter_renders_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+
+    assert_eq!(
+        subscribe_with_parameter(0x28, &[0x00]),
+        vec![0x03, 0x00, 0x0a, 0x01, 0x01, 0x01, 0x6e, 0x01, 0x74, 0x01, 0x28, 0x01, 0x00],
+        "the property-filter trigger is the thirteen bytes the sweep recorded"
+    );
+    assert_eq!(
+        subscribe_with_parameter(0x25, &[0x00, 0xc0]),
+        vec![0x03, 0x00, 0x0b, 0x01, 0x01, 0x01, 0x6e, 0x01, 0x74, 0x01, 0x25, 0x02, 0x00, 0xc0],
+        "the mid-varint trigger is the fourteen bytes the sweep recorded"
+    );
+
+    for (what, parameter_type, value) in the_truncating_triggers() {
+        let wire = subscribe_with_parameter(parameter_type, &value);
+        let decoded = ControlMessage::decode(&mut &wire[..]).unwrap_or_else(|e| {
+            panic!("draft-21 gates these types and not their values, so {what} decodes: {e:?}")
+        });
+
+        let fields = moqtap_codec::draft21::fields::message_fields(&decoded);
         assert_eq!(
             parameters(&fields).get(filter_name(parameter_type)),
             Some(&FieldValue::Bytes(value.clone())),
@@ -408,6 +456,49 @@ fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap() {
         .expect("the frame is well formed; it is the parameter value that is not");
 
     let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
+    assert_eq!(
+        parameters(&fields).get("subgroup_filter"),
+        Some(&FieldValue::Bytes(value)),
+        "an overflowing delta is not a range"
+    );
+}
+/// The delta that runs off the end of the 64-bit space, on draft-21.
+///
+/// **This is the test that needs `--release` to be worth anything.** The parse
+/// resolved its two delta baselines with a bare `+`. In debug that is a panic
+/// and this test would report one. In release it *wraps*, and nothing crashes:
+/// the extractor renders `start: 18446744073709551615, end: 0` and the trace
+/// writer records it as though a peer had asked for it. A wrong answer that
+/// looks like data is the worse of the two failures, and only an assertion on
+/// the rendered value catches it.
+///
+/// `range_filter.rs` has used `checked_add` on both baselines since it was
+/// written, and `tests/range_filters_draft21.rs` has covered
+/// `DeltaOverflow { base: u64::MAX, delta: 2 }` for as long. Neither was
+/// reached from here.
+///
+/// *Ablation:* restore the bare `+` in
+/// `draft21/fields.rs::decode_range_filter`. In debug it panics with
+/// `attempt to add with overflow`; in release it fails as an assertion:
+///
+/// ```text
+/// assertion `left == right` failed: an overflowing delta is not a range
+///   left: Some(Map(FieldMap { entries: [("set_id", Uint(0)),
+///         ("ranges", Array([Map(FieldMap { entries: [("start",
+///         Uint(18446744073709551615)), ("end", Uint(0))] })]))] }))
+///  right: Some(Bytes([0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1]))
+/// ```
+#[cfg(feature = "draft21")]
+#[test]
+fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+
+    let value = a_value_whose_delta_runs_off_the_end();
+    let wire = subscribe_with_parameter(0x25, &value);
+    let decoded = ControlMessage::decode(&mut &wire[..])
+        .expect("the frame is well formed; it is the parameter value that is not");
+
+    let fields = moqtap_codec::draft21::fields::message_fields(&decoded);
     assert_eq!(
         parameters(&fields).get("subgroup_filter"),
         Some(&FieldValue::Bytes(value)),
@@ -487,6 +578,57 @@ fn a_malformed_range_filter_nested_in_fill_parameters_renders() {
         );
     }
 }
+/// All three triggers, one level down inside FILL_PARAMETERS.
+///
+/// Draft-21's `FILL_PARAMETERS_ALLOWED` lists 0x25 through 0x28, and
+/// `draft21/fields.rs` recurses into `params_to_json` for a 0x23 value — so
+/// every trigger above has a second route to the same extractor, through a
+/// parameter the decoder does check the structure of. `decode_fill_parameters`
+/// validates the nested block's framing and its nested LOCATION_FILTERs; it
+/// says nothing about a nested Range Filter's value.
+///
+/// *Ablation:* as above. This one is worth keeping separate because a fix
+/// applied to the top-level call site alone would leave it panicking.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_malformed_range_filter_nested_in_fill_parameters_renders_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+    use moqtap_codec::varint::{Moqt18, VarInt};
+
+    let mut triggers = the_truncating_triggers();
+    triggers.push((
+        "a delta off the end of the 64-bit space",
+        0x25,
+        a_value_whose_delta_runs_off_the_end(),
+    ));
+
+    for (what, parameter_type, value) in triggers {
+        // The FILL_PARAMETERS value is a parameter block of its own: a count,
+        // then one delta-encoded type and its length-prefixed value.
+        let mut nested = vec![0x01];
+        VarInt::from_u64_moqt(parameter_type).encode_moqt::<Moqt18>(&mut nested);
+        VarInt::from_usize(value.len()).encode_moqt::<Moqt18>(&mut nested);
+        nested.extend_from_slice(&value);
+
+        let wire = subscribe_with_parameter(0x23, &nested);
+        let decoded = ControlMessage::decode(&mut &wire[..]).unwrap_or_else(|e| {
+            panic!("a fill block carrying {what} is well formed as a block: {e:?}")
+        });
+
+        let fields = moqtap_codec::draft21::fields::message_fields(&decoded);
+        let params = parameters(&fields);
+        // A nested block is a Key-Value-Pair list like the outer one, so it
+        // collapses the same way. The nesting is the whole point of the test:
+        // a value the outer block would have rendered as bytes must not become
+        // a structure one level down.
+        let fill = entries_by_name(params.get("fill_parameters"));
+        assert_eq!(
+            fill.get(filter_name(parameter_type)),
+            Some(&FieldValue::Bytes(value.clone())),
+            "{what}, nested: the bytes a peer sent, not a structure invented from them"
+        );
+    }
+}
 
 /// The positive control for the Range Filters: a well-formed one still renders
 /// as ranges, and renders them with the draft's own two baselines.
@@ -523,6 +665,41 @@ fn a_well_formed_draft_20_range_filter_still_renders_its_ranges() {
         "a Start counts from the prior Range's End, not from its Start"
     );
 }
+/// The positive control for the Range Filters: a well-formed one still renders
+/// as ranges, and renders them with the draft's own two baselines.
+///
+/// Section 3.4's worked example: ranges 3-5 and 10-15 are written `3, 2, 5,
+/// 5`, because a Start counts from the prior Range's **End** and an End counts
+/// from the Start beside it. A fallback that swallowed everything, or a reader
+/// with one running baseline, would decode the same four integers as 3-5 and
+/// 8-13 — well formed, in range, and wrong.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_well_formed_draft_20_range_filter_still_renders_its_ranges_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+
+    let wire = subscribe_with_parameter(0x25, &[0x00, 0x03, 0x02, 0x05, 0x05]);
+    let decoded = ControlMessage::decode(&mut &wire[..]).expect("a well-formed filter");
+    let fields = moqtap_codec::draft21::fields::message_fields(&decoded);
+
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get("subgroup_filter") else {
+        panic!("a well-formed filter must render as fields: {params:?}");
+    };
+    assert_eq!(filter.get("set_id"), Some(&FieldValue::Uint(0)));
+
+    let mut range = moqtap_codec::fields::FieldMap::new();
+    range.insert("start".into(), FieldValue::Uint(3));
+    range.insert("end".into(), FieldValue::Uint(5));
+    let mut second = moqtap_codec::fields::FieldMap::new();
+    second.insert("start".into(), FieldValue::Uint(10));
+    second.insert("end".into(), FieldValue::Uint(15));
+    assert_eq!(
+        filter.get("ranges"),
+        Some(&FieldValue::Array(vec![FieldValue::Map(range), FieldValue::Map(second)])),
+        "a Start counts from the prior Range's End, not from its Start"
+    );
+}
 
 /// A Range Filter whose final End is left off is a range with no end, and the
 /// rendering says so by omitting the field rather than by inventing a number.
@@ -537,6 +714,32 @@ fn a_range_filter_with_no_final_end_renders_a_start_and_no_end() {
     let wire = subscribe_with_parameter(0x25, &[0x00, 0x07]);
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("a well-formed open filter");
     let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
+
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get("subgroup_filter") else {
+        panic!("a well-formed filter must render as fields: {params:?}");
+    };
+    let mut range = moqtap_codec::fields::FieldMap::new();
+    range.insert("start".into(), FieldValue::Uint(7));
+    assert_eq!(
+        filter.get("ranges"),
+        Some(&FieldValue::Array(vec![FieldValue::Map(range)])),
+        "an omitted End is an unbounded range, not a zero"
+    );
+}
+/// A Range Filter whose final End is left off is a range with no end, and the
+/// rendering says so by omitting the field rather than by inventing a number.
+///
+/// The omission is what makes the pairing unambiguous, so this also pins that
+/// an odd number of integers is not treated as a truncated value.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_range_filter_with_no_final_end_renders_a_start_and_no_end_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+
+    let wire = subscribe_with_parameter(0x25, &[0x00, 0x07]);
+    let decoded = ControlMessage::decode(&mut &wire[..]).expect("a well-formed open filter");
+    let fields = moqtap_codec::draft21::fields::message_fields(&decoded);
 
     let params = parameters(&fields);
     let Some(FieldValue::Map(filter)) = params.get("subgroup_filter") else {
@@ -602,6 +805,57 @@ fn a_priority_filter_above_the_field_renders_its_fields_and_names_the_rule() {
     };
     assert!(violates.contains("300"), "the report must name the offending value, got {violates:?}");
 }
+/// A filter that parses but breaks a content rule renders its fields, and says
+/// which rule.
+///
+/// `RangeFilter` enforces two rules past the value's shape: a `PRIORITY_FILTER`
+/// range naming a value above 255 (Publisher Priority is an 8-bit field), and a
+/// property filter over an odd Property Type (odd Types carry length-prefixed
+/// bytes, so a range over one has nothing to compare). Both are answered with
+/// REQUEST_ERROR rather than a session close, so both are values a peer really
+/// sends and a reader really has to look at.
+///
+/// This is why the renderer parses with `decode_moqt_structure` and checks
+/// with `check_its_own_types` rather than calling `decode_moqt`, which does
+/// both: a reader that refuses the value falls back to a hex dump, hiding the
+/// offending number inside the bytes at exactly the moment someone is looking
+/// for it. Split, the field rendering and the rule report are both available.
+///
+/// *Ablation:* call `decode_moqt` from `draft21/fields.rs` instead and this
+/// fails with `got Bytes([0, 129, 44])` — the value, unrendered.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_priority_filter_above_the_field_renders_its_fields_and_names_the_rule_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+
+    // set_id 0, one open range starting at 300. 300 is two MoQT varint bytes
+    // (`0x8000 | 300`), and is the whole point: a Publisher Priority cannot
+    // hold it.
+    let wire = subscribe_with_parameter(0x27, &[0x00, 0x81, 0x2c]);
+    let decoded = ControlMessage::decode(&mut &wire[..]).expect("the frame itself is well-formed");
+    let fields = moqtap_codec::draft21::fields::message_fields(&decoded);
+
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get("priority_filter") else {
+        panic!(
+            "a rule-breaking filter must still render its fields, got {:?}",
+            parameters(&fields).get("priority_filter")
+        );
+    };
+
+    let mut range = moqtap_codec::fields::FieldMap::new();
+    range.insert("start".into(), FieldValue::Uint(300));
+    assert_eq!(
+        filter.get("ranges"),
+        Some(&FieldValue::Array(vec![FieldValue::Map(range)])),
+        "the value that breaks the rule is the one a reader needs to see"
+    );
+
+    let Some(FieldValue::Text(violates)) = filter.get("violates") else {
+        panic!("the broken rule must be named, got {filter:?}");
+    };
+    assert!(violates.contains("300"), "the report must name the offending value, got {violates:?}");
+}
 
 /// The same, for the other rule: a property filter over an odd Property Type.
 #[cfg(feature = "draft20")]
@@ -613,6 +867,34 @@ fn a_property_filter_over_an_odd_property_type_renders_and_names_the_rule() {
     let wire = subscribe_with_parameter(0x28, &[0x00, 0x03, 0x05]);
     let decoded = ControlMessage::decode(&mut &wire[..]).expect("the frame itself is well-formed");
     let fields = moqtap_codec::draft20::fields::message_fields(&decoded);
+
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get(filter_name(0x28)) else {
+        panic!("a rule-breaking filter must still render its fields: {params:?}");
+    };
+    assert_eq!(
+        filter.get("property_type"),
+        Some(&FieldValue::Uint(3)),
+        "the odd Property Type is what the reader is looking for"
+    );
+    let Some(FieldValue::Text(violates)) = filter.get("violates") else {
+        panic!("the broken rule must be named, got {filter:?}");
+    };
+    assert!(
+        violates.contains('3'),
+        "the report must name the offending Property Type, got {violates:?}"
+    );
+}
+/// The same, for the other rule: a property filter over an odd Property Type.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_property_filter_over_an_odd_property_type_renders_and_names_the_rule_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+
+    // set_id 0, Property Type 3 (odd), one open range starting at 5.
+    let wire = subscribe_with_parameter(0x28, &[0x00, 0x03, 0x05]);
+    let decoded = ControlMessage::decode(&mut &wire[..]).expect("the frame itself is well-formed");
+    let fields = moqtap_codec::draft21::fields::message_fields(&decoded);
 
     let params = parameters(&fields);
     let Some(FieldValue::Map(filter)) = params.get(filter_name(0x28)) else {
@@ -652,6 +934,26 @@ fn a_well_formed_filter_is_not_reported_as_violating_anything() {
     };
     assert_eq!(filter.get("violates"), None, "nothing is broken here: {filter:?}");
 }
+/// The negative control: a filter breaking no rule carries no `violates` key.
+///
+/// Without this, a bug that reported every filter as violating something would
+/// pass both tests above.
+#[cfg(feature = "draft21")]
+#[test]
+fn a_well_formed_filter_is_not_reported_as_violating_anything_draft21() {
+    use moqtap_codec::draft21::message::ControlMessage;
+
+    // A priority filter whose range is 1..=4 — inside the 8-bit field.
+    let wire = subscribe_with_parameter(0x27, &[0x00, 0x01, 0x03]);
+    let decoded = ControlMessage::decode(&mut &wire[..]).expect("a well-formed priority filter");
+    let fields = moqtap_codec::draft21::fields::message_fields(&decoded);
+
+    let params = parameters(&fields);
+    let Some(FieldValue::Map(filter)) = params.get("priority_filter") else {
+        panic!("a well-formed filter must render as fields: {params:?}");
+    };
+    assert_eq!(filter.get("violates"), None, "nothing is broken here: {filter:?}");
+}
 
 // ============================================================
 // 3. AUTHORIZATION TOKEN, asked of a draft that never saw it
@@ -672,14 +974,14 @@ fn setup_token(value: &[u8]) -> moqtap_codec::kvp::KeyValuePair {
 }
 
 /// Every draft this build has, so a single-draft build asks its one draft and an
-/// all-drafts build asks all fourteen.
+/// all-drafts build asks all of them.
 ///
 /// [`moqtap_codec::setup_option_name`] answers `None` for a draft the build left
 /// out, which is the right answer and not a claim about anything — so the loops
-/// below run over 7..=20 unconditionally and the drafts that are missing simply
+/// below run over 7..=21 unconditionally and the drafts that are missing simply
 /// contribute nothing. A panic is a panic in any build that has the draft.
 #[allow(dead_code)]
-const EVERY_DRAFT: std::ops::RangeInclusive<u8> = 7..=20;
+const EVERY_DRAFT: std::ops::RangeInclusive<u8> = 7..=21;
 
 /// `setup_option_name` must not panic on a Token value it was handed.
 ///
@@ -742,7 +1044,7 @@ fn a_well_formed_setup_token_is_still_named_by_every_draft_that_has_one() {
     // complete form, and Token Type 0 is the one the drafts reserve for a
     // meaning the peers settle out of band, so the fixture commits to nothing.
     let param = setup_token(&[0x03, 0x00, 0xab, 0xcd]);
-    let named: Vec<u8> = (12..=20u8)
+    let named: Vec<u8> = (12..=21u8)
         .filter(|&d| {
             moqtap_codec::setup_option_name(d, &param).as_deref() == Some("authorization_token")
         })
@@ -751,7 +1053,7 @@ fn a_well_formed_setup_token_is_still_named_by_every_draft_that_has_one() {
     // A draft this build left out answers `None` by design, so the set is
     // whatever this build has rather than all nine — and the claim is that no
     // draft in the range is missing from it for any other reason.
-    let compiled: Vec<u8> = (12..=20u8).filter(|&d| draft_is_compiled(d)).collect();
+    let compiled: Vec<u8> = (12..=21u8).filter(|&d| draft_is_compiled(d)).collect();
     assert_eq!(named, compiled, "every draft from 12 on numbers the setup token 0x03");
     assert!(
         !compiled.is_empty() || cfg!(not(feature = "draft20")),
@@ -799,6 +1101,7 @@ fn draft_is_compiled(draft: u8) -> bool {
         18 => cfg!(feature = "draft18"),
         19 => cfg!(feature = "draft19"),
         20 => cfg!(feature = "draft20"),
+        21 => cfg!(feature = "draft21"),
         other => panic!("draft-{other} is outside the range this test is about"),
     }
 }

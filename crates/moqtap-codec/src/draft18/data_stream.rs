@@ -233,7 +233,7 @@ fn wide_type_refusal(
 /// Section 11.4.2 is about the subgroup form specifically, and the sixteen
 /// Types inside it that name the reserved SUBGROUP_ID_MODE. Those are not
 /// unknown — the form is assigned and the draft lists the values outright — but
-/// they are unreadable, and they are [`CodecError::InvalidTypeValue`].
+/// they are unreadable, and they are [`CodecError::InvalidStreamTypeValue`].
 ///
 /// Table 3 assigns four things, and two of them carry no Objects at all:
 /// FETCH_HEADER, the subgroup form, SETUP and PADDING. A subgroup reader handed
@@ -253,7 +253,7 @@ fn stream_type_error(raw: u64) -> CodecError {
     {
         CodecError::InvalidField
     } else if subgroup_type_is_reserved_mode(raw) {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidStreamTypeValue {
             raw,
             detail: "its SUBGROUP_ID_MODE is 0b11, which this draft reserves",
         }
@@ -721,7 +721,7 @@ fn datagram_type_is_status_end_of_group(raw: u64) -> bool {
 /// The same two-rule split as `stream_type_error`, read against the datagram
 /// table: a Type outside the form is [`CodecError::UnknownDatagramType`], and
 /// one inside it setting STATUS and END_OF_GROUP together is
-/// [`CodecError::InvalidTypeValue`].
+/// [`CodecError::InvalidDatagramTypeValue`].
 ///
 /// The padding datagram is why the [`CodecError::InvalidField`] arm exists.
 /// [`PADDING_DATAGRAM_TYPE`] is a Type Table 3's companion in Section 11.5.2
@@ -731,7 +731,7 @@ fn datagram_type_error(raw: u64) -> CodecError {
     if raw == PADDING_DATAGRAM_TYPE || datagram_type_is_valid(raw) {
         CodecError::InvalidField
     } else if datagram_type_is_status_end_of_group(raw) {
-        CodecError::InvalidTypeValue {
+        CodecError::InvalidDatagramTypeValue {
             raw,
             detail: "it sets both the STATUS bit and the END_OF_GROUP bit",
         }

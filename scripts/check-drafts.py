@@ -348,7 +348,7 @@ PER_DRAFT_FILE = re.compile(r"^draft(\d\d)_(?!\d\d_)")
 # direction: every guard above passes more, no count moves, and the rules that
 # no longer reach a draft report nothing at all. So the derived set is held
 # against a floor - and the floor was `frozenset(range(7, 20))`, a hand-written
-# range that stopped at draft-19 while the tree had fourteen drafts. It was
+# range that stopped at draft-19 while the tree had already moved past it. It was
 # still doing its job, because a floor only has to be a *lower* bound, but it
 # was doing it one draft behind, and the day somebody deleted `src/draft20/`
 # nothing here would have said so. That is the same defect one paragraph up,

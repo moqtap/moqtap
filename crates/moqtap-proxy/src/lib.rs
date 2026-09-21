@@ -245,7 +245,7 @@
 //!   does.
 //! * **There is no `Expiry::Drop`.** A unit dropped at release time cannot
 //!   arm the framer's positional elide fix-up — its successors are already
-//!   framed — so on drafts 14-20 it would shift every later object's
+//!   framed — so on drafts 14-21 it would shift every later object's
 //!   absolute ID and report corruption as loss. Under the default
 //!   [`shape::Expiry::Deliver`] a starved class is **late, never lossy**;
 //!   [`shape::Expiry::ResetStream`] abandons the stream instead. Discarding

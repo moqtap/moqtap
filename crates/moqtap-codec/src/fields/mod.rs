@@ -169,7 +169,7 @@ impl IntoIterator for FieldMap {
 /// `just test-features`'s `no drafts` clippy, and the two zero-draft rows of
 /// `just draft-matrix`, all three under `-D warnings`.
 ///
-/// A `cfg` here would have to name all fourteen drafts, and it would then have
+/// A `cfg` here would have to name all the drafts, and it would then have
 /// to be repeated on this module's own unit tests, which call this function and
 /// name no draft at all: `--all-targets` compiles them, so gating the function
 /// without gating them turns a dead-code warning into a build failure in the
@@ -177,7 +177,7 @@ impl IntoIterator for FieldMap {
 /// to fall out of step with.
 ///
 /// It conceals nothing in a build that has a draft. One draft is enough to give
-/// this a caller, so the lint is live on all fourteen single-draft rows and on
+/// this a caller, so the lint is live on all single-draft rows and on
 /// every build a user will ever make; the allow is inert everywhere except the
 /// build where the function is *correctly* unused.
 #[allow(dead_code)]

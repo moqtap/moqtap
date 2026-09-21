@@ -132,8 +132,8 @@ pub enum ConnectionError {
     /// hands back can only carry this draft's variant — but the narrowing arm
     /// is compiled in every configuration anyway, under
     /// `#[allow(unreachable_patterns)]` rather than a `cfg` naming the other
-    /// thirteen drafts, because such a list has to be edited in fourteen
-    /// places whenever a draft is added and a copy that omits one leaves the
+    /// drafts, because such a list has to be edited in every per-draft
+    /// module whenever a draft is added and a copy that omits one leaves the
     /// match non-exhaustive.
     ///
     /// Spelled as `CodecError::UnknownMessageType(0)` it would not stay inert:
@@ -411,7 +411,7 @@ impl FramedSendStream {
             // Only this draft's header seeds the object reader. With draft 20 the only enabled
             // draft `AnySubgroupHeader` has a single variant, the arm above is exhaustive and this
             // one unreachable. Compiled in every configuration with the lint allowed, rather than
-            // gated on a `cfg` naming the other thirteen drafts: such a list has to be edited in
+            // gated on a `cfg` naming the other drafts: such a list has to be edited in
             // every draft module whenever a draft is added, and a copy that omits one leaves this
             // match non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -1918,7 +1918,7 @@ impl Connection {
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 20 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
-            // naming the other thirteen drafts: such a list has to be edited in every draft module
+            // naming the other drafts: such a list has to be edited in every draft module
             // whenever a draft is added, and a copy that omits one leaves this match
             // non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -2110,7 +2110,7 @@ impl Connection {
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 20 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
-            // naming the other thirteen drafts: such a list has to be edited in every draft module
+            // naming the other drafts: such a list has to be edited in every draft module
             // whenever a draft is added, and a copy that omits one leaves this match
             // non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -2370,7 +2370,7 @@ impl Connection {
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 20 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
-            // naming the other thirteen drafts: such a list has to be edited in every draft module
+            // naming the other drafts: such a list has to be edited in every draft module
             // whenever a draft is added, and a copy that omits one leaves this match
             // non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -3427,7 +3427,7 @@ impl Connection {
     ///
     /// One more rule reaches this table without naming a code: "An endpoint
     /// that receives an unknown message type MUST close the session", stated in
-    /// those words by all fourteen drafts. Protocol Violation is what carries
+    /// those words by all the drafts. Protocol Violation is what carries
     /// it, as it does on every draft below this one.
     ///
     /// `None` for everything else, including [`CodecError::InvalidField`]. That
@@ -3538,7 +3538,10 @@ impl Connection {
             // is the reserved 0b11, Section 11.3.1 for a datagram asking to be both
             // an object status and an end-of-group marker. Unlike the rule above,
             // these two name their code outright.
-            CodecError::InvalidTypeValue { .. } => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::InvalidStreamTypeValue { .. }
+            | CodecError::InvalidDatagramTypeValue { .. } => {
+                Some(SessionErrorCode::ProtocolViolation)
+            }
             // A key-value pair whose value is not the serialization its own
             // Type defines, Section 1.4.3: "If a receiver understands a Type,
             // and the following Value or Length/Value does not match the
@@ -3584,7 +3587,7 @@ impl Connection {
             // by a wildcard. The arm is exhaustive deliberately: a new
             // `CodecError` variant will not compile until it has been placed on
             // one side or the other, on this draft, which is the decision a `_`
-            // arm makes silently and invisibly on all fourteen at once.
+            // arm makes silently and invisibly on every draft at once.
             //
             // Adding one variant to `CodecError` was tried, and produces
             // fourteen `E0004`s, one per draft, each naming the variant that has

@@ -1,4 +1,4 @@
-//! One datagram's identity, read the same way on all fourteen drafts.
+//! One datagram's identity, read the same way on all the drafts.
 //!
 //! `AnyDatagramHeader::meta` is the draft-neutral answer to "what does this
 //! datagram say it is". The per-draft shapes behind it disagree about more
@@ -43,7 +43,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod test_vectors;
@@ -83,6 +84,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// The drafts whose datagram may leave the Publisher Priority off the wire.
@@ -180,6 +183,7 @@ fn corpus_dir(draft: DraftVersion) -> &'static str {
         DraftVersion::Draft18 => "draft18",
         DraftVersion::Draft19 => "draft19",
         DraftVersion::Draft20 => "draft20",
+        DraftVersion::Draft21 => "draft21",
     }
 }
 

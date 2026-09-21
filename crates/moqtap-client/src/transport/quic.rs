@@ -495,7 +495,7 @@ pub struct QuicTarget {
 /// onto `ConnectionError::InvalidAddress`, which is one of the variants the
 /// facade reads as [`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade),
 /// and with it `is_local() == true` — the right answer for a failure this side
-/// decided. Splitting it further there would add fourteen public variants for a
+/// decided. Splitting it further there would add public variants for a
 /// distinction no caller on that path reads: a draft `Connection` is built by a
 /// caller who named a `host:port`, not by one measuring which stage of a dial
 /// died. The reader of the distinction is a caller of [`dial_quic_to`], and it

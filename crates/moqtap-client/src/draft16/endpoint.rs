@@ -538,7 +538,7 @@ impl EndpointError {
             // is the whole of what Section 3.3 says: its sentence is about
             // what a bidirectional stream may *begin* with, and a message
             // arriving on the control stream begins nothing. Read across all
-            // fourteen texts for a sentence that closes a session over a
+            // texts for a sentence that closes a session over a
             // message being in the wrong place, draft-16 has none — Section
             // 9.25 describes where NAMESPACE messages are sent ("the publisher
             // will send matching NAMESPACE messages on the response stream"),

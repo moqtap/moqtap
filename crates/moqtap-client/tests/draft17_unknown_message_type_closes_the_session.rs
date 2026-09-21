@@ -4,7 +4,7 @@
 //!
 //! # Why this rule needed a gate five drafts late
 //!
-//! All fourteen drafts carry that sentence, in those words. Drafts 08 through 14
+//! All the drafts carry that sentence, in those words. Drafts 08 through 14
 //! answered it; drafts 15 through 19 did not, and none of the five said so. An
 //! exclusion that is written down can be checked against the draft. This one was
 //! never written down — the rule was simply absent from five tables, each of

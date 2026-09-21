@@ -1758,7 +1758,8 @@ const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
         | DraftVersion::Draft17
         | DraftVersion::Draft18
         | DraftVersion::Draft19
-        | DraftVersion::Draft20 => true,
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21 => true,
     }
 }
 
@@ -2552,7 +2553,8 @@ const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
         DraftVersion::Draft17
         | DraftVersion::Draft18
         | DraftVersion::Draft19
-        | DraftVersion::Draft20 => true,
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21 => true,
     }
 }
 
@@ -2632,7 +2634,8 @@ const fn bidi_streams_carry_requests(draft: DraftVersion) -> bool {
         | DraftVersion::Draft17
         | DraftVersion::Draft18
         | DraftVersion::Draft19
-        | DraftVersion::Draft20 => true,
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21 => true,
     }
 }
 
@@ -4315,7 +4318,8 @@ fn report_refused_frames(
         feature = "draft17",
         feature = "draft18",
         feature = "draft19",
-        feature = "draft20"
+        feature = "draft20",
+        feature = "draft21"
     )),
     allow(unreachable_code)
 )]
@@ -5840,6 +5844,8 @@ fn datagram_is_status(header: &AnyDatagramHeader) -> bool {
         AnyDatagramHeader::Draft19(h) => h.object_status.is_some(),
         #[cfg(feature = "draft20")]
         AnyDatagramHeader::Draft20(h) => h.object_status.is_some(),
+        #[cfg(feature = "draft21")]
+        AnyDatagramHeader::Draft21(h) => h.object_status.is_some(),
         #[allow(unreachable_patterns)]
         _ => false,
     }

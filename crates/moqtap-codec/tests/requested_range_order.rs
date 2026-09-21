@@ -27,15 +27,23 @@
 #![allow(clippy::items_after_test_module)]
 
 // Every draft with a range this file can move — the cfg list repeated below.
+// check-draft-cfg: a feature boundary, not a rejection list
 //
-// Draft-20 is absent and cannot be added: Section 10.13 deleted FETCH's inline
-// `Start Location` and `End Location` along with the Standalone Fetch that
-// held them, and the range travels in the `LOCATION_FILTER` parameter now.
-// That parameter states its end as an unsigned `EndGroupDelta` added to
-// `StartGroup`, so an end group before the start group has no encoding at all
-// — there is no backwards range for a gate here to build. What is left of the
-// question on draft-20 is the filter's own shape, which `vectors_draft20.rs`
-// and `draft20_data_stream_rules.rs` drive.
+// Drafts 20 and 21 are absent and cannot be added: draft-20 Section 10.13
+// deleted FETCH's inline `Start Location` and `End Location` along with the
+// Standalone Fetch that held them, and the range travels in the
+// `LOCATION_FILTER` parameter now. That parameter states its end as an unsigned
+// `EndGroupDelta` added to `StartGroup`, so an end group before the start group
+// has no encoding at all — there is no backwards range for a gate here to
+// build. Draft-21 restructures draft-20 and brings none of it back. What is
+// left of the question on those two is the filter's own shape, which
+// `vectors_draft20.rs`, `vectors_draft21.rs` and the `draftNN_data_stream_rules`
+// files drive.
+//
+// The marker above is for `scripts/check-draft-cfg.py`: a draft-neutral file's
+// list is read as a rejection list by its length, and this one is two short of
+// the draft set rather than one, which is the length of a rejection list with a
+// draft missing.
 #[cfg(any(
     feature = "draft07",
     feature = "draft08",

@@ -1,5 +1,5 @@
 //! `AnyConnection::open_subgroup` puts an object on the wire and
-//! `AnyConnection::accept_subgroup` reads one back, on all fourteen drafts.
+//! `AnyConnection::accept_subgroup` reads one back, on all the drafts.
 //!
 //! This is the first thing the facade can ask a relay that is not a question
 //! about control messages. Answering SUBSCRIBE is not delivering a track, and
@@ -24,7 +24,7 @@
 //! That transcript is also the only thing here that can gate the Object ID
 //! encoding. Drafts 14 and later send an ID as a delta from the object before
 //! it, and a writer and a reader that both skipped the delta would round-trip
-//! cleanly. The drafts 14-20 transcripts carry `02` and `03` where the objects
+//! cleanly. The drafts 14-21 transcripts carry `02` and `03` where the objects
 //! were written as 3 and 7; the drafts 07-13 ones carry `03` and `07`.
 //!
 //! # Five object shapes, four header shapes, one signature
@@ -70,7 +70,7 @@
 //! field only when the declared length is zero, because the status and the
 //! payload occupy the same position — no sequence of bytes states both. So both
 //! forms are here, and `AnyObject::status` is asserted `None` on the first two
-//! and `Some(0)` on the third, on all fourteen drafts, including the seven
+//! and `Some(0)` on the third, on all the drafts, including the seven
 //! whose own structs hold a status for every object whether the wire carried
 //! one or not.
 //!
@@ -107,12 +107,12 @@
 //! `insufficient bytes for varint decoding` for an object that was merely
 //! still in flight. The cuts here put the boundary where that relay puts it:
 //! inside the header, and again immediately before the Object Status that ends
-//! the last object on all fourteen drafts.
+//! the last object on all the drafts.
 //!
 //! The condition has one answer, `CodecError::is_incomplete`, and the readers
 //! this file drives ask it rather than keeping a list of spellings of their
 //! own: `read_subgroup_header` and `read_subgroup_object` match on it on all
-//! fourteen drafts, and `moqtap-proxy`'s `parser::data::is_incomplete_error`
+//! drafts, and `moqtap-proxy`'s `parser::data::is_incomplete_error`
 //! delegates straight to it. A list copied per call site is one that can fall
 //! behind the four spellings `is_incomplete` admits, and nothing here would
 //! notice — `read_fetch_stream_header` keeps two of the four written out by
@@ -269,7 +269,7 @@ fn encoded(msg: AnyControlMessage) -> Vec<u8> {
 }
 
 /// One subgroup header, rendered through [`AnySubgroupHeader`]'s uniform
-/// accessors so the string means the same thing on all fourteen drafts even
+/// accessors so the string means the same thing on all the drafts even
 /// where the struct behind it does not.
 ///
 /// Both sides render with this and each gate holds both against one literal:
@@ -343,7 +343,7 @@ impl PeerStream {
     }
 }
 
-/// The setup exchange, in the three shapes the fourteen drafts give it.
+/// The setup exchange, in the three shapes the drafts give it.
 ///
 /// Drafts 07 through 14 answer CLIENT_SETUP with a SERVER_SETUP naming the
 /// version they picked out of the list; drafts 15 and 16 settle the version by
@@ -403,11 +403,11 @@ macro_rules! peer_setup {
 /// draft-08 withdrew it — so a draft-07 session never reaches the point where a
 /// data stream could be written without one. No draft here needs a request
 /// ceiling, because no gate makes a request: a subgroup stream is not one, on
-/// any of the fourteen.
+/// any draft.
 macro_rules! draft_setup_parameters {
     // `KvpValue`, `VarInt` and the varint helper live in this arm rather than
     // at the top of the file because this arm has exactly one caller — the
-    // draft-07 gate, the only one of the fourteen that passes `with_role` — and
+    // draft-07 gate, the only draft that passes `with_role` — and
     // the `none` arm below needs none of them. At file scope they were unread
     // by the other thirteen, which `RUSTFLAGS="-D warnings"` makes an error on
     // every matrix row but draft-07's and on `just draft-pairs`'
@@ -631,7 +631,7 @@ macro_rules! subgroup_gate {
             ///   byte, so the header cannot be decoded from the first piece and
             ///   the reader has to go back for more.
             /// * everything but the final byte, then that byte. The last object
-            ///   carries no payload, so on all fourteen drafts the stream's
+            ///   carries no payload, so on all the drafts the stream's
             ///   last byte is its Object Status — and the reader reaches it
             ///   having already consumed the two objects before it.
             async fn serve_fragmented(server: quinn::Endpoint) {
@@ -861,6 +861,16 @@ subgroup_gate!(
     draft20,
     "draft20",
     Draft20,
+    uni,
+    none,
+    "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
+    "30",
+    "14070305c800056669727374020d7365636f6e64206f626a656374030000"
+);
+subgroup_gate!(
+    draft21,
+    "draft21",
+    Draft21,
     uni,
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",

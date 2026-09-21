@@ -290,7 +290,7 @@ macro_rules! joining_stream_gates {
             /// ```
             ///
             /// Made by taking the verdict and not acting on it. It reddens twenty-four
-            /// tests: this gate and the ended-subscription one, on all twelve drafts
+            /// tests: this gate and the ended-subscription one, on all the drafts
             /// that state the rule.
             #[test]
             fn a_joining_fetch_naming_nothing_is_refused() {

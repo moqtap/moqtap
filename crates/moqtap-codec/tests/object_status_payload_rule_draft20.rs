@@ -41,7 +41,7 @@
 //! merely that draft-20 works.
 //!
 //! That makes this file the place a change to draft-18 has to argue with. The
-//! conversion helpers this crate shares across drafts 07-20 make it easy to
+//! conversion helpers this crate shares across drafts 07-21 make it easy to
 //! give every draft one rule; doing so would move draft-20's registry into
 //! drafts that have no registry, and would fail here.
 

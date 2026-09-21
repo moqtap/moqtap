@@ -391,7 +391,7 @@ pub enum DropMode {
     /// Drafts 07-13, and fetch streams on drafts 07-14, encode absolute
     /// IDs, so this is pure byte deletion: every survivor is forwarded
     /// verbatim, including any non-minimally-encoded varint it arrived
-    /// with. Drafts 14-20 delta-encode, so the *one* object following an
+    /// with. Drafts 14-21 delta-encode, so the *one* object following an
     /// elided run has its leading ID varint rewritten and nothing else;
     /// every later object is again forwarded verbatim, because the wire
     /// cursor re-converges after that one fix-up.

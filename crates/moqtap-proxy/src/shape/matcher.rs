@@ -166,7 +166,7 @@ impl From<RangeSet> for Vec<RangeInclusive<u64>> {
 /// `Datagram` matcher never matches a unit. The report is the scheduler's
 /// job once this module is wired.
 ///
-/// `Fetch` is live on all fourteen. Drafts 18, 19 and 20 write a fetch
+/// `Fetch` is live on every draft. Drafts 18, 19 and 20 write a fetch
 /// object's Group ID as a difference whose sign the fetch's Group Order
 /// settles; the session reads that order off the FETCH —
 /// `capability::fetch_group_order_is_needed` — and hands it to the framer, so
@@ -220,7 +220,7 @@ pub enum MatcherField {
     /// every fetch stream.
     TrackAlias,
     /// [`Matcher::subgroup_id`], against a unit whose header carried none —
-    /// ten drafts in first-object mode, and 16-20 in reserved mode 3.
+    /// ten drafts in first-object mode, and 16-21 in reserved mode 3.
     ///
     /// Never reported about a datagram, which carries no subgroup ID on any
     /// draft. That is not a fact about one header, so it is a pre-run
@@ -572,7 +572,7 @@ struct Keys {
 
 /// Which [`MatchKind`] a framed object's stream is.
 ///
-/// The `Fetch` arm is **live**, on all fourteen drafts:
+/// The `Fetch` arm is **live**, on all the drafts:
 /// `detect_stream_type` maps stream type `0x05` to
 /// [`DataStreamType::Fetch`] and the framer produces ordinary [`ObjectMeta`]
 /// for it. On drafts 18, 19 and 20 that needs the fetch's Group Order, which
@@ -655,32 +655,14 @@ mod tests {
     use super::*;
     use moqtap_codec::version::DraftVersion;
 
-    /// All fourteen, so a claim about "every draft" is one rather than a
+    /// Every draft, so a claim about "every draft" is one rather than a
     /// sample. Nothing here decodes, so an uncompiled draft is as
     /// answerable as a compiled one.
     ///
-    /// The length is written out for the same reason the other draft sweeps
-    /// in this crate write theirs out — `capability.rs` and `exec.rs` both
-    /// hold a `[DraftVersion; 14]`. This one said `13` while claiming
-    /// fourteen, and ending at `Draft19` is how every sweep below silently
-    /// stopped testing draft-20: a short array is not a failing test, it is a
-    /// smaller one.
-    const DRAFTS: [DraftVersion; 14] = [
-        DraftVersion::Draft07,
-        DraftVersion::Draft08,
-        DraftVersion::Draft09,
-        DraftVersion::Draft10,
-        DraftVersion::Draft11,
-        DraftVersion::Draft12,
-        DraftVersion::Draft13,
-        DraftVersion::Draft14,
-        DraftVersion::Draft15,
-        DraftVersion::Draft16,
-        DraftVersion::Draft17,
-        DraftVersion::Draft18,
-        DraftVersion::Draft19,
-        DraftVersion::Draft20,
-    ];
+    /// Taken from [`DraftVersion::ALL`] rather than transcribed. A sweep whose
+    /// draft list is written out can quietly cover one draft fewer than it
+    /// claims to, and that is not a failing test, it is a smaller one.
+    const DRAFTS: [DraftVersion; DraftVersion::ALL.len()] = DraftVersion::ALL;
 
     /// A framed subgroup object with every optional key present, so a test
     /// can knock exactly one out and attribute the result.
@@ -838,7 +820,7 @@ mod tests {
     /// ```text
     /// thread '...the_fetch_arm_claims_a_fetch_object' panicked at
     /// crates\moqtap-proxy\src\shape\matcher.rs:
-    /// a Fetch-aimed class must claim a fetch object: the arm is live on all fourteen
+    /// a Fetch-aimed class must claim a fetch object: the arm is live on all
     /// drafts, every one of which has a fetch object codec
     /// ```
     #[test]
@@ -854,7 +836,7 @@ mod tests {
         assert!(
             fetch_rule.matches(ProxySide::ClientToProxy, &fetch, 0),
             "a Fetch-aimed class must claim a fetch object: the arm is live on all \
-             fourteen drafts, every one of which has a fetch object codec"
+             drafts, every one of which has a fetch object codec"
         );
         assert!(
             !fetch_rule.matches(ProxySide::ClientToProxy, &meta(), 0),

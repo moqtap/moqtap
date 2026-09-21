@@ -14,7 +14,7 @@
 //! draft, so that what each object puts on the wire is chosen rather than
 //! derived. That is the right shape for holding one draft's writer to one
 //! draft's rules, and the wrong shape for this file: the claim here is that
-//! **one** call sequence works on all fourteen drafts, and a fixture written
+//! **one** call sequence works on all the drafts, and a fixture written
 //! fourteen times is fourteen chances to write it in the shape the code
 //! already has. The corpus's fetch streams are bytes nothing in this crate
 //! produced.
@@ -79,7 +79,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod test_vectors;
@@ -122,6 +123,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// The drafts whose fetch objects are written against the frame before them.
@@ -140,6 +143,7 @@ fn frames_are_written_against_each_other(draft: DraftVersion) -> bool {
             | DraftVersion::Draft18
             | DraftVersion::Draft19
             | DraftVersion::Draft20
+            | DraftVersion::Draft21
     )
 }
 
@@ -160,6 +164,7 @@ fn corpus_dir(draft: DraftVersion) -> &'static str {
         DraftVersion::Draft18 => "draft18",
         DraftVersion::Draft19 => "draft19",
         DraftVersion::Draft20 => "draft20",
+        DraftVersion::Draft21 => "draft21",
     }
 }
 

@@ -7,7 +7,7 @@
 //! frame ends and cannot read what is inside it. Nothing about that is
 //! exotic or per-draft: a Message Type the configured draft does not assign,
 //! a body that does not match its own length field, and anything an
-//! extension adds all arrive this way on all fourteen drafts.
+//! extension adds all arrive this way on all the drafts.
 //!
 //! # Two things were owed and neither was paid
 //!
@@ -80,7 +80,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod common;
@@ -134,14 +135,16 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// The draft both fixtures are built for: the newest compiled.
 ///
 /// Derived rather than named, so a single-draft CI row runs this file
 /// against the draft it compiled instead of going green by absence. Nothing
-/// asserted here is draft-specific — the Message Type is unassigned on all
-/// fourteen and the refusal is one code path shared by every draft.
+/// asserted here is draft-specific — the Message Type is unassigned on
+/// every draft and the refusal is one code path shared by every draft.
 const DRAFT: DraftVersion = COMPILED_DRAFTS[COMPILED_DRAFTS.len() - 1];
 
 /// The ALPN the front-end advertises and the session is told the client

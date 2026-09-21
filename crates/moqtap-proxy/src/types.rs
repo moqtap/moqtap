@@ -101,7 +101,7 @@ pub struct ObjectMeta {
     /// a subgroup ID field that holds a placeholder — the same zero, and
     /// the same mis-keying if it were forwarded.
     pub subgroup_id: Option<u64>,
-    /// Absolute Object ID, resolved from delta encoding on drafts 14-20.
+    /// Absolute Object ID, resolved from delta encoding on drafts 14-21.
     pub object_id: u64,
     /// Publisher priority. `None` when the header set a default-priority
     /// flag and omitted the field (drafts 15+).

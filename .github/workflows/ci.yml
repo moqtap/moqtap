@@ -73,7 +73,7 @@ jobs:
       #
       # This is the half of that question that does not depend on which drafts
       # are enabled, so it is asked once here. The per-draft matrix asks the
-      # other half, fourteen times, against a reduced feature set.
+      # other half, fifteen times, against a reduced feature set.
       #
       # The clippy row above has already compiled all of this, and a cached
       # unit still emits `compiler-artifact`, so the enumeration is nearly free.
@@ -188,6 +188,7 @@ jobs:
           - draft18
           - draft19
           - draft20
+          - draft21
     steps:
       - uses: actions/checkout@v4
         with:
@@ -202,7 +203,7 @@ jobs:
       # entry carries it too; the only diagnostic is a cargo *manifest*
       # warning, and the `RUSTFLAGS: "-D warnings"` above reaches rustc, not
       # cargo. Measured: with the root entry unfixed, every row below compiled
-      # all fourteen drafts and exited 0. So assert the resolved feature list
+      # all the drafts and exited 0. So assert the resolved feature list
       # itself, and assert the whole list — a `grep -c draft` style check is
       # satisfied by the all-drafts build as well.
       #
@@ -211,7 +212,7 @@ jobs:
       # in the grep — which is a locale-sensitive character class applied to
       # non-ASCII drawing characters. It matched on the developer's Windows
       # shell and matched nothing on the Linux runner, so every dependency
-      # line was dropped, only the root package survived, and all fourteen
+      # line was dropped, only the root package survived, and all the
       # rows failed on their first real execution. The resolution was
       # identical on both platforms; the gate was asserting cargo's rendering.
       # `--prefix none` emits the same data with no decoration to skip, so the
@@ -254,7 +255,7 @@ jobs:
       #
       # The client sat in that gap longer and with far more behind it. Its
       # shared loopback harness imported one draft's framed streams with no
-      # `cfg` at all, so on thirteen of the fourteen drafts every one of its ~200
+      # `cfg` at all, so on all but one of the drafts every one of its ~200
       # test targets failed at the first line of `tests/common/mod.rs`, and
       # four more test files named a draft they never gated. Measured on
       # 2026-08-25 by running this row by hand for each draft.
@@ -282,7 +283,7 @@ jobs:
       # The default-features half of that comparison does not depend on the
       # draft this cell enables, and it is the expensive half now that the
       # client is in it: it builds every draft's code and ~200 test targets. It
-      # runs once, in the `clippy` job, rather than identically in all fourteen
+      # runs once, in the `clippy` job, rather than identically in all the
       # cells.
       - name: Assert the reduced-draft build compiled every test target
         run: |
@@ -489,28 +490,29 @@ jobs:
       # is taken. A two-draft build is the smallest one where the runtime
       # dispatch those crates are built around actually has something to
       # dispatch between, and no other row builds one.
-      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft20
-      - run: cargo test -p moqtap-client --no-default-features --features draft07,draft20
-      - run: cargo test -p moqtap-proxy --no-default-features --features draft07,draft20
+      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft21
+      - run: cargo test -p moqtap-client --no-default-features --features draft07,draft21
+      - run: cargo test -p moqtap-proxy --no-default-features --features draft07,draft21
       # The newest two together. Not redundant with the row above, and the
       # reason is worth stating: a per-draft module rejects the other drafts
       # with a wildcard arm under a `cfg(any(feature = "draftNN", ...))` that
       # has to name **every** other draft. A list copied from the previous
       # draft's module names one draft too few — its own predecessor — and the
       # match goes non-exhaustive only in a build that enables that predecessor
-      # and not the draft whose name took its place. `draft07,draft20` cannot
-      # see it, because draft07 is in every such list; `draft19,draft20` is the
-      # smallest build that can, and it found five sites in `draft20` and three
-      # more in `draft11` through `draft13`. Move this row with the newest
+      # and not the draft whose name took its place. `draft07,draft21` cannot
+      # see it, because draft07 is in every such list; the newest two are the
+      # smallest build that can, and when the pair was `draft19,draft20` it
+      # found five sites in `draft20` and three more in `draft11` through
+      # `draft13`. Move this row with the newest
       # draft, and keep it beside the oldest+newest one rather than instead of
       # it — the two rows fail on different things.
       #
       # `scripts/check-draft-cfg.py` (the `draft-cfg` job) checks the same
-      # class over all 91 pairs without compiling any of them; this row is what
+      # class over all 105 pairs without compiling any of them; this row is what
       # proves the compiler agrees.
-      - run: cargo test -p moqtap-client --no-default-features --features draft19,draft20
-      - run: cargo test -p moqtap-codec --no-default-features --features draft19,draft20
-      - run: cargo test -p moqtap-proxy --no-default-features --features draft19,draft20
+      - run: cargo test -p moqtap-client --no-default-features --features draft20,draft21
+      - run: cargo test -p moqtap-codec --no-default-features --features draft20,draft21
+      - run: cargo test -p moqtap-proxy --no-default-features --features draft20,draft21
       # Two adjacent drafts.
       - run: cargo test -p moqtap-codec --no-default-features --features draft13,draft14
       # Default (all-drafts) is already covered by the `test` job, but verify
@@ -528,7 +530,7 @@ jobs:
       # 0 since it was written. The fix is an `allow` on each shared helper
       # whose reach is exactly this row.
       - run: cargo clippy -p moqtap-codec --no-default-features --all-targets -- -D warnings
-      # The fifteenth row of the draft sweep: zero drafts, for the client and
+      # The last row of the draft sweep: zero drafts, for the client and
       # the proxy library. Same reasoning as the matrix job — resolution is
       # asserted, not inferred from an exit code.
       - name: Assert zero-draft feature resolution
@@ -570,7 +572,7 @@ jobs:
       # `quinn-netem` has no draft features, so it is deliberately absent from
       # the per-draft matrix above: every row there asserts a resolved draft
       # string, and a crate with no drafts to resolve would report a mismatch on
-      # all fourteen for no reason. Its feature axes are the rows below instead.
+      # every row for no reason. Its feature axes are the rows below instead.
       #
       # The featureless build is not reachable from any other job. `--workspace`
       # unifies features, and the proxy's dev-dependency asks for
@@ -664,7 +666,7 @@ jobs:
       #
       # The compiler cannot be asked this cheaply. A short list only breaks a
       # build that enables the omitted draft alongside the module's own, and
-      # fourteen drafts make 91 such pairs; the sweep above compiles one draft
+      # drafts make 105 such pairs; the sweep above compiles one draft
       # at a time, where the arm is compiled out and a short list is
       # unreadable. `features-combos` compiles the two pairs worth compiling —
       # this covers the other 89 without building anything.
@@ -700,6 +702,10 @@ jobs:
       # *inside* a per-draft module is the `features` matrix above, and
       # rejection `cfg` completeness is `check-draft-cfg.py`.
       - run: python3 scripts/check-draft-parity.py
+      # The prose half: a comment counting the whole draft set is wrong the
+      # day a draft lands, and the count was never saying anything the
+      # sentence did not. Derives the set from the tree like its siblings.
+      - run: python3 scripts/check-draft-counts.py
 
   drafts:
     name: Draft citations and registries

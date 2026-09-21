@@ -53,9 +53,67 @@ pub enum DraftVersion {
     Draft19,
     /// draft-ietf-moq-transport-20.
     Draft20,
+    /// draft-ietf-moq-transport-21.
+    Draft21,
 }
 
 impl DraftVersion {
+    /// Every draft of the series, oldest first.
+    ///
+    /// The variants are not feature-gated, so this is the whole series whatever
+    /// the build compiles. It answers *which drafts exist*, which is a property
+    /// of the specification; *which drafts this binary can decode* is a
+    /// different question with a different answer per feature set, and
+    /// `moqtap-proxy`'s `draft_is_compiled` is where that one lives.
+    ///
+    /// Sweeps should read this rather than write their own list. A written-out
+    /// draft list is the most expensive silent defect this workspace has: it
+    /// compiles, it passes, and it tests one draft fewer than it claims to.
+    /// `shape/matcher.rs` shipped a `[DraftVersion; 13]` under a doc comment
+    /// claiming the whole series, and every unit test that swept it stopped
+    /// covering the newest draft without failing. A sweep over `ALL` cannot do
+    /// that, and a sweep that deliberately covers *less* than the series -- one
+    /// draft per era, or the drafts that have a joining fetch - still writes
+    /// its own list and still says why.
+    ///
+    /// An array rather than a slice, so `for d in DraftVersion::ALL` yields
+    /// drafts and not references and a caller can name the type. The length
+    /// beside it is checked by the compiler against the contents, so it cannot
+    /// silently disagree with them - and the contents are the half that goes
+    /// wrong. `scripts/check-draft-parity.py` holds those against the enum, the
+    /// per-draft source directories, the cargo features and the CI rows on
+    /// every run, and the tests below hold them against `from_number`.
+    pub const ALL: [DraftVersion; 15] = [
+        DraftVersion::Draft07,
+        DraftVersion::Draft08,
+        DraftVersion::Draft09,
+        DraftVersion::Draft10,
+        DraftVersion::Draft11,
+        DraftVersion::Draft12,
+        DraftVersion::Draft13,
+        DraftVersion::Draft14,
+        DraftVersion::Draft15,
+        DraftVersion::Draft16,
+        DraftVersion::Draft17,
+        DraftVersion::Draft18,
+        DraftVersion::Draft19,
+        DraftVersion::Draft20,
+        DraftVersion::Draft21,
+    ];
+
+    /// The newest draft of the series.
+    ///
+    /// `ALL` is ordered, so this is its last element. Written as a method
+    /// rather than left to the caller because `ALL.last().unwrap()` in a
+    /// hundred places is a hundred unwraps, and because a caller that wants
+    /// "the newest" almost always wants it infallibly.
+    pub const fn newest() -> DraftVersion {
+        // `ALL` is never empty, and a `const fn` cannot unwrap an `Option`, so
+        // the index is written out. If `ALL` ever became empty this would fail
+        // to compile rather than panic at run time.
+        DraftVersion::ALL[DraftVersion::ALL.len() - 1]
+    }
+
     /// The MoQT version number this draft would announce in CLIENT_SETUP.
     ///
     /// Format: `0xff000000 + draft_number`.
@@ -63,7 +121,7 @@ impl DraftVersion {
     /// **From draft-15 on there is no such value on the wire at all.** Draft-15
     /// deleted the version field from CLIENT_SETUP and moved version selection
     /// into the ALPN (`moqt-<N>`, see [`Self::quic_alpn`]), so the number this
-    /// returns for drafts 15 through 20 — `0xff00000f` through `0xff000014` —
+    /// returns for drafts 15 through 21 — `0xff00000f` through `0xff000015` —
     /// is a continuation of the mapping and not something a peer can observe or
     /// send. Nothing in this crate encodes it for those drafts. It is kept so
     /// that a caller with a draft in hand can name the version the series would
@@ -88,6 +146,7 @@ impl DraftVersion {
             DraftVersion::Draft18 => 18,
             DraftVersion::Draft19 => 19,
             DraftVersion::Draft20 => 20,
+            DraftVersion::Draft21 => 21,
         };
         VarInt::from_usize(0xff000000 + n as usize)
     }
@@ -114,13 +173,14 @@ impl DraftVersion {
             DraftVersion::Draft18 => b"moqt-18",
             DraftVersion::Draft19 => b"moqt-19",
             DraftVersion::Draft20 => b"moqt-20",
+            DraftVersion::Draft21 => b"moqt-21",
         }
     }
 
     /// Resolve an ALPN identifier to a specific draft version.
     ///
     /// Returns `Some` for ALPNs that unambiguously identify a draft
-    /// (`moqt-15` through `moqt-20`). Returns `None`
+    /// (`moqt-15` through `moqt-21`). Returns `None`
     /// for `moq-00` — which covers drafts 07–14 and requires inspecting
     /// CLIENT_SETUP's supported-versions list — and for any unrecognized
     /// ALPN.
@@ -132,11 +192,12 @@ impl DraftVersion {
             b"moqt-18" => Some(DraftVersion::Draft18),
             b"moqt-19" => Some(DraftVersion::Draft19),
             b"moqt-20" => Some(DraftVersion::Draft20),
+            b"moqt-21" => Some(DraftVersion::Draft21),
             _ => None,
         }
     }
 
-    /// Resolve a draft number (e.g. 7..=20) to a `DraftVersion`.
+    /// Resolve a draft number (e.g. 7..=21) to a `DraftVersion`.
     ///
     /// Returns `None` for numbers outside the supported range.
     pub fn from_number(n: u8) -> Option<DraftVersion> {
@@ -155,6 +216,7 @@ impl DraftVersion {
             18 => Some(DraftVersion::Draft18),
             19 => Some(DraftVersion::Draft19),
             20 => Some(DraftVersion::Draft20),
+            21 => Some(DraftVersion::Draft21),
             _ => None,
         }
     }
@@ -190,10 +252,12 @@ impl DraftVersion {
             // Draft-20 Section 1.4.1 is draft-18's encoding verbatim: the same
             // leading-ones-count prefix over all nine lengths. The revision
             // changed the hyphen in "Variable-length" in the heading and
-            // nothing else about it.
-            DraftVersion::Draft18 | DraftVersion::Draft19 | DraftVersion::Draft20 => {
-                VarIntEncoding::Moqt18
-            }
+            // nothing else about it. Draft-21 moved the section to 8.1 and
+            // left the integer alone.
+            DraftVersion::Draft18
+            | DraftVersion::Draft19
+            | DraftVersion::Draft20
+            | DraftVersion::Draft21 => VarIntEncoding::Moqt18,
         }
     }
 
@@ -242,7 +306,7 @@ impl DraftVersion {
         }
     }
 
-    /// The draft number (e.g. 7, 14, 20).
+    /// The draft number (e.g. 7, 14, 21).
     pub fn number(&self) -> u8 {
         match self {
             DraftVersion::Draft07 => 7,
@@ -259,6 +323,7 @@ impl DraftVersion {
             DraftVersion::Draft18 => 18,
             DraftVersion::Draft19 => 19,
             DraftVersion::Draft20 => 20,
+            DraftVersion::Draft21 => 21,
         }
     }
 }
@@ -272,6 +337,53 @@ impl std::fmt::Display for DraftVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ALL` and `from_number` are two statements of the same set.
+    ///
+    /// Neither is derived from the other - one is a list of variants and the
+    /// other a `match` over numbers - so they can disagree, and this is what
+    /// says so. Adding a variant makes `number()` stop compiling, which is how
+    /// the enum forces the first edit; this is what forces the rest.
+    #[test]
+    fn all_and_from_number_agree_on_which_drafts_exist() {
+        let derived: Vec<DraftVersion> =
+            (0u8..=255).filter_map(DraftVersion::from_number).collect();
+        assert_eq!(
+            DraftVersion::ALL.as_slice(),
+            derived.as_slice(),
+            "`DraftVersion::ALL` and `from_number` disagree about which drafts exist"
+        );
+    }
+
+    /// Oldest first, with no gaps.
+    ///
+    /// Both halves are load-bearing for callers: the order is what makes
+    /// `ALL.last()` the newest draft and `newest()` meaningful, and the
+    /// contiguity is what lets a sweep say "every draft from N on" as a slice
+    /// of `ALL` rather than a second list.
+    #[test]
+    fn all_is_ordered_and_contiguous() {
+        for pair in DraftVersion::ALL.windows(2) {
+            assert_eq!(
+                pair[1].number(),
+                pair[0].number() + 1,
+                "`ALL` jumps from draft-{:02} to draft-{:02}",
+                pair[0].number(),
+                pair[1].number()
+            );
+        }
+    }
+
+    /// `newest()` is the last of `ALL`, and nothing is newer.
+    #[test]
+    fn newest_is_the_end_of_the_series() {
+        assert_eq!(Some(DraftVersion::newest()), DraftVersion::ALL.last().copied());
+        assert_eq!(
+            DraftVersion::from_number(DraftVersion::newest().number() + 1),
+            None,
+            "a draft past the newest resolves, so `ALL` is short"
+        );
+    }
 
     /// The draft-to-encoding map, stated once so a change to it is a change to
     /// this list rather than a silent consequence of a comparison.
@@ -293,6 +405,7 @@ mod tests {
             (DraftVersion::Draft18, Moqt18),
             (DraftVersion::Draft19, Moqt18),
             (DraftVersion::Draft20, Moqt18),
+            (DraftVersion::Draft21, Moqt18),
         ];
         for (draft, encoding) in expected {
             assert_eq!(draft.varint_encoding(), encoding, "{draft}");
@@ -328,6 +441,7 @@ mod tests {
         assert_eq!(DraftVersion::from_alpn(b"moqt-18"), Some(DraftVersion::Draft18));
         assert_eq!(DraftVersion::from_alpn(b"moqt-19"), Some(DraftVersion::Draft19));
         assert_eq!(DraftVersion::from_alpn(b"moqt-20"), Some(DraftVersion::Draft20));
+        assert_eq!(DraftVersion::from_alpn(b"moqt-21"), Some(DraftVersion::Draft21));
     }
 
     #[test]
@@ -340,21 +454,17 @@ mod tests {
 
     #[test]
     fn from_alpn_round_trips_with_quic_alpn() {
-        for d in [
-            DraftVersion::Draft15,
-            DraftVersion::Draft16,
-            DraftVersion::Draft17,
-            DraftVersion::Draft18,
-            DraftVersion::Draft19,
-            DraftVersion::Draft20,
-        ] {
+        // Every draft with an ALPN of its own, off `ALL` rather than
+        // listed: the cohort is "draft-15 onwards", and a list would have
+        // to be extended by hand for each new draft to keep covering it.
+        for d in DraftVersion::ALL.iter().copied().filter(|d| d.number() >= 15) {
             assert_eq!(DraftVersion::from_alpn(d.quic_alpn()), Some(d));
         }
     }
 
     #[test]
     fn from_number_resolves_supported_range() {
-        for n in 7..=20u8 {
+        for n in 7..=21u8 {
             assert!(DraftVersion::from_number(n).is_some(), "draft {n} should resolve");
         }
     }
@@ -363,7 +473,7 @@ mod tests {
     fn from_number_none_outside_range() {
         assert_eq!(DraftVersion::from_number(0), None);
         assert_eq!(DraftVersion::from_number(6), None);
-        assert_eq!(DraftVersion::from_number(21), None);
+        assert_eq!(DraftVersion::from_number(22), None);
         assert_eq!(DraftVersion::from_number(255), None);
     }
 }

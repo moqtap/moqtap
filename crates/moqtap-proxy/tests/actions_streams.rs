@@ -122,7 +122,7 @@ fn subgroup_head(track_alias: u64) -> Vec<u8> {
 /// A whole draft-14 subgroup stream: the hand-written header plus three
 /// objects.
 ///
-/// The objects go through `AnySubgroupObjectWriter` because drafts 14-20
+/// The objects go through `AnySubgroupObjectWriter` because drafts 14-21
 /// delta-encode Object IDs and a hand-rolled object body would be
 /// asserting the codec's arithmetic rather than the proxy's routing. No
 /// assertion in this file reads object *content*: the stream is either
@@ -611,7 +611,7 @@ async fn streams_alone_frames_the_stream_and_fires_the_header_hook() {
     proxy.shutdown().await;
 }
 
-// ── drafts 17-20: the control plane is the unidirectional pair ─────────
+// ── drafts 17-21: the control plane is the unidirectional pair ─────────
 
 /// A draft-19 unified SETUP driven down a **unidirectional** stream is
 /// shown to `on_control_message`, the session reports nothing, and the

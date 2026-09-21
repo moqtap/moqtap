@@ -64,8 +64,8 @@ pub enum ConnectionError {
     /// hands back can only carry this draft's variant — but the narrowing arm
     /// is compiled in every configuration anyway, under
     /// `#[allow(unreachable_patterns)]` rather than a `cfg` naming the other
-    /// thirteen drafts, because such a list has to be edited in fourteen
-    /// places whenever a draft is added and a copy that omits one leaves the
+    /// drafts, because such a list has to be edited in every per-draft
+    /// module whenever a draft is added and a copy that omits one leaves the
     /// match non-exhaustive.
     ///
     /// Spelled as `CodecError::UnknownMessageType(0)` it would not stay inert:
@@ -242,7 +242,7 @@ impl FramedSendStream {
             // Only this draft's header seeds the object reader. With draft 14 the only enabled
             // draft `AnySubgroupHeader` has a single variant, the arm above is exhaustive and this
             // one unreachable. Compiled in every configuration with the lint allowed, rather than
-            // gated on a `cfg` naming the other thirteen drafts: such a list has to be edited in
+            // gated on a `cfg` naming the other drafts: such a list has to be edited in
             // every draft module whenever a draft is added, and a copy that omits one leaves this
             // match non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -871,7 +871,7 @@ impl Connection {
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 14 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
-            // naming the other thirteen drafts: such a list has to be edited in every draft module
+            // naming the other drafts: such a list has to be edited in every draft module
             // whenever a draft is added, and a copy that omits one leaves this match
             // non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -1875,7 +1875,8 @@ impl Connection {
             | CodecError::ParametersOutOfOrder(..)
             | CodecError::ObjectIdOverflow(..)
             | CodecError::InvalidRequiredRequestIdDelta(..)
-            | CodecError::InvalidTypeValue { .. }
+            | CodecError::InvalidStreamTypeValue { .. }
+            | CodecError::InvalidDatagramTypeValue { .. }
             | CodecError::UnknownMessageParameter(_)
             // Not `ParameterOutOfScope`: this draft states the scope rule and
             // answers it the other way. Section 9.2.1 Version Specific Parameters: "Each
@@ -2059,7 +2060,7 @@ mod tests {
     /// draft does not assign — with `0x00` attached as the codepoint that
     /// proved it, which is an accusation better evidenced than any real one
     /// this build makes. The section stating that rule is renumbered several
-    /// times across drafts 07 through 20, and the point does not turn on the
+    /// times across the series, and the point does not turn on the
     /// number.
     ///
     /// Ablated by putting the arm back to

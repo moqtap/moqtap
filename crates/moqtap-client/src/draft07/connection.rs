@@ -62,7 +62,7 @@ pub enum ConnectionError {
     /// hands back can only carry this draft's variant — but the narrowing arm
     /// is compiled in every configuration anyway, under
     /// `#[allow(unreachable_patterns)]` rather than a `cfg` naming the other
-    /// thirteen drafts, because such a list has to be edited in every draft
+    /// drafts, because such a list has to be edited in every draft
     /// module whenever a draft is added, and a copy that omits one leaves the
     /// match non-exhaustive.
     ///
@@ -754,7 +754,7 @@ impl Connection {
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 07 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
-            // naming the other thirteen drafts: such a list has to be edited in every draft
+            // naming the other drafts: such a list has to be edited in every draft
             // module whenever a draft is added, and a copy that omits one leaves this match
             // non-exhaustive.
             #[allow(unreachable_patterns)]
@@ -1352,7 +1352,7 @@ impl Connection {
     /// Every variant listed here comes from a sentence in this draft that names
     /// the consequence, and the list is per draft: answering a bound this draft
     /// does not state would close a session over traffic a conforming peer may
-    /// send. This draft's list is the shortest of the fourteen: draft-08, which
+    /// send. This draft's list is the shortest of any draft's: draft-08, which
     /// sits next to it, answers every entry here and adds two of its own — the
     /// Track Namespace tuple size and the end-of-track Object ID.
     ///
@@ -1490,7 +1490,8 @@ impl Connection {
             | CodecError::ObjectIdOverflow(..)
             | CodecError::ExtensionsOnNonExistentObject(_)
             | CodecError::InvalidRequiredRequestIdDelta(..)
-            | CodecError::InvalidTypeValue { .. }
+            | CodecError::InvalidStreamTypeValue { .. }
+            | CodecError::InvalidDatagramTypeValue { .. }
             | CodecError::ReasonPhraseTooLong
             | CodecError::GoAwayUriTooLong
             | CodecError::KeyValueFormatting { .. }
@@ -1679,7 +1680,7 @@ mod tests {
     /// draft does not assign — with `0x00` attached as the codepoint that
     /// proved it, which is an accusation better evidenced than any real one
     /// this build makes. The section stating that rule is renumbered several
-    /// times across drafts 07 through 20, and the point does not turn on the
+    /// times across the series, and the point does not turn on the
     /// number.
     ///
     /// Ablated by putting the arm back to

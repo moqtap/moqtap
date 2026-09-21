@@ -106,7 +106,8 @@
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21"
 ))]
 
 mod common;
@@ -160,6 +161,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft19,
     #[cfg(feature = "draft20")]
     DraftVersion::Draft20,
+    #[cfg(feature = "draft21")]
+    DraftVersion::Draft21,
 ];
 
 /// The draft every media fixture here is built for: the newest one compiled.
@@ -655,7 +658,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 }
 
 /// A subgroup stream header on `track_alias`: group 0, subgroup 0, publisher
-/// priority `0x80`. Five bytes on every draft 07-20.
+/// priority `0x80`. Five bytes on every draft 07-21.
 fn subgroup_header(track_alias: u64) -> Vec<u8> {
     assert!(track_alias < 64, "single-byte varint only");
     vec![subgroup_stream_type(DRAFT), track_alias as u8, 0x00, 0x00, 0x80]
@@ -665,7 +668,7 @@ fn subgroup_header(track_alias: u64) -> Vec<u8> {
 ///
 /// Split rather than returned whole because these rows write a stream in two
 /// batches with a control-plane call between them, and object IDs are
-/// delta-encoded on drafts 14-20 — encoding the two batches separately would
+/// delta-encoded on drafts 14-21 — encoding the two batches separately would
 /// encode the second batch's first delta against nothing. One writer, one
 /// pass, and the pieces are handed back for the caller to send when it
 /// likes.

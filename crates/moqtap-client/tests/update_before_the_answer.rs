@@ -1,5 +1,5 @@
 //! An update that arrives before the subscription's own answer, on all
-//! fourteen drafts.
+//! drafts.
 //!
 //! No draft orders a subscription update against the SUBSCRIBE_OK. Every one of
 //! them orders it against the SUBSCRIBE: drafts 07 through 10 ask only that the
@@ -117,3 +117,4 @@ update_before_the_answer_gates!(draft17, "draft17", draft17, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft18, "draft18", draft18, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft19, "draft19", draft19, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft20, "draft20", draft20, "REQUEST_UPDATE");
+update_before_the_answer_gates!(draft21, "draft21", draft21, "REQUEST_UPDATE");

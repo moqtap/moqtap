@@ -29,7 +29,7 @@
 //! | | Request | Response |
 //! |---|---|---|
 //! | **Drafts 07-12** | `track_status_request` (0x0D) | `track_status` (0x0E) |
-//! | **Drafts 13-20** | `track_status` (0x0D) | `track_status_ok` (0x0E) |
+//! | **Drafts 13-21** | `track_status` (0x0D) | `track_status_ok` (0x0E) |
 //!
 //! Every answer is right about its own draft, so comparing two of them by name
 //! yields a wrong conclusion out of two correct lookups.
@@ -41,7 +41,7 @@
 //! `publish_namespace`, `goaway` — which is the same string the JavaScript
 //! codec's `MESSAGE_TYPE_MAP` answers with for the same id. That shared
 //! spelling is the point: a trace named by either implementation reads the same
-//! way, and `tests/message_type_names.rs` compares all fourteen drafts against
+//! way, and `tests/message_type_names.rs` compares all the drafts against
 //! the corpus in both directions so the two tables cannot drift apart quietly.
 //!
 //! The corpus is test-only — `Cargo.toml` excludes it from the package — so
@@ -114,6 +114,7 @@ pub fn message_type_name(draft: u8, id: u64) -> Option<&'static str> {
         ("draft18", Draft18) => crate::draft18::message::MessageType::from_id(id).map(|t| t.name()),
         ("draft19", Draft19) => crate::draft19::message::MessageType::from_id(id).map(|t| t.name()),
         ("draft20", Draft20) => crate::draft20::message::MessageType::from_id(id).map(|t| t.name()),
+        ("draft21", Draft21) => crate::draft21::message::MessageType::from_id(id).map(|t| t.name()),
     }
 }
 
@@ -161,9 +162,18 @@ mod tests {
         assert_eq!(message_type_name(14, 0x0E), Some("track_status_ok"));
     }
 
+    /// The draft above the newest is derived, not written down. A literal
+    /// here names a supported draft the day that draft is added, and the case
+    /// then asserts the absent answer about a table that exists — it fails for
+    /// no real reason, which is what 21 did. `DraftVersion::from_number` is
+    /// this crate's own statement of the range, so the first number it refuses
+    /// is the first number this should.
     #[test]
     fn none_outside_the_implemented_drafts() {
-        for draft in [0u8, 6, 21, 255] {
+        let beyond = (7u8..=255)
+            .find(|n| crate::version::DraftVersion::from_number(*n).is_none())
+            .expect("the implemented range is bounded");
+        for draft in [0u8, 6, beyond, 255] {
             assert_eq!(message_type_name(draft, 0x03), None, "draft {draft}");
         }
     }
@@ -175,7 +185,7 @@ mod tests {
     /// for every id, which is what this asserts anyway.
     #[test]
     fn none_for_an_unassigned_id() {
-        for draft in 7..=20u8 {
+        for draft in 7..=21u8 {
             assert_eq!(message_type_name(draft, 0x3F), None, "draft-{draft}");
         }
     }
