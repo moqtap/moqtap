@@ -344,7 +344,7 @@ corpus_names_agree!(draft17_names_agree_with_the_corpus, "draft17", 17, "draft17
 corpus_names_agree!(draft18_names_agree_with_the_corpus, "draft18", 18, "draft18");
 corpus_names_agree!(draft19_names_agree_with_the_corpus, "draft19", 19, "draft19");
 corpus_names_agree!(draft20_names_agree_with_the_corpus, "draft20", 20, "draft20");
-corpus_names_agree!(draft21_names_agree_with_the_corpus, "draft21", 20, "draft21");
+corpus_names_agree!(draft21_names_agree_with_the_corpus, "draft21", 21, "draft21");
 
 /// The draft pairs whose whole name table coincides.
 ///

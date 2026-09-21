@@ -48,6 +48,8 @@
 //! something needs the correlation.
 
 use moqtap_client::dispatch::AnyClientEvent;
+// Every use of this type sits under one of the two drafts below.
+#[cfg(any(feature = "draft14", feature = "draft20"))]
 use moqtap_codec::dispatch::AnyControlMessage;
 use moqtap_codec::version::DraftVersion;
 
@@ -58,6 +60,10 @@ use moqtap_codec::version::DraftVersion;
 /// both and comparing is the stronger claim anyway: two messages that encode
 /// identically are the same message on the wire, which is the level this
 /// accessor is about.
+///
+/// Gated on the drafts whose tests call it, because a build carrying neither
+/// compiles it with no caller and `-D warnings` makes that an error.
+#[cfg(any(feature = "draft14", feature = "draft20"))]
 fn encoded(message: &AnyControlMessage) -> Vec<u8> {
     let mut out = Vec::new();
     message.encode(&mut out).expect("a message this test built encodes");
