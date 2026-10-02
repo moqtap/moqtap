@@ -296,7 +296,7 @@ impl LocationFilter {
     }
 
     /// The `Location Filter Type`, one of
-    /// [`location_filter_types`](moqtap_codec::draft22::message::location_filter_types).
+    /// [`location_filter_types`].
     pub fn filter_type(&self) -> u64 {
         self.filter_type
     }

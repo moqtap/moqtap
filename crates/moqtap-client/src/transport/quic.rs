@@ -1214,10 +1214,12 @@ impl rustls::client::danger::ServerCertVerifier for SkipVerification {
 
         // Schemes a server might legitimately sign with that the provider
         // cannot verify. Additive and deduplicated, so a provider that grows
-        // support for one of these does not end up offering it twice.
-        for extra in [rustls::SignatureScheme::ECDSA_NISTP521_SHA512] {
-            if !schemes.contains(&extra) {
-                schemes.push(extra);
+        // support for one of these does not end up offering it twice. A named
+        // list rather than a literal, so adding a scheme is adding a row.
+        const EXTRA: &[rustls::SignatureScheme] = &[rustls::SignatureScheme::ECDSA_NISTP521_SHA512];
+        for extra in EXTRA {
+            if !schemes.contains(extra) {
+                schemes.push(*extra);
             }
         }
         schemes

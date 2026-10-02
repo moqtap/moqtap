@@ -708,11 +708,19 @@ impl EgressGauge {
         // `saturating` in effect: a queue never credits back more than it
         // charged, but an underflow here would wrap to a total that never
         // reaches zero and would turn every later close into a full-length
-        // wait, so the arithmetic is written not to be able to.
-        let before = self
-            .queued
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| Some(n.saturating_sub(bytes)))
-            .unwrap_or(0);
+        // wait, so the arithmetic is written not to be able to. The loop is
+        // spelled out because the closure form is `try_update` from Rust 1.99
+        // and `fetch_update`, deprecated there, is the only name under the
+        // 1.88 MSRV.
+        let mut before = self.queued.load(Ordering::Acquire);
+        while let Err(seen) = self.queued.compare_exchange_weak(
+            before,
+            before.saturating_sub(bytes),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            before = seen;
+        }
         if before.saturating_sub(bytes) == 0 {
             self.idle.notify_waiters();
         }
