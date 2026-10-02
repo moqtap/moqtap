@@ -1692,7 +1692,7 @@ impl Connection {
                 stream_id: None,
                 raw: raw_server_setup.clone(),
             },
-            ClientEvent::SetupComplete { negotiated_version: 0xff000000 + 20 },
+            ClientEvent::SetupComplete { negotiated_version: 0xff000000 + 22 },
         ];
 
         Ok(Self {
@@ -3874,7 +3874,7 @@ mod tests {
             vec![MOQT_ALPN.to_vec()],
             "MOQT_ALPN is {:?}; a draft-{} client offers {:?}",
             String::from_utf8_lossy(MOQT_ALPN),
-            20,
+            22,
             config
                 .alpn()
                 .iter()

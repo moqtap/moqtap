@@ -20,16 +20,21 @@
 
 use std::path::PathBuf;
 
+use moqtap_codec::version::DraftVersion;
 use serde_json::Value;
 
-/// The drafts with a committed extraction.
-const DRAFTS: [u64; 14] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+/// The drafts with a committed extraction, which is every draft the codec
+/// knows: a new draft is checked here the day its extraction is committed, and
+/// a draft added without one fails `extraction` with the file named.
+fn drafts() -> impl Iterator<Item = u64> {
+    DraftVersion::ALL.into_iter().map(|d| u64::from(d.number()))
+}
 
 fn extraction(draft: u64) -> Value {
     let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tools/registries")
         // Zero-padded: the files are named after the draft as the IETF spells
-        // it, `draft-07` through `draft-20`.
+        // it, `draft-07` and up.
         .join(format!("draft-{draft:02}.json"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
@@ -67,7 +72,7 @@ fn extraction(draft: u64) -> Value {
 /// ```
 #[test]
 fn no_committed_extraction_carries_a_warning() {
-    for draft in DRAFTS {
+    for draft in drafts() {
         let doc = extraction(draft);
         let warnings = doc["warnings"].as_array().unwrap_or_else(|| {
             panic!("draft-{draft}.json has no warnings array; it was not produced by the tool")
@@ -100,7 +105,7 @@ fn no_committed_extraction_carries_a_warning() {
 /// other number moving.
 #[test]
 fn the_two_registry_definitions_do_not_share_a_source_table() {
-    for draft in DRAFTS {
+    for draft in drafts() {
         let doc = extraction(draft);
         let totals = &doc["totals"];
         let overlap =
@@ -149,7 +154,7 @@ fn the_two_registry_definitions_do_not_share_a_source_table() {
 /// ```
 #[test]
 fn every_object_status_assignment_has_a_payload_permission() {
-    for draft in DRAFTS {
+    for draft in drafts() {
         let doc = extraction(draft);
         let reg = &doc["object_status"];
         assert_eq!(
@@ -192,9 +197,9 @@ fn every_object_status_assignment_has_a_payload_permission() {
 /// The distinction the extraction records between a permission the draft
 /// registered and one the tool derived from an older blanket sentence is what
 /// separates draft-19 and later from their predecessors — the three rows are
-/// otherwise identical in code, name and answer. A degraded draft-19 or
-/// draft-20 extraction reports `form: prose-list` and looks exactly like a
-/// draft-18 one, so pinning the form is what makes that visible from inside
+/// otherwise identical in code, name and answer. A degraded extraction of
+/// draft-19 or any later draft reports `form: prose-list` and looks exactly
+/// like a draft-18 one, so pinning the form is what makes that visible from inside
 /// this repository.
 ///
 /// The boundary is stated as a threshold rather than as `draft == 19`, which is
@@ -204,7 +209,7 @@ fn every_object_status_assignment_has_a_payload_permission() {
 /// obvious fix, deleting the test, is what would have lost the claim.
 #[test]
 fn object_status_permissions_come_from_a_column_from_draft19_on() {
-    for draft in DRAFTS {
+    for draft in drafts() {
         let doc = extraction(draft);
         let reg = &doc["object_status"];
         let expected_iana = draft >= 19;

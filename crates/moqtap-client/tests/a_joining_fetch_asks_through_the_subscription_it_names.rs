@@ -159,8 +159,8 @@ const PATIENCE: Duration = Duration::from_secs(10);
 
 /// The track the subscription every joining fetch names is for.
 ///
-/// Unread by the draft-07 and draft-20 gates, which refuse before a SUBSCRIBE
-/// is sent; see the module docs.
+/// Unread by the draft-07 gate and the gates for drafts 20 through 22, which
+/// refuse before a SUBSCRIBE is sent; see the module docs.
 #[allow(dead_code)]
 const TRACK: &[u8] = b"video";
 

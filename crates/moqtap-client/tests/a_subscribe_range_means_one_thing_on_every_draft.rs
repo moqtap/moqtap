@@ -105,8 +105,8 @@ fn ranges() -> [SubscribeRange; 2] {
     [SubscribeRange::starting_at(4, 0), SubscribeRange::through_end_of_group(4, 0, 6)]
 }
 
-/// The range that ends inside a group, which draft-07 and draft-20 can express
-/// and the twelve drafts between them cannot.
+/// The range that ends inside a group, which draft-07 and drafts 20 through 22
+/// can express and the twelve drafts between them cannot.
 fn ends_inside_a_group() -> SubscribeRange {
     SubscribeRange::through_object(4, 0, 6, 9)
 }

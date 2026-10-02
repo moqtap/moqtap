@@ -1926,7 +1926,7 @@ mod tests {
         DRAFTS
             .into_iter()
             .find(|d| draft_is_compiled(*d))
-            .expect("gated on `any(draft07..draft20)`, so the compiled set is non-empty")
+            .expect("gated on `any(draft07..draft22)`, so the compiled set is non-empty")
     }
 
     /// A configuration nobody edited can shape the traffic it will see.

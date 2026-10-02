@@ -1,5 +1,12 @@
-#![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
-//! Rules drafts 17 through 20 state and this codec must hold itself to.
+#![cfg(all(
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
+))]
+//! Rules drafts 17 and later state and this codec must hold itself to.
 //!
 //! Four rules, each pinned by what a caller can observe rather than by reading
 //! a field back:
@@ -34,6 +41,12 @@ use moqtap_codec::draft19::types::ObjectStatus as Status19;
 use moqtap_codec::draft20::data_stream as d20;
 use moqtap_codec::draft20::message as m20;
 use moqtap_codec::draft20::types::ObjectStatus as Status20;
+use moqtap_codec::draft21::data_stream as d21;
+use moqtap_codec::draft21::message as m21;
+use moqtap_codec::draft21::types::ObjectStatus as Status21;
+use moqtap_codec::draft22::data_stream as d22;
+use moqtap_codec::draft22::message as m22;
+use moqtap_codec::draft22::types::ObjectStatus as Status22;
 
 fn vi(v: u64) -> VarInt {
     VarInt::from_u64_moqt(v)
@@ -176,6 +189,48 @@ fn the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one() 
         "draft-20's whole-datagram read must refuse a PROPERTIES bit over an empty block"
     );
 
+    // Drafts 21 and 22 keep the datagram half in both directions, as draft-20
+    // has it.
+    let mut buf = Vec::new();
+    let d21_header = d21::DatagramHeader {
+        datagram_type: DATAGRAM_PROPERTIES_ONLY,
+        track_alias: vi(1),
+        group_id: vi(0),
+        object_id: vi(3),
+        publisher_priority: Some(0x80),
+        properties: Vec::new(),
+        object_status: None,
+    };
+    assert!(
+        d21_header.encode_checked(&mut buf).is_err(),
+        "draft-21 wrote a datagram with the PROPERTIES bit and an empty block"
+    );
+    assert!(buf.is_empty(), "a refused draft-21 datagram left {buf:02x?} behind");
+    assert!(
+        d21::DatagramHeader::decode_object(&mut &empty_block[..]).is_err(),
+        "draft-21's whole-datagram read must refuse a PROPERTIES bit over an empty block"
+    );
+
+    let mut buf = Vec::new();
+    let d22_header = d22::DatagramHeader {
+        datagram_type: DATAGRAM_PROPERTIES_ONLY,
+        track_alias: vi(1),
+        group_id: vi(0),
+        object_id: vi(3),
+        publisher_priority: Some(0x80),
+        properties: Vec::new(),
+        object_status: None,
+    };
+    assert!(
+        d22_header.encode_checked(&mut buf).is_err(),
+        "draft-22 wrote a datagram with the PROPERTIES bit and an empty block"
+    );
+    assert!(buf.is_empty(), "a refused draft-22 datagram left {buf:02x?} behind");
+    assert!(
+        d22::DatagramHeader::decode_object(&mut &empty_block[..]).is_err(),
+        "draft-22's whole-datagram read must refuse a PROPERTIES bit over an empty block"
+    );
+
     // The same datagram with a block in it is written, and parses back with the
     // block intact — the rule is about the empty block, not about properties.
     let mut buf = Vec::new();
@@ -259,6 +314,54 @@ fn the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one() 
             panic!(
                 "draft-20 refused a zero-length properties block on a subgroup stream, \
                  which Section 11.4.2 requires of an object with no properties: {e:?}"
+            )
+        });
+    assert_eq!(out, vec![0x00, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef], "unexpected subgroup bytes");
+
+    // Drafts 21 and 22 keep the sentence under the subgroup header's
+    // PROPERTIES bit; draft-22 widens it to objects with a non-Normal status.
+    let d21_stream =
+        d21::SubgroupHeader::decode(&mut &[SUBGROUP_WITH_PROPERTIES, 0x01, 0x00, 0x80][..])
+            .expect("a draft-21 PROPERTIES subgroup header");
+    let mut out = Vec::new();
+    d21::SubgroupObjectReader::new(&d21_stream)
+        .write_object(
+            &d21::SubgroupObject {
+                object_id: vi(0),
+                extension_headers: Vec::new(),
+                payload_length: vi(4),
+                object_status: None,
+                payload: vec![0xde, 0xad, 0xbe, 0xef],
+            },
+            &mut out,
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "draft-21 refused a zero-length properties block on a subgroup stream, \
+                 which it requires of an object with no properties: {e:?}"
+            )
+        });
+    assert_eq!(out, vec![0x00, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef], "unexpected subgroup bytes");
+
+    let d22_stream =
+        d22::SubgroupHeader::decode(&mut &[SUBGROUP_WITH_PROPERTIES, 0x01, 0x00, 0x80][..])
+            .expect("a draft-22 PROPERTIES subgroup header");
+    let mut out = Vec::new();
+    d22::SubgroupObjectReader::new(&d22_stream)
+        .write_object(
+            &d22::SubgroupObject {
+                object_id: vi(0),
+                extension_headers: Vec::new(),
+                payload_length: vi(4),
+                object_status: None,
+                payload: vec![0xde, 0xad, 0xbe, 0xef],
+            },
+            &mut out,
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "draft-22 refused a zero-length properties block on a subgroup stream, \
+                 which it requires of an object with no properties: {e:?}"
             )
         });
     assert_eq!(out, vec![0x00, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef], "unexpected subgroup bytes");
@@ -392,6 +495,43 @@ fn properties_are_not_written_beside_a_status_other_than_normal() {
     assert!(
         d20::DatagramHeader::decode_object(&mut &wire[..]).is_err(),
         "draft-20's whole-datagram read must refuse properties beside a non-Normal status"
+    );
+
+    // ── drafts 21 and 22, both directions as on draft-20 ──
+    let mut buf = Vec::new();
+    let forbidden = d21::DatagramHeader {
+        datagram_type: DATAGRAM_PROPERTIES_AND_STATUS,
+        track_alias: vi(1),
+        group_id: vi(0),
+        object_id: vi(0),
+        publisher_priority: Some(0x80),
+        properties: properties.clone(),
+        object_status: Some(Status21::EndOfGroup),
+    }
+    .encode_checked(&mut buf);
+    assert!(forbidden.is_err(), "draft-21 wrote properties beside End of Group");
+    assert!(buf.is_empty(), "a refused draft-21 datagram left {buf:02x?} behind");
+    assert!(
+        d21::DatagramHeader::decode_object(&mut &wire[..]).is_err(),
+        "draft-21's whole-datagram read must refuse properties beside a non-Normal status"
+    );
+
+    let mut buf = Vec::new();
+    let forbidden = d22::DatagramHeader {
+        datagram_type: DATAGRAM_PROPERTIES_AND_STATUS,
+        track_alias: vi(1),
+        group_id: vi(0),
+        object_id: vi(0),
+        publisher_priority: Some(0x80),
+        properties: properties.clone(),
+        object_status: Some(Status22::EndOfGroup),
+    }
+    .encode_checked(&mut buf);
+    assert!(forbidden.is_err(), "draft-22 wrote properties beside End of Group");
+    assert!(buf.is_empty(), "a refused draft-22 datagram left {buf:02x?} behind");
+    assert!(
+        d22::DatagramHeader::decode_object(&mut &wire[..]).is_err(),
+        "draft-22's whole-datagram read must refuse properties beside a non-Normal status"
     );
 
     // Normal is the status the rule exempts, and its datagram still goes out.
@@ -579,10 +719,10 @@ fn a_fetch_type_that_disagrees_with_its_body_is_refused() {
 /// body under any other code the bytes are written and then never read, and the
 /// sender believes it redirected a peer that never saw a redirect.
 ///
-/// New in draft-18 and carried into drafts 19 and 20; draft-17's REQUEST_ERROR
+/// New in draft-18 and carried into every later draft; draft-17's REQUEST_ERROR
 /// has no Redirect field at all, which is why it is absent here.
 ///
-/// On draft-20 this is the *only* discriminator left in a control message —
+/// From draft-20 on this is the *only* discriminator left in a control message —
 /// Section 10.13 deleted FETCH's Fetch Type — so the arm this drives is the
 /// whole of that draft's `check_discriminators`.
 ///
@@ -684,6 +824,71 @@ fn a_request_error_redirect_must_match_its_error_code() {
         m20::ControlMessage::decode(&mut &buf[..])
     );
     assert!(buf.is_empty(), "a refused draft-20 REQUEST_ERROR left {buf:02x?} behind");
+
+    // Drafts 21 and 22: the same arm, both directions.
+    let mut buf = Vec::new();
+    let missing = m21::ControlMessage::RequestError(m21::RequestError {
+        error_code: vi(REDIRECT),
+        retry_interval: vi(0),
+        reason_phrase: Vec::new(),
+        redirect: None,
+    });
+    assert!(
+        missing.encode(&mut buf).is_err(),
+        "draft-21 encoded a REDIRECT error with no Redirect body; it decodes as {:?}",
+        m21::ControlMessage::decode(&mut &buf[..])
+    );
+    assert!(buf.is_empty(), "a refused draft-21 REQUEST_ERROR left {buf:02x?} behind");
+
+    let mut buf = Vec::new();
+    let stowaway = m21::ControlMessage::RequestError(m21::RequestError {
+        error_code: vi(0x1),
+        retry_interval: vi(0),
+        reason_phrase: Vec::new(),
+        redirect: Some(m21::Redirect {
+            connect_uri: b"https://example".to_vec(),
+            track_namespace: namespace_17(),
+            track_name: b"t".to_vec(),
+        }),
+    });
+    assert!(
+        stowaway.encode(&mut buf).is_err(),
+        "draft-21 encoded a Redirect body under error code 0x1; it decodes as {:?}",
+        m21::ControlMessage::decode(&mut &buf[..])
+    );
+    assert!(buf.is_empty(), "a refused draft-21 REQUEST_ERROR left {buf:02x?} behind");
+
+    let mut buf = Vec::new();
+    let missing = m22::ControlMessage::RequestError(m22::RequestError {
+        error_code: vi(REDIRECT),
+        retry_interval: vi(0),
+        reason_phrase: Vec::new(),
+        redirect: None,
+    });
+    assert!(
+        missing.encode(&mut buf).is_err(),
+        "draft-22 encoded a REDIRECT error with no Redirect body; it decodes as {:?}",
+        m22::ControlMessage::decode(&mut &buf[..])
+    );
+    assert!(buf.is_empty(), "a refused draft-22 REQUEST_ERROR left {buf:02x?} behind");
+
+    let mut buf = Vec::new();
+    let stowaway = m22::ControlMessage::RequestError(m22::RequestError {
+        error_code: vi(0x1),
+        retry_interval: vi(0),
+        reason_phrase: Vec::new(),
+        redirect: Some(m22::Redirect {
+            connect_uri: b"https://example".to_vec(),
+            track_namespace: namespace_17(),
+            track_name: b"t".to_vec(),
+        }),
+    });
+    assert!(
+        stowaway.encode(&mut buf).is_err(),
+        "draft-22 encoded a Redirect body under error code 0x1; it decodes as {:?}",
+        m22::ControlMessage::decode(&mut &buf[..])
+    );
+    assert!(buf.is_empty(), "a refused draft-22 REQUEST_ERROR left {buf:02x?} behind");
 
     // Draft-20 also changed what an empty Redirect target means, without
     // changing a byte: draft-19 read an empty Track Namespace and Track Name
@@ -843,6 +1048,32 @@ fn a_status_datagram_never_yields_a_payload() {
                 Err(CodecError::PayloadNotPermitted { .. })
             ),
             "draft-20 accepted trailing bytes on a status {status:#04x} datagram"
+        );
+
+        let header = d21::DatagramHeader::decode(&mut &whole[..]).expect("the header parses");
+        assert!(
+            !header.permits_payload(),
+            "draft-21 permitted a payload on a status datagram carrying status {status:#04x}"
+        );
+        assert!(
+            matches!(
+                d21::DatagramHeader::decode_object(&mut &whole[..]),
+                Err(CodecError::PayloadNotPermitted { .. })
+            ),
+            "draft-21 accepted trailing bytes on a status {status:#04x} datagram"
+        );
+
+        let header = d22::DatagramHeader::decode(&mut &whole[..]).expect("the header parses");
+        assert!(
+            !header.permits_payload(),
+            "draft-22 permitted a payload on a status datagram carrying status {status:#04x}"
+        );
+        assert!(
+            matches!(
+                d22::DatagramHeader::decode_object(&mut &whole[..]),
+                Err(CodecError::PayloadNotPermitted { .. })
+            ),
+            "draft-22 accepted trailing bytes on a status {status:#04x} datagram"
         );
     }
 

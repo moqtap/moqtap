@@ -107,6 +107,23 @@ fn varint_draft20() {
     run_moqt_varint_vectors::<Moqt18>("transport/draft20/codec/varint.json");
 }
 
+/// Draft-21 moved the encoding to Section 8.1 and changed nothing in it, so
+/// draft-18's profile reads its vectors too. The corpus file differs from
+/// draft-20's only in `spec_section`. `vectors_draft21.rs` counts this file
+/// toward the whole corpus on the strength of this runner.
+#[test]
+fn varint_draft21() {
+    run_moqt_varint_vectors::<Moqt18>("transport/draft21/codec/varint.json");
+}
+
+/// Draft-22 Section 8.1 is draft-21's encoding unchanged, and its corpus file
+/// is draft-21's byte for byte. `vectors_draft22.rs` counts it toward the whole
+/// corpus on the strength of this runner.
+#[test]
+fn varint_draft22() {
+    run_moqt_varint_vectors::<Moqt18>("transport/draft22/codec/varint.json");
+}
+
 /// Draft-17 omits the 7-byte length and calls 11111100 an invalid code point,
 /// while draft-18 restored it. The same bytes must therefore be rejected on a
 /// draft-17 session and accepted on a later one.

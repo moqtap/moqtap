@@ -1,12 +1,12 @@
-//! The bounds drafts 17, 18 and 19 put on parameters, key-value pairs and
-//! track names, checked in both directions.
+//! The bounds drafts 17 and later put on parameters, key-value pairs and track
+//! names, checked in both directions.
 //!
 //! Every gate here is a consequence: bytes in and an answer out, or a message in
 //! and the bytes it becomes. None of them reads a constant back.
 //!
 //! Two of these rules are the reason the file exists rather than a test module
-//! beside each draft. They are worded identically in all three drafts, and the
-//! defect they cover was present in all three at once — a decoder that panicked
+//! beside each draft. They are worded identically in drafts 17, 18 and 19, and
+//! the defect they cover was present in all three at once — a decoder that panicked
 //! on a delta-encoded key and an encoder that truncated a uint8 parameter. A
 //! single file makes a draft that drifts out of line visible as a missing row
 //! rather than as a test nobody wrote.
@@ -16,7 +16,14 @@
 //! The observed output for each is in the docstring of the test that catches
 //! it; they are not predictions.
 
-#![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19", feature = "draft20"))]
+#![cfg(all(
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
+))]
 
 use moqtap_codec::error::{
     CodecError, MAX_FULL_TRACK_NAME_LENGTH, MAX_GOAWAY_URI_LENGTH, MAX_REASON_PHRASE_LENGTH,
@@ -97,8 +104,12 @@ fn setup_option_key_may_not_wrap_past_the_end_of_the_range() {
     let d18 = moqtap_codec::draft18::message::ControlMessage::decode(&mut &wire[..]).err();
     let d19 = moqtap_codec::draft19::message::ControlMessage::decode(&mut &wire[..]).err();
     let d20 = moqtap_codec::draft20::message::ControlMessage::decode(&mut &wire[..]).err();
+    let d21 = moqtap_codec::draft21::message::ControlMessage::decode(&mut &wire[..]).err();
+    let d22 = moqtap_codec::draft22::message::ControlMessage::decode(&mut &wire[..]).err();
 
-    for (draft, got) in [("17", d17), ("18", d18), ("19", d19), ("20", d20)] {
+    for (draft, got) in
+        [("17", d17), ("18", d18), ("19", d19), ("20", d20), ("21", d21), ("22", d22)]
+    {
         assert!(
             matches!(got, Some(CodecError::KeyDeltaOverflow(..))),
             "draft-{draft} accepted a wrapping setup option key: {got:?}"
@@ -131,7 +142,9 @@ fn parameter_key_may_not_wrap_past_the_end_of_the_range() {
     let d18 = moqtap_codec::draft18::message::ControlMessage::decode(&mut &wire[..]).err();
     let d19 = moqtap_codec::draft19::message::ControlMessage::decode(&mut &wire[..]).err();
     let d20 = moqtap_codec::draft20::message::ControlMessage::decode(&mut &wire[..]).err();
-    for (draft, got) in [("18", d18), ("19", d19), ("20", d20)] {
+    let d21 = moqtap_codec::draft21::message::ControlMessage::decode(&mut &wire[..]).err();
+    let d22 = moqtap_codec::draft22::message::ControlMessage::decode(&mut &wire[..]).err();
+    for (draft, got) in [("18", d18), ("19", d19), ("20", d20), ("21", d21), ("22", d22)] {
         assert!(
             matches!(got, Some(CodecError::KeyDeltaOverflow(..))),
             "draft-{draft} accepted a wrapping parameter key: {got:?}"
@@ -271,8 +284,8 @@ fn out_of_range_uint8_parameters_are_refused_on_every_draft_that_defines_them() 
         let got = moqtap_codec::draft18::message::ControlMessage::decode(&mut &d18_good[..]);
         assert!(got.is_ok(), "draft-18 refused the legal parameter {key:#x} = {good}: {got:?}");
 
-        // Drafts 19 and 20 frame a SUBSCRIBE exactly as draft-18 does, so the
-        // same bytes serve all three.
+        // Drafts 19 through 22 frame a SUBSCRIBE exactly as draft-18 does, so
+        // the same bytes serve all five.
         let got = moqtap_codec::draft19::message::ControlMessage::decode(&mut &d18_bad[..]);
         assert!(got.is_err(), "draft-19 accepted parameter {key:#x} = {bad}: {got:?}");
         let got = moqtap_codec::draft19::message::ControlMessage::decode(&mut &d18_good[..]);
@@ -282,9 +295,20 @@ fn out_of_range_uint8_parameters_are_refused_on_every_draft_that_defines_them() 
         assert!(got.is_err(), "draft-20 accepted parameter {key:#x} = {bad}: {got:?}");
         let got = moqtap_codec::draft20::message::ControlMessage::decode(&mut &d18_good[..]);
         assert!(got.is_ok(), "draft-20 refused the legal parameter {key:#x} = {good}: {got:?}");
+
+        let got = moqtap_codec::draft21::message::ControlMessage::decode(&mut &d18_bad[..]);
+        assert!(got.is_err(), "draft-21 accepted parameter {key:#x} = {bad}: {got:?}");
+        let got = moqtap_codec::draft21::message::ControlMessage::decode(&mut &d18_good[..]);
+        assert!(got.is_ok(), "draft-21 refused the legal parameter {key:#x} = {good}: {got:?}");
+
+        let got = moqtap_codec::draft22::message::ControlMessage::decode(&mut &d18_bad[..]);
+        assert!(got.is_err(), "draft-22 accepted parameter {key:#x} = {bad}: {got:?}");
+        let got = moqtap_codec::draft22::message::ControlMessage::decode(&mut &d18_good[..]);
+        assert!(got.is_ok(), "draft-22 refused the legal parameter {key:#x} = {good}: {got:?}");
     }
 
-    // Draft-20 adds a third uint8 with a restricted range. Section 10.2.21:
+    // Draft-20 adds a third uint8 with a restricted range, and drafts 21 and 22
+    // keep it word for word. Draft-20 Section 10.2.21:
     // "The allowed values are 0 (do not send Properties) or 1 (send
     // Properties), and the default is 1. If an endpoint receives a value
     // outside this range, it MUST close the session with PROTOCOL_VIOLATION."
@@ -296,6 +320,18 @@ fn out_of_range_uint8_parameters_are_refused_on_every_draft_that_defines_them() 
         let wire = subscribe_with_param_d18(0x35, good);
         let got = moqtap_codec::draft20::message::ControlMessage::decode(&mut &wire[..]);
         assert!(got.is_ok(), "draft-20 refused the legal INCLUDE_PROPERTIES = {good}: {got:?}");
+
+        let wire = subscribe_with_param_d18(0x35, bad);
+        let got = moqtap_codec::draft21::message::ControlMessage::decode(&mut &wire[..]);
+        assert!(got.is_err(), "draft-21 accepted INCLUDE_PROPERTIES = {bad}: {got:?}");
+        let got = moqtap_codec::draft22::message::ControlMessage::decode(&mut &wire[..]);
+        assert!(got.is_err(), "draft-22 accepted INCLUDE_PROPERTIES = {bad}: {got:?}");
+
+        let wire = subscribe_with_param_d18(0x35, good);
+        let got = moqtap_codec::draft21::message::ControlMessage::decode(&mut &wire[..]);
+        assert!(got.is_ok(), "draft-21 refused the legal INCLUDE_PROPERTIES = {good}: {got:?}");
+        let got = moqtap_codec::draft22::message::ControlMessage::decode(&mut &wire[..]);
+        assert!(got.is_ok(), "draft-22 refused the legal INCLUDE_PROPERTIES = {good}: {got:?}");
     }
 }
 
@@ -473,6 +509,16 @@ fn a_zero_length_namespace_field_is_refused() {
     assert!(
         matches!(got, Err(CodecError::EmptyNamespaceField)),
         "draft-20 accepted a zero-length namespace field: {got:?}"
+    );
+    let got = moqtap_codec::draft21::message::ControlMessage::decode(&mut &d18[..]);
+    assert!(
+        matches!(got, Err(CodecError::EmptyNamespaceField)),
+        "draft-21 accepted a zero-length namespace field: {got:?}"
+    );
+    let got = moqtap_codec::draft22::message::ControlMessage::decode(&mut &d18[..]);
+    assert!(
+        matches!(got, Err(CodecError::EmptyNamespaceField)),
+        "draft-22 accepted a zero-length namespace field: {got:?}"
     );
 }
 

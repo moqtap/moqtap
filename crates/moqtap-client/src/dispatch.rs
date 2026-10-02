@@ -958,8 +958,8 @@ pub enum SubscribeEnd {
     /// Through this Object of this Group, **inclusive** — it is the last Object
     /// the subscription covers, and the range holds it.
     ///
-    /// Expressible on draft-07 and draft-20 and on nothing between them. See
-    /// [`SubscribeEnd`] for why those two and not the twelve in the middle, and
+    /// Expressible on draft-07 and drafts 20 through 22, and on nothing between
+    /// them. See [`SubscribeEnd`] for why those and not the twelve in the middle, and
     /// [`SubscribeRange::inline_end_location`] for the plus one draft-07 needs
     /// and draft-20 must not have.
     ThroughObject {
@@ -1117,7 +1117,8 @@ impl SubscribeRange {
             SubscribeEnd::ThroughObject { .. } => Err(AnyConnectionError::facade(format!(
                 "subscribe_range: draft-{:02} carries no End Object on SUBSCRIBE — draft-08 \
                  deleted the field and draft-20 restored it inside LOCATION_FILTER, so a range \
-                 ending inside a group is expressible on draft-07 and draft-20 alone. Ask for \
+                 ending inside a group is expressible on draft-07 and drafts 20 through 22 \
+                 alone. Ask for \
                  the whole group with SubscribeEnd::EndOfGroup",
                 draft.number()
             ))),
@@ -3061,6 +3062,8 @@ impl AnyConnection {
                 ("draft18", Draft18, draft18),
                 ("draft19", Draft19, draft19),
                 ("draft20", Draft20, draft20),
+                ("draft21", Draft21, draft21),
+                ("draft22", Draft22, draft22),
             ],
         }
     }

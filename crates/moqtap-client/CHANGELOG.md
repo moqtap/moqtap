@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking.** `DraftVersion` gains `Draft22` (see `moqtap-codec`), and every `Any*` enum in `dispatch` gains a `Draft22` variant behind the new `draft22` feature, which is in `all-drafts`. A downstream `match` over any of them stops compiling.
 - **Draft-22's `LOCATION_FILTER` is not draft-21's.** `draft22::fill::LocationFilter` carries a Location Filter Type: `absolute_start(0, 0)` is the beginning of the track, `next_object()` is type 0x05 rather than `{0, 0}`, and a nested filter inside `FILL_PARAMETERS` is written without a length. `SubscribeRange::location_filter_draft22` sends an open `{0, 0}` where the draft-20 and draft-21 methods refuse it. Draft-19's Filter Type numbers are not draft-22's.
 
+### Fixed
+
+- `AnyConnection::adopt` and `adopt_offering` refused draft-21 (since 0.7.0) and draft-22 as "not enabled in this build" in builds that enable them; `AnyConnection::connect` was unaffected.
+- On draft-21 and draft-22, `ClientEvent::SetupComplete` reported draft-20's version (`0xff000014`) instead of its own.
+
 ## [0.7.0] - 2026-09-21
 
 ### Added
