@@ -166,7 +166,7 @@ impl From<RangeSet> for Vec<RangeInclusive<u64>> {
 /// `Datagram` matcher never matches a unit. The report is the scheduler's
 /// job once this module is wired.
 ///
-/// `Fetch` is live on every draft. Drafts 18, 19 and 20 write a fetch
+/// `Fetch` is live on every draft. Drafts 18-22 write a fetch
 /// object's Group ID as a difference whose sign the fetch's Group Order
 /// settles; the session reads that order off the FETCH —
 /// `capability::fetch_group_order_is_needed` — and hands it to the framer, so
@@ -220,7 +220,7 @@ pub enum MatcherField {
     /// every fetch stream.
     TrackAlias,
     /// [`Matcher::subgroup_id`], against a unit whose header carried none —
-    /// ten drafts in first-object mode, and 16-21 in reserved mode 3.
+    /// drafts 11-22 in first-object mode, and 16-22 in reserved mode 3.
     ///
     /// Never reported about a datagram, which carries no subgroup ID on any
     /// draft. That is not a fact about one header, so it is a pre-run
@@ -296,8 +296,8 @@ pub struct Matcher {
     pub track_alias: Option<RangeSet>,
     /// Group ID. Always present on a framed object.
     pub group_id: Option<RangeSet>,
-    /// Subgroup ID. `None` on ten drafts in first-object mode and on
-    /// 16-20 in reserved mode 3, so a rule keyed here claims nothing there.
+    /// Subgroup ID. `None` on drafts 11-22 in first-object mode and on
+    /// 16-22 in reserved mode 3, so a rule keyed here claims nothing there.
     pub subgroup_id: Option<RangeSet>,
     /// Absolute object ID. Always present on a framed object.
     pub object_id: Option<RangeSet>,
@@ -575,7 +575,7 @@ struct Keys {
 /// The `Fetch` arm is **live**, on all the drafts:
 /// `detect_stream_type` maps stream type `0x05` to
 /// [`DataStreamType::Fetch`] and the framer produces ordinary [`ObjectMeta`]
-/// for it. On drafts 18, 19 and 20 that needs the fetch's Group Order, which
+/// for it. On drafts 18-22 that needs the fetch's Group Order, which
 /// the session reads off the FETCH before the response opens; a response
 /// naming a request nobody made is bypassed and says so per stream, and
 /// produces no meta for a rule to be measured against either way.

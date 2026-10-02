@@ -1,7 +1,7 @@
 # moqtap-client
 
 MoQT client — session state, protocol flows and framed I/O over QUIC and
-WebTransport, for every draft from draft-07 through draft-21.
+WebTransport, for every draft from draft-07 through draft-22.
 
 A library with no UI: it is driven by another application that decides what to
 do and presents the results.
@@ -10,25 +10,31 @@ do and presents the results.
 
 Connect to a MoQT relay over QUIC or WebTransport and perform subscriber-side
 or publisher-side operations. The caller decides what to subscribe, fetch,
-or publish; moqtap-client handles the protocol. On drafts 17 through 20 it
+or publish; moqtap-client handles the protocol. On drafts 17 through 22 it
 also serves requests a peer opens on a bidirectional stream of its own.
 
-Supports every MoQT draft from **draft-07 through draft-21**. Each draft
-lives in its own top-level module (`draft07`..`draft21`) with its own
+Supports every MoQT draft from **draft-07 through draft-22**. Each draft
+lives in its own top-level module (`draft07`..`draft22`) with its own
 connection, endpoint state machine, event types, observer trait, and
 per-flow state machines. The `transport` module (QUIC / WebTransport) is
 shared across drafts.
 
 The newest draft here is not a default anywhere: it is not the interop target,
 and nothing in this crate promotes it to a connection default or an
-auto-selected draft. Three of the changes draft-20 brought — and draft-21
-inherits, the two being one wire format — are visible in the API rather than
+auto-selected draft. Three of the changes draft-20 brought — and drafts 21
+and 22 inherit — are visible in the API rather than
 only on the wire: `draft20::connection::Connection::fetch` takes a parameter
 list where earlier drafts took four location varints, because draft-20 moved
 the range into the `LOCATION_FILTER` parameter and deleted the joining fetch; `draft20::fill` builds that filter and the `FILL_PARAMETERS`
 that asks for a fill fetch stream; and `accept_fill_stream` reads the stream
-that answers one. **Ranges are inclusive at both ends on drafts 20 and 21**, so a call
-ported from draft-19 must drop the `+ 1` its end location carried.
+that answers one. **Ranges are inclusive at both ends on drafts 20 through 22**, so a
+call ported from draft-19 must drop the `+ 1` its end location carried.
+
+Draft-22 changes one thing on the wire: `LOCATION_FILTER` opens with a
+`Location Filter Type` and carries no length. `draft22::fill::LocationFilter`
+writes the type, so on draft-22 `{0, 0}` is an absolute start at the beginning
+of the track and the live edge is `LocationFilter::next_object`, type 0x05;
+draft-19's Filter Type numbers are not draft-22's.
 
 ```rust
 use moqtap_client::draft14::connection::{Connection, ClientConfig, TransportType};
@@ -98,7 +104,7 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 │  └────────────────────┬───────────────────────┘  │
 │                       │ wraps                    │
 │  ┌────────────────────▼───────────────────────┐  │
-│  │ draft07 | draft08 | ... | draft21          │  │
+│  │ draft07 | draft08 | ... | draft22          │  │
 │  │   connection · endpoint · session          │  │
 │  │   subscribe · fetch · publish · namespace  │  │
 │  │   subgroup streams · datagrams             │  │
@@ -127,7 +133,7 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 - Framed message I/O (control messages with varint- or fixed-length framing,
   measured with the variable-length integer the draft uses)
 - Data stream I/O (subgroup streams, fetch streams, datagrams)
-- Per-draft wire formats for drafts 07 through 21
+- Per-draft wire formats for drafts 07 through 22
 - TLS configuration (system roots, custom CAs, skip verification)
 - Event emission via the per-draft `ConnectionObserver` trait and the
   draft-agnostic `AnyConnectionObserver`
@@ -144,7 +150,7 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `draft07`..`draft21` | no | Enable the matching draft's module; forwards the feature to `moqtap-codec` |
+| `draft07`..`draft22` | no | Enable the matching draft's module; forwards the feature to `moqtap-codec` |
 | `all-drafts` | yes | Enables every draft; this is `default` |
 | `webtransport` | no | WebTransport client support via `wtransport` |
 

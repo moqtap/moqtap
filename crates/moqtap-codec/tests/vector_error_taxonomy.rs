@@ -84,10 +84,15 @@ mod test_vectors;
 
 use test_vectors::{vector_files, vectors_dir};
 
-#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
+#[cfg(any(
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
+))]
 use test_vectors::error_category;
 
-#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21", feature = "draft22"))]
 fn hex(s: &str) -> Vec<u8> {
     hex::decode(s.replace(' ', "")).expect("test hex")
 }
@@ -96,7 +101,7 @@ fn hex(s: &str) -> Vec<u8> {
 ///
 /// Panics if the bytes decode, because a case that stopped failing is a case
 /// that stopped testing anything.
-#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21"))]
+#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21", feature = "draft22"))]
 fn category_of(
     what: &str,
     decode: impl FnOnce() -> Result<(), moqtap_codec::error::CodecError>,
@@ -236,6 +241,43 @@ fn draft21_names_every_invalid_type_inside_the_byte_space() {
     assert_eq!(category, "unknown_message", "draft-21 subgroup Type 0x0100");
 }
 
+/// Draft-20 moved the boundary between those two complaints, and this is where
+/// the move is visible.
+///
+/// Draft-19's figure enumerated the valid subgroup Types and left everything
+/// else to Section 6.4.1's unknown-stream-type rule, so 0x60 — bit 4 clear, which
+/// puts it outside the 0b0XX1XXXX pattern — was `unknown_message`. Draft-22
+/// states three conditions instead, and "values where bit 4 is not set" is one
+/// of them, so the draft now *names* 0x60 as invalid and the complaint is
+/// `invalid_type`. The set of accepted values did not change; only what a
+/// refusal is called did.
+///
+/// `unknown_message` is still reachable on draft-22, and only above the byte
+/// space: Section 11.3.1's conditions are about a one-byte flags field, so a
+/// stream type too wide to be one is Section 6.4.1's business again.
+#[cfg(feature = "draft22")]
+#[test]
+fn draft22_names_every_invalid_type_inside_the_byte_space() {
+    use moqtap_codec::draft22::data_stream::SubgroupHeader;
+
+    for (label, bytes) in
+        [("the reserved SUBGROUP_ID_MODE", "16"), ("bit 4 clear", "60"), ("128 or greater", "8090")]
+    {
+        let bytes = hex(bytes);
+        let category = category_of(&format!("draft-22 subgroup Type, {label}"), || {
+            SubgroupHeader::decode(&mut &bytes[..]).map(|_| ())
+        });
+        assert_eq!(category, "invalid_type", "draft-22 subgroup Type, {label}");
+    }
+
+    // Above the byte space, Section 6.4.1's rule is the one that answers.
+    let bytes = hex("810007090380");
+    let category = category_of("draft-22 subgroup Type 0x0100", || {
+        SubgroupHeader::decode(&mut &bytes[..]).map(|_| ())
+    });
+    assert_eq!(category, "unknown_message", "draft-22 subgroup Type 0x0100");
+}
+
 /// Draft-20's new LOCATION_FILTER value shape is the first thing in the corpus
 /// to claim `invalid_parameter` for a malformed filter.
 ///
@@ -295,6 +337,52 @@ fn a_malformed_location_filter_is_an_invalid_parameter_draft21() {
         ControlMessage::decode(&mut &bytes[..]).map(|_| ())
     });
     assert_eq!(category, "invalid_parameter", "draft-21 LOCATION_FILTER end group overflow");
+}
+
+/// Draft-22's LOCATION_FILTER fails three ways, and they are two categories.
+///
+/// A `Location Filter Type` draft-22 does not assign is `invalid_value`: it is
+/// [`CodecError::InvalidFilterType`], the variant drafts 07 through 14 already
+/// file there, and the corpus names it `invalid-filter-type` on every draft
+/// that has the field. The other two are a parameter wrong in itself — fields
+/// that run past the message body its type says they are in, and an
+/// `EndGroupDelta` that carries the range out of the number space — and both
+/// are `invalid_parameter`, as on drafts 20 and 21.
+///
+/// [`CodecError::InvalidFilterType`]: moqtap_codec::error::CodecError::InvalidFilterType
+#[cfg(feature = "draft22")]
+#[test]
+fn a_malformed_location_filter_is_two_categories_draft22() {
+    use moqtap_codec::draft22::message::ControlMessage;
+
+    let cases = [
+        // `messages/fetch.json [invalid-filter-type]`: Location Filter Type
+        // 0x40, which Section 9.20.9 does not assign.
+        (
+            "1600100201046c69766505766964656f012140",
+            "invalid_value",
+            "draft-22 LOCATION_FILTER of an unassigned type",
+        ),
+        // `messages/fetch.json [location-filter-fields-overrun-payload]`:
+        // type 0x04 names four fields and the message ends after two.
+        (
+            "1600120201046c69766505766964656f0121040a03",
+            "invalid_parameter",
+            "draft-22 LOCATION_FILTER whose fields overrun the message",
+        ),
+        // `messages/fetch.json [location-filter-end-group-overflow]`: type
+        // 0x03, StartGroup 2^64 - 1 with an EndGroupDelta of 1.
+        (
+            "16001b0201046c69766505766964656f012103ffffffffffffffffff0001",
+            "invalid_parameter",
+            "draft-22 LOCATION_FILTER end group overflow",
+        ),
+    ];
+    for (wire, expected, what) in cases {
+        let bytes = hex(wire);
+        let category = category_of(what, || ControlMessage::decode(&mut &bytes[..]).map(|_| ()));
+        assert_eq!(category, expected, "{what}");
+    }
 }
 
 /// An object carrying a payload where its framing leaves no room for one.

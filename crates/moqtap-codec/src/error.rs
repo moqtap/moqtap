@@ -17,7 +17,7 @@ pub const MAX_NAMESPACE_TUPLE_SIZE: usize = 32;
 /// table matching it exhaustively fails to compile until a new variant has been
 /// placed on each of the drafts — either among the rules that draft
 /// answers with a close or among the ones it names and does not. A wildcard arm
-/// would make those fourteen decisions silently, all in the direction of "no
+/// would make each draft's decision silently, all in the direction of "no
 /// rule", and a missing arm and a deliberate exclusion look identical from
 /// inside such a table.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
@@ -317,15 +317,19 @@ pub enum CodecError {
     InvalidForward(u8),
     /// A subscription filter names a Filter Type no draft in its range assigns.
     ///
-    /// All the drafts state the rule and they do not state the same
-    /// consequence. Drafts 07 through 13: "A filter type other than the above
-    /// MUST be treated as error", which names no code and no close. Draft-14:
+    /// Every draft with a Filter Type states the rule, and they do not state
+    /// the same consequence. Drafts 20 and 21 have no Filter Type: their
+    /// filter's shape comes from its length. Drafts 07 through 13: "A filter
+    /// type other than the above MUST be treated as error", which names no code
+    /// and no close. Draft-14:
     /// "An endpoint that receives a filter type other than the above MUST be
     /// close the session with PROTOCOL_VIOLATION", the typo being the draft's.
-    /// Drafts 15 through 19 say the same without the typo. So the same value in
-    /// the same place is a refused message on the first seven drafts and a
-    /// session close on the last six, and only the per-draft session table can
-    /// tell them apart.
+    /// Drafts 15 through 19 say the same without the typo, and draft-22, whose
+    /// `Location Filter Type` numbers its forms afresh, writes it as "Any other
+    /// Location Filter Type is a PROTOCOL_VIOLATION." So the same value in the
+    /// same place is a refused message on the first seven drafts and a session
+    /// close on the later ones, and only the per-draft session table can tell
+    /// them apart.
     ///
     /// The assigned set is not constant either. Drafts 07 and 08 assign 0x1 as
     /// Latest Group, drafts 09 and 10 withdraw it and list three types, and
@@ -334,9 +338,12 @@ pub enum CodecError {
     /// draft-09 SUBSCRIBE the draft requires it to reject.
     ///
     /// The serialization moves as well. Drafts 07 through 14 carry the Filter
-    /// Type as a field of SUBSCRIBE and its relatives; drafts 15 and later carry
-    /// it as the first field inside the length-prefixed filter parameter, which
-    /// is a place a reader of the field has to know to look.
+    /// Type as a field of SUBSCRIBE and its relatives; drafts 15 through 19
+    /// carry it as the first field inside the length-prefixed filter parameter,
+    /// which is a place a reader of the field has to know to look. Draft-22
+    /// carries it first in a LOCATION_FILTER parameter that has no length at
+    /// all, so there an unknown type leaves the reader unable to find the end
+    /// of the parameter, let alone the next one.
     #[error("filter type {0} is not one this draft assigns")]
     InvalidFilterType(u64),
     /// A FETCH names a Fetch Type no draft in its range assigns.
@@ -474,7 +481,7 @@ pub enum CodecError {
     /// A delta-encoded Object ID would exceed 2^64 - 1 once the delta is added
     /// to the previous Object ID on the same stream.
     ///
-    /// Drafts 18 through 20 Section 11.4.2, and draft-21 Section 11.3.1: "The
+    /// Drafts 18 through 20 Section 11.4.2, and drafts 21 and 22 Section 11.3.1: "The
     /// Object ID Delta + 1 is added to the previous Object ID in the Subgroup
     /// stream if there was one... If the resulting Object ID would be greater
     /// than 2^64 - 1, the endpoint MUST close the session with a
@@ -625,9 +632,9 @@ pub enum CodecError {
     /// but held a combination the draft separately names as invalid.
     ///
     /// Distinct from [`CodecError::UnknownStreamType`], which reports a value
-    /// no table assigns. Drafts 16 through 21 describe the subgroup Type as a
+    /// no table assigns. Drafts 16 through 22 describe the subgroup Type as a
     /// bit field rather than as a list of code points, and then rule
-    /// combinations out *within* the form: on all six a SUBGROUP_ID_MODE of
+    /// combinations out *within* the form: on all seven a SUBGROUP_ID_MODE of
     /// 0b11, and from draft-20 also a Type that leaves the subgroup form's own
     /// bit clear or that runs past the one-byte flags space. The enclosing
     /// form is assigned, so calling these unknown would misname them; the
@@ -659,8 +666,8 @@ pub enum CodecError {
     ///
     /// The datagram half of [`CodecError::InvalidStreamTypeValue`], which
     /// carries the reason the two are separate variants rather than one.
-    /// Drafts 16 through 21 rule out a Type asking to be both an object status
-    /// and an end-of-group marker; drafts 20 and 21 add the bit reserved for a
+    /// Drafts 16 through 22 rule out a Type asking to be both an object status
+    /// and an end-of-group marker; drafts 20 through 22 add the bit reserved for a
     /// datagram, and any other bit their form leaves unspecified.
     ///
     /// `detail` names which combination was seen, for the reason the stream

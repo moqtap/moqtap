@@ -683,6 +683,14 @@ uni_repeated_goaway_gates!(
     plain,
     moqtap_client::draft21::session::request_id::Role
 );
+uni_repeated_goaway_gates!(
+    draft22,
+    "draft22",
+    Draft22,
+    "9.2",
+    plain,
+    moqtap_client::draft22::session::request_id::Role
+);
 
 /// The per-stream half of the rule, on the two drafts that state it.
 ///
@@ -827,3 +835,4 @@ request_stream_goaway_gates!(draft18, "draft18", draft18_request_streams);
 request_stream_goaway_gates!(draft19, "draft19", draft19_request_streams);
 request_stream_goaway_gates!(draft20, "draft20", draft20_request_streams);
 request_stream_goaway_gates!(draft21, "draft21", draft21_request_streams);
+request_stream_goaway_gates!(draft22, "draft22", draft22_request_streams);

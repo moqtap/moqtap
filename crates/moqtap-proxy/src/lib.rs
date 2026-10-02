@@ -210,7 +210,7 @@
 //! Ordering is not a policy option. Each unit is classified and charged
 //! individually, but a destination stream keeps one FIFO whose head gates
 //! everything behind it, because object IDs are delta-encoded on drafts
-//! 14-20 and the framer's re-encoding primitive handles removal, not
+//! 14-22 and the framer's re-encoding primitive handles removal, not
 //! reordering. A stream carrying two classes says so, once, as
 //! `ImpairmentKind::ClassChangedMidStream`.
 //!
@@ -230,12 +230,14 @@
 //!   [`action::Action::Hold`] at the datagram site is refused as
 //!   `Refusal::WrongSite` rather than approximated. Reordering and delay
 //!   under a whole connection are `quinn-netem`'s, one layer down.
-//! * **A `Fetch`-aimed class is live on drafts 07-17 and dead on 18-19**,
-//!   whose fetch objects carry a Group ID *difference* the fetch's Group
-//!   Order gives a direction to; that order is settled on the control plane
-//!   and never reaches the data stream, so the framer abandons the stream at
-//!   its header and no rule ever sees a unit. Reported the same way and for
-//!   the same reason, per draft rather than unconditionally.
+//! * **A `Fetch`-aimed class can miss one stream at a time on drafts
+//!   18-22**, whose fetch objects carry a Group ID *difference* the fetch's
+//!   Group Order gives a direction to. That order is settled on the control
+//!   plane and never reaches the data stream, so the session reads it off the
+//!   FETCH and hands it to the framer; a fetch stream naming a request the
+//!   session never carried is abandoned at its header, no rule ever sees a
+//!   unit of it, and it reports itself as
+//!   `Impairment { FramerBypass { FetchGroupOrderUnknown } }`.
 //! * **On drafts 15, 16 and 17 an elide on a fetch unit is paid for rather
 //!   than refused.** Those drafts let a fetch object leave a field off and
 //!   take the previous object's, so deleting one object's bytes would move
@@ -245,7 +247,7 @@
 //!   does.
 //! * **There is no `Expiry::Drop`.** A unit dropped at release time cannot
 //!   arm the framer's positional elide fix-up — its successors are already
-//!   framed — so on drafts 14-21 it would shift every later object's
+//!   framed — so on drafts 14-22 it would shift every later object's
 //!   absolute ID and report corruption as loss. Under the default
 //!   [`shape::Expiry::Deliver`] a starved class is **late, never lossy**;
 //!   [`shape::Expiry::ResetStream`] abandons the stream instead. Discarding

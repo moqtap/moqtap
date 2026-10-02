@@ -107,6 +107,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// The drafts that write an Object ID as `id - prev - 1` on a subgroup
@@ -129,14 +131,16 @@ const DELTA_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
-/// The ten drafts with a stream type whose Subgroup ID is the Object ID
+/// The drafts with a stream type whose Subgroup ID is the Object ID
 /// of the first object on the stream rather than a field of the header.
 /// Drafts 07-10 always carry the ID explicitly; every draft from 11 on has
 /// the mode, in one of two wordings. Drafts 11-15 say the Subgroup ID "is
 /// either 0 ... or the Object ID of the first object transmitted in this
-/// subgroup", enumerating the types that mean each; drafts 16-21 name a
+/// subgroup", enumerating the types that mean each; drafts 16-22 name a
 /// SUBGROUP_ID_MODE field and say "The Subgroup ID field is absent and the
 /// Subgroup ID is the Object ID of the first Object transmitted in this
 /// Subgroup". Both spell the same stream `0x12`.
@@ -163,6 +167,8 @@ const IMPLICIT_SUBGROUP_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// The drafts whose subgroup header-type octet carries a subgroup-ID
@@ -180,6 +186,8 @@ const MODE_FIELD_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// The drafts with a fetch **object** layout this codec decodes.
@@ -204,7 +212,7 @@ const FETCH_OBJECT_DRAFTS: &[DraftVersion] = &[
 
 /// The drafts whose fetch objects the framer does not address.
 ///
-/// Drafts 18, 19 and 20 write a fetch object's Group ID as a difference from
+/// Drafts 18-22 write a fetch object's Group ID as a difference from
 /// the previous object's, and the fetch's Group Order decides whether it is
 /// added or subtracted (draft-19 Section 11.4.4.1). That order is settled by
 /// the control exchange and never reaches the data stream, so a framer given
@@ -219,6 +227,8 @@ const FETCH_BYPASS_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// The drafts whose fetch objects the framer addresses and pays to elide.
@@ -285,7 +295,7 @@ fn a_compiled_draft() -> DraftVersion {
 /// The two-byte spelling of `0` under `draft`'s variable-length integer.
 ///
 /// `0x40 0x00` under RFC 9000's, which drafts 07-16 use; `0x80 0x00` under
-/// MoQT's own, which 17-20 use. Both are legal and neither is minimal,
+/// MoQT's own, which 17-22 use. Both are legal and neither is minimal,
 /// which is the whole point of the fixture that carries one.
 fn widened_zero(draft: DraftVersion) -> [u8; 2] {
     match draft.varint_encoding() {
@@ -418,7 +428,7 @@ enum SubgroupIdMode {
     /// The subgroup ID is the first object's Object ID, so index 0 may not
     /// be removed.
     FirstObject,
-    /// Drafts 17-21 mode 3, a value those drafts reserve.
+    /// Drafts 17-22 mode 3, a value those drafts reserve.
     Reserved,
 }
 
@@ -569,7 +579,7 @@ impl Wire {
     /// Drafts 07-10 define a single subgroup type with an explicit
     /// Subgroup ID. Draft-11 numbered them from `0x08` — `0x0A` takes the
     /// Subgroup ID from the first object, `0x0C` states it — and drafts 12+
-    /// moved the same two to `0x12` and `0x14`. Drafts 17-21 reinterpret
+    /// moved the same two to `0x12` and `0x14`. Drafts 17-22 reinterpret
     /// bits 1-2 as a two-bit mode field, where `3` (`0x16`) is reserved.
     fn subgroup_stream_type(&self) -> u8 {
         let ext = u8::from(self.extensions);
@@ -933,7 +943,7 @@ async fn forward_parts(
     common::init_crypto();
 
     // The ALPN is load-bearing: `draft_is_fixed` is derived from it, and
-    // `moq-00` does not resolve on drafts 15-21.
+    // `moq-00` does not resolve on drafts 15-22.
     let alpn = draft.quic_alpn();
     let relay = Arc::new(FakeRelay::bind(alpn));
     let observer = Arc::new(RecordingObserver::new());
@@ -1393,7 +1403,7 @@ async fn reemit_rewrites_the_leading_varint_when_it_must() {
 /// *Ablation (measured):* call the fix-up only from `poll_object`'s
 /// addressable arm, i.e. discard `apply_elide_fixup`'s rewritten bytes in
 /// `poll_oversized`. Verified to
-/// fail on every one of drafts 14-21, the emitted chunk carrying
+/// fail on every one of drafts 14-22, the emitted chunk carrying
 /// `…, 0, 0, 128, 80, …` where `…, 0, 1, 128, 80, …` is owed. It fails
 /// nothing outside the two oversized tests, because the addressable path
 /// still fixes up.

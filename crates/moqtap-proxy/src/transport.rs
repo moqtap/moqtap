@@ -201,10 +201,10 @@ pub struct TransportProfile {
     ///   SUBSCRIBE_NAMESPACE (draft-16 Section 3.3). It is the one draft
     ///   on which a cap can starve something and leave the session
     ///   running.
-    /// * Drafts 17 through 20 moved the control plane onto a pair of
+    /// * Drafts 17 through 22 moved the control plane onto a pair of
     ///   unidirectional streams and give bidirectional streams to
     ///   requests alone — six message types on draft-17, seven on drafts
-    ///   18, 19 and 20 (draft-17 Section 3.3). A cap there is the request-side
+    ///   18-22 (draft-17 Section 3.3). A cap there is the request-side
     ///   counterpart of
     ///   [`TransportProfile::max_concurrent_uni_streams`] on the media
     ///   side, and it is the case this knob is carried for.

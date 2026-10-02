@@ -372,6 +372,7 @@ fn headers() -> Vec<(&'static str, AnySubgroupHeader, bool)> {
     typed!(draft19, Draft19, "draft-19");
     typed!(draft20, Draft20, "draft-20");
     typed!(draft21, Draft21, "draft-21");
+    typed!(draft22, Draft22, "draft-22");
 
     cases
 }

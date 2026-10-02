@@ -24,7 +24,7 @@
 //! That transcript is also the only thing here that can gate the Object ID
 //! encoding. Drafts 14 and later send an ID as a delta from the object before
 //! it, and a writer and a reader that both skipped the delta would round-trip
-//! cleanly. The drafts 14-21 transcripts carry `02` and `03` where the objects
+//! cleanly. The drafts 14-22 transcripts carry `02` and `03` where the objects
 //! were written as 3 and 7; the drafts 07-13 ones carry `03` and `07`.
 //!
 //! # Five object shapes, four header shapes, one signature
@@ -128,8 +128,8 @@
 //! Five cuts, each made, run and reverted.
 //!
 //! `CodecError::is_incomplete` narrowed to `UnexpectedEnd` alone, the one
-//! spelling of running out that says so in its own name. **The
-//! fourteen fragmented gates redden and the fourteen one-write gates stay
+//! spelling of running out that says so in its own name. **Every
+//! fragmented gate reddens and every one-write gate stays
 //! green** — a clean split, and the reason both halves are here: the one-write
 //! gates cannot see this defect at all, and a suite that only reddens as a
 //! whole would not have told which half was measuring it.
@@ -145,8 +145,8 @@
 //! it is what the delivery probe reported for moq-rs on draft-14, for an object
 //! that had been forwarded correctly and was merely still arriving.
 //!
-//! `open_subgroup` ignoring its `subgroup_id` argument and writing zero. **All
-//! fourteen redden**, which is the plainest form of the claim — the caller's
+//! `open_subgroup` ignoring its `subgroup_id` argument and writing zero. **Every
+//! gate reddens**, which is the plainest form of the claim — the caller's
 //! values reach the wire:
 //!
 //! ```text
@@ -409,9 +409,9 @@ macro_rules! draft_setup_parameters {
     // at the top of the file because this arm has exactly one caller — the
     // draft-07 gate, the only draft that passes `with_role` — and
     // the `none` arm below needs none of them. At file scope they were unread
-    // by the other thirteen, which `RUSTFLAGS="-D warnings"` makes an error on
+    // by every other draft, which `RUSTFLAGS="-D warnings"` makes an error on
     // every matrix row but draft-07's and on `just draft-pairs`'
-    // `draft19,draft20`. Kept here they need no `cfg` and no `allow`: the
+    // `draft21,draft22`. Kept here they need no `cfg` and no `allow`: the
     // condition is already spelled, once, by which arm the invocation names.
     (with_role) => {
         fn setup_parameters() -> Vec<KeyValuePair> {
@@ -871,6 +871,16 @@ subgroup_gate!(
     draft21,
     "draft21",
     Draft21,
+    uni,
+    none,
+    "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
+    "30",
+    "14070305c800056669727374020d7365636f6e64206f626a656374030000"
+);
+subgroup_gate!(
+    draft22,
+    "draft22",
+    Draft22,
     uni,
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",

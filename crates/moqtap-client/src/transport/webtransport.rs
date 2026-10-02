@@ -603,7 +603,10 @@ mod tests {
     #[cfg(feature = "wt-protocol")]
     #[test]
     fn every_identifier_this_crate_offers_survives_a_round_trip() {
-        for n in 15..=21u8 {
+        // Every draft from 15 on, which is every draft whose version is the
+        // ALPN alone.
+        let drafts = moqtap_codec::version::DraftVersion::ALL.map(|d| d.number());
+        for n in drafts.into_iter().filter(|n| *n >= 15) {
             let name = format!("moqt-{n}");
             let (_, offered) = available_protocols(&[name.clone().into_bytes()])
                 .expect("a single well-formed identifier is offerable");

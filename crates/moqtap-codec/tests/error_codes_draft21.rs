@@ -3,8 +3,8 @@
 //!
 //! The code points asserted here were read out of the `Name`/`Code`/
 //! `Specification` tables in the IANA Considerations of draft-21: tables 18
-//! through 21, sections 16.11.1 (Session Termination Error Codes), 15.11.2
-//! (REQUEST_ERROR Codes), 15.11.3 (PUBLISH_DONE Codes) and 15.11.4 (Stream
+//! through 21, sections 16.11.1 (Session Termination Error Codes), 16.11.2
+//! (REQUEST_ERROR Codes), 16.11.3 (PUBLISH_DONE Codes) and 16.11.4 (Stream
 //! Reset Error Codes). Each registry is pinned as a full list rather than
 //! spot-checked, so that a variant added, dropped or renumbered later fails
 //! here instead of silently changing what the codec puts on the wire.
@@ -23,7 +23,7 @@
 //! * `INVALID_JOINING_REQUEST_ID`, REQUEST_ERROR `0x32`;
 //! * `SUBSCRIPTION_ENDED`, PUBLISH_DONE `0x3`.
 //!
-//! [`the_three_codes_draft21_removed_are_unassigned`] states them together,
+//! [`the_three_codes_draft20_removed_are_unassigned`] states them together,
 //! because the registry lists below can only say a code is absent by not
 //! mentioning it — and a removal recorded that way is indistinguishable from a
 //! transcription slip. Section 13 is what makes the removal a receiver's
@@ -139,7 +139,7 @@ macro_rules! check_registry {
 /// 20 assignments; definitions in section 6.6. Draft-19 had 21: `0x15`
 /// `VERSION_NEGOTIATION_FAILED` is gone.
 #[test]
-fn session_error_codes_match_draft21_section_15_11_1() {
+fn session_error_codes_match_draft21_section_16_11_1() {
     let n = check_registry!("SessionErrorCode", SessionErrorCode, [
         0x0 => SessionErrorCode::NoError,
         0x1 => SessionErrorCode::InternalError,
@@ -189,7 +189,7 @@ fn session_error_codes_match_draft21_section_15_11_1() {
 /// 18 assignments; definitions in section 9.4.2. Draft-19 had 19: `0x32`
 /// `INVALID_JOINING_REQUEST_ID` went with the Joining Fetch.
 #[test]
-fn request_error_codes_match_draft21_section_15_11_2() {
+fn request_error_codes_match_draft21_section_16_11_2() {
     let n = check_registry!("RequestErrorCode", RequestErrorCode, [
         0x0 => RequestErrorCode::InternalError,
         0x1 => RequestErrorCode::Unauthorized,
@@ -212,7 +212,7 @@ fn request_error_codes_match_draft21_section_15_11_2() {
     ]);
     assert_eq!(n, 18);
 
-    // 0x32 is draft-21's hole here, and it sits between two assignments.
+    // 0x32 is draft-20's hole here, and it sits between two assignments.
     assert!(RequestErrorCode::from_u64(0x32).is_none());
     assert_eq!(RequestErrorCode::from_u64(0x31), Some(RequestErrorCode::NamespaceTooLarge));
     assert_eq!(RequestErrorCode::from_u64(0x33), Some(RequestErrorCode::UnsupportedExtension));
@@ -240,7 +240,7 @@ fn request_error_codes_match_draft21_section_15_11_2() {
 /// "A publisher does not end a subscription solely because the Largest Object
 /// advances past the end of the current Location Filter").
 #[test]
-fn publish_done_status_codes_match_draft21_section_15_11_3() {
+fn publish_done_status_codes_match_draft21_section_16_11_3() {
     let n = check_registry!("PublishDoneStatusCode", PublishDoneStatusCode, [
         0x0 => PublishDoneStatusCode::InternalError,
         0x1 => PublishDoneStatusCode::Unauthorized,
@@ -261,7 +261,7 @@ fn publish_done_status_codes_match_draft21_section_15_11_3() {
     assert_eq!(PublishDoneStatusCode::UpdateFailed.as_u64(), 0x8);
     assert!(PublishDoneStatusCode::from_u64(0x7).is_none());
 
-    // 0x3 is draft-21's hole, between TRACK_ENDED and GOING_AWAY.
+    // 0x3 is draft-20's hole, between TRACK_ENDED and GOING_AWAY.
     assert!(PublishDoneStatusCode::from_u64(0x3).is_none());
     assert_eq!(PublishDoneStatusCode::from_u64(0x2), Some(PublishDoneStatusCode::TrackEnded));
     assert_eq!(PublishDoneStatusCode::from_u64(0x4), Some(PublishDoneStatusCode::GoingAway));
@@ -269,9 +269,9 @@ fn publish_done_status_codes_match_draft21_section_15_11_3() {
 
 /// Draft-21 section 16.11.4, table 21 (Stream Reset Error Codes).
 /// 10 assignments; definitions in section 12.5. The one registry of the four
-/// draft-21 left alone.
+/// draft-20 left alone.
 #[test]
-fn stream_reset_error_codes_match_draft21_section_15_11_4() {
+fn stream_reset_error_codes_match_draft21_section_16_11_4() {
     let n = check_registry!("StreamResetErrorCode", StreamResetErrorCode, [
         0x0 => StreamResetErrorCode::InternalError,
         0x1 => StreamResetErrorCode::Cancelled,
@@ -364,7 +364,7 @@ fn greasing_and_unknown_codes_decode_to_none() {
 /// and decoded to Some(SubscriptionEnded)
 /// ```
 #[test]
-fn the_three_codes_draft21_removed_are_unassigned() {
+fn the_three_codes_draft20_removed_are_unassigned() {
     assert!(
         SessionErrorCode::from_u64(0x15).is_none(),
         "session 0x15 (draft-19 VERSION_NEGOTIATION_FAILED) is unassigned in draft-21 and \

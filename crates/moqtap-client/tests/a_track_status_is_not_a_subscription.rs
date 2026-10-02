@@ -8,6 +8,7 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
+    feature = "draft22",
 ))]
 
 //! A track status creates no subscription, so nothing about a subscription can
@@ -922,3 +923,4 @@ macro_rules! closing_gates {
 closing_gates!(draft19, "draft19", "10.14");
 closing_gates!(draft20, "draft20", "10.15");
 closing_gates!(draft21, "draft21", "9.13");
+closing_gates!(draft22, "draft22", "9.13");

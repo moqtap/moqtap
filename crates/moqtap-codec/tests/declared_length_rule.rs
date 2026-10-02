@@ -221,3 +221,10 @@ declared_length_gate!(
     2, 1,
     timeout: vi(0),
 );
+declared_length_gate!(
+    draft22_reads_its_whole_declared_payload,
+    "draft22",
+    draft22,
+    2, 1,
+    timeout: vi(0),
+);

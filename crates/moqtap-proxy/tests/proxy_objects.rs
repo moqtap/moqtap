@@ -24,7 +24,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 mod common;
@@ -72,6 +73,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// Collects object events. `wants_events()` is left at its `true` default

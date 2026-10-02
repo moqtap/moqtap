@@ -1,7 +1,7 @@
 # Extracted registries
 
 One JSON file per MoQ Transport Internet-Draft, `draft-07.json` through
-`draft-20.json`, holding the code point registries transcribed into this
+`draft-22.json`, holding the code point registries transcribed into this
 crate's `draftNN::error_codes` and `draftNN::types` modules. They are produced
 by `../extract-registries.py` and committed so that every number this crate
 asserts about a draft can be re-derived and diffed without re-running the
@@ -13,7 +13,7 @@ rather than as a test that quietly starts agreeing with something new.
 Three families, counted separately and never summed.
 
 **Outcome codes** — the registries that report how a request or a session
-ended. Four of them in drafts 15-20 (Session Termination, REQUEST_ERROR,
+ended. Four of them in drafts 15-22 (Session Termination, REQUEST_ERROR,
 PUBLISH_DONE, Stream Reset); more in the earlier drafts, which had a separate
 error registry per message type before drafts 15+ merged them into
 REQUEST_ERROR. They live under `registries` and are totalled in `totals.rows`.
@@ -21,9 +21,9 @@ REQUEST_ERROR. They live under `registries` and are totalled in `totals.rows`.
 **Object Status** — the status a single Object carries (Normal, End of Group,
 End of Track). It lives under `object_status` and is totalled in
 `totals.object_status_rows`. It is kept apart from the outcome codes because
-it is a different kind of thing — drafts 19 and 20 give it its own IANA
+it is a different kind of thing — drafts 19 through 22 give it its own IANA
 subsection, a sibling of rather than a part of the Error Codes section — and
-because it is identified by a different rule: only drafts 19 and 20 print it as
+because it is identified by a different rule: only drafts 19 through 22 print it as
 a table at all, and drafts 07-18 assign the same code points as a run of bullets with no IANA
 registry anywhere. `extract-registries.py` states both rules in full in its
 module docstring, under `WHAT COUNTS AS A ROW` and `OBJECT STATUS: A SECOND
@@ -31,7 +31,7 @@ FAMILY, COUNTED SEPARATELY`. Read that before changing what the tool matches;
 getting the definition wrong has already produced one wrong count in this
 project's history, and the docstring is where that is written down.
 
-Object Status rows carry the `Payload` column drafts 19 and 20 print (draft-19
+Object Status rows carry the `Payload` column drafts 19 through 22 print (draft-19
 Section 15.9, Table 16)
 where the draft prints one, and where it does not, `payload_source` says so:
 `payload-column` means the draft registered that answer, `blanket-rule` means
@@ -69,27 +69,27 @@ table-anchored extraction to read. `reason_absent` says so in the file.
 
 Per draft, as committed:
 
-| draft | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| outcome registries | 3 | 6 | 6 | 6 | 7 | 8 | 8 | 8 | 4 | 4 | 4 | 4 | 4 | 4 |
-| outcome rows | 21 | 40 | 40 | 40 | 65 | 71 | 71 | 73 | 47 | 49 | 59 | 62 | 64 | 61 |
-| object status rows | 5 | 5 | 5 | 5 | 4 | 4 | 4 | 4 | 4 | 3 | 3 | 3 | 3 | 3 |
-| object status form | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | table | table |
-| parameter registries | 0 | 0 | 0 | 0 | 1 | 1 | 1 | 1 | 2 | 3 | 4 | 6 | 6 | 7 |
-| parameter rows | 0 | 0 | 0 | 0 | 4 | 4 | 4 | 4 | 16 | 21 | 25 | 40 | 47 | 60 |
+| draft | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| outcome registries | 3 | 6 | 6 | 6 | 7 | 8 | 8 | 8 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
+| outcome rows | 21 | 40 | 40 | 40 | 65 | 71 | 71 | 73 | 47 | 49 | 59 | 62 | 64 | 61 | 61 | 61 |
+| object status rows | 5 | 5 | 5 | 5 | 4 | 4 | 4 | 4 | 4 | 3 | 3 | 3 | 3 | 3 | 3 | 3 |
+| object status form | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | \* | table | table | table | table |
+| parameter registries | 0 | 0 | 0 | 0 | 1 | 1 | 1 | 1 | 2 | 3 | 4 | 6 | 6 | 7 | 7 | 7 |
+| parameter rows | 0 | 0 | 0 | 0 | 4 | 4 | 4 | 4 | 16 | 21 | 25 | 40 | 47 | 60 | 60 | 60 |
 
 `\*` is `prose-list`: bullets under the section that defines the field, no
-IANA registry. Drafts 19 and 20 are the only drafts with an
+IANA registry. Drafts 19 through 22 are the only drafts with an
 IANA table for Object Status, and the only ones with a `Payload` column.
 
-The three row counts are never added. 763 outcome rows, 55 object statuses and
-225 parameter rows are three answers to three questions, and a single number for
+The three row counts are never added. 885 outcome rows, 61 object statuses and
+345 parameter rows are three answers to three questions, and a single number for
 all three would mean something different on draft 09 than on draft 20.
 
 ## Where the input comes from
 
 The rendered drafts are **not in this repository**. They are the HTML that
-xml2rfc produces for draft-ietf-moq-transport-07 through -20 — the same
+xml2rfc produces for draft-ietf-moq-transport-07 through -22 — the same
 documents published at the IETF datatracker — one file per draft, named
 `draft-NN.html`.
 

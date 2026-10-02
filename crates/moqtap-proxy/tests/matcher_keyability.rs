@@ -178,7 +178,7 @@ const FETCH_REQUEST: u64 = 9;
 /// A draft-19 fetch stream of three objects, each stating all four of its
 /// fields.
 ///
-/// Drafts 18-21 read a stated Group ID as a *difference* from the object
+/// Drafts 18-22 read a stated Group ID as a *difference* from the object
 /// before — draft-19 Section 11.4.4.1 — so these three sit in three groups
 /// rather than one. What matters here is that each carries a Subgroup ID for
 /// a rule to key on, and that reading them at all needs the fetch's Group
@@ -558,7 +558,7 @@ fn a_fetch_aimed_track_alias_rule_is_refused() {
 /// the same key is admitted for the other two kinds.
 ///
 /// This is the one refusal in the table that is about the *carrier* rather
-/// than the draft. No datagram of any of the fourteen belongs to a subgroup
+/// than the draft. No datagram of any draft belongs to a subgroup
 /// — there is no header shape anywhere in the family that puts the field on
 /// one — so the answer is knowable the moment a class names both, which is
 /// what makes it a refusal here and not an

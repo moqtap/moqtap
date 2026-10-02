@@ -65,7 +65,7 @@
 //!
 //! The peer writes each Object as a literal byte sequence rather than through
 //! an encoder. A test whose expectation comes from the same code as its input
-//! agrees with itself whatever either does; these bytes come from Figure 27 and
+//! agrees with itself whatever either does; these bytes come from Figure 28 and
 //! Table 9, and what is asserted is the Locations a draft-20 subscriber must
 //! read out of them.
 

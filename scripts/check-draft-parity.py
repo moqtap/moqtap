@@ -341,7 +341,7 @@ def axes():
     # against the new draft.
     #
     # The union of every draft either file names, rather than each list
-    # separately - both also carry two-draft rows (`draft07,draft20`,
+    # separately - both also carry two-draft rows (`draft07,draft22`,
     # `draft13,draft14`) and prose naming a draft or two, and those are subsets
     # on purpose. The union is the claim: a file that decides what gets checked
     # has to have heard of the newest draft somewhere.
@@ -361,17 +361,16 @@ def axes():
         body = "\n".join(l for l in read(where).splitlines()
                          if not l.lstrip().startswith("#"))
         # The *runs*, not the union of the file. Ablated both ways: taking the
-        # union of every draft either file names, deleting the `- draft20`
-        # matrix row from `ci.yml` and deleting `draft20` from the justfile's
+        # union of every draft either file names, deleting the newest draft's
+        # matrix row from `ci.yml` and deleting it from the justfile's
         # `for d in ...` loops are both reported clean, because each file also
-        # carries `draft07,draft20` and `draft19,draft20` two-draft rows
-        # elsewhere that put draft-20 back into the union. The union is the
-        # wrong question; the enumeration is.
+        # carries two-draft rows naming the newest draft that put it back into
+        # the union. The union is the wrong question; the enumeration is.
         #
         # And a run only counts as an enumeration when it is **contiguous and
         # starts at the oldest draft there is**, which is what tells "every
         # draft" from a chosen few. `just draft-pairs` writes
-        # `for pair in draft07,draft20 draft19,draft20; do`, which is one run
+        # `for pair in draft07,draft22 draft21,draft22; do`, which is one run
         # of three distinct drafts and means nothing of the kind - it reported
         # as an axis eleven drafts short until this condition was added. Same
         # argument `check-draft-cfg.py` makes about list lengths: a list that
@@ -841,19 +840,11 @@ def rule_3(everything, known, used):
 # definition. Each entry carries why it is here and who owns the fix. Printed on
 # every run: a finding that is skipped silently is a finding nobody fixes.
 KNOWN = {
-    ("crates/moqtap-proxy/tests/control_undecodable.rs", "alpn", "a `match` over drafts"):
-        "REAL DEFECT, owned by moqtap-proxy. `alpn()` maps Draft15..Draft19 to "
-        "`moqt-NN` and everything else to `moq-00`, so the draft-20 row takes "
-        "the drafts-07-to-14 route through the fixture instead of the "
-        "ALPN-resolved one the comment above it describes. Both routes pass, "
-        "which is why nothing has reported it. Drop this entry when Draft20 is "
-        "in the match.",
-
     # `message_type_name` and `setup_option_name` are not baselined here, and
     # this rule does not see them at all. They share
     # `moqtap_codec::draft_table::by_draft`, which writes an arm per draft under
     # `#[cfg(feature)]` and another under `#[cfg(not(feature))]` and so leaves no
-    # `_` to fall into: a sixteenth `DraftVersion` variant stops that crate
+    # `_` to fall into: a new `DraftVersion` variant stops that crate
     # compiling instead of being answered quietly. The macro invocation writes
     # `Draft07` rather than `DraftVersion::Draft07`, which is the "anything a
     # macro spells by token concatenation" this file's own summary already excludes.

@@ -59,7 +59,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::error::CodecError;
 #[cfg(any(
@@ -73,7 +74,8 @@ use moqtap_codec::error::CodecError;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::types::TrackNamespace;
 #[cfg(any(
@@ -81,7 +83,8 @@ use moqtap_codec::types::TrackNamespace;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::varint::MoqtProfile;
 #[cfg(any(
@@ -95,7 +98,8 @@ use moqtap_codec::varint::MoqtProfile;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -112,7 +116,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     let mut wire = vec![type_id];
@@ -143,7 +148,8 @@ fn vi(v: u64) -> Vec<u8> {
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn vi_moqt<P: MoqtProfile>(v: u64) -> Vec<u8> {
     let mut out = Vec::new();
@@ -177,7 +183,8 @@ fn ns_name(namespace_bytes: usize, name_bytes: usize) -> Vec<u8> {
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn ns_name_moqt<P: MoqtProfile>(namespace_bytes: usize, name_bytes: usize) -> Vec<u8> {
     let mut out = Vec::new();
@@ -311,7 +318,13 @@ cap_gate!(draft16_caps_a_fetch, "draft16", draft16, 0x16, |ns, name| {
 
 #[cfg(feature = "draft17")]
 type M17 = moqtap_codec::varint::Moqt17;
-#[cfg(any(feature = "draft18", feature = "draft19", feature = "draft20", feature = "draft21"))]
+#[cfg(any(
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
+))]
 type M18 = moqtap_codec::varint::Moqt18;
 
 cap_gate!(draft17_caps_a_track_status, "draft17", draft17, 0x0D, |ns, name| {
@@ -327,6 +340,9 @@ cap_gate!(draft20_caps_a_track_status, "draft20", draft20, 0x0D, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name)].concat()
 });
 cap_gate!(draft21_caps_a_track_status, "draft21", draft21, 0x0D, |ns, name| {
+    [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name)].concat()
+});
+cap_gate!(draft22_caps_a_track_status, "draft22", draft22, 0x0D, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name)].concat()
 });
 
@@ -348,6 +364,9 @@ cap_gate!(draft20_caps_a_publish, "draft20", draft20, 0x1D, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(4)].concat()
 });
 cap_gate!(draft21_caps_a_publish, "draft21", draft21, 0x1D, |ns, name| {
+    [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(4)].concat()
+});
+cap_gate!(draft22_caps_a_publish, "draft22", draft22, 0x1D, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(4)].concat()
 });
 
@@ -399,6 +418,9 @@ cap_gate!(draft20_caps_a_fetch, "draft20", draft20, 0x16, |ns, name| {
 cap_gate!(draft21_caps_a_fetch, "draft21", draft21, 0x16, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(0)].concat()
 });
+cap_gate!(draft22_caps_a_fetch, "draft22", draft22, 0x16, |ns, name| {
+    [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(0)].concat()
+});
 
 // PUBLISH_BLOCKED on drafts 17 and 18 and PUBLISH_SKIPPED on drafts 19 and 20,
 // type 0x0F on all four: the same message under two names, and the only
@@ -416,6 +438,9 @@ cap_gate!(draft20_caps_a_publish_skipped, "draft20", draft20, 0x0F, |ns, name| {
     ns_name_moqt::<M18>(ns, name)
 });
 cap_gate!(draft21_caps_a_publish_skipped, "draft21", draft21, 0x0F, |ns, name| {
+    ns_name_moqt::<M18>(ns, name)
+});
+cap_gate!(draft22_caps_a_publish_skipped, "draft22", draft22, 0x0F, |ns, name| {
     ns_name_moqt::<M18>(ns, name)
 });
 
@@ -454,6 +479,16 @@ cap_gate!(draft20_caps_a_redirect, "draft20", draft20, 0x05, |ns, name| {
     .concat()
 });
 cap_gate!(draft21_caps_a_redirect, "draft21", draft21, 0x05, |ns, name| {
+    [
+        vi_moqt::<M18>(0x34),
+        vi_moqt::<M18>(0),
+        vi_moqt::<M18>(0),
+        vi_moqt::<M18>(0),
+        ns_name_moqt::<M18>(ns, name),
+    ]
+    .concat()
+});
+cap_gate!(draft22_caps_a_redirect, "draft22", draft22, 0x05, |ns, name| {
     [
         vi_moqt::<M18>(0x34),
         vi_moqt::<M18>(0),

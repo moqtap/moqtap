@@ -491,7 +491,7 @@ pub struct QuicTarget {
 ///
 /// # Why it goes no further than this type
 ///
-/// The fourteen `From<DialError> for ConnectionError` impls map this variant
+/// The per-draft `From<DialError> for ConnectionError` impls map this variant
 /// onto `ConnectionError::InvalidAddress`, which is one of the variants the
 /// facade reads as [`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade),
 /// and with it `is_local() == true` — the right answer for a failure this side
@@ -868,7 +868,7 @@ pub async fn dial_quic_to(
 /// Resolve `addr` and dial the first address that answers.
 ///
 /// Keeps the signature every draft module's `connect_quic` already calls, so
-/// all fourteen reach this resolution without any of them being touched.
+/// every draft module reaches this resolution without any of them being touched.
 ///
 /// Why it resolves rather than parses: `addr.parse::<SocketAddr>()` accepts
 /// numeric literals and nothing else, so every hostname fails with `invalid

@@ -710,8 +710,8 @@ impl FramedRecvStream {
                         // Only this draft's header seeds the object reader. With draft 20 the only
                         // enabled draft `AnySubgroupHeader` has a single variant, the arm above is
                         // exhaustive and this one unreachable. Compiled in every configuration with
-                        // the lint allowed, rather than gated on a `cfg` naming the other thirteen
-                        // drafts: such a list has to be edited in every draft module whenever a
+                        // the lint allowed, rather than gated on a `cfg` naming every other
+                        // draft: such a list has to be edited in every draft module whenever a
                         // draft is added, and a copy that omits one leaves this match
                         // non-exhaustive.
                         #[allow(unreachable_patterns)]
@@ -3590,7 +3590,7 @@ impl Connection {
             // arm makes silently and invisibly on every draft at once.
             //
             // Adding one variant to `CodecError` was tried, and produces
-            // fourteen `E0004`s, one per draft, each naming the variant that has
+            // one `E0004` per draft, each naming the variant that has
             // nowhere to go. That is the whole mechanism.
             //
             // The nesting stops at `VarInt`, whose variants report how the bytes

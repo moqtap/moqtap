@@ -47,7 +47,7 @@ under every feature set and needs no edit when a draft is added. **That
 conversion also deleted a signal**, and rule 2 below is what replaces it: the
 old list, wrong as it usually was, at least had to be looked at once per draft.
 The new form never has to be looked at at all, which is the point and also the
-risk — a fifteenth draft's module that simply *lacks* one of these arms, because
+risk — a new draft's module that simply *lacks* one of these arms, because
 whoever copied it dropped a function, is now invisible to the compiler under
 every feature set including `all-drafts`.
 
@@ -91,7 +91,7 @@ For every per-draft module the tree actually contains, count the
 `#[allow(unreachable_patterns)]` arms. The population is **derived from the
 directory names**, never written down here, for the reason
 `scripts/check-drafts.py:274-289` sets out at length: a hardcoded draft list
-narrows silently when a fourteenth draft lands, and the guards that ask
+narrows silently when a new draft lands, and the guards that ask
 `in DRAFTS` then drop what they cannot place rather than reporting it.
 
 Then require the count to be **non-decreasing from one draft to the next**
@@ -222,9 +222,9 @@ def rule_1_cfg_lists(all_drafts: list[str]) -> tuple[dict[str, int], list[str]]:
                 continue
 
             # A draft-neutral file. The path names no owner, so the count is
-            # what says this is a rejection list: thirteen is complete, twelve
-            # is one short. See the module docstring for why nothing else
-            # lands on twelve.
+            # what says this is a rejection list: one fewer than the draft set
+            # is complete, two fewer is one short. See the module docstring
+            # for why nothing else lands there.
             if len(named) == len(all_drafts) - 1:
                 per_crate[crate] += 1
             elif len(named) == len(all_drafts) - 2:

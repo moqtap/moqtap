@@ -28,7 +28,7 @@
 //!   not reach at all.
 //! - **Fetch objects**, on every draft. Drafts 07-15 put an Object Status
 //!   behind a zero Object Payload Length and are swept like the rest. Drafts
-//!   16-21 took the field off the fetch object — draft-19 Section 11.2.1.1:
+//!   16-22 took the field off the fetch object — draft-19 Section 11.2.1.1:
 //!   the status "is only present in objects that are delivered via a
 //!   SUBSCRIPTION, and is absent in Objects delivered via a FETCH" — so what
 //!   is gated there is that nothing is read in its place, whatever the next
@@ -40,9 +40,9 @@
 //! `Ok` exactly for the codes in it. A table written out here would be a
 //! second copy free to drift from the enum it is supposed to be pinning, and
 //! the sets genuinely differ: drafts 07-10 assign `0x5`, drafts 11-15 do not,
-//! and drafts 16-21 also drop `0x1`. So `0x1` and `0x5` are each accepted on
+//! and drafts 16-22 also drop `0x1`. So `0x1` and `0x5` are each accepted on
 //! some rows and refused on others, from the same sweep — which is what makes
-//! this a per-draft gate rather than fourteen copies of one assertion.
+//! this a per-draft gate rather than one assertion copied per draft.
 //!
 //! # Why the sweep stops at 0x3f
 //!
@@ -102,7 +102,7 @@
 //! cannot hold `0x2`, so an unvalidated read cannot report the code it saw and
 //! is caught for mis-reporting before it is caught for accepting.
 //!
-//! For drafts 16-21 the fetch gate is the absence of the field. Reading a
+//! For drafts 16-22 the fetch gate is the absence of the field. Reading a
 //! status varint after a zero payload length in `fo19::read_object`, in
 //! `src/data_dispatch.rs`, fails `draft19_object_status_on_the_wire` with:
 //!
@@ -137,7 +137,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 use moqtap_codec::dispatch::{
@@ -171,7 +172,7 @@ impl ExtBlock {
     }
 }
 
-/// Subgroup objects carry no extension block on draft-07, and on drafts 11-21
+/// Subgroup objects carry no extension block on draft-07, and on drafts 11-22
 /// carry one only when the stream type says so — which the streams here never
 /// ask for. Drafts 08-10 carry it unconditionally.
 fn subgroup_ext_block(draft: DraftVersion) -> ExtBlock {
@@ -195,7 +196,7 @@ fn fetch_ext_block(draft: DraftVersion) -> ExtBlock {
 /// field naming the fields that follow it.
 ///
 /// Drafts 07-14 give every fetch object the same fixed field list. Draft-15
-/// Section 10.4.4 replaced it with per-object flags, and drafts 16-21 kept that
+/// Section 10.4.4 replaced it with per-object flags, and drafts 16-22 kept that
 /// shape, so their objects are built from a different layout below.
 fn fetch_serialization_flags(draft: DraftVersion) -> bool {
     matches!(
@@ -207,6 +208,7 @@ fn fetch_serialization_flags(draft: DraftVersion) -> bool {
             | DraftVersion::Draft19
             | DraftVersion::Draft20
             | DraftVersion::Draft21
+            | DraftVersion::Draft22
     )
 }
 
@@ -214,7 +216,7 @@ fn fetch_serialization_flags(draft: DraftVersion) -> bool {
 ///
 /// Drafts 07-15 put one after a zero Object Payload Length — draft-15
 /// Section 10.4.4: "The Object Status field is only present if the Object
-/// Payload Length is zero." Drafts 16-21 dropped it: Figure 27 of draft-19
+/// Payload Length is zero." Drafts 16-22 dropped it: Figure 27 of draft-19
 /// Section 11.4.4 runs from Object Payload Length straight to Object Payload,
 /// and Section 11.2.1.1 states the field is "absent in Objects delivered via a
 /// FETCH".
@@ -227,6 +229,7 @@ fn fetch_carries_a_status(draft: DraftVersion) -> bool {
             | DraftVersion::Draft19
             | DraftVersion::Draft20
             | DraftVersion::Draft21
+            | DraftVersion::Draft22
     )
 }
 
@@ -270,7 +273,7 @@ fn subgroup_stream(draft: DraftVersion, status: u64) -> Vec<u8> {
 /// object may take: every other combination names a field of a prior object,
 /// which the first object does not have. It is under `0x40` on every draft, so
 /// the same byte is the whole field whether the draft spells it as a fixed
-/// octet (draft-15) or a variable-length integer (drafts 16-21). Drafts 18-21
+/// octet (draft-15) or a variable-length integer (drafts 16-22). Drafts 18-22
 /// read the two ID fields as differences, but the same section makes the first
 /// object's deltas its absolute Group ID and Object ID, so the bytes are
 /// unchanged.
@@ -351,7 +354,7 @@ fn gate_subgroup(draft: DraftVersion, assigned: &[u64]) {
 /// swept exactly as the subgroup decoders are, with the accepted code required
 /// back so that "accepted" means "decoded", not "skipped".
 ///
-/// Drafts 16-21 have no such field, so the assertion there is the other one
+/// Drafts 16-22 have no such field, so the assertion there is the other one
 /// worth making: the object ends at its payload length, and the byte after it
 /// is still on the stream. A decoder that read one anyway would swallow the
 /// next object's Serialization Flags and desynchronise everything behind it.
@@ -445,7 +448,7 @@ macro_rules! draft_row {
 //
 // Drafts 07/08 fold the status into the ordinary datagram header behind a zero
 // payload length; drafts 09-13 give it a header of its own, with an
-// extension-length field on 09/10 only; drafts 14-21 select it with a type
+// extension-length field on 09/10 only; drafts 14-22 select it with a type
 // byte.
 draft_row!(
     draft07_object_status_on_the_wire,
@@ -565,5 +568,13 @@ draft_row!(
     draft21,
     Draft21,
     moqtap_codec::draft21::data_stream::DatagramHeader::decode,
+    &[0x20, 0x01, 0x00, 0x00, 0x80]
+);
+draft_row!(
+    draft22_object_status_on_the_wire,
+    "draft22",
+    draft22,
+    Draft22,
+    moqtap_codec::draft22::data_stream::DatagramHeader::decode,
     &[0x20, 0x01, 0x00, 0x00, 0x80]
 );

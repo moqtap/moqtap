@@ -247,6 +247,7 @@ fn every_arm_names_its_own_draft() {
         "draft19" => Draft19, draft19;
         "draft20" => Draft20, draft20;
         "draft21" => Draft21, draft21;
+        "draft22" => Draft22, draft22;
     }
 
     // A build with no draft feature has no arms, so nothing was checked and

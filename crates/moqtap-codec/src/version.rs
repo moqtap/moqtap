@@ -55,6 +55,8 @@ pub enum DraftVersion {
     Draft20,
     /// draft-ietf-moq-transport-21.
     Draft21,
+    /// draft-ietf-moq-transport-22.
+    Draft22,
 }
 
 impl DraftVersion {
@@ -83,7 +85,7 @@ impl DraftVersion {
     /// wrong. `scripts/check-draft-parity.py` holds those against the enum, the
     /// per-draft source directories, the cargo features and the CI rows on
     /// every run, and the tests below hold them against `from_number`.
-    pub const ALL: [DraftVersion; 15] = [
+    pub const ALL: [DraftVersion; 16] = [
         DraftVersion::Draft07,
         DraftVersion::Draft08,
         DraftVersion::Draft09,
@@ -99,6 +101,7 @@ impl DraftVersion {
         DraftVersion::Draft19,
         DraftVersion::Draft20,
         DraftVersion::Draft21,
+        DraftVersion::Draft22,
     ];
 
     /// The newest draft of the series.
@@ -121,7 +124,7 @@ impl DraftVersion {
     /// **From draft-15 on there is no such value on the wire at all.** Draft-15
     /// deleted the version field from CLIENT_SETUP and moved version selection
     /// into the ALPN (`moqt-<N>`, see [`Self::quic_alpn`]), so the number this
-    /// returns for drafts 15 through 21 — `0xff00000f` through `0xff000015` —
+    /// returns for drafts 15 through 22 — `0xff00000f` through `0xff000016` —
     /// is a continuation of the mapping and not something a peer can observe or
     /// send. Nothing in this crate encodes it for those drafts. It is kept so
     /// that a caller with a draft in hand can name the version the series would
@@ -147,6 +150,7 @@ impl DraftVersion {
             DraftVersion::Draft19 => 19,
             DraftVersion::Draft20 => 20,
             DraftVersion::Draft21 => 21,
+            DraftVersion::Draft22 => 22,
         };
         VarInt::from_usize(0xff000000 + n as usize)
     }
@@ -174,13 +178,14 @@ impl DraftVersion {
             DraftVersion::Draft19 => b"moqt-19",
             DraftVersion::Draft20 => b"moqt-20",
             DraftVersion::Draft21 => b"moqt-21",
+            DraftVersion::Draft22 => b"moqt-22",
         }
     }
 
     /// Resolve an ALPN identifier to a specific draft version.
     ///
     /// Returns `Some` for ALPNs that unambiguously identify a draft
-    /// (`moqt-15` through `moqt-21`). Returns `None`
+    /// (`moqt-15` through `moqt-22`). Returns `None`
     /// for `moq-00` — which covers drafts 07–14 and requires inspecting
     /// CLIENT_SETUP's supported-versions list — and for any unrecognized
     /// ALPN.
@@ -193,11 +198,12 @@ impl DraftVersion {
             b"moqt-19" => Some(DraftVersion::Draft19),
             b"moqt-20" => Some(DraftVersion::Draft20),
             b"moqt-21" => Some(DraftVersion::Draft21),
+            b"moqt-22" => Some(DraftVersion::Draft22),
             _ => None,
         }
     }
 
-    /// Resolve a draft number (e.g. 7..=21) to a `DraftVersion`.
+    /// Resolve a draft number (e.g. 7..=22) to a `DraftVersion`.
     ///
     /// Returns `None` for numbers outside the supported range.
     pub fn from_number(n: u8) -> Option<DraftVersion> {
@@ -217,6 +223,7 @@ impl DraftVersion {
             19 => Some(DraftVersion::Draft19),
             20 => Some(DraftVersion::Draft20),
             21 => Some(DraftVersion::Draft21),
+            22 => Some(DraftVersion::Draft22),
             _ => None,
         }
     }
@@ -252,12 +259,13 @@ impl DraftVersion {
             // Draft-20 Section 1.4.1 is draft-18's encoding verbatim: the same
             // leading-ones-count prefix over all nine lengths. The revision
             // changed the hyphen in "Variable-length" in the heading and
-            // nothing else about it. Draft-21 moved the section to 8.1 and
-            // left the integer alone.
+            // nothing else about it. Drafts 21 and 22 state it in Section 8.1
+            // and leave the integer alone.
             DraftVersion::Draft18
             | DraftVersion::Draft19
             | DraftVersion::Draft20
-            | DraftVersion::Draft21 => VarIntEncoding::Moqt18,
+            | DraftVersion::Draft21
+            | DraftVersion::Draft22 => VarIntEncoding::Moqt18,
         }
     }
 
@@ -306,7 +314,7 @@ impl DraftVersion {
         }
     }
 
-    /// The draft number (e.g. 7, 14, 21).
+    /// The draft number (e.g. 7, 14, 22).
     pub fn number(&self) -> u8 {
         match self {
             DraftVersion::Draft07 => 7,
@@ -324,6 +332,7 @@ impl DraftVersion {
             DraftVersion::Draft19 => 19,
             DraftVersion::Draft20 => 20,
             DraftVersion::Draft21 => 21,
+            DraftVersion::Draft22 => 22,
         }
     }
 }
@@ -406,6 +415,7 @@ mod tests {
             (DraftVersion::Draft19, Moqt18),
             (DraftVersion::Draft20, Moqt18),
             (DraftVersion::Draft21, Moqt18),
+            (DraftVersion::Draft22, Moqt18),
         ];
         for (draft, encoding) in expected {
             assert_eq!(draft.varint_encoding(), encoding, "{draft}");
@@ -442,6 +452,7 @@ mod tests {
         assert_eq!(DraftVersion::from_alpn(b"moqt-19"), Some(DraftVersion::Draft19));
         assert_eq!(DraftVersion::from_alpn(b"moqt-20"), Some(DraftVersion::Draft20));
         assert_eq!(DraftVersion::from_alpn(b"moqt-21"), Some(DraftVersion::Draft21));
+        assert_eq!(DraftVersion::from_alpn(b"moqt-22"), Some(DraftVersion::Draft22));
     }
 
     #[test]
@@ -464,8 +475,12 @@ mod tests {
 
     #[test]
     fn from_number_resolves_supported_range() {
-        for n in 7..=21u8 {
-            assert!(DraftVersion::from_number(n).is_some(), "draft {n} should resolve");
+        for d in DraftVersion::ALL {
+            assert_eq!(
+                DraftVersion::from_number(d.number()),
+                Some(d),
+                "draft {d:?} should resolve"
+            );
         }
     }
 
@@ -473,7 +488,8 @@ mod tests {
     fn from_number_none_outside_range() {
         assert_eq!(DraftVersion::from_number(0), None);
         assert_eq!(DraftVersion::from_number(6), None);
-        assert_eq!(DraftVersion::from_number(22), None);
+        let newest = DraftVersion::ALL.last().unwrap().number();
+        assert_eq!(DraftVersion::from_number(newest + 1), None);
         assert_eq!(DraftVersion::from_number(255), None);
     }
 }

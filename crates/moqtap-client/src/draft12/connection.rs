@@ -512,8 +512,8 @@ impl FramedRecvStream {
                         // Only this draft's header sets the flag. With draft 12 the only enabled
                         // draft `AnySubgroupHeader` has a single variant, the arm above is
                         // exhaustive and this one unreachable. Compiled in every configuration with
-                        // the lint allowed, rather than gated on a `cfg` naming the other thirteen
-                        // drafts: such a list has to be edited in every draft module whenever a
+                        // the lint allowed, rather than gated on a `cfg` naming every other
+                        // draft: such a list has to be edited in every draft module whenever a
                         // draft is added, and a copy that omits one leaves this match
                         // non-exhaustive.
                         #[allow(unreachable_patterns)]

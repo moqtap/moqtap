@@ -1494,3 +1494,27 @@ id_keyed_gates!(
     present,
     "9.15"
 );
+id_keyed_gates!(
+    draft22,
+    "draft22",
+    0xff00_0014,
+    moqtap_client::draft22::session::request_id::Role,
+    Server,
+    in_setup,
+    none,
+    one_message,
+    d18,
+    stream,
+    stream18,
+    stream18,
+    cancel,
+    params,
+    0,
+    2,
+    1,
+    0x30,
+    ignored,
+    dropped,
+    present,
+    "4.2"
+);

@@ -81,7 +81,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 mod common;
@@ -137,6 +138,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// The draft both fixtures are built for: the newest compiled.
@@ -157,15 +160,12 @@ const DRAFT: DraftVersion = COMPILED_DRAFTS[COMPILED_DRAFTS.len() - 1];
 /// not one, which settles the draft to the configured fallback and builds
 /// the parser then. Both routes are exercised across the CI rows, and the
 /// assertions are the same either way.
-const fn alpn(draft: DraftVersion) -> &'static [u8] {
-    match draft {
-        DraftVersion::Draft15 => b"moqt-15",
-        DraftVersion::Draft16 => b"moqt-16",
-        DraftVersion::Draft17 => b"moqt-17",
-        DraftVersion::Draft18 => b"moqt-18",
-        DraftVersion::Draft19 => b"moqt-19",
-        _ => b"moq-00",
-    }
+///
+/// Taken from [`DraftVersion::quic_alpn`] rather than written out per draft:
+/// a hand-written table that stops at some draft sends every later one down
+/// the `moq-00` route, and since both routes pass, nothing says so.
+fn alpn(draft: DraftVersion) -> &'static [u8] {
+    draft.quic_alpn()
 }
 
 /// How long a poll waits for something a correct build has already done.

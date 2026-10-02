@@ -1,4 +1,4 @@
-//! The Range Filters drafts 19 and 20 carry in five parameters.
+//! The Range Filters drafts 19 through 22 carry in five parameters.
 //!
 //! Section 5.1.3: "Range Filters are parameters in SUBSCRIBE, FETCH, or
 //! SUBSCRIBE_TRACKS that tell a publisher to filter tracks (via TRACK PROPERTY
@@ -7,7 +7,7 @@
 //! other Object header fields (Subgroup ID, Object ID, and Publisher Priority).
 //! There are five Range Filter parameter types, 0x25-0x29, as shown below."
 //!
-//! Drafts 19 and 20 are the only drafts with them, and the five share one
+//! Drafts 19 through 22 are the only drafts with them, and the five share one
 //! value shape:
 //!
 //! ```text

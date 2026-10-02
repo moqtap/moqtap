@@ -28,11 +28,11 @@
 //! subscription that does not exist yet. Only the *terminal* state became
 //! tolerant, and it stays terminal — nothing here reopens anything.
 //!
-//! # Why fourteen gates and not one
+//! # Why a gate per draft and not one
 //!
-//! Because the machine is fourteen machines. They agree today and have not
+//! Because the machine is one machine per draft. They agree today and have not
 //! always: the message is SUBSCRIBE_DONE on drafts 07 through 13 and PUBLISH_DONE
-//! from draft-14, and drafts 17 through 20 have no UNSUBSCRIBE at all — there a
+//! from draft-14, and drafts from 17 on have no UNSUBSCRIBE at all — there a
 //! subscriber withdraws by resetting its own request stream. The last of those is
 //! why the gates below reach `Done` through SUBSCRIBE_ERROR as well as through
 //! UNSUBSCRIBE where the draft has one: the tolerance is about the state, not
@@ -227,3 +227,4 @@ withdrawal_gate!(draft18, "draft18", on_publish_done);
 withdrawal_gate!(draft19, "draft19", on_publish_done);
 withdrawal_gate!(draft20, "draft20", on_publish_done);
 withdrawal_gate!(draft21, "draft21", on_publish_done);
+withdrawal_gate!(draft22, "draft22", on_publish_done);

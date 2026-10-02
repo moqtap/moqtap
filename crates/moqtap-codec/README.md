@@ -1,7 +1,7 @@
 # moqtap-codec
 
 MoQT wire codec — a parser and writer for every MoQT draft from draft-07
-through draft-21.
+through draft-22.
 
 Pure encoding and decoding: no I/O, no async runtime, no network dependencies.
 It depends only on `bytes` and `thiserror`.
@@ -27,16 +27,15 @@ It depends only on `bytes` and `thiserror`.
   `AnySubgroupObjectWriter`, `AnyFetchObjectReader`, `AnyFetchObjectWriter` and
   the values they hand back), so a caller frames a data stream into
   individually addressable objects without naming a `draftNN` type. Subgroup
-  and fetch streams on every draft 07-21
+  and fetch streams on every draft 07-22
 - Structured parameter values, rather than opaque bytes: the AUTHORIZATION
   TOKEN structure (`auth_token`), the subscription filter of drafts 15-19
-  (`subscription_filter`), and the Range Filter parameters of drafts 19 and 20
-  (`range_filter`). Draft-20 rebuilt the LOCATION_FILTER value — the Filter Type
-  enum is gone and the shape comes from the field count — so it reads its own
-  through `draft20::message::decode_location_filter` (and draft-21's own),
-  and reads the nested
-  parameter block of the new `FILL_PARAMETERS` through
-  `draft20::message::decode_fill_parameters`
+  (`subscription_filter`), and the Range Filter parameters of drafts 19 through
+  22 (`range_filter`). Drafts 20 and 21 give the LOCATION_FILTER value's shape
+  by its field count and draft-22 by a `Location Filter Type` of its own, so
+  each reads its filters through its own `draftNN::message::decode_location_filter`,
+  and the nested parameter block of `FILL_PARAMETERS` through its own
+  `draftNN::message::decode_fill_parameters`
 
 ## Module layout
 
@@ -54,7 +53,7 @@ moqtap_codec::
                                           FieldValue, FieldMap)
     dispatch, data_dispatch              (per-draft dispatch: runtime Any*
                                           enums and object framing)
-    draft07, draft08, ..., draft21       (per-draft wire format)
+    draft07, draft08, ..., draft22       (per-draft wire format)
 ```
 
 **"No wire-level code is shared across drafts" is what the older wording here
@@ -78,7 +77,7 @@ The rule that *is* true, and that this crate is actually built on:
   hand-written `fo14` onwards where no macro shape captured the flags.
 - **A crate-root module may be shared only where it serves a stated draft
   subset**, and the subset is a specification fact rather than a convenience:
-  `subscription_filter` is drafts 15-19, `range_filter` is 19-20,
+  `subscription_filter` is drafts 15-19, `range_filter` is 19-22,
   `fields/params.rs` is 07-10 because draft-08 removed ROLE and draft-11 keeps
   its own tables.
 - **Anything reachable from a single draft belongs to that draft's module.**
@@ -104,13 +103,13 @@ Each draft is behind a feature flag. Enable the ones you need. The default is
 
 ```toml
 # every draft (default)
-moqtap-codec = "0.6"
+moqtap-codec = "0.8"
 
 # draft-14 only
-moqtap-codec = { version = "0.7", default-features = false, features = ["draft14"] }
+moqtap-codec = { version = "0.8", default-features = false, features = ["draft14"] }
 
 # draft-07 plus draft-14 for runtime dispatch
-moqtap-codec = { version = "0.7", default-features = false, features = ["draft07", "draft14"] }
+moqtap-codec = { version = "0.8", default-features = false, features = ["draft07", "draft14"] }
 ```
 
 The newest draft this crate implements is not a default anywhere: it is not the

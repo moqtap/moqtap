@@ -13,7 +13,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 //! Every control message name this crate answers with, on every draft it
 //! implements, is checked against the shared vector corpus.
@@ -41,7 +42,7 @@
 //! The comparison is per draft rather than over the union, because the ids are
 //! reused. 0x07 is `announce_ok` through draft-13, `publish_namespace_ok` on
 //! draft-14 and `request_ok` from draft-15 on; 0x08, 0x0E and 0x11 move the same
-//! way. A table checked against the union of all fourteen corpora would accept
+//! way. A table checked against the union of every draft's corpus would accept
 //! every one of those spellings on every draft, which is the draft-blind lookup
 //! this replaced.
 //!
@@ -96,7 +97,7 @@ use test_vectors::{load_vectors, vectors_dir};
 
 /// Every draft this crate implements, with the corpus directory that holds its
 /// vectors.
-const DRAFTS: [(u8, &str); 15] = [
+const DRAFTS: [(u8, &str); 16] = [
     (7, "draft07"),
     (8, "draft08"),
     (9, "draft09"),
@@ -112,6 +113,7 @@ const DRAFTS: [(u8, &str); 15] = [
     (19, "draft19"),
     (20, "draft20"),
     (21, "draft21"),
+    (22, "draft22"),
 ];
 
 /// Highest id swept when reading a draft's names back out of this crate.
@@ -136,7 +138,7 @@ const UNASSIGNED: &str = "unknown";
 /// the alias, the name this crate answers with)`.
 ///
 /// Draft-18 collapsed PUBLISH_OK into REQUEST_OK, and the corpus kept a
-/// `publish-ok.json` on drafts 18, 19 and 20 whose vectors are REQUEST_OK bytes
+/// `publish-ok.json` on drafts 18 through 22 whose vectors are REQUEST_OK bytes
 /// at 0x07 — `PUBLISH_OK (REQUEST_OK alias, Type 0x07)`, as the file's own
 /// description puts it. There is one message type at 0x07 on those drafts and it
 /// is `request_ok`, which is also the only name the JavaScript codec's
@@ -152,6 +154,7 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("draft19", "publish_ok", "request_ok"),
     ("draft20", "publish_ok", "request_ok"),
     ("draft21", "publish_ok", "request_ok"),
+    ("draft22", "publish_ok", "request_ok"),
 ];
 
 /// The `codec/messages` directory for one draft.
@@ -345,6 +348,7 @@ corpus_names_agree!(draft18_names_agree_with_the_corpus, "draft18", 18, "draft18
 corpus_names_agree!(draft19_names_agree_with_the_corpus, "draft19", 19, "draft19");
 corpus_names_agree!(draft20_names_agree_with_the_corpus, "draft20", 20, "draft20");
 corpus_names_agree!(draft21_names_agree_with_the_corpus, "draft21", 21, "draft21");
+corpus_names_agree!(draft22_names_agree_with_the_corpus, "draft22", 22, "draft22");
 
 /// The draft pairs whose whole name table coincides.
 ///
@@ -354,11 +358,12 @@ corpus_names_agree!(draft21_names_agree_with_the_corpus, "draft21", 21, "draft21
 /// exactly the same ids to exactly the same names, so those three arms are
 /// interchangeable as far as any corpus check can tell.
 ///
-/// Drafts 20 and 21 are the second such group, and they are here for a
-/// different reason: draft-21 is draft-20 restructured, so the tables coincide
-/// because the drafts do. That pair is the claim, not a coincidence to be
-/// explained away — if it ever left this list, one of the two modules would
-/// have acquired a code point the other has not.
+/// Drafts 20, 21 and 22 are the second such group, and they are here for a
+/// different reason: draft-21 is draft-20 restructured, and draft-22 changes
+/// one parameter's value and no message type, so the tables coincide because
+/// the drafts do. Those pairs are the claim, not a coincidence to be explained
+/// away — if one ever left this list, one of the modules would have acquired a
+/// code point another has not.
 ///
 /// Written down rather than derived, so a draft joining or leaving the run is a
 /// change to this list.
@@ -379,9 +384,11 @@ corpus_names_agree!(draft21_names_agree_with_the_corpus, "draft21", 21, "draft21
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
 ))]
-const IDENTICAL_TABLES: [(u8, u8); 4] = [(8, 9), (8, 10), (9, 10), (20, 21)];
+const IDENTICAL_TABLES: [(u8, u8); 6] = [(8, 9), (8, 10), (9, 10), (20, 21), (20, 22), (21, 22)];
 
 #[cfg(all(
     feature = "draft07",
@@ -397,7 +404,9 @@ const IDENTICAL_TABLES: [(u8, u8); 4] = [(8, 9), (8, 10), (9, 10), (20, 21)];
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
 ))]
 #[test]
 fn the_drafts_are_distinguishable_from_each_other() {

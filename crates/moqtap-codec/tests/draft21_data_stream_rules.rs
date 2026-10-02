@@ -828,7 +828,7 @@ const UNDEFINED_FLAGS: &[u64] =
 
 /// Every End of Range value Table 7 assigns, with the marker it names.
 ///
-/// Draft-19 had the first two. `0x20C` End of Timed-Out Range is draft-21's
+/// Draft-19 had the first two. `0x20C` End of Timed-Out Range is draft-20's
 /// addition, and it is a behavioural change as much as a new value: the Objects
 /// it covers are the ones draft-19 reported as an Unknown range.
 const END_OF_RANGE_FLAGS: &[(u64, FetchEndOfRange)] = &[
@@ -1043,7 +1043,7 @@ fn a_fetch_object_header_that_contradicts_its_flags_is_refused() {
 /// and Table 7 gives them whole values rather than a bit, so a mask would find
 /// them everywhere.
 ///
-/// The third is draft-21's, and it is the one a codec ported forward is most
+/// The third is draft-20's, and it is the one a codec ported forward is most
 /// likely to miss: `0x20C` is not a variation on `0x10C`, it is the value a
 /// relay uses when its `FILL_TIMEOUT` budget ran out, which draft-19 had no way
 /// to distinguish from an unknown status at all.

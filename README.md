@@ -20,11 +20,11 @@ Add the crates you need to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-moqtap-codec = "0.6"
-moqtap-client = "0.6"
+moqtap-codec = "0.8"
+moqtap-client = "0.8"
 ```
 
-Each draft is a separate feature flag on both crates (`draft07`..`draft21`), and both default to `all-drafts`. Turn default features off and name only the drafts you need to build a smaller subset; a draft that is not enabled cannot be negotiated at runtime.
+Each draft is a separate feature flag on both crates (`draft07`..`draft22`), and both default to `all-drafts`. Turn default features off and name only the drafts you need to build a smaller subset; a draft that is not enabled cannot be negotiated at runtime.
 
 ### Connect and subscribe (draft-14)
 
@@ -135,15 +135,14 @@ shared across drafts and what may not, and what to run when adding a draft.
 
 ## Spec Compliance
 
-This implementation covers MoQT drafts 07 through 21. Each draft is a
+This implementation covers MoQT drafts 07 through 22. Each draft is a
 separate module in both `moqtap-codec` and `moqtap-client`; `moqtap-proxy` has
 none and spans them at runtime instead. See
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-Draft-20 is the newest and is not a default anywhere. It is not the interop
-target — interop ran against draft-18 and the editors plan draft-22 next — so
-no crate here promotes it to a connection default, an advertised-preferred
-version or an auto-selected draft.
+Draft-22 is the newest and is not a default anywhere. It is not the interop
+target — interop ran against draft-18 — so no crate here promotes it to a
+connection default, an advertised-preferred version or an auto-selected draft.
 
 ## License
 

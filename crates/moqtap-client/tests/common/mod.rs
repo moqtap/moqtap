@@ -50,7 +50,8 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 mod framing {
     //! One pair, carrying the draft at run time, frames all of them.
@@ -115,6 +116,20 @@ mod framing {
         ))
     ))]
     pub use moqtap_client::draft21::connection::{FramedRecvStream, FramedSendStream};
+    #[cfg(all(
+        feature = "draft22",
+        not(any(
+            feature = "draft14",
+            feature = "draft15",
+            feature = "draft16",
+            feature = "draft17",
+            feature = "draft18",
+            feature = "draft19",
+            feature = "draft20",
+            feature = "draft21"
+        ))
+    ))]
+    pub use moqtap_client::draft22::connection::{FramedRecvStream, FramedSendStream};
 
     pub fn send(inner: SendStream, draft: DraftVersion) -> FramedSendStream {
         FramedSendStream::new(inner, draft)
@@ -133,7 +148,8 @@ mod framing {
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 )))]
 mod framing {
     //! A pair wired to one draft, for a build that enables no later one.

@@ -149,7 +149,7 @@ corpus:
 test-features:
     #!/usr/bin/env bash
     set -euo pipefail
-    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20 draft21; do
+    for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20 draft21 draft22; do
         echo "=== $d ==="
         cargo test -p moqtap-codec --no-default-features --features "$d"
     done
@@ -162,8 +162,8 @@ test-features:
     # 0 since it was written.
     echo "=== no drafts ==="
     RUSTFLAGS="-D warnings" cargo clippy -p moqtap-codec --no-default-features --all-targets -- -D warnings
-    echo "=== draft07 + draft21 ==="
-    cargo test -p moqtap-codec --no-default-features --features draft07,draft21
+    echo "=== draft07 + draft22 ==="
+    cargo test -p moqtap-codec --no-default-features --features draft07,draft22
     echo "=== draft13 + draft14 ==="
     cargo test -p moqtap-codec --no-default-features --features draft13,draft14
 
@@ -188,7 +188,7 @@ test-features:
 # configuration in which this defect cannot appear: with a single draft every
 # `Any*` enum has one variant, the wildcard arm is compiled out, and a list that
 # is short by one draft is a list nothing reads. It takes two drafts to see it,
-# and there are 105 pairs — so this reads the lists rather than compiling them.
+# and there are 120 pairs — so this reads the lists rather than compiling them.
 # `draft-pairs` is the compile-side half; see the script for what went wrong.
 #
 # No cfg list may omit a sibling draft
@@ -263,7 +263,7 @@ draft-pairs:
     #!/usr/bin/env bash
     set -euo pipefail
     export RUSTFLAGS="-D warnings"
-    for pair in draft07,draft21 draft20,draft21; do
+    for pair in draft07,draft22 draft21,draft22; do
         for crate in moqtap-codec moqtap-client moqtap-proxy; do
             echo "=== $crate --features $pair ==="
             cargo check -q -p "$crate" --no-default-features --features "$pair" --all-targets
@@ -383,7 +383,7 @@ draft-matrix:
     }
     for crate in moqtap-client moqtap-proxy; do
         echo "=== $crate ==="
-        for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20 draft21; do
+        for d in draft07 draft08 draft09 draft10 draft11 draft12 draft13 draft14 draft15 draft16 draft17 draft18 draft19 draft20 draft21 draft22; do
             run_row "$crate" "--features $d" "moqtap_client=$d moqtap_codec=$d" 0 --all-targets
         done
         # The proxy is the one crate that must refuse a zero-draft build, and

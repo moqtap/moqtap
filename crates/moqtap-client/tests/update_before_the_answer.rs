@@ -10,7 +10,7 @@
 //!
 //! So a subscriber that sends SUBSCRIBE and its update back to back is
 //! conforming. That is the shape this file exists for: the state machines are
-//! fourteen copies of one graph, so a change applied to one of them and not the
+//! per-draft copies of one graph, so a change applied to one of them and not the
 //! rest reads exactly like a change applied to all of them, and only a gate on
 //! every draft tells the two apart. A module ported from a corrected original is
 //! indistinguishable from one nobody checked, which is the same hazard from the
@@ -118,3 +118,4 @@ update_before_the_answer_gates!(draft18, "draft18", draft18, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft19, "draft19", draft19, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft20, "draft20", draft20, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft21, "draft21", draft21, "REQUEST_UPDATE");
+update_before_the_answer_gates!(draft22, "draft22", draft22, "REQUEST_UPDATE");

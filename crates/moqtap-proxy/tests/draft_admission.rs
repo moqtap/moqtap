@@ -35,9 +35,9 @@
 //!
 //! Both halves are live in every build, and which of them each draft lands in
 //! is decided by the feature set rather than by a `#[cfg]` written here: an
-//! all-drafts build runs fourteen admissions and no refusals, and a
+//! all-drafts build runs one admission per draft and no refusals, and a
 //! `--no-default-features --features draftNN` build runs one admission and
-//! thirteen refusals. Nothing is skipped either way, so the row cannot quietly
+//! a refusal for every other draft. Nothing is skipped either way, so the row cannot quietly
 //! stop checking anything.
 
 mod common;

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-02
+
+### Changed
+
+- **Breaking.** `DraftVersion` gains `Draft22` (feature `draft22`, in `all-drafts`; ALPN `moqt-22`), and `DraftVersion::ALL` is a `[DraftVersion; 16]`. The enum is not `#[non_exhaustive]`, so a downstream `match` that enumerates its variants stops compiling. Draft-22's LOCATION_FILTER carries an explicit Location Filter Type and no length: `{0, 0}` under type 0x02 is an absolute start, and the Next Object is type 0x05. No existing draft's bytes, errors or API changed.
+
 ## [0.7.0] - 2026-09-21
 
 ### Added

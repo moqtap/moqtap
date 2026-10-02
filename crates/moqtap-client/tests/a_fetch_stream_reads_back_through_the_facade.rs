@@ -81,7 +81,7 @@
 //! # What is *not* claimed
 //!
 //! That a relay serves a fetch. Nothing here dials one — the peer is a fixture
-//! that writes fourteen fixed byte strings. What this settles is that the facade
+//! that writes one fixed byte string per draft. What this settles is that the facade
 //! can read the answer.
 //!
 //! # Ablations, measured
@@ -314,7 +314,7 @@ macro_rules! peer_setup {
 macro_rules! draft_setup_parameters {
     // `KvpValue`, `VarInt` and the varint helper are local to this arm, whose
     // only caller is the draft-07 gate — the one draft that
-    // passes `with_role`. At file scope they were unread by the other thirteen
+    // passes `with_role`. At file scope they were unread by every other draft
     // and `RUSTFLAGS="-D warnings"` makes that an error on every
     // `just draft-matrix` row but draft-07's. Here the condition is stated once,
     // by the invocation, so there is no `cfg` list and no `allow` to go stale.
@@ -802,7 +802,54 @@ fetch_gate!(
             "reading fetch-end-of-non-existent-range back through the facade"
         );
     },
-    /// Draft-21's third marker, which no earlier draft has: a span the
+    /// The third marker, which no draft before draft-20 has: a span the
+    /// publisher gave up on rather than one it knows about.
+    #[tokio::test]
+    async fn the_third_marker_this_draft_added_comes_back_as_its_own_code() {
+        assert_eq!(
+            read_back("0504820c050a00", GroupOrder::Ascending).await,
+            "group=5 subgroup=none object=10 payload=- status=none eor=0x20c",
+            "reading fetch-end-of-timed-out-range back through the facade"
+        );
+    },
+    #[tokio::test]
+    async fn the_same_bytes_walk_the_other_way_under_descending() {
+        let wire = "05041c05008001aa0c000001bb";
+        assert_eq!(
+            read_back(wire, GroupOrder::Ascending).await,
+            "group=5 subgroup=0 object=0 payload=aa status=none eor=none | \
+             group=6 subgroup=0 object=0 payload=bb status=none eor=none",
+            "under Ascending a Group ID Delta of 0 is the prior Group plus one"
+        );
+        assert_eq!(
+            read_back(wire, GroupOrder::Descending).await,
+            "group=5 subgroup=0 object=0 payload=aa status=none eor=none | \
+             group=4 subgroup=0 object=0 payload=bb status=none eor=none",
+            "under Descending the same delta subtracts, and the same bytes are a \
+             different answer"
+        );
+    },
+);
+fetch_gate!(
+    draft22,
+    "draft22",
+    Draft22,
+    uni,
+    none,
+    4,
+    "fetch-stream-two-objects",
+    "05041c00008004deadbeef0002cafe",
+    "group=0 subgroup=0 object=0 payload=deadbeef status=none eor=none | \
+     group=0 subgroup=0 object=1 payload=cafe status=none eor=none",
+    #[tokio::test]
+    async fn an_end_of_range_marker_is_a_record_and_not_an_object() {
+        assert_eq!(
+            read_back("0504808c050a00", GroupOrder::Ascending).await,
+            "group=5 subgroup=none object=10 payload=- status=none eor=0x8c",
+            "reading fetch-end-of-non-existent-range back through the facade"
+        );
+    },
+    /// The third marker, which no draft before draft-20 has: a span the
     /// publisher gave up on rather than one it knows about.
     #[tokio::test]
     async fn the_third_marker_this_draft_added_comes_back_as_its_own_code() {
@@ -914,6 +961,50 @@ fn the_group_order_is_read_off_the_property_that_carries_it_or_defaulted_draft21
     let v = |n: u64| VarInt::from_u64(n).expect("fixture value fits a varint");
     let fetch_ok = |properties: Vec<KeyValuePair>| {
         AnyControlMessage::Draft21(ControlMessage::FetchOk(FetchOk {
+            end_of_track: 0,
+            end_group: v(0),
+            end_object: v(0),
+            parameters: Vec::new(),
+            track_properties: properties,
+        }))
+    };
+    let order = |code: u64| vec![KeyValuePair { key: v(0x22), value: KvpValue::Varint(v(code)) }];
+
+    assert_eq!(
+        fetch_group_order(&fetch_ok(order(0x2))),
+        GroupOrder::Descending,
+        "a FETCH_OK naming Descending is read as Descending"
+    );
+    assert_eq!(
+        fetch_group_order(&fetch_ok(order(0x1))),
+        GroupOrder::Ascending,
+        "a FETCH_OK naming Ascending is read as Ascending"
+    );
+    assert_eq!(
+        fetch_group_order(&fetch_ok(Vec::new())),
+        GroupOrder::Ascending,
+        "an omitted DEFAULT PUBLISHER GROUP ORDER is Ascending, which is the \
+         draft's answer and not this function's guess"
+    );
+    assert_eq!(
+        fetch_group_order(&fetch_ok(order(0x0))),
+        GroupOrder::Ascending,
+        "Publisher states no direction, and a delta reader needs one"
+    );
+}
+/// The same conversion on draft-22, whose GROUP_ORDER section is 9.20.8 and
+/// keeps the Ascending default for a FETCH.
+#[cfg(feature = "draft22")]
+#[test]
+fn the_group_order_is_read_off_the_property_that_carries_it_or_defaulted_draft22() {
+    use moqtap_client::dispatch::fetch_group_order;
+    use moqtap_codec::draft22::message::{ControlMessage, FetchOk};
+    use moqtap_codec::kvp::KvpValue;
+    use moqtap_codec::varint::VarInt;
+
+    let v = |n: u64| VarInt::from_u64(n).expect("fixture value fits a varint");
+    let fetch_ok = |properties: Vec<KeyValuePair>| {
+        AnyControlMessage::Draft22(ControlMessage::FetchOk(FetchOk {
             end_of_track: 0,
             end_group: v(0),
             end_object: v(0),

@@ -81,10 +81,10 @@ use crate::kvp::KeyValuePair;
 //
 // An `allow` rather than a `cfg`, and the choice is forced rather than
 // preferred. Spelling the condition would mean writing
-// `any(feature = "draft07", ..., feature = "draft20", feature = "draft21")` — every draft — beside a
+// `any(feature = "draft07", ..., feature = "draft21", feature = "draft22")` — every draft — beside a
 // list of the same drafts, with nothing holding the two level. That is the
 // drift `scripts/check-draft-parity.py` exists to catch and would not catch
-// here: a fifteenth draft added to the table and forgotten in the `cfg` compiles
+// here: a new draft added to the table and forgotten in the `cfg` compiles
 // clean and silently stops naming anything.
 //
 // Neither allow can hide a defect in a build that has a draft. With one draft
@@ -119,6 +119,7 @@ pub fn setup_option_name(draft: u8, param: &KeyValuePair) -> Option<String> {
         ("draft19", Draft19) => crate::draft19::fields::options_to_json(one),
         ("draft20", Draft20) => crate::draft20::fields::options_to_json(one),
         ("draft21", Draft21) => crate::draft21::fields::options_to_json(one),
+        ("draft22", Draft22) => crate::draft22::fields::options_to_json(one),
     };
     name_in(&rendered)
 }
@@ -149,9 +150,9 @@ fn name_in(rendered: &crate::fields::FieldValue) -> Option<String> {
 /// `assert_eq!(setup_option_name(11, ..), Some("path"))` is not a claim about
 /// the naming table at all under `--no-default-features --features draft07`. It
 /// is a claim that draft-11 was compiled, failing in a build that never
-/// promised to have it. `just test-features` runs this suite fourteen times,
-/// once per draft alone, plus `draft07,draft20` and `draft13,draft14`, so
-/// thirteen of those runs meet exactly that.
+/// promised to have it. `just test-features` runs this suite once per draft
+/// alone, plus `draft07,draft22` and `draft13,draft14`, so every run that does
+/// not enable draft-11 meets exactly that.
 ///
 /// The gates are per **draft asserted**, not per test, wherever one test spans
 /// several: `a_retired_codepoint_is_named_by_the_drafts_that_had_it_and_no_others`
@@ -159,7 +160,7 @@ fn name_in(rendered: &crate::fields::FieldValue) -> Option<String> {
 /// rather than being switched off whole because one is missing.
 ///
 /// The two negative claims — a codepoint nobody assigned, and a draft number
-/// outside 7..=21 — are left ungated because they are true under every feature
+/// outside 7..=22 — are left ungated because they are true under every feature
 /// set and no build can make them false. They are *vacuous* for a draft that
 /// was left out, since it answers `None` for every parameter; that is a
 /// weakening the all-drafts `cargo test --workspace` run in `just test` covers,
@@ -200,7 +201,7 @@ mod tests {
         assert_eq!(setup_option_name(11, &max).as_deref(), Some("max_request_id"));
         #[cfg(feature = "draft16")]
         assert_eq!(setup_option_name(16, &max).as_deref(), Some("max_request_id"));
-        for draft in 17..=21 {
+        for draft in 17..=22 {
             assert_eq!(setup_option_name(draft, &max), None, "draft-{draft} still names 0x02");
         }
     }
@@ -209,7 +210,7 @@ mod tests {
     #[test]
     fn an_unassigned_codepoint_is_named_by_nobody() {
         let odd = bytes(0x21, b"\x01\xff");
-        for draft in 7..=21 {
+        for draft in 7..=22 {
             assert_eq!(setup_option_name(draft, &odd), None, "draft-{draft} names 0x21");
         }
     }
@@ -252,6 +253,7 @@ mod tests {
     fn a_draft_this_crate_does_not_implement_names_nothing() {
         let max = varint(0x02, 100);
         assert_eq!(setup_option_name(6, &max), None);
-        assert_eq!(setup_option_name(21, &max), None);
+        let beyond = crate::version::DraftVersion::newest().number() + 1;
+        assert_eq!(setup_option_name(beyond, &max), None);
     }
 }

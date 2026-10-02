@@ -10,6 +10,7 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
+    feature = "draft22",
 ))]
 
 //! `AnyConnection::recv_inbound` hands back a SUBSCRIBE the peer sent, and
@@ -726,6 +727,17 @@ request_stream_gate!(
     "draft21",
     Draft21,
     moqtap_codec::draft21::message::Subscribe {
+        request_id: v(PEER_REQUEST_ID),
+        track_namespace: namespace(),
+        track_name: TRACK.to_vec(),
+        parameters: Vec::new(),
+    }
+);
+request_stream_gate!(
+    draft22,
+    "draft22",
+    Draft22,
+    moqtap_codec::draft22::message::Subscribe {
         request_id: v(PEER_REQUEST_ID),
         track_namespace: namespace(),
         track_name: TRACK.to_vec(),

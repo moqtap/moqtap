@@ -30,7 +30,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 use bytes::Bytes;
@@ -80,6 +81,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// Drafts whose object headers the codec decodes by copying the extension
@@ -121,9 +124,11 @@ const SKIPPING_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
-/// Drafts 17-21, which are the drafts whose subgroup header type carries a
+/// Drafts 17-22, which are the drafts whose subgroup header type carries a
 /// two-bit subgroup-ID *mode* field rather than a present/absent flag.
 const MODE_FIELD_DRAFTS: &[DraftVersion] = &[
     #[cfg(feature = "draft17")]
@@ -136,6 +141,8 @@ const MODE_FIELD_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// Drafts whose subgroup stream table has a type meaning "the Subgroup ID is
@@ -201,6 +208,8 @@ const FIRST_OBJECT_SUBGROUP_STREAMS: &[(DraftVersion, u8)] = &[
     (DraftVersion::Draft20, 0x12),
     #[cfg(feature = "draft21")]
     (DraftVersion::Draft21, 0x12),
+    #[cfg(feature = "draft22")]
+    (DraftVersion::Draft22, 0x12),
 ];
 
 /// A draft this build compiled, for the handful of claims below that are
@@ -236,7 +245,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 /// `draft`'s — the leading byte of a stream `draft`'s framer cannot open.
 ///
 /// The three type spaces are disjoint: 07-10 open at `0x04`, draft-11 at
-/// `0x0C`, and 12-21 at `0x14`. Any draft therefore has another space to
+/// `0x0C`, and 12-22 at `0x14`. Any draft therefore has another space to
 /// borrow from, which is what lets the wrong-draft case be put to a build
 /// that compiled only one draft — the alternative, encoding a real stream
 /// on a second draft, needs a second codec and so cannot be asked there at
@@ -474,7 +483,7 @@ fn corrupt_object_stream(draft: DraftVersion) -> Vec<u8> {
     // A zero-length payload is what makes a status field present at all,
     // and the status is the object's final field, so the last byte is the
     // status and nothing else. `0x3F` is a one-byte code under both the
-    // RFC 9000 varint drafts 07-16 use and the MoQT varint of 17-21, and
+    // RFC 9000 varint drafts 07-16 use and the MoQT varint of 17-22, and
     // no draft assigns it — a hard parse failure rather than a short read.
     // Building it this way rather than by hand is what makes the fixture
     // hold on every draft instead of only on the one whose object layout
@@ -598,7 +607,7 @@ fn oversized_object_passes_through_and_framing_resumes() {
 fn an_object_many_times_the_cap_still_lets_framing_resume() {
     const CAP: usize = 64 * 1024;
 
-    // Drafts 14-21 measure an object without copying anything out of the
+    // Drafts 14-22 measure an object without copying anything out of the
     // buffer, so no declared size puts one out of measuring reach.
     for &draft in SKIPPING_DRAFTS {
         let objects = [
@@ -829,14 +838,14 @@ fn stream_without_a_subgroup_id_field(
 
 #[test]
 fn subgroup_id_mode_zero_is_reported_as_zero() {
-    // Header type 0x10 on drafts 17-21: subgroup-ID mode 0, which *defines*
+    // Header type 0x10 on drafts 17-22: subgroup-ID mode 0, which *defines*
     // the ID as zero rather than leaving it unresolved. It is the commonest
     // header shape in the vector corpus, so reporting `None` here would
     // hide the majority of live traffic from any subgroup matcher.
     //
     // Swept over the compiled members of those four rather than named, for
     // the same reason its sibling below is: no other draft has a mode
-    // field to report, and a build without 17-20 has no decoder to ask.
+    // field to report, and a build without 17-22 has no decoder to ask.
     for &draft in MODE_FIELD_DRAFTS {
         let stream = stream_without_a_subgroup_id_field(draft, 0x10, 7);
 
@@ -861,7 +870,7 @@ fn implicit_subgroup_id_is_reported_as_unresolved() {
     // stream store a zero the framer must not pass off as a real subgroup
     // ID.
     //
-    // Drafts 17-21's reserved mode 3 (header type 0x16) stores that same
+    // Drafts 17-22's reserved mode 3 (header type 0x16) stores that same
     // zero and is deliberately not swept here: draft-20 Section 11.4.2 and
     // its three predecessors list every mode-3 type value as invalid, so no
     // such header decodes and the framer has nothing to report a subgroup
@@ -889,7 +898,7 @@ fn implicit_subgroup_id_is_reported_as_unresolved() {
     }
 }
 
-/// A header carrying drafts 17-21's reserved subgroup-ID mode costs
+/// A header carrying drafts 17-22's reserved subgroup-ID mode costs
 /// addressability and not one byte.
 ///
 /// Draft-20 Section 11.4.2, and the same list in 19, 18 and 17, gives eight

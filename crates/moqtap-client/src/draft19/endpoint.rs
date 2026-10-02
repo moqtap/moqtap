@@ -1766,7 +1766,7 @@ impl Endpoint {
         self.peer_request_filters.insert(id, in_force);
 
         // Section 10.9.2 gives an update one thing to move that no draft before
-        // this one lets a request change: "A subscriber can update the Track
+        // draft-18 lets a request change: "A subscriber can update the Track
         // Namespace Prefix of an established SUBSCRIBE_NAMESPACE or
         // SUBSCRIBE_TRACKS by including the TRACK_NAMESPACE_PREFIX parameter
         // (Section 10.2.19) in a REQUEST_UPDATE."

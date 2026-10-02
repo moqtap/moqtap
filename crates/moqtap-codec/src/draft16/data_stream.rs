@@ -417,7 +417,7 @@ impl SubgroupHeader {
     /// than dropping the byte. Draft-16 Section 11.1.1.1: "A subscription has
     /// Publisher Priorty 128 if this extension is omitted", so 128 is this
     /// draft's own name for an unstated priority and not an invented filler.
-    /// Drafts 17-21 write the same value in the same place. Use
+    /// Drafts 17-22 write the same value in the same place. Use
     /// [`Self::encode_checked`] to be told about the disagreement rather than
     /// having it resolved silently.
     pub fn encode(&self, buf: &mut impl BufMut) {

@@ -3,14 +3,14 @@
 //! `fetch_tests.rs` drives draft-14's machine through the whole transition
 //! table. There is one of those machines per draft module, and they
 //! are separate types with separate copies of the same graph — so a change made
-//! to one of them and not to its thirteen siblings compiles, passes that file, and
+//! to one of them and not to its siblings compiles, passes that file, and
 //! ships. This file drives the two orders and the late close on every draft the
 //! build has, so the odd sibling is a failure rather than a silence.
 //!
 //! # Ablation, run
 //!
 //! Deleting the `FetchState::Unanswered` arm from draft-07's `on_fetch_ok` and
-//! nothing else — one sibling of the fourteen put back the way it was — leaves
+//! nothing else — one sibling of the set put back the way it was — leaves
 //! `fetch_tests.rs` entirely green and fails one row here:
 //!
 //! ```text
@@ -95,3 +95,5 @@ fetch_answer_order!(draft19_answers_in_either_order, "draft-19", moqtap_client::
 fetch_answer_order!(draft20_answers_in_either_order, "draft-20", moqtap_client::draft20::fetch);
 #[cfg(feature = "draft21")]
 fetch_answer_order!(draft21_answers_in_either_order, "draft-21", moqtap_client::draft21::fetch);
+#[cfg(feature = "draft22")]
+fetch_answer_order!(draft22_answers_in_either_order, "draft-22", moqtap_client::draft22::fetch);

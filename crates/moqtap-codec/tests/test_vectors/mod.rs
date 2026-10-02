@@ -101,7 +101,7 @@ impl TestVector {
 /// - `unknown_message` — a type code this draft does not assign, on a control
 ///   message, a data stream or a datagram.
 /// - `invalid_type` — a type code inside the form its draft defines, which the
-///   draft separately names as invalid. Drafts 16 through 21 describe their
+///   draft separately names as invalid. Drafts 16 through 22 describe their
 ///   data-plane types as bit fields and then rule out particular combinations
 ///   within the form, so the enclosing form is assigned and the value is not.
 ///   One category for both spaces, because the two error variants that reach it
@@ -193,9 +193,9 @@ pub fn error_category(err: &CodecError) -> &'static str {
 /// Read one vector file, keeping the vectors whose expectations bind
 /// [`PROFILE`].
 ///
-/// The filter is here rather than in each of the fourteen runners because a
+/// The filter is here rather than in each of the per-draft runners because a
 /// rule that one kind of consumer must enforce and another need not is a fact
-/// about the corpus, not about any one suite, and fourteen copies of it would
+/// about the corpus, not about any one suite, and a copy per runner would
 /// drift. `tests/vector_profiles.rs` reads the same files without the filter
 /// and reports what it leaves out, so what is dropped here is written down
 /// somewhere that fails when it changes.
@@ -346,9 +346,9 @@ pub fn unassigned_statuses(vector: &TestVector, assigned: &[u64]) -> Vec<u64> {
 ///
 /// # Which JSON keys count
 ///
-/// `object_status`, which drafts 07-14 use everywhere and drafts 15-21 keep on
-/// the datagram header, and `status`, which is what drafts 15-21 call the same
-/// field inside a subgroup object. Drafts 15-21's `subgroup.json` and
+/// `object_status`, which drafts 07-14 use everywhere and drafts 15-22 keep on
+/// the datagram header, and `status`, which is what drafts 15-22 call the same
+/// field inside a subgroup object. Drafts 15-22's `subgroup.json` and
 /// `fetch-header.json` carry no `object_status` key at all, so a walk that knew
 /// only the first name read none of those six drafts' subgroup objects — and
 /// reported a clean sweep over a corpus it had not opened.

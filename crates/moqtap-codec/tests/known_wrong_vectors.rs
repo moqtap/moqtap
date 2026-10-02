@@ -3,7 +3,7 @@
 //!
 //! Every draft's whole data-stream corpus is swept against that draft's own
 //! `ObjectStatus::ALL`, and the set of disagreements must be exactly what
-//! [`KNOWN_WRONG`] records. That table is empty, so all fourteen sweeps assert
+//! [`KNOWN_WRONG`] records. That table is empty, so all the per-draft sweeps assert
 //! the same thing: no committed vector claims a status its draft does not
 //! assign.
 //!
@@ -34,8 +34,8 @@
 //! produce — a draft whose whole corpus yields no status field at all.
 //!
 //! That last one is why [`test_vectors::statuses_in`] names two JSON keys. The
-//! corpus spells the field `object_status` in drafts 07-14 and on drafts 15-21's
-//! datagram headers, but `status` inside drafts 15-21's subgroup objects. A walk
+//! corpus spells the field `object_status` in drafts 07-14 and on drafts 15-22's
+//! datagram headers, but `status` inside drafts 15-22's subgroup objects. A walk
 //! that knew only the first name read none of those six drafts' subgroup
 //! objects and reported a clean sweep over vectors it had never opened.
 //!
@@ -92,7 +92,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 mod test_vectors;
@@ -235,6 +236,7 @@ corpus_sweep!(draft18_corpus_object_statuses, "draft18", draft18, "draft18");
 corpus_sweep!(draft19_corpus_object_statuses, "draft19", draft19, "draft19");
 corpus_sweep!(draft20_corpus_object_statuses, "draft20", draft20, "draft20");
 corpus_sweep!(draft21_corpus_object_statuses, "draft21", draft21, "draft21");
+corpus_sweep!(draft22_corpus_object_statuses, "draft22", draft22, "draft22");
 
 // ─────────────────────────────────────────────────────────────
 // Message vectors carrying a parameter their draft does not admit there
@@ -390,3 +392,4 @@ message_sweep!(draft18_message_vectors_decode, "draft18", draft18, "draft18");
 message_sweep!(draft19_message_vectors_decode, "draft19", draft19, "draft19");
 message_sweep!(draft20_message_vectors_decode, "draft20", draft20, "draft20");
 message_sweep!(draft21_message_vectors_decode, "draft21", draft21, "draft21");
+message_sweep!(draft22_message_vectors_decode, "draft22", draft22, "draft22");

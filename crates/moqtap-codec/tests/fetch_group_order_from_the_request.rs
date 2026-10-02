@@ -45,7 +45,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 /// The four gates each of drafts 15 to 20 gets, and the one thing that differs
@@ -61,7 +62,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 macro_rules! fetch_group_order_gates {
     (
@@ -368,6 +370,20 @@ mod draft21 {
         draft21,
         Draft21,
         moqtap_codec::version::DraftVersion::Draft21,
+        fetch { track_namespace: TrackNamespace(vec![b"ns".to_vec()]), track_name: b"t".to_vec() }
+    );
+}
+
+#[cfg(feature = "draft22")]
+mod draft22 {
+    // Draft-22's FETCH names the track inline: no Fetch Type, no Standalone
+    // Fetch, and no inline range — that travels in LOCATION_FILTER now
+    // (Section 9.11). GROUP_ORDER still settles the fetch's Group Order, so
+    // every assertion the macro makes carries over unchanged.
+    fetch_group_order_gates!(
+        draft22,
+        Draft22,
+        moqtap_codec::version::DraftVersion::Draft22,
         fetch { track_namespace: TrackNamespace(vec![b"ns".to_vec()]), track_name: b"t".to_vec() }
     );
 }

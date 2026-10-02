@@ -64,7 +64,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 use moqtap_codec::varint::VarInt;
@@ -455,4 +456,26 @@ mod draft21 {
     }
 
     kvp_value_maximum_gates!(draft21, subscribe, setup);
+}
+
+#[cfg(feature = "draft22")]
+mod draft22 {
+    use moqtap_codec::draft22::message::*;
+    use moqtap_codec::kvp::KeyValuePair;
+    use moqtap_codec::types::*;
+
+    fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: super::varint(1),
+            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+            track_name: b"t".to_vec(),
+            parameters,
+        })
+    }
+
+    fn setup(options: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Setup(Setup { options })
+    }
+
+    kvp_value_maximum_gates!(draft22, subscribe, setup);
 }

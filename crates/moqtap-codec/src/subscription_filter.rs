@@ -12,7 +12,14 @@
 //! `draft20::message::decode_location_filter` and does not use this module.
 //! That name is spelled rather than linked because the module it names is
 //! behind a feature flag, and a link would be broken in any build that leaves
-//! draft-20 out.
+//! draft-20 out. Draft-21 reads its own the same way.
+//!
+//! Draft-22 brings a type back as the value's first field, and it is not this
+//! module's: its `Location Filter Type` numbers the forms afresh (0x01 is a
+//! relative start where draft-19's 0x1 was Next Group Start, and 0x05 is the
+//! Next Object), and the value has no length. Draft-22 reads it through
+//! `draft22::message::decode_location_filter`, and a draft-22 filter read
+//! through this module would be misnamed rather than refused.
 //!
 //! The move is why this module exists. A parameter value is a run of bytes, and
 //! a codec that carries it as bytes carries the Filter Type with it — including

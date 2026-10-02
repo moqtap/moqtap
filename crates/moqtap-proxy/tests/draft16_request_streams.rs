@@ -20,7 +20,7 @@
 //! of a session can be that subscriber, so the streams arrive in both
 //! directions.
 //!
-//! Drafts 17 through 20 moved the control plane onto a pair of unidirectional
+//! Drafts 17 through 22 moved the control plane onto a pair of unidirectional
 //! streams and every bidirectional stream became a request stream — that
 //! topology is gated by `control_plane_uni.rs`. Draft-16 is the one draft
 //! where the two answers differ, which is why it needs a gate of its own: a

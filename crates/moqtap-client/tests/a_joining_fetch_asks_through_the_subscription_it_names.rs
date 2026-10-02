@@ -14,6 +14,7 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
+    feature = "draft22",
 ))]
 
 //! `AnyConnection::fetch_joining` names a subscription and a starting point,
@@ -64,11 +65,12 @@
 //! message that could ask for a join; draft-08 introduces the field and the
 //! second type together. **Draft-20 deleted the whole mechanism** — Section
 //! 10.13 removed the Fetch Type field, both payload structures and the Fetch
-//! Type registry in one rewrite. And drafts 08 through 10 have Fetch Types `0x1`
+//! Type registry in one rewrite, and drafts 21 and 22 have no joining
+//! mechanism either. And drafts 08 through 10 have Fetch Types `0x1`
 //! and `0x2` only, so the *absolute* form has no encoding there; draft-11 is
 //! where the pair arrives.
 //!
-//! All five refusals have gates, and they are why this file spans all the
+//! All seven refusals have gates, and they are why this file spans all the
 //! drafts rather than twelve. A refusal is the measurement on those drafts:
 //! **this is the entry point behind "one suite run per draft rather than one
 //! against the newest"**, because a relay speaking 14 and 20 can be asked this
@@ -102,30 +104,21 @@
 //!
 //! # Why the shared items below carry `allow` and not `cfg`
 //!
-//! Two of the fourteen gates here — draft-07 and draft-20 — are refusals, and a
-//! refusal needs almost nothing: a session, a call, and the sentence that comes
-//! back. Everything this file holds for reading a FETCH off the wire is used
-//! only by the twelve drafts in between. So a build enabling **only** the two
-//! refusing drafts compiles the whole file and reads none of it, and that build
-//! is not hypothetical: `just draft-pairs` runs `--features draft07,draft20`
-//! under `RUSTFLAGS="-D warnings"` precisely because it is the pair that
-//! exercises the dispatch path, and `just draft-matrix` compiles `draft07`
-//! alone and `draft20` alone as two of its rows.
+//! Four of the gates here — draft-07, draft-20, draft-21 and draft-22 — are
+//! refusals, and a refusal needs almost nothing: a session, a call, and the
+//! sentence that comes back. Everything this file holds for reading a FETCH off
+//! the wire is used only by the twelve drafts from 08 through 19. So a build
+//! enabling **only** refusing drafts compiles the whole file and reads none of
+//! it, and that build is not hypothetical: `just draft-pairs` runs `--features
+//! draft07,draft22` under `RUSTFLAGS="-D warnings"` precisely because it is the
+//! pair that exercises the dispatch path, and `just draft-matrix` compiles each
+//! refusing draft alone as one of its rows.
 //!
 //! The obvious repair is `#[cfg(any(feature = "draft08", …, feature =
-//! "draft19"))]` on each shared item. **It is not available here**, and the
-//! reason is a gate rather than a preference: that list names twelve drafts,
-//! and `scripts/check-draft-cfg.py` rule 1 fails any draft-only `cfg(any(...))`
-//! in a draft-neutral file that names exactly twelve. Its docstring sets out
-//! why — of the long lists in this workspace the fourteens are "any draft at
-//! all", the thirteens are rejection lists, and the only twelve ever found was
-//! a rejection list with a draft missing from it. This file would be the second
-//! twelve and `just draft-cfg` would go red, trading one broken gate for
-//! another.
-//!
-//! And twelve is not even the only list these items would need. `absolute_gate!`
+//! "draft19"))]` on each shared item, and that list is not the only one these
+//! items would need. `absolute_gate!`
 //! is read by drafts 08 through 16, nine; `setup_parameters` by drafts 07
-//! through 16, ten; `refusal` by drafts 07, 08, 09, 10 **and** 20, which is not
+//! through 16, ten; `refusal` by drafts 07, 08, 09, 10, 20, 21 **and** 22, which is not
 //! a contiguous range at all. Four different lists across one family of shared
 //! helpers, each restating some part of the invocation table at the foot of this
 //! file, with nothing holding any of them level with it. That is the drift the
@@ -152,7 +145,7 @@ use moqtap_codec::dispatch::AnyControlMessage;
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 use moqtap_codec::types::TrackNamespace;
 // `FilterType` and `GroupOrder` are read only by the SUBSCRIBE that every
-// joining gate sends first, and the two refusing drafts send no SUBSCRIBE. Split
+// joining gate sends first, and the refusing drafts send no SUBSCRIBE. Split
 // from the line above so that the allow covers the two dead names and not
 // `TrackNamespace`, which `namespace()` reads under every feature set. See "Why
 // the shared items below carry `allow` and not `cfg`" in the module docs.
@@ -197,7 +190,7 @@ fn v(n: u64) -> VarInt {
 
 /// The namespace the subscription every joining gate names is opened under.
 ///
-/// [`TRACK`]'s reason, unchanged: the two refusing drafts subscribe to nothing.
+/// [`TRACK`]'s reason, unchanged: the refusing drafts subscribe to nothing.
 #[allow(dead_code)]
 fn namespace() -> TrackNamespace {
     TrackNamespace(vec![b"conformance".to_vec()])
@@ -215,9 +208,10 @@ fn encoded(msg: AnyControlMessage) -> Vec<u8> {
 /// side to be `Debug` and an [`AnyRequest`] is not: it owns a stream on the
 /// drafts from 17, and a handle that could be printed is not what that is.
 ///
-/// Read by the five gates that expect a refusal: draft-07 and draft-20 through
-/// `no_joining_gate!`, and drafts 08, 09 and 10 through `absolute_gate!`. That
-/// set is not a range — it is the oldest four drafts and the newest one — so
+/// Read by the seven gates that expect a refusal: drafts 07, 20, 21 and 22
+/// through `no_joining_gate!`, and drafts 08, 09 and 10 through
+/// `absolute_gate!`. That set is not a range — it is the oldest four drafts and
+/// the newest three — so
 /// the `cfg` this would otherwise take is not even a contiguous list to read,
 /// which is the clearest case in this file for the `allow` the module docs
 /// argue for.
@@ -243,7 +237,7 @@ fn refusal(
 ///
 /// Its readers are exactly the drafts named in the first line — draft-07
 /// through `setup_parameters_with_role` below, and drafts 08 through 16 through
-/// `control_stream_gate!` — so `--features draft19,draft20`, the newest-two row
+/// `control_stream_gate!` — so `--features draft21,draft22`, the newest-two row
 /// of `just draft-pairs`, compiles it and calls it nowhere. The `cfg` would be
 /// a ten-draft list, and the third distinct list this file's shared items would
 /// need between them; see the module docs.
@@ -767,7 +761,7 @@ macro_rules! request_stream_gate {
 /// One draft with no Joining Fetch to send, and the sentence that says why.
 ///
 /// A gate rather than an omission: "this draft cannot" is the measurement on
-/// draft-07 and draft-20, and an entry point that quietly sent something
+/// draft-07 and on drafts 20 through 22, and an entry point that quietly sent something
 /// adjacent would be worse than one that refuses.
 macro_rules! no_joining_gate {
     ($module:ident, $feat:literal, $version:ident, $handshake:tt, $params:expr,
@@ -828,7 +822,7 @@ macro_rules! no_joining_gate {
     };
 }
 
-// ── The two drafts with nothing to send ─────────────────────────────────────
+// ── The drafts with nothing to send ─────────────────────────────────────────
 
 no_joining_gate!(
     draft07,
@@ -856,7 +850,16 @@ no_joining_gate!(
     uni,
     Vec::new(),
     "Section 9.11",
-    "draft-21 deleted the joining mechanism"
+    "draft-21 has no joining mechanism"
+);
+no_joining_gate!(
+    draft22,
+    "draft22",
+    Draft22,
+    uni,
+    Vec::new(),
+    "Section 9.11",
+    "draft-22 has no joining mechanism"
 );
 
 // ── Drafts 08 through 10: one joining Fetch Type, and a flat FETCH ──────────

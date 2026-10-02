@@ -2403,7 +2403,7 @@ mod tests {
         KeyValuePair { key: VarInt::from_u64_moqt(key), value: KvpValue::Bytes(value.to_vec()) }
     }
 
-    /// Draft-21 Section 9.20.17: "The LARGEST_OBJECT parameter (Parameter Type
+    /// Draft-21 Section 9.20.18: "The LARGEST_OBJECT parameter (Parameter Type
     /// 0x9) is a Location." Section 9.20 defines Location as "Two consecutive
     /// varints (Group, Object)" — the value carries no length of its own.
     ///

@@ -18,8 +18,8 @@
 //! obvious way to end one is `_ => None`. That reads as *a draft this build did
 //! not compile has no name for anything*, which is true and is not the whole of
 //! what it does: it also answers for a draft **nobody has added yet**. The day a
-//! `Draft21` variant lands, a table that ends in a catch-all goes on compiling
-//! and starts answering "no name" for every draft-21 codepoint — which is
+//! `Draft23` variant lands, a table that ends in a catch-all goes on compiling
+//! and starts answering "no name" for every draft-23 codepoint — which is
 //! indistinguishable from a correct answer about an unassigned number, and which
 //! nothing in the build says a word about.
 //!
@@ -28,7 +28,7 @@
 //! falls through to a `_` arm that is not loud. [`by_draft`] answers it
 //! structurally rather than with a louder arm: spell **both** feature states
 //! for every draft and the match has no catch-all left to fall into, so a
-//! fifteenth variant stops this crate compiling instead of being answered
+//! new variant stops this crate compiling instead of being answered
 //! quietly.
 //!
 //! # What that trades away, stated rather than assumed
@@ -38,8 +38,8 @@
 //! either table as a draft-enumerating construct, and rules 2 and 3 do not
 //! count them. That is a smaller census and a stronger guarantee: rule 2 asks
 //! whether a list reaches the newest draft, and here a list that does not is a
-//! non-exhaustive `match`, which is a compile error in fourteen feature
-//! configurations. A textual gate is what you need when the compiler cannot see
+//! non-exhaustive `match`, which is a compile error in every feature
+//! configuration. A textual gate is what you need when the compiler cannot see
 //! the omission; it is not an improvement on the compiler seeing it.
 //!
 //! The script's own summary already excludes "anything a macro spells by token
@@ -67,11 +67,11 @@
 /// by_draft! { draft, <absent>,
 ///     ("draft07", Draft07) => <the answer draft-07 gives>,
 ///     ...
-///     ("draft21", Draft21) => <the answer draft-21 gives>,
+///     ("draft22", Draft22) => <the answer draft-22 gives>,
 /// }
 /// ```
 ///
-/// `draft` is the draft number as the IETF writes it — 7 through 21, matching
+/// `draft` is the draft number as the IETF writes it — 7 through 22, matching
 /// [`crate::version::DraftVersion::number`]. `<absent>` is the answer for a
 /// draft this crate does not implement **and** for one whose feature flag is off
 /// in this build, which are two different facts with one honest answer: this

@@ -66,7 +66,8 @@ mod frames;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 #[cfg(any(
@@ -81,7 +82,8 @@ use moqtap_codec::kvp::{KeyValuePair, KvpValue};
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -97,7 +99,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn varint(v: u64) -> VarInt {
     VarInt::from_u64(v).expect("fixture value fits a varint")
@@ -115,7 +118,8 @@ fn varint(v: u64) -> VarInt {
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn pair(key: u64, value: Vec<u8>) -> KeyValuePair {
     KeyValuePair { key: varint(key), value: KvpValue::Bytes(value) }
@@ -136,7 +140,8 @@ fn pair(key: u64, value: Vec<u8>) -> KeyValuePair {
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 const WELL_FORMED: &[u8] = &[0x02, 0x07];
 
@@ -157,7 +162,8 @@ const WELL_FORMED: &[u8] = &[0x02, 0x07];
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 const MALFORMED: &[&[u8]] = &[
     // No Alias Type at all.
@@ -187,7 +193,8 @@ const MALFORMED: &[&[u8]] = &[
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn alias_only(alias_type: u8, alias: u8) -> Vec<u8> {
     vec![alias_type, alias]
@@ -208,7 +215,8 @@ fn alias_only(alias_type: u8, alias: u8) -> Vec<u8> {
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -> Vec<u8> {
     let mut out = vec![alias_type];
@@ -248,7 +256,8 @@ fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 macro_rules! token_structure_gates {
     ($draft:ident, $key:expr) => {
@@ -967,6 +976,40 @@ mod draft21 {
     }
 
     token_structure_gates!(draft21, AUTHORIZATION_TOKEN, setup);
+}
+
+#[cfg(feature = "draft22")]
+mod draft22 {
+    use moqtap_codec::draft22::message::*;
+    use moqtap_codec::kvp::KeyValuePair;
+    use moqtap_codec::types::*;
+
+    const AUTHORIZATION_TOKEN: u64 = 0x03;
+
+    fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: super::varint(1),
+            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+            track_name: b"t".to_vec(),
+            parameters,
+        })
+    }
+
+    fn setup(options: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Setup(Setup { options })
+    }
+
+    fn encode(message: &ControlMessage) -> Vec<u8> {
+        let mut buf = Vec::new();
+        message.encode(&mut buf).expect("the encoder writes the value it is given");
+        buf
+    }
+
+    fn decode(bytes: &[u8]) -> Result<ControlMessage, moqtap_codec::error::CodecError> {
+        ControlMessage::decode(&mut &bytes[..])
+    }
+
+    token_structure_gates!(draft22, AUTHORIZATION_TOKEN, setup);
 }
 
 /// Drafts 07 through 10 have no Token, and the same bytes travel unread.

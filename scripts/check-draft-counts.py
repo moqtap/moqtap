@@ -144,8 +144,11 @@ NOT_THE_DRAFT_SET = {
         "the same quotation, in the section that names the defect",
     ("ARCHITECTURE.md", "which have fourteen and twelve distinct"):
         "distinct variants in two files, not drafts",
-    ("ARCHITECTURE.md", 'grep -rn "twelve drafts'):
+    ("ARCHITECTURE.md", 'grep -rn "fourteen drafts'):
         "a grep recipe: it has to contain the phrases it hunts for",
+    ("ARCHITECTURE.md", 'file saying "all fifteen drafts"'):
+        "the example the recipe below it hunts for: a count one short beside a "
+        "range one short is the defect being illustrated",
     ("ARCHITECTURE.md", "for f in $(grep -rl"):
         "the same recipe, second half",
     ("scripts/check-draft-parity.py", "so a claim about 'every draft' is one"):

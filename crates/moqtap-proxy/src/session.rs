@@ -604,14 +604,14 @@ impl ProxySession {
         let object_hook = interest.contains(Interest::OBJECTS);
         let control_mutation = interest.contains(Interest::CONTROL);
         // A fourth reason to decode control frames, and the only one that is
-        // not about telling somebody. Drafts 18, 19 and 20 write a fetch
+        // not about telling somebody. Drafts 18-22 write a fetch
         // Object's Group ID as a difference whose sign the fetch's Group Order
-        // decides, and the order is on the FETCH — so on those three a session
+        // decides, and the order is on the FETCH — so on those drafts a session
         // that frames data has to read its own control plane or it cannot read
         // its own fetch streams. See `capability::fetch_group_order_is_needed`.
         //
         // The initial draft is exact here for the same reason it is in
-        // `bidi_streams_carry_requests`: drafts 18, 19 and 20 have an ALPN each,
+        // `bidi_streams_carry_requests`: drafts 18-22 have an ALPN each,
         // and the one cohort that is a guess, `moq-00`, spans drafts 07 to 14
         // and answers `false` for every member.
         let fetch_orders_wanted = objects_enabled && fetch_group_order_is_needed(initial_draft);
@@ -1459,7 +1459,7 @@ struct ForwardCtx {
     /// [`ForwardCtx::control_frames_are_decoded`] rather than either alone.
     control_parse: bool,
     /// Whether this session has to decode control frames to read its own
-    /// fetch streams — drafts 18, 19 and 20, framing data.
+    /// fetch streams — drafts 18-22, framing data.
     ///
     /// Unlike `control_parse` this arms no report and calls no hook. It is
     /// the one case where the proxy parses the control plane for itself, and
@@ -1759,7 +1759,8 @@ const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
         | DraftVersion::Draft18
         | DraftVersion::Draft19
         | DraftVersion::Draft20
-        | DraftVersion::Draft21 => true,
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22 => true,
     }
 }
 
@@ -2492,7 +2493,7 @@ async fn request_streams_beside_the_control_stream(
 /// unidirectional streams**, making a bidirectional stream a *request*
 /// stream rather than the control stream.
 ///
-/// True on drafts 17 through 20; false on 07 through 16.
+/// True on drafts 17 through 22; false on 07 through 16.
 ///
 /// # What the drafts say
 ///
@@ -2554,7 +2555,8 @@ const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
         | DraftVersion::Draft18
         | DraftVersion::Draft19
         | DraftVersion::Draft20
-        | DraftVersion::Draft21 => true,
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22 => true,
     }
 }
 
@@ -2562,7 +2564,7 @@ const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
 /// own, so that a bidirectional stream beyond the control stream is a stream
 /// this proxy has to forward.
 ///
-/// True on drafts 16 through 20; false on 07 through 15.
+/// True on drafts 16 through 22; false on 07 through 15.
 ///
 /// # Why this is not [`control_plane_is_unidirectional`]
 ///
@@ -2587,7 +2589,7 @@ const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
 ///
 /// Drafts 07 through 15 have no second use to forward: none of them puts any
 /// message on a bidirectional stream other than the control stream. Drafts 17
-/// through 20 moved the control plane off bidirectional streams entirely, so
+/// through 22 moved the control plane off bidirectional streams entirely, so
 /// there every bidirectional stream is a request stream and the first one is
 /// no different from the rest.
 ///
@@ -2635,7 +2637,8 @@ const fn bidi_streams_carry_requests(draft: DraftVersion) -> bool {
         | DraftVersion::Draft18
         | DraftVersion::Draft19
         | DraftVersion::Draft20
-        | DraftVersion::Draft21 => true,
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22 => true,
     }
 }
 
@@ -4319,7 +4322,8 @@ fn report_refused_frames(
         feature = "draft18",
         feature = "draft19",
         feature = "draft20",
-        feature = "draft21"
+        feature = "draft21",
+        feature = "draft22"
     )),
     allow(unreachable_code)
 )]
@@ -5846,6 +5850,8 @@ fn datagram_is_status(header: &AnyDatagramHeader) -> bool {
         AnyDatagramHeader::Draft20(h) => h.object_status.is_some(),
         #[cfg(feature = "draft21")]
         AnyDatagramHeader::Draft21(h) => h.object_status.is_some(),
+        #[cfg(feature = "draft22")]
+        AnyDatagramHeader::Draft22(h) => h.object_status.is_some(),
         #[allow(unreachable_patterns)]
         _ => false,
     }

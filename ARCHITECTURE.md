@@ -54,6 +54,11 @@ draft is the unit this workspace is correct in, the pair coincides by the
 accident of one revision being editorial, and the draft that ends the
 coincidence would otherwise end it by editing draft-20's file.
 
+Draft-22 is that draft for `fields.rs`. Its LOCATION_FILTER opens with a
+Location Filter Type where draft-21's had a length, so the decoded value
+gains a key and loses one — and the change is in `draft22/fields.rs`, a copy,
+with draft-21's file and its corpus untouched.
+
 **(b) A shared module must not name a draft.** No `DraftVersion` parameter, no
 `d07` suffix, no `if draft >= 15`. Where drafts genuinely need different
 behaviour from one shared record, give them **different entry points** rather
@@ -83,9 +88,9 @@ How often does it diverge? Public function names in
 
 | window | drafts | common | union | overlap |
 |---|---|---|---|---|
-| 07-21 (all) | 15 | 34 | 122 | **28%** |
-| 17-21 | 5 | 64 | 78 | 82% |
-| 19-21 | 3 | 72 | 76 | 95% |
+| 07-22 (all) | 16 | 34 | 122 | **28%** |
+| 17-22 | 6 | 64 | 78 | 82% |
+| 19-22 | 4 | 72 | 76 | 95% |
 
 A universal all-draft trait could cover 28% of the surface. It is not hard;
 it is impossible. Within an *era* the overlap is 82-95%, which is why the
@@ -173,7 +178,7 @@ module. The fourth sits *below* the protocol layer entirely — see the
 `transport` paragraph in `src/lib.rs`. All four cost nothing per draft. Copy this shape.
 
 Note that `forwarding_preference` is compiled for drafts 07-15 and
-`malformed_tracks` for drafts 12-20, both with a paragraph naming the sentence
+`malformed_tracks` for drafts 12-22, both with a paragraph naming the sentence
 each draft states. **A shared module serving a subset of drafts is fine.** What
 is not fine is a shared module that serves all of them by asking which one it is.
 
@@ -230,11 +235,12 @@ this workspace.
 ### `moqtap-codec` — structured parameter values
 
 `auth_token`, `subscription_filter` (drafts 15-19) and `range_filter` (drafts
-19-20) are crate-root modules serving explicit draft subsets. Same rule as the
+19-22) are crate-root modules serving explicit draft subsets. Same rule as the
 client's four: the subset is a specification fact, stated in the module doc.
 Draft-20 rebuilt the LOCATION_FILTER value and therefore reads its own through
-`draft20::message::decode_location_filter` — which is corollary (b) working
-correctly.
+`draft20::message::decode_location_filter`, and draft-22 rebuilt it again and
+reads its own through `draft22::message::decode_location_filter` — which is
+corollary (b) working correctly.
 
 ---
 
@@ -253,7 +259,7 @@ and in CI.
 | gate | recipe | what it answers |
 |---|---|---|
 | `scripts/check-draft-parity.py` | `just draft-parity` | the draft set agrees on every axis that states it — including the per-draft rows in the `justfile` and in CI, so a matrix that was not extended is a failure rather than green rows that skipped the new draft; no list of drafts names draft N-1 and stops; no draft-enumerating `match` closes with a quiet catch-all |
-| `scripts/check-draft-cfg.py` | `just draft-cfg` | every per-draft rejection `cfg(any(...))` names all other drafts — all 105 pairs, without compiling any of them |
+| `scripts/check-draft-cfg.py` | `just draft-cfg` | every per-draft rejection `cfg(any(...))` names all other drafts — all 120 pairs, without compiling any of them |
 | the per-draft CI matrix | `just draft-matrix`, `just draft-pairs`, `just draft-targets` | each draft alone, `--all-targets`, `-D warnings`, with the *resolved feature list* asserted rather than inferred from an exit code; plus the two-draft rows |
 | `scripts/check-drafts.py` | `just drafts` | every citation and every quotation under `crates/` against the draft it names |
 | `scripts/check-draft-counts.py` | `just draft-counts` | no comment counts the whole draft set in words — the half of the prose construct below that a gate can read, with the set derived from the tree so the gate never needs editing |
@@ -279,7 +285,7 @@ when this draft is the only one enabled. Written as
 `#[cfg(any(feature = "draft07", ...))]` it must name every other draft, a copy
 from the previous draft names one too few, and the failure needs *two* drafts
 enabled to appear. Eight of forty-one were wrong when this was measured.
-`check-draft-cfg.py` covers all 105 pairs; `just draft-pairs` compiles the two
+`check-draft-cfg.py` covers all 120 pairs; `just draft-pairs` compiles the two
 that matter. Prefer the always-compiled form — `#[allow(unreachable_patterns)]
 _ => {}` — which is total under every feature set and needs no edit per
 draft.
@@ -339,7 +345,7 @@ nothing here reads English. A doc comment saying "all thirteen drafts" or
 for it. `shape/matcher.rs` declaring `[DraftVersion; 13]` under a doc comment
 reading "All fourteen" is this defect with one half gated and the other not.
 
-Run these after the mechanical port, reading **20** as the draft the tree had
+Run these after the mechanical port, reading **21** as the draft the tree had
 before yours. Each is a **to-do list, not a defect list** — the draft-20 port
 left 86 range hits alone because draft-20 really did delete the Filter Type and
 Fetch Type fields. A range ending at N-1 is a question.
@@ -350,16 +356,21 @@ answered every one of them the same way, because draft-21 changes nothing, so
 and a port where none of them is are both possible; what is not possible is
 knowing which without reading them.
 
+Draft-22 sits between the two. It changes one parameter on the wire,
+LOCATION_FILTER, so a range is stale wherever it speaks for the whole protocol
+and may be right where it speaks for that parameter's draft-20 and draft-21
+form — the length-prefixed field count that draft-22 replaced with a type.
+
 A range that stops at the previous draft:
 
 ```sh
-grep -rn "[0-9]\{2\}-20" --include=*.rs crates/
+grep -rn "[0-9]\{2\}-21" --include=*.rs crates/
 ```
 
 A count word one short, and a hard-coded length:
 
 ```sh
-grep -rn "twelve drafts\|thirteen drafts\|drafts\|all fourteen" --include=*.rs crates/
+grep -rn "fourteen drafts\|fifteen drafts\|all fifteen" --include=*.rs crates/
 grep -rn "DraftVersion; [0-9]\+\]" --include=*.rs crates/
 ```
 
@@ -381,12 +392,12 @@ At draft-20 those read 56 / 76 / 7 / 4 / 7 / 0. The counts are not the
 point; a count that has not moved after a port is.
 
 **The fastest way to a real defect is a file that fails two of them at once.** A
-file saying "all the drafts" *and* "drafts 15-20" states two things that
+file saying "all fifteen drafts" *and* "drafts 15-21" states two things that
 cannot both be current, so one is wrong before any draft is opened:
 
 ```sh
-for f in $(grep -rl "drafts\|all fourteen" --include=*.rs crates/); do
-  grep -q "[0-9]\{2\}-20" "$f" && echo "$f"
+for f in $(grep -rl "fifteen drafts\|all fifteen" --include=*.rs crates/); do
+  grep -q "[0-9]\{2\}-21" "$f" && echo "$f"
 done
 ```
 

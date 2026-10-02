@@ -1,4 +1,10 @@
-#![cfg(any(feature = "draft18", feature = "draft19", feature = "draft20", feature = "draft21"))]
+#![cfg(any(
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
+))]
 
 //! A REQUEST_UPDATE can move a namespace subscription's prefix, and the prefix
 //! it moves to is judged before the move is allowed.
@@ -928,3 +934,4 @@ gates!(draft18, "draft18");
 gates!(draft19, "draft19");
 gates!(draft20, "draft20");
 gates!(draft21, "draft21");
+gates!(draft22, "draft22");

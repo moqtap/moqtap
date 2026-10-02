@@ -137,3 +137,4 @@ close_during_setup_gates!(draft18, "draft18", moqtap_client::draft18::session::r
 close_during_setup_gates!(draft19, "draft19", moqtap_client::draft19::session::request_id::Role);
 close_during_setup_gates!(draft20, "draft20", moqtap_client::draft20::session::request_id::Role);
 close_during_setup_gates!(draft21, "draft21", moqtap_client::draft21::session::request_id::Role);
+close_during_setup_gates!(draft22, "draft22", moqtap_client::draft22::session::request_id::Role);

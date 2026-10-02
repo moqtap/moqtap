@@ -24,7 +24,7 @@
 //!
 //! # And the fourth question, which only some drafts can be asked
 //!
-//! Six of the fourteen add `ConnectionError` variants of their own, for rules
+//! The drafts from 15 on add `ConnectionError` variants of their own, for rules
 //! stated about frames that read perfectly well — properties on an Object whose
 //! status forbids them, a bidirectional stream opened with a message type the
 //! draft does not permit, a request stream finished before the response it owes.
@@ -524,7 +524,7 @@ fn a_call_this_facade_refused_is_not_the_peers_doing() {
 /// publish a host with no IPv6 stack as a relay that failed a handshake.
 ///
 /// Two drafts because one cannot distinguish a table from a constant, and these
-/// two because they are the ends of the range — the fourteen impls are
+/// two because they are the ends of the range — the per-draft impls are
 /// generated from one text and drift as a set or not at all.
 #[test]
 fn a_socket_this_machine_would_not_open_is_not_the_relays_doing() {

@@ -29,7 +29,7 @@
 //! | | Request | Response |
 //! |---|---|---|
 //! | **Drafts 07-12** | `track_status_request` (0x0D) | `track_status` (0x0E) |
-//! | **Drafts 13-21** | `track_status` (0x0D) | `track_status_ok` (0x0E) |
+//! | **Drafts 13-22** | `track_status` (0x0D) | `track_status_ok` (0x0E) |
 //!
 //! Every answer is right about its own draft, so comparing two of them by name
 //! yields a wrong conclusion out of two correct lookups.
@@ -115,6 +115,7 @@ pub fn message_type_name(draft: u8, id: u64) -> Option<&'static str> {
         ("draft19", Draft19) => crate::draft19::message::MessageType::from_id(id).map(|t| t.name()),
         ("draft20", Draft20) => crate::draft20::message::MessageType::from_id(id).map(|t| t.name()),
         ("draft21", Draft21) => crate::draft21::message::MessageType::from_id(id).map(|t| t.name()),
+        ("draft22", Draft22) => crate::draft22::message::MessageType::from_id(id).map(|t| t.name()),
     }
 }
 
@@ -185,7 +186,7 @@ mod tests {
     /// for every id, which is what this asserts anyway.
     #[test]
     fn none_for_an_unassigned_id() {
-        for draft in 7..=21u8 {
+        for draft in 7..=22u8 {
             assert_eq!(message_type_name(draft, 0x3F), None, "draft-{draft}");
         }
     }

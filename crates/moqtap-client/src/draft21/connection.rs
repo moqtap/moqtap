@@ -710,8 +710,8 @@ impl FramedRecvStream {
                         // Only this draft's header seeds the object reader. With draft 21 the only
                         // enabled draft `AnySubgroupHeader` has a single variant, the arm above is
                         // exhaustive and this one unreachable. Compiled in every configuration with
-                        // the lint allowed, rather than gated on a `cfg` naming the other thirteen
-                        // drafts: such a list has to be edited in every draft module whenever a
+                        // the lint allowed, rather than gated on a `cfg` naming every other
+                        // draft: such a list has to be edited in every draft module whenever a
                         // draft is added, and a copy that omits one leaves this match
                         // non-exhaustive.
                         #[allow(unreachable_patterns)]
@@ -952,8 +952,9 @@ pub enum RequestKind {
     Subscribe,
     /// PUBLISH, 0x1D.
     Publish,
-    /// FETCH, 0x16. Draft-21 has one shape of FETCH: Section 9.11 deleted the
-    /// `Fetch Type` field and with it the standalone/joining distinction.
+    /// FETCH, 0x16. Draft-21 has one shape of FETCH: Section 9.11 has no
+    /// `Fetch Type` field and so no standalone/joining distinction (draft-20
+    /// removed both).
     Fetch,
     /// PUBLISH_NAMESPACE, 0x06.
     PublishNamespace,
@@ -2695,7 +2696,7 @@ impl Connection {
     ///
     /// # The range is a parameter now
     ///
-    /// Draft-21 Section 9.11 rebuilt FETCH: there is no `Fetch Type`, no
+    /// Draft-21 Section 9.11 is not draft-19's FETCH: there is no `Fetch Type`, no
     /// Standalone or Joining structure, and no inline `Start Location` /
     /// `End Location` pair. The range travels in the `LOCATION_FILTER`
     /// parameter, so this takes the same three arguments
@@ -2738,8 +2739,8 @@ impl Connection {
         self.begin_request(halves, RequestKind::Fetch, req_id, &msg).await
     }
 
-    // Draft-21 has no joining fetch. Section 9.11 deleted the Fetch Type
-    // field, both variant structures and the whole joining mechanism, and
+    // Draft-21 has no joining fetch. Section 9.11 has no Fetch Type field, no
+    // variant structures and no joining mechanism (draft-20 removed them), and
     // Section 3.4's fill fetch stream replaces it: a subscriber asks for the
     // Objects behind the live edge by putting a `FILL_PARAMETERS` parameter on
     // its SUBSCRIBE (or on a later REQUEST_UPDATE) rather than by opening a
@@ -3474,7 +3475,7 @@ impl Connection {
             // antecedent for *the resulting Group ID*; draft-21 states it as
             // the one self-contained sentence above, naming its operands.
             // Drafts 18 and 19 put it in their Section 5.1.2 and draft-21 in
-            // Section 3.3.1, and all three name
+            // Section 9.20.10, and all three name
             // PROTOCOL_VIOLATION, so a sentence borrowed from a neighbour is
             // the shape a reader cannot tell from a transcription — which is
             // why `CodecRule` keeps the two wordings as separate runs, so that
@@ -3485,8 +3486,8 @@ impl Connection {
             CodecError::FilterEndGroupOverflow { .. } => {
                 Some(SessionErrorCode::ProtocolViolation)
             }
-            // Draft-21 has no Fetch Type: Section 9.11 deleted the field, both
-            // variant structures and the registry together, so this draft's
+            // Draft-21 has no Fetch Type: Section 9.11 has no such field, no
+            // variant structures and no registry for it, so this draft's
             // FETCH decoder cannot produce this error. The arm stays because
             // `CodecError` is shared across every draft and is not
             // `#[non_exhaustive]`, and because the answer would not change if
@@ -3549,7 +3550,7 @@ impl Connection {
             // serialization defined by that Type, the receiver MUST close the
             // session with error code KEY_VALUE_FORMATTING_ERROR."
             //
-            // Section 9.20.3 states the same answer for the one structure this
+            // Section 8.9 states the same answer for the one structure this
             // draft spells out: "If the Token structure cannot be decoded, the
             // receiver MUST close the Session with KEY_VALUE_FORMATTING_ERROR."
             //
@@ -3591,7 +3592,7 @@ impl Connection {
             // arm makes silently and invisibly on every draft at once.
             //
             // Adding one variant to `CodecError` was tried, and produces
-            // fourteen `E0004`s, one per draft, each naming the variant that has
+            // one `E0004` per draft, each naming the variant that has
             // nowhere to go. That is the whole mechanism.
             //
             // The nesting stops at `VarInt`, whose variants report how the bytes
@@ -3973,8 +3974,8 @@ mod tests {
         let (_, subscribe) = ep.subscribe(ns.clone(), b"t".to_vec(), vec![]).unwrap();
         let built = vec![
             (RequestKind::Subscribe, subscribe),
-            // One FETCH, not two: draft-21 Section 9.11 deleted the Fetch Type
-            // field and the joining fetch with it, so there is no second shape
+            // One FETCH, not two: draft-21 Section 9.11 has no Fetch Type field
+            // and no joining fetch (draft-20 removed both), so there is no second shape
             // for this to label.
             (RequestKind::Fetch, ep.fetch(ns.clone(), b"t".to_vec(), vec![]).unwrap().1),
             (

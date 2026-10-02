@@ -25,7 +25,7 @@ categories = ["network-programming"]
 # `0.1.0` crate for the whole of the project's history without one gate
 # noticing, because nothing consumed the pin.
 [workspace.dependencies]
-moqtap-codec = { path = "crates/moqtap-codec", version = "0.7.0", default-features = false }
+moqtap-codec = { path = "crates/moqtap-codec", version = "0.8.0", default-features = false }
 wtransport = { version = "0.7", features = ["dangerous-configuration", "quinn"] }
 moqtap-trace = { path = "crates/moqtap-trace", version = "0.3.0" }
 # `default-features = false` is load-bearing: cargo IGNORES a member manifest's
@@ -34,8 +34,8 @@ moqtap-trace = { path = "crates/moqtap-trace", version = "0.3.0" }
 # `RUSTFLAGS = "-D warnings"` never sees. Without it every reduced-draft
 # `moqtap-proxy` build silently resolves all the drafts and CI's
 # single-draft rows pass by not checking anything.
-moqtap-client = { path = "crates/moqtap-client", version = "0.7.0", default-features = false }
-moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.7.0" }
+moqtap-client = { path = "crates/moqtap-client", version = "0.8.0", default-features = false }
+moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.8.0" }
 # No `default-features = false`: this crate declares no `default` key at all, so
 # every feature it has is opt-in at the member manifest.
 quinn-netem = { path = "crates/quinn-netem", version = "0.1.3" }
@@ -56,7 +56,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 # the `Connection` instead of being parsed and dropped. `vendor/wtransport/PATCH.md`
 # has the diff and the reasoning; the short version is that `WT-Protocol` — the
 # server's half of WebTransport version negotiation, and the only channel drafts
-# 15 through 20 have over that transport — arrives in that response and nowhere
+# 15 through 22 have over that transport — arrives in that response and nowhere
 # else.
 #
 # A `[patch]` section applies to whatever workspace is being *built*, and is not

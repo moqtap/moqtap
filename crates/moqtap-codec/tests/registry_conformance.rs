@@ -13,7 +13,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 //! Every code point this crate assigns, on every draft it implements, is
 //! checked against the registries extracted from the rendered Internet-Drafts.
@@ -148,10 +149,12 @@ use moqtap_codec::draft19;
 use moqtap_codec::draft20;
 #[cfg(feature = "draft21")]
 use moqtap_codec::draft21;
+#[cfg(feature = "draft22")]
+use moqtap_codec::draft22;
 
 /// Every draft with a committed extraction, which is every draft this crate
 /// implements.
-const DRAFTS: [u64; 14] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+const DRAFTS: [u64; 16] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 
 /// Highest code point swept when reading a registry back out of the crate.
 ///
@@ -176,7 +179,7 @@ fn extracted(draft: u64) -> Value {
     let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tools/registries")
         // Zero-padded: the files are named after the draft as the IETF spells
-        // it, `draft-07` through `draft-20`.
+        // it, `draft-07` onward.
         .join(format!("draft-{draft:02}.json"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
@@ -921,20 +924,13 @@ fn draft20_error_registries_match_the_extracted_draft() {
         "stream_reset" => StreamResetErrorCode,
     });
 }
-/// Draft-21 keeps all four registries and takes one row out of three of them.
-///
-/// The removals are what this comparison is for, and they are the direction a
-/// spec-driven iteration cannot see: `VERSION_NEGOTIATION_FAILED` (session
-/// `0x15`), `INVALID_JOINING_REQUEST_ID` (REQUEST_ERROR `0x32`) and
-/// `SUBSCRIPTION_ENDED` (PUBLISH_DONE `0x3`) are each still assigned by
-/// draft-19, so a registry copied forward keeps decoding them and every
-/// "implement what the draft assigns" test still passes. Only comparing as a
-/// set in both directions reports it.
+/// Draft-21 keeps draft-20's four registries unchanged: same rows, same names.
+/// The three codes draft-20 removed stay removed.
 ///
 /// # Ablation
 ///
-/// Copying draft-19's `PublishDoneStatusCode` forward whole — the row and its
-/// `from_u64` arm together, which is what a `cp -r draft19 draft21` produces:
+/// Copying draft-19's `PublishDoneStatusCode` into draft-21 — the row and its
+/// `from_u64` arm together — fails here:
 ///
 /// ```text
 /// draft-21 PUBLISH_DONE Codes: accepted by PublishDoneStatusCode, not assigned
@@ -945,7 +941,22 @@ fn draft20_error_registries_match_the_extracted_draft() {
 fn draft21_error_registries_match_the_extracted_draft() {
     use draft21::error_codes as ec;
 
-    registries!(20, {
+    registries!(21, {
+        "session_termination" => SessionErrorCode,
+        "request_error" => RequestErrorCode,
+        "publish_done" => PublishDoneStatusCode,
+        "stream_reset" => StreamResetErrorCode,
+    });
+}
+
+/// Draft-22 keeps draft-21's four registries unchanged: same rows, same names.
+/// The three codes draft-20 removed stay removed.
+#[cfg(feature = "draft22")]
+#[test]
+fn draft22_error_registries_match_the_extracted_draft() {
+    use draft22::error_codes as ec;
+
+    registries!(22, {
         "session_termination" => SessionErrorCode,
         "request_error" => RequestErrorCode,
         "publish_done" => PublishDoneStatusCode,
@@ -1086,9 +1097,16 @@ fn object_status_registries_match_the_extracted_drafts() {
     );
     #[cfg(feature = "draft21")]
     same_object_status(
-        20,
-        &extracted(20),
+        21,
+        &extracted(21),
         &codec_registry!(draft21::types::ObjectStatus, "draft21 ObjectStatus"),
+    );
+
+    #[cfg(feature = "draft22")]
+    same_object_status(
+        22,
+        &extracted(22),
+        &codec_registry!(draft22::types::ObjectStatus, "draft22 ObjectStatus"),
     );
 }
 
@@ -1097,12 +1115,25 @@ fn object_status_registries_match_the_extracted_drafts() {
 /// Runs of drafts whose error-code assignments are the same set of codes under
 /// the same names.
 ///
-/// Drafts 08, 09 and 10 changed nothing in any of their six registries; every
-/// other draft in the range changed something. The runs are a partition of
-/// [`DRAFTS`], so every one of the ninety-one pairs is claimed one way or
-/// the other rather than merely not being claimed to differ.
-const ERROR_REGISTRY_ERAS: &[&[u64]] =
-    &[&[7], &[8, 9, 10], &[11], &[12], &[13], &[14], &[15], &[16], &[17], &[18], &[19], &[20]];
+/// Drafts 08, 09 and 10 changed nothing in any of their six registries, and
+/// drafts 21 and 22 changed nothing in these four; every other draft changed
+/// something. The runs are a partition of
+/// [`DRAFTS`], so every pair is claimed one way or the other rather than
+/// merely not being claimed to differ.
+const ERROR_REGISTRY_ERAS: &[&[u64]] = &[
+    &[7],
+    &[8, 9, 10],
+    &[11],
+    &[12],
+    &[13],
+    &[14],
+    &[15],
+    &[16],
+    &[17],
+    &[18],
+    &[19],
+    &[20, 21, 22],
+];
 
 /// The same, for Object Status.
 ///
@@ -1110,10 +1141,10 @@ const ERROR_REGISTRY_ERAS: &[&[u64]] =
 /// renamed `0x5` from END_OF_SUBGROUP to END_OF_TRACK, draft-11 dropped `0x5`
 /// and renamed `0x4` from END_OF_TRACK_AND_GROUP to END_OF_TRACK, and draft-16
 /// dropped OBJECT_DOES_NOT_EXIST. Draft-19 changed how the registry is printed,
-/// not what it assigns, and draft-20 changed nothing at all, which is why both
-/// share a run with 16.
+/// not what it assigns, and drafts 20, 21 and 22 changed nothing at all, which
+/// is why they share a run with 16.
 const OBJECT_STATUS_ERAS: &[&[u64]] =
-    &[&[7], &[8, 9, 10], &[11, 12, 13, 14, 15], &[16, 17, 18, 19, 20]];
+    &[&[7], &[8, 9, 10], &[11, 12, 13, 14, 15], &[16, 17, 18, 19, 20, 21, 22]];
 
 /// Every draft checked against its own file only proves something if the
 /// files differ.

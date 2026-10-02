@@ -50,7 +50,6 @@ use moqtap_codec::types::TrackNamespace;
 use moqtap_codec::varint::VarInt;
 
 /// FORWARD, a uint8 parameter draft-21 Section 9.20.19 limits to 0 and 1.
-/// Draft-19 numbered the section 9.20.18.
 const FORWARD: u64 = 0x10;
 /// GROUP_ORDER, a uint8 parameter draft-21 Section 9.20.9 limits to 1 and 2.
 const GROUP_ORDER: u64 = 0x22;

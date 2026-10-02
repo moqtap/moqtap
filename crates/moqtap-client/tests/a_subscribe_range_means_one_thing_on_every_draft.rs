@@ -30,6 +30,9 @@
 //! * **draft-20** — `LOCATION_FILTER` with no Filter Type at all: Section 5.1.2
 //!   selects the shape from how many fields the value holds, ranges are
 //!   inclusive, and an End Object is back.
+//! * **draft-22** — the same parameter, opening with a `Location Filter Type`
+//!   that names the shape (Section 9.20.9), so an open `{0, 0}` is the
+//!   beginning of the track again and the live edge is a type of its own.
 //!
 //! # Why the loopbacks are drafts 15 through 20 and not all of them
 //!
@@ -66,6 +69,7 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
+    feature = "draft22",
 ))]
 
 mod common;
@@ -195,9 +199,9 @@ fn the_end_group_travels_as_a_delta_from_the_start() {
     assert!(err.to_string().contains("backwards"), "{err}");
 }
 
-/// Draft-20 reads `{0, 0}` as the live edge where every earlier draft reads it
+/// Draft-20 reads `{0, 0}` as the live edge where drafts 07-19 and 22 read it
 /// as the beginning of the track, so the facade refuses it rather than sending
-/// one draft the opposite of what the other thirteen were sent.
+/// one draft the opposite of what the others were sent.
 ///
 /// The refusal is that one value with no end beside it and nothing else: the
 /// same start with an end is three fields and unambiguous, and any other start
@@ -225,9 +229,9 @@ fn a_zero_start_with_no_end_has_no_draft20_filter() {
         &[0, 1]
     );
 }
-/// Draft-21 reads `{0, 0}` as the live edge where every earlier draft reads it
+/// Draft-21 reads `{0, 0}` as the live edge where drafts 07-19 and 22 read it
 /// as the beginning of the track, so the facade refuses it rather than sending
-/// one draft the opposite of what the other thirteen were sent.
+/// one draft the opposite of what the others were sent.
 ///
 /// The refusal is that one value with no end beside it and nothing else: the
 /// same start with an end is three fields and unambiguous, and any other start
@@ -255,6 +259,30 @@ fn a_zero_start_with_no_end_has_no_draft21_filter() {
         &[0, 1]
     );
 }
+/// Draft-22 reads an open `{0, 0}` as the beginning of the track, so the
+/// facade sends it rather than refusing it.
+///
+/// Section 9.20.9 gives the live edge a type of its own — "If Location Filter
+/// Type is 0x05, no fields follow and it specifies the Next Object" — so type
+/// 0x02 with two zero fields can only be an absolute start, and the collision
+/// drafts 20 and 21 refuse over is not there to refuse.
+#[cfg(feature = "draft22")]
+#[test]
+fn a_zero_start_with_no_end_is_the_beginning_of_the_track_on_draft22() {
+    use moqtap_client::draft22::fill::LocationFilter;
+    use moqtap_codec::draft22::message::location_filter_types;
+
+    let filter = SubscribeRange::starting_at(0, 0)
+        .location_filter_draft22()
+        .expect("{0, 0} is an absolute start on draft-22");
+    assert_eq!(filter.filter_type(), location_filter_types::ABSOLUTE_START);
+    assert_eq!(filter.fields(), &[0, 0]);
+    assert_eq!(filter.encode_value(), vec![0x02, 0x00, 0x00]);
+
+    // The live edge is a different value, not the same one read another way.
+    assert_ne!(filter, LocationFilter::next_object());
+    assert_eq!(LocationFilter::next_object().encode_value(), vec![0x05]);
+}
 
 /// Ten drafts deleted the End Object and refuse a range that ends inside a
 /// group, rather than widening it to the whole group behind the caller's back.
@@ -274,6 +302,11 @@ fn a_range_ending_inside_a_group_is_two_drafts_and_not_fourteen() {
     #[cfg(feature = "draft21")]
     assert_eq!(
         ends_inside_a_group().location_filter_draft21().expect("draft-21 carries one too").fields(),
+        &[4, 0, 2, 9]
+    );
+    #[cfg(feature = "draft22")]
+    assert_eq!(
+        ends_inside_a_group().location_filter_draft22().expect("draft-22 carries one too").fields(),
         &[4, 0, 2, 9]
     );
 }
@@ -613,18 +646,29 @@ macro_rules! request_stream_gate {
 #[cfg(any(feature = "draft17", feature = "draft18", feature = "draft19"))]
 const DELTA_END: [&[u8]; 2] = [&[0x03, 4, 0], &[0x04, 4, 0, 2]];
 
-/// Draft-20: no Filter Type at all, and the shape from the field count.
+/// Drafts 20 and 21: no Filter Type at all, and the shape from the field count.
 ///
 /// Two fields for the open range, three for one through the end of a Group, and
 /// four for one ending at Object 9 — which is written as `9` and not as `10`,
 /// because Section 5.1.2's range is inclusive.
 ///
-/// [`DELTA_END`]'s reason on one draft. Not caught by `just draft-pairs`, whose
-/// `draft07,draft20` row enables the reader below: only the thirteen
-/// single-draft matrix rows that are not draft-20 see this one unread, which is
-/// why it is gated here rather than after a red build reported it.
+/// [`DELTA_END`]'s reason on two drafts. Caught by neither `just draft-pairs`
+/// row: `draft07,draft22` enables no reader and `draft21,draft22` enables one,
+/// so only the single-draft matrix rows other than draft-20 and draft-21 see
+/// this one unread, which is why it is gated here rather than after a red build
+/// reported it.
 #[cfg(any(feature = "draft20", feature = "draft21"))]
 const FIELD_COUNT: [&[u8]; 3] = [&[4, 0], &[4, 0, 2], &[4, 0, 2, 9]];
+
+/// Draft-22: the same fields, each behind the `Location Filter Type` that
+/// names them — 0x02 for the open range, 0x03 for one through the end of a
+/// Group, 0x04 for one ending at Object 9 (Section 9.20.9).
+///
+/// The open range is where these differ from [`FIELD_COUNT`] on the wire: a
+/// draft-21 reader would take the `0x02` for a length and read `{2, 4}` as the
+/// start, two fields and a byte early.
+#[cfg(feature = "draft22")]
+const FILTER_TYPE: [&[u8]; 3] = [&[2, 4, 0], &[3, 4, 0, 2], &[4, 4, 0, 2, 9]];
 
 request_stream_gate!(
     draft17,
@@ -667,4 +711,13 @@ request_stream_gate!(
     FIELD_COUNT,
     "draft-21 Section 3.3.1 reads the shape off the field count and its ranges are inclusive: \
      no Filter Type, and an end Object of 9 rather than 10"
+);
+request_stream_gate!(
+    draft22,
+    "draft22",
+    Draft22,
+    true,
+    FILTER_TYPE,
+    "draft-22 Section 9.20.9 names the shape with a Location Filter Type and its ranges are \
+     inclusive: an end Object of 9 rather than 10"
 );

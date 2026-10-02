@@ -30,7 +30,7 @@
 //! exactly for the codes in it. A table written out here would be a second
 //! copy free to drift from the enum it is meant to be pinning, and the sets
 //! genuinely differ: drafts 07-10 assign `0x5`, drafts 11-15 do not, and
-//! drafts 16-21 also drop `0x1`. So the same sweep accepts `0x1` on draft-15
+//! drafts 16-22 also drop `0x1`. So the same sweep accepts `0x1` on draft-15
 //! and refuses it on draft-16, from one body of code.
 //!
 //! # Accepting is not enough — the bytes are checked too
@@ -117,7 +117,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 use moqtap_codec::dispatch::{
@@ -249,3 +250,4 @@ draft_row!(draft18_object_status_through_the_encoder, "draft18", draft18, Draft1
 draft_row!(draft19_object_status_through_the_encoder, "draft19", draft19, Draft19);
 draft_row!(draft20_object_status_through_the_encoder, "draft20", draft20, Draft20);
 draft_row!(draft21_object_status_through_the_encoder, "draft21", draft21, Draft21);
+draft_row!(draft22_object_status_through_the_encoder, "draft22", draft22, Draft22);

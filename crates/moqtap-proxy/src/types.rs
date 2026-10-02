@@ -89,7 +89,7 @@ pub struct ObjectMeta {
     /// Subgroup ID. `None` when the frame has none to report, which
     /// happens two ways.
     /// On a subgroup stream, when the stream type encodes an implicit subgroup
-    /// ID that this draft never resolves — ten drafts (11 through 20) define a
+    /// ID that this draft never resolves — drafts 11 through 22 define a
     /// *subgroup ID is the first object's ID* mode that the codec stores as
     /// zero, and reporting that zero would mis-key any matcher.
     ///
@@ -101,7 +101,7 @@ pub struct ObjectMeta {
     /// a subgroup ID field that holds a placeholder — the same zero, and
     /// the same mis-keying if it were forwarded.
     pub subgroup_id: Option<u64>,
-    /// Absolute Object ID, resolved from delta encoding on drafts 14-21.
+    /// Absolute Object ID, resolved from delta encoding on drafts 14-22.
     pub object_id: u64,
     /// Publisher priority. `None` when the header set a default-priority
     /// flag and omitted the field (drafts 15+).
@@ -143,10 +143,10 @@ pub enum BypassReason {
     /// dispatch and the object-reader dispatch ever disagree about which
     /// drafts this binary speaks.
     NoFetchObjectCodec,
-    /// A fetch stream on draft-18, draft-19 or draft-20 naming a request this
+    /// A fetch stream on drafts 18-22 naming a request this
     /// session never saw asked for.
     ///
-    /// Those three drafts write an Object's Group ID as a difference from the
+    /// Those drafts write an Object's Group ID as a difference from the
     /// previous Object's, and the fetch's Group Order decides which way the
     /// difference points — draft-19 Section 11.4.4.1: "If the Group Order is
     /// Ascending, the Group ID is the prior Object's Group ID plus the Group

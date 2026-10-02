@@ -73,7 +73,7 @@ jobs:
       #
       # This is the half of that question that does not depend on which drafts
       # are enabled, so it is asked once here. The per-draft matrix asks the
-      # other half, fifteen times, against a reduced feature set.
+      # other half, once per draft, against a reduced feature set.
       #
       # The clippy row above has already compiled all of this, and a cached
       # unit still emits `compiler-artifact`, so the enumeration is nearly free.
@@ -189,6 +189,7 @@ jobs:
           - draft19
           - draft20
           - draft21
+          - draft22
     steps:
       - uses: actions/checkout@v4
         with:
@@ -490,16 +491,16 @@ jobs:
       # is taken. A two-draft build is the smallest one where the runtime
       # dispatch those crates are built around actually has something to
       # dispatch between, and no other row builds one.
-      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft21
-      - run: cargo test -p moqtap-client --no-default-features --features draft07,draft21
-      - run: cargo test -p moqtap-proxy --no-default-features --features draft07,draft21
+      - run: cargo test -p moqtap-codec --no-default-features --features draft07,draft22
+      - run: cargo test -p moqtap-client --no-default-features --features draft07,draft22
+      - run: cargo test -p moqtap-proxy --no-default-features --features draft07,draft22
       # The newest two together. Not redundant with the row above, and the
       # reason is worth stating: a per-draft module rejects the other drafts
       # with a wildcard arm under a `cfg(any(feature = "draftNN", ...))` that
       # has to name **every** other draft. A list copied from the previous
       # draft's module names one draft too few — its own predecessor — and the
       # match goes non-exhaustive only in a build that enables that predecessor
-      # and not the draft whose name took its place. `draft07,draft21` cannot
+      # and not the draft whose name took its place. `draft07,draft22` cannot
       # see it, because draft07 is in every such list; the newest two are the
       # smallest build that can, and when the pair was `draft19,draft20` it
       # found five sites in `draft20` and three more in `draft11` through
@@ -508,11 +509,11 @@ jobs:
       # it — the two rows fail on different things.
       #
       # `scripts/check-draft-cfg.py` (the `draft-cfg` job) checks the same
-      # class over all 105 pairs without compiling any of them; this row is what
+      # class over all 120 pairs without compiling any of them; this row is what
       # proves the compiler agrees.
-      - run: cargo test -p moqtap-client --no-default-features --features draft20,draft21
-      - run: cargo test -p moqtap-codec --no-default-features --features draft20,draft21
-      - run: cargo test -p moqtap-proxy --no-default-features --features draft20,draft21
+      - run: cargo test -p moqtap-client --no-default-features --features draft21,draft22
+      - run: cargo test -p moqtap-codec --no-default-features --features draft21,draft22
+      - run: cargo test -p moqtap-proxy --no-default-features --features draft21,draft22
       # Two adjacent drafts.
       - run: cargo test -p moqtap-codec --no-default-features --features draft13,draft14
       # Default (all-drafts) is already covered by the `test` job, but verify
@@ -666,10 +667,10 @@ jobs:
       #
       # The compiler cannot be asked this cheaply. A short list only breaks a
       # build that enables the omitted draft alongside the module's own, and
-      # drafts make 105 such pairs; the sweep above compiles one draft
+      # the drafts make 120 such pairs; the sweep above compiles one draft
       # at a time, where the arm is compiled out and a short list is
       # unreadable. `features-combos` compiles the two pairs worth compiling —
-      # this covers the other 89 without building anything.
+      # this covers the other 118 without building anything.
       - run: python3 scripts/check-draft-cfg.py
 
   draft-parity:
@@ -720,7 +721,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .drafts
-          key: moqt-drafts-07-20
+          key: moqt-drafts-07-22
       # Two checks over the same renderings, neither of which compiles
       # anything, and both of which reach the IETF archive where these drafts
       # are published. No credential and no sibling checkout: the reason this

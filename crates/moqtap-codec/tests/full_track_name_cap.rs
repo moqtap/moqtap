@@ -42,7 +42,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::error::CodecError;
 #[cfg(any(
@@ -56,7 +57,8 @@ use moqtap_codec::error::CodecError;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::types::TrackNamespace;
 #[cfg(any(
@@ -64,7 +66,8 @@ use moqtap_codec::types::TrackNamespace;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::varint::MoqtProfile;
 #[cfg(any(
@@ -78,7 +81,8 @@ use moqtap_codec::varint::MoqtProfile;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -95,7 +99,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     let mut wire = vec![type_id];
@@ -144,7 +149,8 @@ fn subscribe_prefix(leading_varints: usize, namespace_bytes: usize, name_bytes: 
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn subscribe_prefix_moqt<P: MoqtProfile>(
     leading_varints: usize,
@@ -291,6 +297,13 @@ full_track_name_cap_gate_moqt!(
     draft21_caps_the_full_track_name,
     "draft21",
     draft21,
+    moqtap_codec::varint::Moqt18,
+    1
+);
+full_track_name_cap_gate_moqt!(
+    draft22_caps_the_full_track_name,
+    "draft22",
+    draft22,
     moqtap_codec::varint::Moqt18,
     1
 );

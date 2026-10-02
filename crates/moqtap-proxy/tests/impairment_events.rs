@@ -111,7 +111,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 mod common;
@@ -170,6 +171,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// The draft every fixture here is built for: the newest compiled.
@@ -215,7 +218,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 }
 
 /// A subgroup stream header for [`DRAFT`]: track alias 1, group 0, subgroup
-/// 0, publisher priority `0x80`. Five bytes on every draft 07-21.
+/// 0, publisher priority `0x80`. Five bytes on every draft 07-22.
 fn subgroup_header_bytes() -> Vec<u8> {
     vec![subgroup_stream_type(DRAFT), 0x01, 0x00, 0x00, 0x80]
 }
@@ -247,7 +250,7 @@ fn subgroup_stream(count: u64) -> (Vec<u8>, Vec<Vec<u8>>) {
     (head, objects)
 }
 
-/// Stream B: bytes whose first octet is a data stream type no draft 07-21
+/// Stream B: bytes whose first octet is a data stream type no draft 07-22
 /// decodes as a subgroup header.
 ///
 /// `0x00` was chosen by feeding it to `ObjectFramer` on each of the

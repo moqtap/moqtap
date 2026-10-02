@@ -2,9 +2,9 @@
 
 //! MoQT wire codec for
 //! [draft-07](https://www.ietf.org/archive/id/draft-ietf-moq-transport-07.html) through
-//! [draft-21](https://www.ietf.org/archive/id/draft-ietf-moq-transport-21.html).
+//! [draft-22](https://www.ietf.org/archive/id/draft-ietf-moq-transport-22.html).
 //!
-//! Each draft sits behind its own feature flag — `draft07` through `draft21`.
+//! Each draft sits behind its own feature flag — `draft07` through `draft22`.
 //! The default is `all-drafts`, which enables every one of them.
 //!
 //! # Shared modules
@@ -31,7 +31,7 @@
 //! termination code registries as enums. They are reached only through their draft —
 //! `draft14::error_codes::SessionErrorCode` — and nothing from them is re-exported at
 //! the crate root. Registry names recur across drafts while the code points behind
-//! them move: every one of the fourteen defines a `SessionErrorCode`, and drafts that
+//! them move: every draft defines a `SessionErrorCode`, and drafts that
 //! share a spelling do not always share a value. A root-level re-export would collide
 //! outright, and disambiguating it would mean coining names that appear in no draft's
 //! table. The `draftNN` path is what fixes which table a code point came from.
@@ -70,10 +70,12 @@ pub mod draft19;
 pub mod draft20;
 #[cfg(feature = "draft21")]
 pub mod draft21;
+#[cfg(feature = "draft22")]
+pub mod draft22;
 
 /// The Token structure carried by the AUTHORIZATION TOKEN parameter.
 ///
-/// Drafts 11 through 21 define one structure and require a receiver to close
+/// Drafts 11 through 22 define one structure and require a receiver to close
 /// the session when a value it understands does not match it.
 pub mod auth_token;
 

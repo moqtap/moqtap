@@ -6,6 +6,7 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
+    feature = "draft22",
 ))]
 
 //! A FETCH carries the parameters the caller gave it, as every other request
@@ -649,6 +650,138 @@ mod draft21 {
     fn a_ranged_fetch_keeps_the_callers_parameters_beside_its_filter() {
         let mut ep = active();
         let range = LocationFilter::range(0, 0, 2).expect("a range across three groups");
+        let (_, msg) = ep
+            .fetch_range(crate::namespace(), b"alpha".to_vec(), &range, vec![token()])
+            .expect("this endpoint may fetch a range with parameters");
+        let back = decoded(msg);
+
+        let keys: Vec<u64> = back.parameters.iter().map(|p| p.key.into_inner()).collect();
+        assert_eq!(
+            keys.len(),
+            2,
+            "the filter is added to the caller's list, not put in place of it; got {keys:?}"
+        );
+        assert!(
+            keys.contains(&GROUP_ORDER_PARAMETER),
+            "the caller's own parameter must survive the insertion; got {keys:?}"
+        );
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        assert_eq!(keys, sorted, "and the two must be in ascending Parameter Type order");
+    }
+}
+#[cfg(feature = "draft22")]
+mod draft22 {
+    use moqtap_client::draft22::endpoint::Endpoint;
+    use moqtap_client::draft22::fill::LocationFilter;
+    use moqtap_client::draft22::session::request_id::Role;
+    use moqtap_client::draft22::session::state::SessionState;
+    use moqtap_codec::draft22::message::*;
+    use moqtap_codec::kvp::{KeyValuePair, KvpValue};
+    #[allow(unused_imports)]
+    use moqtap_codec::types::*;
+
+    fn active() -> Endpoint {
+        let mut ep = Endpoint::new(Role::Client);
+        ep.connect().expect("a client may open");
+        let _ = ep.send_setup(vec![]).expect("SETUP");
+        ep.receive_setup(&Setup { options: vec![] }).expect("SETUP");
+        assert_eq!(ep.session_state(), SessionState::Active, "the gate needs a running session");
+        ep
+    }
+
+    /// The parameter the caller attaches.
+    ///
+    /// GROUP_ORDER (0x22) rather than the SUBSCRIBER PRIORITY (0x20) the five
+    /// drafts above use, and the choice is what makes the third gate mean
+    /// something: 0x22 sorts *above* draft-22's LOCATION_FILTER (0x21), so
+    /// `fetch_range` has to search for the insertion point and put its filter
+    /// in front of this one. A key below 0x21 is appended after it and never
+    /// exercises the search at all.
+    ///
+    /// Two of the codec's rules narrowed this to one usable key, and the two
+    /// that were tried first each failed the gate for its own reason. The value
+    /// is `2` because Section 9.20.8 holds GROUP_ORDER to `{1, 2}`.
+    ///
+    /// The obvious pick was one of the Range Filters, since 0x25 through 0x29
+    /// all sort above the filter and all admit a FETCH. They are
+    /// length-prefixed: draft-22 puts them in the same value class as
+    /// AUTHORIZATION_TOKEN regardless of key parity, so a `Varint` there
+    /// decodes as `ControlMessageLengthMismatch` rather than as a wrong value.
+    /// That leaves 0x0A, 0x20, 0x22 and 0x35 as the plainly varint-valued
+    /// parameters a FETCH may carry, and 0x22 is the only one of the four above
+    /// 0x21.
+    fn token() -> KeyValuePair {
+        KeyValuePair { key: crate::v(GROUP_ORDER_PARAMETER), value: KvpValue::Varint(crate::v(2)) }
+    }
+
+    /// GROUP_ORDER as a parameter type, draft-22 Section 9.20.8.
+    const GROUP_ORDER_PARAMETER: u64 = 0x22;
+
+    fn decoded(msg: ControlMessage) -> Fetch {
+        let mut buf = Vec::new();
+        msg.encode(&mut buf).expect("the fetch encodes");
+        let mut cursor = &buf[..];
+        let ControlMessage::Fetch(back) =
+            ControlMessage::decode(&mut cursor).expect("the fetch decodes")
+        else {
+            panic!("what was encoded was a FETCH");
+        };
+        back
+    }
+
+    /// The parameters a fetch is given reach the peer.
+    #[test]
+    fn the_parameters_a_fetch_is_given_reach_the_peer() {
+        let mut ep = active();
+        let (_, msg) = ep
+            .fetch(crate::namespace(), b"alpha".to_vec(), vec![token()])
+            .expect("this endpoint may fetch with parameters");
+        let back = decoded(msg);
+        assert_eq!(
+            back.parameters.len(),
+            1,
+            "the parameter the caller attached must reach the peer"
+        );
+        assert_eq!(
+            back.parameters[0].key.into_inner(),
+            GROUP_ORDER_PARAMETER,
+            "and it must be the one the caller passed"
+        );
+    }
+
+    /// A fetch with nothing attached still carries nothing.
+    ///
+    /// The control, as above: a change that made the field always non-empty
+    /// would pass the gate before it.
+    #[test]
+    fn a_fetch_given_no_parameters_carries_none() {
+        let mut ep = active();
+        let (_, msg) = ep
+            .fetch(crate::namespace(), b"alpha".to_vec(), Vec::new())
+            .expect("this endpoint may fetch without parameters");
+        let ControlMessage::Fetch(built) = msg else {
+            panic!("what was built was a FETCH");
+        };
+        assert!(built.parameters.is_empty(), "an empty list is still what an empty list means");
+    }
+
+    /// The range convenience keeps what the caller already put in the list.
+    ///
+    /// `fetch_range` is the entry point that has to insert, so it is the one
+    /// that can displace. Both parameters must arrive, and in ascending
+    /// Parameter Type order, because Section 9.20 makes that order a wire rule
+    /// and the codec's encoder refuses a descending pair rather than emitting
+    /// one — which is why an encode-and-decode round trip is the assertion
+    /// rather than a look at the built message.
+    ///
+    /// The range starts at Group 1000, a two-byte field, so the filter's type
+    /// (0x03) and its byte length (4) differ: a reader that took the type for
+    /// a length would stop short and read the GROUP_ORDER as a field.
+    #[test]
+    fn a_ranged_fetch_keeps_the_callers_parameters_beside_its_filter() {
+        let mut ep = active();
+        let range = LocationFilter::range(1000, 0, 2).expect("a range across three groups");
         let (_, msg) = ep
             .fetch_range(crate::namespace(), b"alpha".to_vec(), &range, vec![token()])
             .expect("this endpoint may fetch a range with parameters");

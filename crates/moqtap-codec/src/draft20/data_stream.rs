@@ -1669,7 +1669,7 @@ impl FetchObjectHeader {
         }
 
         self.serialization_flags.encode_moqt::<Wire>(buf);
-        // Wire order, from Figure 27: Group ID Delta, then Subgroup ID, then
+        // Wire order, from Figure 28: Group ID Delta, then Subgroup ID, then
         // Object ID Delta. The `layout` check above has already established
         // that exactly the fields the flags call for are present, so whichever
         // of the three are `Some` are the ones that belong here.

@@ -50,9 +50,9 @@
 //!
 //! # Which drafts this file covers
 //!
-//! [`DELIMITED`] is cfg-built, so the thirteen-draft splice sweep is really
+//! [`DELIMITED`] is cfg-built, so the splice sweep is really
 //! "every compiled draft whose datagram header delimits its payload".
-//! [`STATUS_DRAFTS`] is the same idea for the six drafts that have a
+//! [`STATUS_DRAFTS`] is the same idea for the drafts that have a
 //! status datagram. Draft-14's swallowing decode is the one probe gated on
 //! a single draft, because draft-14 is the only draft it is about.
 //!
@@ -85,7 +85,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 mod common;
@@ -140,6 +141,8 @@ const DELIMITED: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// Every draft this build compiled, delimited or not.
@@ -182,9 +185,11 @@ const COMPILED: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
-/// Drafts 15-21, whose datagram type carries a status flag at bit 5 and,
+/// Drafts 15-22, whose datagram type carries a status flag at bit 5 and,
 /// when it is set, ends the header with a status field and no payload.
 ///
 /// Draft-14 is left out although it has the same flag: its header decode
@@ -206,6 +211,8 @@ const STATUS_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// The draft the single-session tests below run on: whichever this build
@@ -309,7 +316,7 @@ fn datagram_header(draft: DraftVersion, payload_len: usize) -> Vec<u8> {
         // 14, 15 and 20 decode this field as a varint and 16-19 as a raw
         // `u8`, and a lone `0x00` is both a valid one-byte varint and that
         // `u8`. How the field is defined differs too: 14 and 15 enumerate
-        // whole type values in a table, while 16-20 name the bits and
+        // whole type values in a table, while 16-22 name the bits and
         // `0x00` clears all of them. Draft-20 spells the field
         // `Type Flags` where 14-19 spell it `Type`; draft-20's bits are
         // draft-19's.
@@ -320,7 +327,8 @@ fn datagram_header(draft: DraftVersion, payload_len: usize) -> Vec<u8> {
         | DraftVersion::Draft18
         | DraftVersion::Draft19
         | DraftVersion::Draft20
-        | DraftVersion::Draft21 => {
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22 => {
             h.push(0x00);
             varint(TRACK_ALIAS, &mut h);
             varint(GROUP_ID, &mut h);
@@ -454,7 +462,8 @@ fn the_hand_built_fixtures_decode_on_every_draft() {
                 feature = "draft17",
                 feature = "draft18",
                 feature = "draft20",
-                feature = "draft21"
+                feature = "draft21",
+                feature = "draft22"
             ))]
             other => panic!("expected a draft-19 header, got {other:?}"),
         }
@@ -1093,7 +1102,7 @@ async fn replace_payload_on_a_datagram_is_refused_where_the_payload_is_not_delim
     .await;
 
     // 2. a status datagram: no payload slot exists at all. Asked on the
-    //    first of the five drafts that have one, rather than on a named
+    //    first of the drafts that have one, rather than on a named
     //    draft that a reduced build may not hold.
     if let Some(&draft) = STATUS_DRAFTS.first() {
         refusal_case(draft, status_datagram(draft), "status datagram has no payload").await;

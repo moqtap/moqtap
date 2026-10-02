@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-09-21
+## [0.8.0] - 2026-10-02
 
 ### Added
 
-- **`draft21`**, a feature, in `all-drafts`, forwarded to `moqtap-codec` and `moqtap-client`. Every capability predicate, framer rule and session check that answered for draft-20 answers the same for draft-21, because the two drafts put the same bytes on the wire.
+- **`draft21` and `draft22`**, features, in `all-drafts`, forwarded to `moqtap-codec` and `moqtap-client`. Every capability predicate, framer rule and session check that answered for draft-20 answers the same for both, because their data planes put the same bytes on the wire. Draft-22 changes the encoding of the LOCATION_FILTER Message Parameter, which this crate never interprets: a control frame carrying one is decoded by `moqtap-codec` and forwarded as it arrived.
 
 ### Changed
 
-- **Breaking.** `DraftVersion` gains `Draft21` (see `moqtap-codec`), which stops a downstream `match` over its variants compiling. `DEFAULT_DRAFT_ORDER` takes draft-21 ahead of draft-20, after draft-14: the order is draft-14 first and the newest draft downwards.
-- Requires `moqtap-codec` and `moqtap-client` 0.7.0, both breaking in this cycle.
+- **Breaking.** `DraftVersion` gains `Draft21` and `Draft22` (see `moqtap-codec`), which stops a downstream `match` over its variants compiling. `DEFAULT_DRAFT_ORDER` takes them ahead of draft-20, after draft-14: the order is draft-14 first and the newest draft downwards.
+- Requires `moqtap-codec` and `moqtap-client` 0.8.0, both breaking in this cycle.
 
 ## [0.6.0] - 2026-09-20
 

@@ -55,7 +55,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 use moqtap_codec::fields::{FieldMap, FieldValue};
@@ -217,6 +218,7 @@ macro_rules! every_draft {
             (19, rendered_token!("19", "draft19", draft19, 0x03, $token, PublishNamespace)),
             (20, rendered_token!("20", "draft20", draft20, 0x03, $token, PublishNamespace)),
             (21, rendered_token!("21", "draft21", draft21, 0x03, $token, PublishNamespace)),
+            (22, rendered_token!("22", "draft22", draft22, 0x03, $token, PublishNamespace)),
         ]
     };
 }

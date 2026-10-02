@@ -881,7 +881,7 @@ pub(crate) fn execute_stream(
 /// unit anyway** — the queue overshoots its depth by one. A shaper may not
 /// corrupt a stream to honour a depth limit: eliding an object the framer
 /// cannot renumber around does not lose one object, it makes every
-/// successor decode with a wrong absolute ID on drafts 14-21.
+/// successor decode with a wrong absolute ID on drafts 14-22.
 ///
 /// The refusal is reported as an ordinary
 /// [`ProxyEvent::ActionRefused`] and bumps `Counters::actions_refused`,
@@ -1486,7 +1486,8 @@ const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
         | DraftVersion::Draft18
         | DraftVersion::Draft19
         | DraftVersion::Draft20
-        | DraftVersion::Draft21 => true,
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22 => true,
     }
 }
 
@@ -1536,7 +1537,8 @@ fn elide_renumbers_successor(unit: &Unit<'_>) -> bool {
             | DraftVersion::Draft18
             | DraftVersion::Draft19
             | DraftVersion::Draft20
-            | DraftVersion::Draft21 => true,
+            | DraftVersion::Draft21
+            | DraftVersion::Draft22 => true,
         },
         DataStreamType::Fetch => match unit.draft {
             DraftVersion::Draft07
@@ -1553,7 +1555,8 @@ fn elide_renumbers_successor(unit: &Unit<'_>) -> bool {
             | DraftVersion::Draft18
             | DraftVersion::Draft19
             | DraftVersion::Draft20
-            | DraftVersion::Draft21 => true,
+            | DraftVersion::Draft21
+            | DraftVersion::Draft22 => true,
         },
     }
 }
@@ -1906,6 +1909,8 @@ mod tests {
         DraftVersion::Draft20,
         #[cfg(feature = "draft21")]
         DraftVersion::Draft21,
+        #[cfg(feature = "draft22")]
+        DraftVersion::Draft22,
     ];
 
     // ── how many events one action produces ─────────────────────────
@@ -3140,7 +3145,7 @@ mod tests {
             // Restated here rather than read from `stream_reset_code_defined`,
             // which is the thing under test, and exhaustive for the reason
             // `capability.rs`'s `a_first_object_carrier_exists` gives: a
-            // fifteenth draft must not join either side of the partition
+            // new draft must not join either side of the partition
             // without an answer being written down twice.
             let expected = match draft {
                 DraftVersion::Draft07
@@ -3157,7 +3162,8 @@ mod tests {
                 | DraftVersion::Draft18
                 | DraftVersion::Draft19
                 | DraftVersion::Draft20
-                | DraftVersion::Draft21 => true,
+                | DraftVersion::Draft21
+                | DraftVersion::Draft22 => true,
             };
             let mut h = Harness::new();
             let m = meta(draft);
@@ -3223,14 +3229,14 @@ mod tests {
     }
 
     #[test]
-    fn drafts_17_to_20_execute_a_control_action_like_every_other_draft() {
-        // These four carry the control plane on a pair of unidirectional
+    fn drafts_17_on_execute_a_control_action_like_every_other_draft() {
+        // These carry the control plane on a pair of unidirectional
         // streams and requests on bidirectional ones. Both shapes reach this
         // site, so the column is `Yes` here exactly as it is on 07-16 and a
         // draft-conditional refusal would be wrong.
         //
         // Filtered to the compiled set, like every other control row: a
-        // build without one of the four has no decoder for it and no hook
+        // build without one of them has no decoder for it and no hook
         // is reached, which is a claim about the build rather than about
         // the control plane's shape.
         for draft in [
@@ -3239,6 +3245,7 @@ mod tests {
             DraftVersion::Draft19,
             DraftVersion::Draft20,
             DraftVersion::Draft21,
+            DraftVersion::Draft22,
         ]
         .into_iter()
         .filter(|d| COMPILED_DRAFTS.contains(d))

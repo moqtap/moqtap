@@ -548,7 +548,7 @@ pub enum ShapeOutcome {
     /// [`Overflow::DropTail`](crate::shape::Overflow::DropTail).
     ///
     /// The unit went through the framer's elide path, so absolute object
-    /// IDs on drafts 14-21 stay correct; a unit an elide guard refused was
+    /// IDs on drafts 14-22 stay correct; a unit an elide guard refused was
     /// admitted instead of dropped and is reported as a refusal, not here.
     Dropped,
     /// A queued unit outlived `max_hold` under
@@ -610,8 +610,8 @@ pub enum Effect {
     /// An object was removed. `renumbered_successor` is `true` when the next
     /// object on the stream has to be re-encoded against the one now in
     /// front of it: its leading ID varint rewritten on a subgroup stream of
-    /// drafts 14-21, its whole framing re-encoded on a fetch stream of
-    /// drafts 15-21.
+    /// drafts 14-22, its whole framing re-encoded on a fetch stream of
+    /// drafts 15-22.
     ///
     /// It says a fix-up is **owed**, not that the bytes moved. A survivor
     /// that already stated everything it needed comes through unchanged, and
@@ -1083,7 +1083,7 @@ pub enum ImpairmentKind {
     /// This is not a defect and not a refusal — it is what per-unit
     /// classification over a single per-stream FIFO *means*. Reordering the
     /// queue by class is forbidden outright: object IDs are delta-encoded on
-    /// the wire on drafts 14-21, and the framer's only re-encoding primitive
+    /// the wire on drafts 14-22, and the framer's only re-encoding primitive
     /// handles removal, not reordering. So the head gates everything behind
     /// it whatever class those units are, and this report is what keeps that
     /// from being mistaken for the shaping the author configured.

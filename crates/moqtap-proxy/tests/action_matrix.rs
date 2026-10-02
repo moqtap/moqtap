@@ -48,7 +48,7 @@
 //!
 //! # Coverage caveat on the Control column
 //!
-//! On drafts 17-21 the harness drives control bytes down the first
+//! On drafts 17-22 the harness drives control bytes down the first
 //! bidirectional stream, which is exactly the topology the proxy wrongly
 //! assumes those drafts use. Harness and proxy therefore share one mistake,
 //! so those cells prove the actions execute correctly on whatever the site
@@ -58,7 +58,7 @@
 //! # Which drafts this file sweeps
 //!
 //! [`DRAFTS`] is cfg-built, so the axis is the set of drafts the build
-//! compiled: fourteen by default, one under `--features draftNN`. A build
+//! compiled: every draft by default, one under `--features draftNN`. A build
 //! with **no** draft has nothing to sweep — every cell is a claim about a
 //! codec that is not there — so the whole file is gated below rather than
 //! left to pass vacuously with a zero-length axis, which would turn the
@@ -79,7 +79,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 mod common;
@@ -149,6 +150,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// All fourteen kinds — one of the sweep's three axes.
@@ -294,7 +297,7 @@ impl std::fmt::Display for Cell {
 /// Whether a fetch stream on this draft can only be read by an endpoint that
 /// knows the Group Order the fetch asked for.
 ///
-/// Drafts 18, 19 and 20. There a fetch object's Group ID is a difference and the
+/// Drafts 18-22. There a fetch object's Group ID is a difference and the
 /// order decides its sign (draft-19 Section 11.4.4.1); nothing on the data
 /// stream states it, and the wrong assumption decodes rather than failing.
 /// The order is on the FETCH — draft-19 Section 10.2.8: "If omitted from
@@ -315,7 +318,7 @@ const FETCH_REQUEST: u64 = 9;
 /// which of its Group ID, Subgroup ID, Object ID and Priority are on the wire
 /// at all.
 ///
-/// Drafts 15-21. Read here as a **layout** fact — it decides which shape
+/// Drafts 15-22. Read here as a **layout** fact — it decides which shape
 /// [`fetch_object`] writes — and not as a verdict: an elide is allowed on
 /// every draft whose fetch stream is addressed, because the framer re-encodes
 /// the survivor rather than deleting bytes underneath it.
@@ -325,7 +328,7 @@ fn fetch_objects_use_serialization_flags(d: DraftVersion) -> bool {
 
 /// Whether a fetch object of this draft can carry an Object Status.
 ///
-/// Drafts 07-15. Drafts 16-21 define no Object Status field on a fetch
+/// Drafts 07-15. Drafts 16-22 define no Object Status field on a fetch
 /// object, so a zero-length fetch frame there is an object with no bytes
 /// rather than a status object — which is what decides whether eliding one
 /// is refused.
@@ -342,22 +345,22 @@ fn fetch_objects_carry_a_status(d: DraftVersion) -> bool {
 /// of the type value, draft-15
 /// Section 10.4.2 putting it as "the Subgroup ID is either 0 (for Types
 /// 0x10-11 and 0x18-19) or the Object ID of the first object transmitted in
-/// this subgroup (for Types 0x12-13 and 0x1A-1B)"; drafts 16 through 20 name
+/// this subgroup (for Types 0x12-13 and 0x1A-1B)"; drafts 16 through 22 name
 /// a SUBGROUP_ID_MODE field and spell mode 1 out as "The Subgroup ID field is
 /// absent and the Subgroup ID is the Object ID of the first Object
 /// transmitted in this Subgroup". Reading for the later phrasing alone finds
-/// 16 through 20 and walks straight past 11 through 15.
+/// 16 through 22 and walks straight past 11 through 15.
 ///
 /// Draft-20 spells the header's leading field `Type Flags` where draft-19
 /// spells it `Type`, with the same bits, so its subgroup stream types and
 /// their SUBGROUP_ID_MODE values are draft-19's (Section 11.4.2).
 fn has_implicit_subgroup_id_mode(d: DraftVersion) -> bool {
-    matches!(d.number(), 11..=21)
+    matches!(d.number(), 11..=22)
 }
 
 /// Whether the draft carries its control plane on a **pair of
 /// unidirectional** streams and its requests on bidirectional ones: true on
-/// 17-20, false on 07-16, where the control plane is the one
+/// 17-22, false on 07-16, where the control plane is the one
 /// client-initiated bidirectional stream.
 ///
 /// Both shapes reach `Site::Control`, so no column splits on this. It is
@@ -667,7 +670,9 @@ fn refusal_label(r: &Refusal) -> &'static str {
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
 ))]
 const ALL_REFUSAL_LABELS: [&str; 12] = [
     "WrongSite",
@@ -704,7 +709,9 @@ const ALL_REFUSAL_LABELS: [&str; 12] = [
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
 ))]
 const TABLE_ONLY_REFUSALS: [&str; 2] = ["StreamNotFramed", "ControlFrameNotDecodable"];
 
@@ -722,10 +729,10 @@ const TABLE_ONLY_REFUSALS: [&str; 2] = ["StreamNotFramed", "ControlFrameNotDecod
 /// verdict itself stays gated where it is produced, in `capability`'s own
 /// tests; what no session can show is one being emitted.
 ///
-/// Five drafts carry the field: 16, 17, 18, 19 and 20 each define a
+/// Seven drafts carry the field: 16 through 22 each define a
 /// SUBGROUP_ID_MODE with the same reserved `0b11`, and each refuses the type
 /// values carrying it at decode. The unprovokability argument rests on that
-/// refusal, which all five share.
+/// refusal, which all seven share.
 ///
 /// Kept beside the other two lists rather than folded into either, so the
 /// day a draft defines mode 3 this set empties and the partition below
@@ -747,7 +754,9 @@ const TABLE_ONLY_REFUSALS: [&str; 2] = ["StreamNotFramed", "ControlFrameNotDecod
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
 ))]
 const UNPROVOKABLE_REFUSALS: [&str; 1] = ["ReservedHeaderMode"];
 
@@ -790,7 +799,7 @@ enum SubgroupMode {
     /// The subgroup ID is the first object's ID — the mode that makes
     /// eliding index 0 a redefinition.
     FirstObject,
-    /// Drafts 16-21's reserved subgroup-ID mode 3.
+    /// Drafts 16-22's reserved subgroup-ID mode 3.
     Reserved,
 }
 
@@ -799,7 +808,7 @@ enum SubgroupMode {
 /// Drafts 07-10 have a single subgroup type and always carry the ID
 /// explicitly. Draft-11 numbers the type space 0x08-0x0D; drafts 12+ use
 /// 0x10-0x15, where bit 1 selects "first object" and bit 2 "explicit".
-/// Drafts 16-21 read bits 1-2 as a two-bit mode, whose value 3 is reserved.
+/// Drafts 16-22 read bits 1-2 as a two-bit mode, whose value 3 is reserved.
 fn subgroup_stream_type(draft: DraftVersion, mode: SubgroupMode) -> u8 {
     match (draft.number(), mode) {
         (7..=10, _) => 0x04,
@@ -827,7 +836,7 @@ fn subgroup_header(draft: DraftVersion, mode: SubgroupMode) -> Vec<u8> {
 /// One object's wire bytes on a subgroup stream.
 ///
 /// `payload` empty means a status object: `payload_length` is zero and an
-/// Object Status varint follows, which is the layout every draft 07-21
+/// Object Status varint follows, which is the layout every draft 07-22
 /// shares.
 fn subgroup_object(
     draft: DraftVersion,
@@ -875,7 +884,7 @@ fn fetch_header() -> Vec<u8> {
 
 /// A FETCH asking for one group of one track, under [`FETCH_REQUEST`].
 ///
-/// Built for the three drafts that need one and for no others, so a sweep
+/// Built for the drafts that need one and for no others, so a sweep
 /// that sent one where it was not needed would be sending a control frame the
 /// rest of the file does not account for. It carries no GROUP_ORDER parameter,
 /// which is itself an answer — draft-19 Section 10.2.8 and draft-20's own
@@ -890,7 +899,7 @@ fn fetch_frame(draft: DraftVersion) -> Option<Vec<u8>> {
     if !fetch_group_order_is_needed(draft) {
         return None;
     }
-    // Typed, because a build compiling none of the three drafts leaves the
+    // Typed, because a build compiling none of those drafts leaves the
     // match with only its `_` arm and nothing to infer from.
     let msg: AnyControlMessage = match draft {
         #[cfg(feature = "draft18")]
@@ -947,6 +956,16 @@ fn fetch_frame(draft: DraftVersion) -> Option<Vec<u8>> {
                 parameters: vec![],
             }))
         }
+        #[cfg(feature = "draft22")]
+        DraftVersion::Draft22 => {
+            use moqtap_codec::draft22::message as m;
+            AnyControlMessage::Draft22(m::ControlMessage::Fetch(m::Fetch {
+                request_id: moqtap_codec::varint::VarInt::from_u64(FETCH_REQUEST).unwrap(),
+                track_namespace: moqtap_codec::types::TrackNamespace(vec![b"ns".to_vec()]),
+                track_name: b"t".to_vec(),
+                parameters: vec![],
+            }))
+        }
         _ => return None,
     };
     let mut out = Vec::new();
@@ -962,7 +981,7 @@ fn fetch_frame(draft: DraftVersion) -> Option<Vec<u8>> {
 /// count-prefixed and drafts 09-14 use a byte-length prefix — and unlike
 /// subgroup objects it is never gated on the stream type.
 ///
-/// **Drafts 15-21.** A Serialization Flags field first, then only the
+/// **Drafts 15-22.** A Serialization Flags field first, then only the
 /// fields it announces. Every object built here states all four outright —
 /// flags `0x1F`: Subgroup ID present, Object ID present, Group ID present,
 /// Priority present — which is the encoding that makes this function's
@@ -984,7 +1003,7 @@ fn fetch_frame(draft: DraftVersion) -> Option<Vec<u8>> {
 /// asserts nothing about that, because what it measures is what may be done
 /// to an object rather than where the object sits.
 ///
-/// Drafts 16-21 define no Object Status field on a fetch object, so a
+/// Drafts 16-22 define no Object Status field on a fetch object, so a
 /// `status` asked for there comes out as an ordinary zero-length object.
 fn fetch_object(
     draft: DraftVersion,
@@ -1222,7 +1241,7 @@ fn client_setup_frame(draft: DraftVersion) -> Vec<u8> {
 /// code that produced the bytes proves only self-consistency.
 /// This file's control-site claims are about **events** — which action was
 /// applied, which refusal was emitted — so the frame only has to be one the
-/// parser accepts, and fourteen hand-rolled control encoders would buy
+/// parser accepts, and a hand-rolled control encoder per draft would buy
 /// nothing the assertions read.
 ///
 /// Every arm is `#[cfg(feature = "draftNN")]`, so the fixture exists for
@@ -1238,7 +1257,8 @@ fn goaway_frame(draft: DraftVersion, uri: &[u8]) -> Vec<u8> {
         feature = "draft18",
         feature = "draft19",
         feature = "draft20",
-        feature = "draft21"
+        feature = "draft21",
+        feature = "draft22"
     ))]
     use moqtap_codec::varint::VarInt;
     let uri = uri.to_vec();
@@ -1349,6 +1369,15 @@ fn goaway_frame(draft: DraftVersion, uri: &[u8]) -> Vec<u8> {
                 },
             ))
         }
+        #[cfg(feature = "draft22")]
+        DraftVersion::Draft22 => {
+            AnyControlMessage::Draft22(moqtap_codec::draft22::message::ControlMessage::GoAway(
+                moqtap_codec::draft22::message::GoAway {
+                    new_session_uri: uri,
+                    timeout: VarInt::from_u64(0).unwrap(),
+                },
+            ))
+        }
         #[cfg(not(all(
             feature = "draft07",
             feature = "draft08",
@@ -1363,7 +1392,9 @@ fn goaway_frame(draft: DraftVersion, uri: &[u8]) -> Vec<u8> {
             feature = "draft17",
             feature = "draft18",
             feature = "draft19",
-            feature = "draft20"
+            feature = "draft20",
+            feature = "draft21",
+            feature = "draft22"
         )))]
         other => panic!(
             "[{other}] goaway_frame was asked for a draft this build did not compile — DRAFTS is \
@@ -1474,7 +1505,7 @@ impl Rig {
     /// the session to have read it.
     ///
     /// A no-op on the eleven drafts whose fetch streams resolve from their
-    /// own bytes. On drafts 18, 19 and 20 it is what makes the stream readable:
+    /// own bytes. On drafts 18-22 it is what makes the stream readable:
     /// the session files the Group Order under the Request ID and the framer
     /// takes it out again when the response opens.
     ///
@@ -1673,10 +1704,10 @@ fn queued_then(events: &[Obs], kind: ActionKind, inner: ActionKind, effect: &Eff
 ///
 /// Every draft opens with a datagram type field. Drafts 07-10 number the
 /// payload-bearing datagram `0x01`; drafts 11-13 number it `0x00` and use
-/// the low bits for flags this fixture leaves clear; drafts 15-21 open with
+/// the low bits for flags this fixture leaves clear; drafts 15-22 open with
 /// one type byte, where `0x00` is again the payload-bearing value with
 /// object ID and priority present — a row of draft-15's type table, and
-/// every flag clear on 16-20. Asserted rather than assumed — see
+/// every flag clear on 16-22. Asserted rather than assumed — see
 /// `the_datagram_fixtures_delimit_their_payload`.
 fn decodable_datagram(draft: DraftVersion) -> Option<Vec<u8>> {
     if draft == DraftVersion::Draft14 {
@@ -1990,7 +2021,7 @@ async fn sweep_data_streams(draft: DraftVersion, sw: &mut Sweep) {
     }
 
     // ── Stream 3: the reserved subgroup-ID header mode, which no draft
-    //    decodes. Drafts 16-21 define the mode; this drives it on 17-21 ──
+    //    decodes. Drafts 16-22 define the mode; this drives it on 17-22 ──
     //
     // Draft-20 Section 11.4.2, and the same list in 19, 18, 17 and 16,
     // gives every mode-3 type value as invalid and tells the endpoint
@@ -2473,7 +2504,7 @@ async fn sweep_fetch_streams(draft: DraftVersion, sw: &mut Sweep) {
     // subgroup ID. What refuses an elide differs across the boundary at
     // draft-15 and is the one branch below.
     //
-    // Drafts 18, 19 and 20 join this column rather than a bypassed one of
+    // Drafts 18-22 join this column rather than a bypassed one of
     // their own, and `arm_fetch` is the whole difference: their Group IDs are
     // differences the FETCH's Group Order gives a direction to, and the
     // session has now been told it. The objects below state all four of
@@ -2905,10 +2936,10 @@ async fn sweep_control(draft: DraftVersion, sw: &mut Sweep) {
     let hook = ScriptedHook::new(all_interest(), Script::default());
     let mut rig = Rig::new(draft, Arc::clone(&hook)).await;
     // What the probes below drive is a bidirectional stream. On 07-16 that
-    // is the control stream itself; on 17-20 it is a *request* stream, which
+    // is the control stream itself; on 17-22 it is a *request* stream, which
     // is a second shape of the same control plane and reaches the same site
     // with the same framing. Either way the cell is `Yes`. The uni pair that
-    // carries SETUP on 17-20 is driven end to end in
+    // carries SETUP on 17-22 is driven end to end in
     // `control_plane_uni.rs`, not here. Labelled in the coverage report.
     let uni_pair = control_plane_is_a_uni_pair(draft);
     let note = if uni_pair { "Yes (probed on a request stream)" } else { "Yes" };
@@ -3637,7 +3668,7 @@ fn the_capability_table_matches_observed_behaviour() {
     );
 
     // Every draft contributed at least one live session. Without this the
-    // coverage claim above could be satisfied by a table read fourteen times
+    // coverage claim above could be satisfied by a table read once per draft
     // and a wire driven zero times.
     let mut drafts_run: BTreeSet<u8> = BTreeSet::new();
     drafts_run.extend(sweep.sessions.iter().copied());
@@ -3659,7 +3690,7 @@ fn the_capability_table_matches_observed_behaviour() {
 /// `WouldRedefineSubgroupId` needs an implicit-subgroup stream type, and
 /// `SessionAlreadyClosing`'s racing-close probe is run once on draft-14.
 /// On a single-draft row the missing variants are unreachable *by
-/// construction*, so the honest gate is "all fourteen compiled", not a
+/// construction*, so the honest gate is "every draft compiled", not a
 /// weaker assertion that would also pass against an engine that stopped
 /// emitting them.
 #[test]
@@ -3677,7 +3708,9 @@ fn the_capability_table_matches_observed_behaviour() {
     feature = "draft17",
     feature = "draft18",
     feature = "draft19",
-    feature = "draft20"
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
 ))]
 fn every_declared_refusal_is_reachable_or_declared_table_only() {
     let sweep = sweep();
@@ -3795,7 +3828,7 @@ fn the_sweep_reports_per_cell_coverage() {
     }
     let _ = writeln!(
         report,
-        "  probed on a request stream: {assumption} Control cells on drafts 17-20 — \
+        "  probed on a request stream: {assumption} Control cells on drafts 17-22 — \
          this harness drives control bytes down a bidirectional stream, which on those four \
          drafts is a request stream rather than the unidirectional control pair; the \
          compensating end-to-end assertions are in control_plane_uni.rs, which drives the \

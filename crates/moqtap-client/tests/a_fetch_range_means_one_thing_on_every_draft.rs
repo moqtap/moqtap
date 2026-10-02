@@ -7,6 +7,7 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
+    feature = "draft22",
 ))]
 
 //! `AnyConnection::fetch` asks for the same three ranges on every draft it is
@@ -114,10 +115,23 @@ const INLINE_LOCATIONS: [(u64, u64, u64, u64); 3] = [(4, 0, 6, 10), (4, 0, 6, 0)
 /// end Group, where a fourth field of `0` would mean Object 0.
 ///
 /// Gated for the same reason as [`INLINE_LOCATIONS`], in the other direction:
-/// its readers only expand for draft-20, so a build without it — `draft14,draft19`,
+/// its readers only expand for drafts 20 and 21, so a build without it — `draft14,draft19`,
 /// say — compiles a constant nothing can reach and fails under `-D warnings`.
 #[cfg(any(feature = "draft20", feature = "draft21"))]
 const FILTER_VALUES: [&[u8]; 3] = [&[4, 0, 2, 9], &[4, 0, 2], &[4, 7, 0, 7]];
+
+/// What draft-22 must put in the `LOCATION_FILTER` value for [`ranges`]: the
+/// same fields as [`FILTER_VALUES`], each behind the `Location Filter Type`
+/// that names them. Section 9.20.9 makes 0x04 the four-field Absolute Range
+/// and 0x03 the three-field form ending at the "last Object of Group
+/// StartGroup + EndGroupDelta".
+///
+/// Every field here fits one byte, so a decoder still reading draft-21's
+/// `Length` would read these bytes too: the type equals the field count for
+/// both forms. What tells the two drafts apart is the gate that sends them,
+/// which decodes with draft-22's codec.
+#[cfg(feature = "draft22")]
+const FILTER_VALUES_22: [&[u8]; 3] = [&[4, 4, 0, 2, 9], &[3, 4, 0, 2], &[4, 4, 7, 0, 7]];
 
 fn namespace() -> TrackNamespace {
     TrackNamespace(vec![b"conformance".to_vec()])
@@ -164,6 +178,10 @@ fn an_end_object_at_the_top_of_the_number_space_has_no_inline_encoding() {
     range
         .location_filter_draft21()
         .expect("draft-21's end is the last Object, so this one is ordinary");
+    #[cfg(feature = "draft22")]
+    range
+        .location_filter_draft22()
+        .expect("draft-22's end is the last Object, so this one is ordinary");
 }
 
 /// A range whose end Group is below its start has no draft-20 filter.
@@ -190,6 +208,17 @@ fn a_range_that_runs_backwards_has_no_draft20_filter() {
 fn a_range_that_runs_backwards_has_no_draft21_filter() {
     let range = FetchRange::through_object(6, 0, 4, 9);
     let err = range.location_filter_draft21().expect_err("an unsigned delta cannot count down");
+    assert!(err.to_string().contains("backwards"), "{err}");
+}
+/// A range whose end Group is below its start has no draft-22 filter.
+///
+/// Section 9.20.9: "EndGroupDelta is delta encoded from StartGroup", and a
+/// delta is unsigned, whichever Location Filter Type carries it.
+#[cfg(feature = "draft22")]
+#[test]
+fn a_range_that_runs_backwards_has_no_draft22_filter() {
+    let range = FetchRange::through_object(6, 0, 4, 9);
+    let err = range.location_filter_draft22().expect_err("an unsigned delta cannot count down");
     assert!(err.to_string().contains("backwards"), "{err}");
 }
 
@@ -552,4 +581,24 @@ request_stream_gate!(
     FILTER_VALUES.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
     "draft-21 Sections 3.3.1 and 9.11 make the filter's range inclusive: nothing adds one to \
      the end, and a range that covers a whole Group has three fields rather than a fourth of 0"
+);
+request_stream_gate!(
+    draft22,
+    "draft22",
+    Draft22,
+    Vec<u8>,
+    |f| {
+        let filter = f
+            .parameters
+            .iter()
+            .find(|p| p.key.into_inner() == moqtap_codec::draft22::message::LOCATION_FILTER)
+            .expect("draft-22 carries the range in a LOCATION_FILTER and nowhere else");
+        match &filter.value {
+            moqtap_codec::kvp::KvpValue::Bytes(bytes) => bytes.clone(),
+            other => panic!("LOCATION_FILTER is a Location Filter value, got {other:?}"),
+        }
+    },
+    FILTER_VALUES_22.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
+    "draft-22 Sections 3.2 and 3.3.1 make the range inclusive: nothing adds one to the end, \
+     and a range that covers a whole Group is type 0x03 rather than a fourth field of 0"
 );

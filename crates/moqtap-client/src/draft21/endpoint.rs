@@ -535,7 +535,7 @@ pub enum EndpointError {
 
     /// A fill fetch stream opened against a request that asked for no fill.
     ///
-    /// Section 3.4 makes `FILL_PARAMETERS` the whole of the request: "Its
+    /// Section 9.20.16 makes `FILL_PARAMETERS` the whole of the request: "Its
     /// presence is what requests a fill fetch stream; a subscription with no
     /// FILL_PARAMETERS opens none." A FETCH_HEADER naming a subscription that
     /// never asked is a stream this endpoint has nothing to attribute, and one
@@ -1050,7 +1050,7 @@ pub struct Endpoint {
     /// join as the fetch was made rather than at the withdrawal — a fill
     /// outlives the subscription it was asked from, so a lookup through the
     /// join came up empty exactly while there was still a fetch to cancel.
-    /// Draft-21 Section 9.11 deleted the joining fetch; a fill fetch stream
+    /// Draft-21 Section 9.11 has no joining fetch; a fill fetch stream
     /// belongs to its subscription and is tracked in `fills`.
     fetch_tracks: HashMap<u64, FetchTrack>,
     /// Which tracks this endpoint has given up on, and what for.
@@ -1894,7 +1894,7 @@ impl Endpoint {
         self.peer_request_filters.insert(id, in_force);
 
         // Section 9.5.2 gives an update one thing to move that no draft before
-        // this one lets a request change: "A subscriber can update the Track
+        // draft-18 lets a request change: "A subscriber can update the Track
         // Namespace Prefix of an established SUBSCRIBE_NAMESPACE or
         // SUBSCRIBE_TRACKS by including the TRACK_NAMESPACE_PREFIX parameter
         // (Section 9.20.21) in a REQUEST_UPDATE."
@@ -2012,9 +2012,9 @@ impl Endpoint {
     ///
     /// # This is not draft-19's FETCH
     ///
-    /// Draft-21 Section 9.11 rebuilt the message. The `Fetch Type` field, the
-    /// Standalone Fetch and Joining Fetch structures and the Fetch Type
-    /// registry are gone; the Track Namespace and the Track Name are inline
+    /// Draft-21 Section 9.11 has no `Fetch Type` field, no Standalone Fetch or
+    /// Joining Fetch structure and no Fetch Type registry (draft-20 removed
+    /// them); the Track Namespace and the Track Name are inline
     /// fields, and **the range travels in the `LOCATION_FILTER` parameter**
     /// (Section 3.3.1) rather than in the message. So this takes the same three
     /// arguments [`subscribe`](Self::subscribe) does, and the four location
@@ -2087,7 +2087,7 @@ impl Endpoint {
 
     // -- Fill fetch streams -----------------------------------------
     //
-    // Draft-21 Sections 3.4 and 3.4.1, new in this draft, and what replaced
+    // Draft-21 Sections 3.4 and 3.4.1, which take the place of
     // the joining fetch. There is no message here and no state machine: a fill
     // is asked for by a parameter on a SUBSCRIBE or a REQUEST_UPDATE, answered
     // by a unidirectional stream, and ended by that stream being finished or
@@ -2713,7 +2713,7 @@ impl Endpoint {
     /// three "Request", so this is where they land; the control stream refuses
     /// them.
     ///
-    /// PUBLISH_STATE_NOTIFY (0x22) is draft-21's addition to that set, and the
+    /// PUBLISH_STATE_NOTIFY (0x22) is draft-20's addition to that set, and the
     /// one message here that is neither a response nor a request: Section 9.10
     /// puts it on "a subscription's bidirectional stream" and answers it with
     /// nothing at all.
@@ -2905,8 +2905,8 @@ impl Endpoint {
             // Nothing is judged here that draft-19 judged. Its FETCH could
             // name a subscription to join, and a Joining Fetch naming none was
             // a REQUEST_ERROR this endpoint had to owe; draft-21 Section 9.11
-            // deleted the field, both structures and
-            // `INVALID_JOINING_REQUEST_ID` with them, so a FETCH now names a
+            // has no such field and no such structures, and Section 16.11.2
+            // does not assign `INVALID_JOINING_REQUEST_ID`, so a FETCH names a
             // track like a SUBSCRIBE and there is nothing about it to refuse
             // in advance.
             ControlMessage::Fetch(_) => {
@@ -3313,7 +3313,7 @@ impl Endpoint {
     /// inside it, then whether two filters share a key. A request with no Range
     /// Filter at all is not measured against the ceiling, so an endpoint that
     /// advertised nothing still takes ordinary requests — which is the whole of
-    /// the traffic today, since draft-21 is the first draft with these
+    /// the traffic today, since draft-19 is the first draft with these
     /// parameters.
     fn filter_verdict(&self, parameters: &[KeyValuePair]) -> Option<FilterRejection> {
         let filters = match range_filter::decode_all_moqt::<Moqt18>(parameters) {
@@ -3630,9 +3630,9 @@ impl Endpoint {
                 } else if let Some(sm) = self.fetches.get_mut(&id) {
                     // Draft-19 held one refusal of a FETCH to one code:
                     // INVALID_JOINING_REQUEST_ID, for a Joining Fetch naming no
-                    // live subscription. Draft-21 Section 9.11 deleted the
-                    // joining mechanism and Section 16.11.2 unassigned the code,
-                    // so every FETCH refusal is now the caller's choice.
+                    // live subscription. Draft-21 Section 9.11 has no
+                    // joining mechanism and Section 16.11.2 does not assign the
+                    // code, so every FETCH refusal is the caller's choice.
                     sm.on_fetch_error_sent()?;
                 } else if let Some(sm) = self.publishes.get_mut(&id) {
                     sm.on_publish_error_sent()?;
@@ -4906,8 +4906,8 @@ mod tests {
         assert_eq!(ep.goaway_uri(), Some(&b"https://elsewhere.example/moq"[..]));
     }
 
-    /// Draft-21 Section 9.11 deleted the `Fetch Type` field, both variant
-    /// structures and the Fetch Type registry, so a FETCH names a track the way
+    /// Draft-21 Section 9.11 has no `Fetch Type` field, no variant structures
+    /// and no Fetch Type registry, so a FETCH names a track the way
     /// a SUBSCRIBE does and the range travels in a parameter.
     ///
     /// Restoring draft-19's `+ 1` on the end object — which is what a port that

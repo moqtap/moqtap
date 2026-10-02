@@ -158,6 +158,8 @@ dispatch_enum! {
         Draft20 => crate::draft20::message::ControlMessage,
         #[cfg(feature = "draft21")]
         Draft21 => crate::draft21::message::ControlMessage,
+        #[cfg(feature = "draft22")]
+        Draft22 => crate::draft22::message::ControlMessage,
     }
     decode(decode);
     encode(encode -> Result<(), CodecError>);
@@ -188,7 +190,7 @@ impl AnyControlMessage {
         // where `match *self {}` is exhaustive. `ref` on each binding is the
         // price of saying it that way.
         //
-        // What that avoids is a `cfg(not(any(…)))` naming all fifteen features
+        // What that avoids is a `cfg(not(any(…)))` naming every draft feature
         // to gate a catch-all for the empty build. Such a list has to be
         // extended by hand for every new draft, and forgetting is silent in
         // exactly one configuration — the build compiling only the new draft,
@@ -275,6 +277,10 @@ impl AnyControlMessage {
             AnyControlMessage::Draft21(ref m) => {
                 matches!(m, crate::draft21::message::ControlMessage::Setup(_))
             }
+            #[cfg(feature = "draft22")]
+            AnyControlMessage::Draft22(ref m) => {
+                matches!(m, crate::draft22::message::ControlMessage::Setup(_))
+            }
         }
     }
 
@@ -331,6 +337,8 @@ impl AnyControlMessage {
             AnyControlMessage::Draft20(ref m) => crate::draft20::fields::message_fields(m),
             #[cfg(feature = "draft21")]
             AnyControlMessage::Draft21(ref m) => crate::draft21::fields::message_fields(m),
+            #[cfg(feature = "draft22")]
+            AnyControlMessage::Draft22(ref m) => crate::draft22::fields::message_fields(m),
         }
     }
 
@@ -350,7 +358,7 @@ impl AnyControlMessage {
         //
         // Not a `cfg`, for the reason the arms below are not one
         // either: the condition would be `any(feature = "draft07", …,
-        // feature = "draft21")`, one more hand-kept copy of the draft list, and
+        // feature = "draft22")`, one more hand-kept copy of the draft list, and
         // a draft added to the arms and forgotten in the `cfg` would delete the
         // macro out from under its own caller. The allow cannot be wrong about
         // anything, because a build with any draft at all invokes the macro.
@@ -392,6 +400,8 @@ impl AnyControlMessage {
             AnyControlMessage::Draft20(m) => named!(m),
             #[cfg(feature = "draft21")]
             AnyControlMessage::Draft21(m) => named!(m),
+            #[cfg(feature = "draft22")]
+            AnyControlMessage::Draft22(m) => named!(m),
             // The no-draft build, where the enum has no variants and no value
             // of it can exist. A refusal rather than an answer, because there
             // is no id and no name to invent for a message that cannot exist.
@@ -464,7 +474,7 @@ impl AnyControlMessage {
     /// guess wearing the same return type as a fact.
     ///
     /// Also `None` for a GROUP_ORDER value that is neither Ascending (0x1)
-    /// nor Descending (0x2), which drafts 15-21 make a session-closing
+    /// nor Descending (0x2), which drafts 15-22 make a session-closing
     /// PROTOCOL_VIOLATION and this crate's decoder refuses before building a
     /// message. Defensive, and deliberately not the Ascending default: an
     /// out-of-range value is not an omitted one.
@@ -475,7 +485,7 @@ impl AnyControlMessage {
     pub fn fetch_group_order(&self) -> Option<(u64, AnyFetchGroupOrder)> {
         /// GROUP_ORDER, Parameter Type 0x22 on every draft that has it.
         ///
-        /// Both of these go unused in a build compiling none of drafts 15-21,
+        /// Both of these go unused in a build compiling none of drafts 15-22,
         /// which is the honest report: no draft in such a build carries a
         /// fetch's Group Order as a parameter, so every arm that would consult
         /// them is gated out and what is left answers `None` outright.
@@ -487,7 +497,7 @@ impl AnyControlMessage {
             request_id: crate::varint::VarInt,
             parameters: &[crate::kvp::KeyValuePair],
         ) -> Option<(u64, AnyFetchGroupOrder)> {
-            // The first, because drafts 15-21 refuse a repeated parameter
+            // The first, because drafts 15-22 refuse a repeated parameter
             // before a message is built, so there is never a second.
             let order = match parameters.iter().find(|p| p.key.into_inner() == GROUP_ORDER) {
                 None => AnyFetchGroupOrder::Ascending,
@@ -535,6 +545,10 @@ impl AnyControlMessage {
             AnyControlMessage::Draft21(crate::draft21::message::ControlMessage::Fetch(ref f)) => {
                 fetch_group_order(f.request_id, &f.parameters)
             }
+            #[cfg(feature = "draft22")]
+            AnyControlMessage::Draft22(crate::draft22::message::ControlMessage::Fetch(ref f)) => {
+                fetch_group_order(f.request_id, &f.parameters)
+            }
             // Every message that is not a FETCH, and every FETCH on a draft
             // that does not settle the order by itself.
             //
@@ -575,6 +589,8 @@ impl AnyControlMessage {
             AnyControlMessage::Draft20(_) => None,
             #[cfg(feature = "draft21")]
             AnyControlMessage::Draft21(_) => None,
+            #[cfg(feature = "draft22")]
+            AnyControlMessage::Draft22(_) => None,
         }
     }
 }
@@ -615,6 +631,8 @@ dispatch_enum! {
         Draft20 => crate::draft20::data_stream::SubgroupHeader,
         #[cfg(feature = "draft21")]
         Draft21 => crate::draft21::data_stream::SubgroupHeader,
+        #[cfg(feature = "draft22")]
+        Draft22 => crate::draft22::data_stream::SubgroupHeader,
     }
     decode(decode);
     encode(encode -> ());
@@ -625,7 +643,7 @@ impl AnySubgroupHeader {
     /// field, for any enabled draft.
     ///
     /// Drafts 07-13 encode the stream type as a varint ahead of the header
-    /// body; drafts 14-21 fold it into the header itself. This entry point
+    /// body; drafts 14-22 fold it into the header itself. This entry point
     /// hides that difference: callers hand it the stream's first byte onwards
     /// and it consumes exactly the header, type field included.
     ///
@@ -695,6 +713,9 @@ impl AnySubgroupHeader {
             #[cfg(feature = "draft21")]
             DraftVersion::Draft21 => crate::draft21::data_stream::SubgroupHeader::decode(buf)
                 .map(AnySubgroupHeader::Draft21),
+            #[cfg(feature = "draft22")]
+            DraftVersion::Draft22 => crate::draft22::data_stream::SubgroupHeader::decode(buf)
+                .map(AnySubgroupHeader::Draft22),
             #[allow(unreachable_patterns)]
             _ => Err(CodecError::UnsupportedDraft(format!(
                 "draft {version:?} not enabled via feature flag"
@@ -731,7 +752,7 @@ impl AnySubgroupHeader {
             AnySubgroupHeader::Draft12(h) => h.encode_stream(buf),
             #[cfg(feature = "draft13")]
             AnySubgroupHeader::Draft13(h) => h.encode_stream(buf),
-            // Drafts 14-21 fold the stream type into the header, so their
+            // Drafts 14-22 fold the stream type into the header, so their
             // `encode` already writes it and `decode_stream` already reads
             // it back.
             #[cfg(feature = "draft14")]
@@ -750,6 +771,8 @@ impl AnySubgroupHeader {
             AnySubgroupHeader::Draft20(h) => h.encode(buf),
             #[cfg(feature = "draft21")]
             AnySubgroupHeader::Draft21(h) => h.encode(buf),
+            #[cfg(feature = "draft22")]
+            AnySubgroupHeader::Draft22(h) => h.encode(buf),
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnySubgroupHeader has no enabled variants"),
         }
@@ -804,7 +827,7 @@ impl AnySubgroupHeader {
                 crate::varint::VarInt::from_usize(h.stream_type as usize).encode(&mut body);
                 h.encode_checked(&mut body)?;
             }
-            // Drafts 14-21 fold the type into the header, so their
+            // Drafts 14-22 fold the type into the header, so their
             // `encode_checked` already writes it.
             #[cfg(feature = "draft14")]
             AnySubgroupHeader::Draft14(h) => h.encode_checked(&mut body)?,
@@ -822,6 +845,8 @@ impl AnySubgroupHeader {
             AnySubgroupHeader::Draft20(h) => h.encode_checked(&mut body)?,
             #[cfg(feature = "draft21")]
             AnySubgroupHeader::Draft21(h) => h.encode_checked(&mut body)?,
+            #[cfg(feature = "draft22")]
+            AnySubgroupHeader::Draft22(h) => h.encode_checked(&mut body)?,
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnySubgroupHeader has no enabled variants"),
         }
@@ -837,7 +862,7 @@ impl AnySubgroupHeader {
             Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
             Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
             Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-            Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
+            Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21", Draft22 @ "draft22",
         ] => |h| h.track_alias.into_inner(),
     }
 
@@ -849,7 +874,7 @@ impl AnySubgroupHeader {
             Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
             Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
             Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
-            Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
+            Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21", Draft22 @ "draft22",
         ] => |h| h.group_id.into_inner(),
     }
 
@@ -864,7 +889,7 @@ impl AnySubgroupHeader {
         ] => |h| Some(h.publisher_priority),
         [
             Draft15 @ "draft15", Draft16 @ "draft16", Draft17 @ "draft17",
-            Draft18 @ "draft18", Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
+            Draft18 @ "draft18", Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21", Draft22 @ "draft22",
         ] => |h| h.publisher_priority,
     }
 
@@ -876,7 +901,7 @@ impl AnySubgroupHeader {
         /// object's ID* stream, which **every draft from 11 on** defines — ten
         /// of the drafts, draft-15 included — and this codec never resolves.
         /// The second is a header whose type the draft does not assign at all:
-        /// drafts 17-21 mode 3, and the same fourth combination of the `0x06`
+        /// drafts 17-22 mode 3, and the same fourth combination of the `0x06`
         /// bits on drafts 15 and 16. In every one of them the codec stores a
         /// placeholder zero that a caller must not report.
         ///
@@ -943,7 +968,7 @@ impl AnySubgroupHeader {
         // read it, and that caller is the one this accessor exists to protect.
         // `Some(0)` would hand it subgroup zero for a stream no draft defines;
         // `None` says the header determines no Subgroup ID, which is true.
-        // Drafts 17-21 already answer `None` for their mode 3, so this is the
+        // Drafts 17-22 already answer `None` for their mode 3, so this is the
         // same rule stated once for all five.
         [Draft15 @ "draft15", Draft16 @ "draft16"] => |h| {
             // The unassigned combination has to be tested somewhere. With the
@@ -964,7 +989,7 @@ impl AnySubgroupHeader {
         },
         [
             Draft17 @ "draft17", Draft18 @ "draft18", Draft19 @ "draft19",
-            Draft20 @ "draft20", Draft21 @ "draft21",
+            Draft20 @ "draft20", Draft21 @ "draft21", Draft22 @ "draft22",
         ] => |h| {
             match h.subgroup_id_mode() {
                 0 => Some(0),
@@ -1027,13 +1052,13 @@ impl AnySubgroupHeader {
         },
         [
             Draft17 @ "draft17", Draft18 @ "draft18", Draft19 @ "draft19",
-            Draft20 @ "draft20", Draft21 @ "draft21",
+            Draft20 @ "draft20", Draft21 @ "draft21", Draft22 @ "draft22",
         ] => |h| { Some(h.subgroup_id_mode()) },
     }
 
     subgroup_header_accessor! {
         /// Whether every object on this stream writes a length-prefixed
-        /// extension block — the field drafts 17-21 renamed Properties.
+        /// extension block — the field drafts 17-22 renamed Properties.
         ///
         /// A property of the *stream*, not of any object on it. The header's
         /// type settles it once, and an object with nothing to put in the
@@ -1062,7 +1087,7 @@ impl AnySubgroupHeader {
         [Draft15 @ "draft15", Draft16 @ "draft16"] => |h| h.has_extensions(),
         [
             Draft17 @ "draft17", Draft18 @ "draft18", Draft19 @ "draft19",
-            Draft20 @ "draft20", Draft21 @ "draft21",
+            Draft20 @ "draft20", Draft21 @ "draft21", Draft22 @ "draft22",
         ] => |h| { h.has_properties() },
     }
 }
@@ -1085,10 +1110,10 @@ dispatch_enum! {
         Draft12 => crate::draft12::data_stream::ObjectHeader,
         #[cfg(feature = "draft13")]
         Draft13 => crate::draft13::data_stream::ObjectHeader,
-        // NOTE: drafts 14-21 have no standalone ObjectHeader — their
+        // NOTE: drafts 14-22 have no standalone ObjectHeader — their
         // subgroup objects are delta-encoded against the previous object
         // on the stream. Use [`AnySubgroupObjectReader`], which covers
-        // every draft 07-21 and also consumes object payloads.
+        // every draft 07-22 and also consumes object payloads.
     }
     decode(decode);
     encode(encode -> ());
@@ -1144,6 +1169,8 @@ dispatch_enum! {
         Draft20 => crate::draft20::data_stream::DatagramHeader,
         #[cfg(feature = "draft21")]
         Draft21 => crate::draft21::data_stream::DatagramHeader,
+        #[cfg(feature = "draft22")]
+        Draft22 => crate::draft22::data_stream::DatagramHeader,
     }
     decode(decode);
     encode(encode_checked -> Result<(), CodecError>);
@@ -1378,6 +1405,14 @@ impl AnyDatagramHeader {
                 publisher_priority: d.publisher_priority,
                 status: d.has_status().then(|| d.status().as_u64()),
             },
+            #[cfg(feature = "draft22")]
+            AnyDatagramHeader::Draft22(d) => AnyDatagramMeta {
+                track_alias: d.track_alias.into_inner(),
+                group_id: d.group_id.into_inner(),
+                object_id: d.object_id.into_inner(),
+                publisher_priority: d.publisher_priority,
+                status: d.has_status().then(|| d.status().as_u64()),
+            },
             _ => unreachable!("AnyDatagramHeader has no enabled variants"),
         }
     }
@@ -1423,7 +1458,7 @@ impl AnyDatagramHeader {
             AnyDatagramHeader::Draft15(d) => !d.is_status(),
             #[cfg(feature = "draft16")]
             AnyDatagramHeader::Draft16(d) => !d.is_status(),
-            // Drafts 17-21 answer the per-status question directly, which from 19
+            // Drafts 17-22 answer the per-status question directly, which from 19
             // is the registry column rather than the blanket rule.
             #[cfg(feature = "draft17")]
             AnyDatagramHeader::Draft17(d) => d.permits_payload(),
@@ -1435,6 +1470,8 @@ impl AnyDatagramHeader {
             AnyDatagramHeader::Draft20(d) => d.permits_payload(),
             #[cfg(feature = "draft21")]
             AnyDatagramHeader::Draft21(d) => d.permits_payload(),
+            #[cfg(feature = "draft22")]
+            AnyDatagramHeader::Draft22(d) => d.permits_payload(),
             _ => unreachable!("AnyDatagramHeader has no enabled variants"),
         }
     }
@@ -1533,6 +1570,8 @@ impl AnyDatagramHeader {
             AnyDatagramHeader::Draft20(d) => Some(d.properties_permitted()),
             #[cfg(feature = "draft21")]
             AnyDatagramHeader::Draft21(d) => Some(d.properties_permitted()),
+            #[cfg(feature = "draft22")]
+            AnyDatagramHeader::Draft22(d) => Some(d.properties_permitted()),
             _ => unreachable!("AnyDatagramHeader has no enabled variants"),
         }
     }
@@ -1575,6 +1614,8 @@ dispatch_enum! {
         Draft20 => crate::draft20::data_stream::FetchHeader,
         #[cfg(feature = "draft21")]
         Draft21 => crate::draft21::data_stream::FetchHeader,
+        #[cfg(feature = "draft22")]
+        Draft22 => crate::draft22::data_stream::FetchHeader,
     }
     decode(decode);
     encode(encode -> ());
@@ -1584,7 +1625,7 @@ impl AnyFetchHeader {
     /// The id of the request this fetch stream answers.
     ///
     /// Every draft puts it in the header and nothing else: drafts 07-10 call
-    /// it the Subscribe ID and drafts 11-21 the Request ID, and it names the
+    /// it the Subscribe ID and drafts 11-22 the Request ID, and it names the
     /// request the publisher is responding to either way. Draft-19 Section
     /// 11.4.4: "When a stream begins with FETCH_HEADER, all objects on the
     /// stream belong to the track requested in the Fetch message identified by
@@ -1627,6 +1668,8 @@ impl AnyFetchHeader {
             AnyFetchHeader::Draft20(h) => h.request_id.into_inner(),
             #[cfg(feature = "draft21")]
             AnyFetchHeader::Draft21(h) => h.request_id.into_inner(),
+            #[cfg(feature = "draft22")]
+            AnyFetchHeader::Draft22(h) => h.request_id.into_inner(),
             _ => unreachable!("AnyFetchHeader has no enabled variants"),
         }
     }
@@ -1653,7 +1696,7 @@ impl AnyFetchHeader {
             AnyFetchHeader::Draft12(h) => h.encode_stream(buf),
             #[cfg(feature = "draft13")]
             AnyFetchHeader::Draft13(h) => h.encode_stream(buf),
-            // Drafts 14-21 fold the stream type into the header, so their
+            // Drafts 14-22 fold the stream type into the header, so their
             // `encode` already writes it and `decode_stream` already reads
             // it back.
             #[cfg(feature = "draft14")]
@@ -1672,6 +1715,8 @@ impl AnyFetchHeader {
             AnyFetchHeader::Draft20(h) => h.encode(buf),
             #[cfg(feature = "draft21")]
             AnyFetchHeader::Draft21(h) => h.encode(buf),
+            #[cfg(feature = "draft22")]
+            AnyFetchHeader::Draft22(h) => h.encode(buf),
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnyFetchHeader has no enabled variants"),
         }
@@ -1733,6 +1778,10 @@ impl AnyFetchHeader {
             #[cfg(feature = "draft21")]
             DraftVersion::Draft21 => {
                 crate::draft21::data_stream::FetchHeader::decode(buf).map(AnyFetchHeader::Draft21)
+            }
+            #[cfg(feature = "draft22")]
+            DraftVersion::Draft22 => {
+                crate::draft22::data_stream::FetchHeader::decode(buf).map(AnyFetchHeader::Draft22)
             }
             #[allow(unreachable_patterns)]
             _ => Err(CodecError::UnsupportedDraft(format!(

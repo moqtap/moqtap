@@ -11,8 +11,8 @@
 //!
 //! # Why these run on the corpus
 //!
-//! The claim is that **one** call answers on fourteen shapes, and a fixture
-//! built here fourteen times is fourteen chances to build it in the shape the
+//! The claim is that **one** call answers on every draft's shape, and a fixture
+//! built here once per draft is one chance per draft to build it in the shape the
 //! code already has. The corpus's datagrams are bytes nothing in this crate
 //! produced, and each states its own decoded fields, so the comparison is
 //! against something written independently of this function.
@@ -44,7 +44,8 @@
     feature = "draft18",
     feature = "draft19",
     feature = "draft20",
-    feature = "draft21"
+    feature = "draft21",
+    feature = "draft22"
 ))]
 
 mod test_vectors;
@@ -86,6 +87,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft20,
     #[cfg(feature = "draft21")]
     DraftVersion::Draft21,
+    #[cfg(feature = "draft22")]
+    DraftVersion::Draft22,
 ];
 
 /// The drafts whose datagram may leave the Publisher Priority off the wire.
@@ -119,7 +122,7 @@ enum MissingCase {
 /// would turn the body above it into a vacuous pass. Under
 /// `--no-default-features --features draftNN` the total is **one draft's
 /// slice**, so a slice without the case fires the guard as though the codec
-/// were wrong. CI runs exactly that command in all fourteen cells, which is
+/// were wrong. CI runs exactly that command in every cell, which is
 /// where a thin slice shows up as a red cell rather than as a question nobody
 /// asked.
 ///
@@ -184,6 +187,7 @@ fn corpus_dir(draft: DraftVersion) -> &'static str {
         DraftVersion::Draft19 => "draft19",
         DraftVersion::Draft20 => "draft20",
         DraftVersion::Draft21 => "draft21",
+        DraftVersion::Draft22 => "draft22",
     }
 }
 
