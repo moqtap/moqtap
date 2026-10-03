@@ -2943,8 +2943,9 @@ impl Endpoint {
                 // this message, and Section 10.20.1 names it anyway: "To join
                 // Tracks initiated via the resulting PUBLISHes, the subscriber
                 // can specify a Location Filter and optionally include
-                // FILL_PARAMETERS". The codec's scope table takes the wider
-                // reading, so this records what arrives under it.
+                // FILL_PARAMETERS". The codec's scope table follows that
+                // sentence for this parameter, so this records what arrives
+                // under it.
                 self.note_fill_requested(id, &m.parameters);
                 let mut sm = SubscribeNamespaceStateMachine::new();
                 sm.on_subscribe_namespace_received()?;

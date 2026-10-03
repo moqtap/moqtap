@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-03
+
+### Fixed
+
+- Drafts 20, 21 and 22: SUBSCRIBE_TRACKS no longer accepts OBJECT_DELIVERY_TIMEOUT (0x02), RENDEZVOUS_TIMEOUT (0x04), SUBGROUP_DELIVERY_TIMEOUT (0x06), SUBSCRIBER_PRIORITY (0x20) or NEW_GROUP_REQUEST (0x32). None of their definitions names SUBSCRIBE_TRACKS, so each is now `ParameterOutOfScope` on decode and encode. LOCATION_FILTER (0x21) and FILL_PARAMETERS (0x23) are still accepted there, because the SUBSCRIBE_TRACKS section tells the subscriber to send them. Draft-19 and earlier are unchanged.
+
 ## [0.8.0] - 2026-10-02
 
 ### Changed

@@ -1541,10 +1541,24 @@ fn check_discriminators(message: &ControlMessage) -> Result<(), CodecError> {
 ///   multiple times in a FETCH, SUBSCRIBE, SUBSCRIBE_TRACKS, or REQUEST_UPDATE
 ///   (on a subscription, from the subscriber only) message". Draft-19 listed
 ///   PUBLISH_OK in that second sentence and draft-20 removed it.
-/// * SUBSCRIBE_TRACKS inherits SUBSCRIBE's whole set. Section 9.18.1 — the
-///   renumbering of draft-19's 10.19.1 — keeps the sentence verbatim: "Any
-///   Parameter that can be specified on a Subscription (ie: in SUBSCRIBE) is
-///   valid in SUBSCRIBE_TRACKS, unless otherwise specified."
+/// * **SUBSCRIBE_TRACKS takes the parameters whose own definitions name it,
+///   plus `LOCATION_FILTER` (0x21) and `FILL_PARAMETERS` (0x23), and the two
+///   extra are a decision this codec makes.** Section 9.18.1: "Any Parameter
+///   that can be specified on a Subscription (ie: in SUBSCRIBE) is valid in
+///   SUBSCRIBE_TRACKS, unless otherwise specified." The definitions are that
+///   "otherwise": `AUTHORIZATION_TOKEN`, `FORWARD`, `GROUP_ORDER`,
+///   `INCLUDE_PROPERTIES` and the Range Filters name SUBSCRIBE_TRACKS, and
+///   `OBJECT_DELIVERY_TIMEOUT` (0x02), `RENDEZVOUS_TIMEOUT` (0x04),
+///   `SUBGROUP_DELIVERY_TIMEOUT` (0x06), `SUBSCRIBER_PRIORITY` (0x20) and
+///   `NEW_GROUP_REQUEST` (0x32) leave it out, so those five are refused there
+///   under Section 9.20.1. The same section then closes: "To join Tracks
+///   initiated via the resulting PUBLISHes, the subscriber can specify a
+///   Location Filter and optionally include FILL_PARAMETERS" — two parameters
+///   whose definitions also leave this message out. On those two alone the
+///   section and the definitions with Section 9.20.1's rule conflict, from
+///   draft-20 on. This codec follows the section for them: it is the one
+///   sentence telling a subscriber what to put in this message, and a scope
+///   miss ends the session.
 /// * **`PUBLISH_OK` is gone from six definitions.** `OBJECT_DELIVERY_TIMEOUT`
 ///   (0x02), `SUBGROUP_DELIVERY_TIMEOUT` (0x06), `FORWARD` (0x10),
 ///   `SUBSCRIBER_PRIORITY` (0x20), `LOCATION_FILTER` (0x21) and
@@ -1576,16 +1590,13 @@ fn check_discriminators(message: &ControlMessage) -> Result<(), CodecError> {
 /// which is why the final arm carries rather than refuses.
 pub fn parameter_in_scope(key: u64, message: MessageType) -> bool {
     use MessageType as M;
-    // Section 9.18.1 makes SUBSCRIBE_TRACKS a superset of SUBSCRIBE, so every
-    // arm admitting one admits the other. The arms spell both out rather than
-    // wrapping the call, so each still reads against its own sentence.
+    // SUBSCRIBE_TRACKS appears only in the arms whose definitions name it, and
+    // in 0x21 and 0x23, which Section 9.18.1 names; see the doc comment above.
     match key {
         // Section 9.20.5 OBJECT_DELIVERY_TIMEOUT: "It MAY appear in a
         // SUBSCRIBE, PUBLISH, or REQUEST_UPDATE message." Draft-19 said
         // PUBLISH_OK where this says PUBLISH.
-        0x02 => {
-            matches!(message, M::Subscribe | M::Publish | M::RequestUpdate | M::SubscribeTracks)
-        }
+        0x02 => matches!(message, M::Subscribe | M::Publish | M::RequestUpdate),
         // Section 9.20.3 AUTHORIZATION TOKEN: "It MAY appear in a PUBLISH,
         // SUBSCRIBE, REQUEST_UPDATE, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS,
         // PUBLISH_NAMESPACE, TRACK_STATUS or FETCH message." Unchanged from
@@ -1606,13 +1617,11 @@ pub fn parameter_in_scope(key: u64, message: MessageType) -> bool {
         ),
         // Section 9.20.7 RENDEZVOUS TIMEOUT: it "MAY appear in a SUBSCRIBE
         // message".
-        0x04 => matches!(message, M::Subscribe | M::SubscribeTracks),
+        0x04 => matches!(message, M::Subscribe),
         // Section 9.20.4 SUBGROUP_DELIVERY_TIMEOUT: "It MAY appear in a
         // SUBSCRIBE, PUBLISH, or REQUEST_UPDATE message." Draft-19 said
         // PUBLISH_OK where this says PUBLISH.
-        0x06 => {
-            matches!(message, M::Subscribe | M::Publish | M::RequestUpdate | M::SubscribeTracks)
-        }
+        0x06 => matches!(message, M::Subscribe | M::Publish | M::RequestUpdate),
         // Section 9.20.17 EXPIRES: "It MAY appear in SUBSCRIBE_OK, PUBLISH,
         // PUBLISH_OK, SUBSCRIBE_NAMESPACE_OK, SUBSCRIBE_TRACKS_OK,
         // PUBLISH_NAMESPACE_OK, or REQUEST_UPDATE_OK." Five of those seven are
@@ -1647,10 +1656,7 @@ pub fn parameter_in_scope(key: u64, message: MessageType) -> bool {
         // Section 9.20.8 SUBSCRIBER PRIORITY: "It MAY appear in a SUBSCRIBE,
         // PUBLISH, FETCH, or REQUEST_UPDATE (for a subscription or FETCH)."
         // Draft-19 said PUBLISH_OK where this says PUBLISH.
-        0x20 => matches!(
-            message,
-            M::Subscribe | M::Publish | M::Fetch | M::RequestUpdate | M::SubscribeTracks
-        ),
+        0x20 => matches!(message, M::Subscribe | M::Publish | M::Fetch | M::RequestUpdate),
         // Section 9.20.10 LOCATION FILTER: "The LOCATION_FILTER parameter
         // (Parameter Type 0x21) MAY appear in a FETCH, SUBSCRIBE, PUBLISH,
         // REQUEST_UPDATE (for a subscription) or PUBLISH_STATE_NOTIFY
@@ -1659,7 +1665,8 @@ pub fn parameter_in_scope(key: u64, message: MessageType) -> bool {
         // `Length` field is still in the structure and the wire is unchanged.
         // Draft-19 admitted SUBSCRIBE, PUBLISH_OK and REQUEST_UPDATE
         // and no FETCH, because a draft-19 FETCH carried its range in the
-        // message instead.
+        // message instead. SUBSCRIBE_TRACKS is admitted on top of that list by
+        // Section 9.18.1's closing sentence, as for FILL_PARAMETERS below.
         0x21 => matches!(
             message,
             M::Fetch
@@ -1676,17 +1683,10 @@ pub fn parameter_in_scope(key: u64, message: MessageType) -> bool {
         // Section 9.20.16 FILL_PARAMETERS, new in draft-20: it "MAY appear in a
         // SUBSCRIBE or REQUEST_UPDATE (for a subscription) message."
         //
-        // SUBSCRIBE_TRACKS is admitted on top of those two, and the draft says
-        // it twice over: Section 9.18.1's "Any Parameter that can be specified
-        // on a Subscription (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS,
-        // unless otherwise specified", and the same section's closing sentence,
-        // "To join Tracks initiated via the resulting PUBLISHes, the subscriber
-        // can specify a Location Filter and optionally include
-        // FILL_PARAMETERS". Section 9.20.16's own list is the "unless otherwise
-        // specified" clause read strictly, and the two readings disagree. This
-        // takes the wider one: a rule that ends sessions should be wrong in the
-        // direction of carrying the parameter, and Section 9.18.1 names this
-        // message outright.
+        // SUBSCRIBE_TRACKS is admitted on top of those two by Section 9.18.1's
+        // closing sentence, which tells the subscriber it "can specify a
+        // Location Filter and optionally include FILL_PARAMETERS" there; see
+        // the doc comment above for why that sentence wins over this list.
         //
         // FETCH is refused, and that is the case the corpus pins: a fill fetch
         // stream is something a subscription opens, and a FETCH already is one.
@@ -1694,8 +1694,8 @@ pub fn parameter_in_scope(key: u64, message: MessageType) -> bool {
         // Section 3.3.2: "All other filter parameters MAY appear multiple times
         // in a FETCH, SUBSCRIBE, SUBSCRIBE_TRACKS, or REQUEST_UPDATE (on a
         // subscription, from the subscriber only) message." SUBGROUP_FILTER
-        // (Section 9.20.11), OBJECTID_FILTER (10.2.11), PRIORITY_FILTER
-        // (10.2.12) and OBJECT_PROPERTY_FILTER (10.2.13) are those four.
+        // (Section 9.20.11), OBJECTID_FILTER (9.20.12), PRIORITY_FILTER
+        // (9.20.13) and OBJECT_PROPERTY_FILTER (9.20.14) are those four.
         // Draft-19's sentence also listed PUBLISH_OK.
         0x25..=0x28 => {
             matches!(message, M::Fetch | M::Subscribe | M::SubscribeTracks | M::RequestUpdate)
@@ -1708,7 +1708,7 @@ pub fn parameter_in_scope(key: u64, message: MessageType) -> bool {
         0x29 => matches!(message, M::SubscribeTracks | M::RequestUpdate),
         // Section 9.20.20 NEW GROUP REQUEST: "It MAY appear in SUBSCRIBE or
         // REQUEST_UPDATE for a subscription." Draft-19 also listed PUBLISH_OK.
-        0x32 => matches!(message, M::Subscribe | M::RequestUpdate | M::SubscribeTracks),
+        0x32 => matches!(message, M::Subscribe | M::RequestUpdate),
         // Section 9.20.21 TRACK_NAMESPACE_PREFIX: "It MAY appear in
         // REQUEST_UPDATE for a SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS
         // request." The two named there are the request being updated, not two

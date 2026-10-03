@@ -766,8 +766,8 @@ fn d22_every_committed_vector_is_run() {
     );
     assert_eq!(
         on_disk_count,
-        335,
-        "the committed draft-22 corpus is 335 vectors across 25 files; it now has \
+        342,
+        "the committed draft-22 corpus is 342 vectors across 25 files; it now has \
          {on_disk_count} across {}",
         on_disk.len()
     );

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-03
+
+### Changed
+
+- Requires `moqtap-codec` 0.8.1, whose SUBSCRIBE_TRACKS scope on drafts 20, 21 and 22 accepts LOCATION_FILTER (0x21) and FILL_PARAMETERS (0x23) and refuses the other SUBSCRIBE-only parameters. The comment on the draft-20, draft-21 and draft-22 endpoints' SUBSCRIBE_TRACKS handling says so; no client code or behavior of its own changed.
+
 ## [0.8.0] - 2026-10-02
 
 ### Changed

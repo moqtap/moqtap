@@ -100,8 +100,9 @@
 //!   [`message::decode_fill_parameters`]
 //! - the `Type Delta` chain restarts inside `FILL_PARAMETERS` and the outer
 //!   chain is unaffected — [`message::decode_fill_parameters`]
-//! - SUBSCRIBE_TRACKS admits every parameter SUBSCRIBE does, as Section 3.6.2
-//!   says and Section 9.18's own list does not — [`message::parameter_in_scope`]
+//! - SUBSCRIBE_TRACKS admits `LOCATION_FILTER` and `FILL_PARAMETERS`, as
+//!   Section 3.6.2 says and Section 9.18's list and their own definitions do
+//!   not — [`message::parameter_in_scope`]
 //! - a non-minimally encoded `Type Flags` is accepted on receive and never
 //!   emitted — [`data_stream::SubgroupHeader::decode`](crate::draft22::data_stream::SubgroupHeader::decode) and
 //!   [`data_stream::DatagramHeader::decode`](crate::draft22::data_stream::DatagramHeader::decode)

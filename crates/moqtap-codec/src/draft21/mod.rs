@@ -95,6 +95,9 @@
 //!   [`message::publish_done_codes::STREAM_COUNT_UNKNOWN`]
 //! - `PUBLISH_STATE_NOTIFY`'s parameter allow-list is treated as closed —
 //!   [`message::parameter_in_scope`]
+//! - SUBSCRIBE_TRACKS admits `LOCATION_FILTER` and `FILL_PARAMETERS`, as
+//!   Section 9.18.1 says and their own definitions do not —
+//!   [`message::parameter_in_scope`]
 //! - `Object Payload Length` is present on an End-of-Range marker record,
 //!   encoded as 0, and the ordinary delta arithmetic applies to the marker's
 //!   two fields — [`data_stream::FetchObjectHeader`]

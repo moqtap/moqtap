@@ -723,8 +723,14 @@ mod draft20 {
     /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
 
+    /// LOCATION_FILTER, carried in a SUBSCRIBE_TRACKS by this codec's decision.
+    const LOCATION_FILTER: u64 = 0x21;
+    /// FILL_PARAMETERS, carried in a SUBSCRIBE_TRACKS by this codec's decision.
+    const FILL_PARAMETERS: u64 = 0x23;
+
     const SUBSCRIBE_TYPE: u8 = 0x03;
     const FETCH_OK_TYPE: u8 = 0x18;
+    const SUBSCRIBE_TRACKS_TYPE: u64 = 0x51;
 
     fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
         ControlMessage::Subscribe(Subscribe {
@@ -818,23 +824,63 @@ mod draft20 {
         );
     }
 
-    /// Section 10.20.1: "Any Parameter that can be specified on a Subscription
-    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
-    /// specified."
+    /// SUBSCRIBER_PRIORITY, OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS TIMEOUT,
+    /// SUBGROUP_DELIVERY_TIMEOUT and NEW GROUP REQUEST name SUBSCRIBE and not
+    /// SUBSCRIBE_TRACKS, so Section 10.2.1 refuses each of them there.
     ///
-    /// RENDEZVOUS TIMEOUT names SUBSCRIBE and nothing else, and arrives in a
-    /// SUBSCRIBE_TRACKS unrefused because of that sentence alone. Draft-18 has no
-    /// such sentence and refuses the same parameter in the same message, which is
-    /// what its `subscribe_tracks_does_not_inherit_a_subscribes_parameters`
-    /// asserts.
+    /// Section 10.20.1's "Any Parameter that can be specified on a Subscription
+    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
+    /// specified" does not carry them: the definitions are the "otherwise". Each
+    /// parameter is first shown carried in a SUBSCRIBE, so the refusal is the
+    /// message's and not the parameter's.
     #[test]
-    fn subscribe_tracks_inherits_a_subscribes_parameters() {
-        let message = subscribe_tracks(vec![varint_parameter(RENDEZVOUS_TIMEOUT, 30)]);
-        let frame = encoded(&message);
+    fn subscribe_tracks_refuses_a_subscribe_only_parameter() {
+        for key in [OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS_TIMEOUT, 0x06, 0x20, 0x32] {
+            let message = subscribe(vec![varint_parameter(key, 30)]);
+            let frame = encoded(&message);
+            let decoded = ControlMessage::decode(&mut &frame[..])
+                .expect("the parameter's own definition names SUBSCRIBE");
+            assert_eq!(decoded, message);
 
-        let decoded = ControlMessage::decode(&mut &frame[..])
-            .expect("Section 10.20.1 extends SUBSCRIBE's parameters to SUBSCRIBE_TRACKS");
-        assert_eq!(decoded, message);
+            let carried =
+                encoded(&subscribe_tracks(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
+            let frame = retyped(carried, UNDEFINED_PARAMETER as u8, key as u8);
+            let refusal =
+                CodecError::ParameterOutOfScope { key, message_type: SUBSCRIBE_TRACKS_TYPE };
+            assert_eq!(ControlMessage::decode(&mut &frame[..]), Err(refusal.clone()), "{key:#x}");
+
+            let mut out = Vec::new();
+            let err = subscribe_tracks(vec![varint_parameter(key, 30)])
+                .encode(&mut out)
+                .expect_err("the encoder refuses what the decoder refuses");
+            assert_eq!(err, refusal, "{key:#x}");
+        }
+    }
+
+    /// LOCATION_FILTER and FILL_PARAMETERS are carried in a SUBSCRIBE_TRACKS,
+    /// together and apart, although neither definition names it.
+    ///
+    /// Section 10.20.1: "To join Tracks initiated via the resulting PUBLISHes,
+    /// the subscriber can specify a Location Filter and optionally include
+    /// FILL_PARAMETERS". This codec follows that sentence for these two and
+    /// for no other parameter. The filter is the two-field `{0, 0}` Next
+    /// Object form, and the FILL_PARAMETERS block is empty.
+    #[test]
+    fn subscribe_tracks_carries_a_location_filter_and_fill_parameters() {
+        for parameters in [
+            vec![bytes_parameter(LOCATION_FILTER, &[0x00, 0x00])],
+            vec![bytes_parameter(FILL_PARAMETERS, &[0x00])],
+            vec![
+                bytes_parameter(LOCATION_FILTER, &[0x00, 0x00]),
+                bytes_parameter(FILL_PARAMETERS, &[0x00]),
+            ],
+        ] {
+            let message = subscribe_tracks(parameters);
+            let frame = encoded(&message);
+            let decoded = ControlMessage::decode(&mut &frame[..])
+                .expect("Section 10.20.1 names both parameters in SUBSCRIBE_TRACKS");
+            assert_eq!(decoded, message);
+        }
     }
 
     /// The one Range Filter a SUBSCRIBE may not carry.
@@ -895,8 +941,14 @@ mod draft21 {
     /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
 
+    /// LOCATION_FILTER, carried in a SUBSCRIBE_TRACKS by this codec's decision.
+    const LOCATION_FILTER: u64 = 0x21;
+    /// FILL_PARAMETERS, carried in a SUBSCRIBE_TRACKS by this codec's decision.
+    const FILL_PARAMETERS: u64 = 0x23;
+
     const SUBSCRIBE_TYPE: u8 = 0x03;
     const FETCH_OK_TYPE: u8 = 0x18;
+    const SUBSCRIBE_TRACKS_TYPE: u64 = 0x51;
 
     fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
         ControlMessage::Subscribe(Subscribe {
@@ -990,23 +1042,63 @@ mod draft21 {
         );
     }
 
-    /// Section 9.18.1: "Any Parameter that can be specified on a Subscription
-    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
-    /// specified."
+    /// SUBSCRIBER_PRIORITY, OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS TIMEOUT,
+    /// SUBGROUP_DELIVERY_TIMEOUT and NEW GROUP REQUEST name SUBSCRIBE and not
+    /// SUBSCRIBE_TRACKS, so Section 9.20.1 refuses each of them there.
     ///
-    /// RENDEZVOUS TIMEOUT names SUBSCRIBE and nothing else, and arrives in a
-    /// SUBSCRIBE_TRACKS unrefused because of that sentence alone. Draft-18 has no
-    /// such sentence and refuses the same parameter in the same message, which is
-    /// what its `subscribe_tracks_does_not_inherit_a_subscribes_parameters`
-    /// asserts.
+    /// Section 9.18.1's "Any Parameter that can be specified on a Subscription
+    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
+    /// specified" does not carry them: the definitions are the "otherwise". Each
+    /// parameter is first shown carried in a SUBSCRIBE, so the refusal is the
+    /// message's and not the parameter's.
     #[test]
-    fn subscribe_tracks_inherits_a_subscribes_parameters() {
-        let message = subscribe_tracks(vec![varint_parameter(RENDEZVOUS_TIMEOUT, 30)]);
-        let frame = encoded(&message);
+    fn subscribe_tracks_refuses_a_subscribe_only_parameter() {
+        for key in [OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS_TIMEOUT, 0x06, 0x20, 0x32] {
+            let message = subscribe(vec![varint_parameter(key, 30)]);
+            let frame = encoded(&message);
+            let decoded = ControlMessage::decode(&mut &frame[..])
+                .expect("the parameter's own definition names SUBSCRIBE");
+            assert_eq!(decoded, message);
 
-        let decoded = ControlMessage::decode(&mut &frame[..])
-            .expect("Section 9.18.1 extends SUBSCRIBE's parameters to SUBSCRIBE_TRACKS");
-        assert_eq!(decoded, message);
+            let carried =
+                encoded(&subscribe_tracks(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
+            let frame = retyped(carried, UNDEFINED_PARAMETER as u8, key as u8);
+            let refusal =
+                CodecError::ParameterOutOfScope { key, message_type: SUBSCRIBE_TRACKS_TYPE };
+            assert_eq!(ControlMessage::decode(&mut &frame[..]), Err(refusal.clone()), "{key:#x}");
+
+            let mut out = Vec::new();
+            let err = subscribe_tracks(vec![varint_parameter(key, 30)])
+                .encode(&mut out)
+                .expect_err("the encoder refuses what the decoder refuses");
+            assert_eq!(err, refusal, "{key:#x}");
+        }
+    }
+
+    /// LOCATION_FILTER and FILL_PARAMETERS are carried in a SUBSCRIBE_TRACKS,
+    /// together and apart, although neither definition names it.
+    ///
+    /// Section 9.18.1: "To join Tracks initiated via the resulting PUBLISHes,
+    /// the subscriber can specify a Location Filter and optionally include
+    /// FILL_PARAMETERS". This codec follows that sentence for these two and
+    /// for no other parameter. The filter is the two-field `{0, 0}` Next
+    /// Object form, and the FILL_PARAMETERS block is empty.
+    #[test]
+    fn subscribe_tracks_carries_a_location_filter_and_fill_parameters() {
+        for parameters in [
+            vec![bytes_parameter(LOCATION_FILTER, &[0x00, 0x00])],
+            vec![bytes_parameter(FILL_PARAMETERS, &[0x00])],
+            vec![
+                bytes_parameter(LOCATION_FILTER, &[0x00, 0x00]),
+                bytes_parameter(FILL_PARAMETERS, &[0x00]),
+            ],
+        ] {
+            let message = subscribe_tracks(parameters);
+            let frame = encoded(&message);
+            let decoded = ControlMessage::decode(&mut &frame[..])
+                .expect("Section 9.18.1 names both parameters in SUBSCRIBE_TRACKS");
+            assert_eq!(decoded, message);
+        }
     }
 
     /// The one Range Filter a SUBSCRIBE may not carry.
@@ -1068,8 +1160,14 @@ mod draft22 {
     /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
 
+    /// LOCATION_FILTER, carried in a SUBSCRIBE_TRACKS by this codec's decision.
+    const LOCATION_FILTER: u64 = 0x21;
+    /// FILL_PARAMETERS, carried in a SUBSCRIBE_TRACKS by this codec's decision.
+    const FILL_PARAMETERS: u64 = 0x23;
+
     const SUBSCRIBE_TYPE: u8 = 0x03;
     const FETCH_OK_TYPE: u8 = 0x18;
+    const SUBSCRIBE_TRACKS_TYPE: u64 = 0x51;
 
     fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
         ControlMessage::Subscribe(Subscribe {
@@ -1163,23 +1261,63 @@ mod draft22 {
         );
     }
 
-    /// Section 3.6.2: "Any Parameter that can be specified on a Subscription
-    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
-    /// specified."
+    /// SUBSCRIBER_PRIORITY, OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS TIMEOUT,
+    /// SUBGROUP_DELIVERY_TIMEOUT and NEW GROUP REQUEST name SUBSCRIBE and not
+    /// SUBSCRIBE_TRACKS, so Section 9.20.1 refuses each of them there.
     ///
-    /// RENDEZVOUS TIMEOUT names SUBSCRIBE and nothing else, and arrives in a
-    /// SUBSCRIBE_TRACKS unrefused because of that sentence alone. Draft-18 has no
-    /// such sentence and refuses the same parameter in the same message, which is
-    /// what its `subscribe_tracks_does_not_inherit_a_subscribes_parameters`
-    /// asserts.
+    /// Section 3.6.2's "Any Parameter that can be specified on a Subscription
+    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
+    /// specified" does not carry them: the definitions are the "otherwise". Each
+    /// parameter is first shown carried in a SUBSCRIBE, so the refusal is the
+    /// message's and not the parameter's.
     #[test]
-    fn subscribe_tracks_inherits_a_subscribes_parameters() {
-        let message = subscribe_tracks(vec![varint_parameter(RENDEZVOUS_TIMEOUT, 30)]);
-        let frame = encoded(&message);
+    fn subscribe_tracks_refuses_a_subscribe_only_parameter() {
+        for key in [OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS_TIMEOUT, 0x06, 0x20, 0x32] {
+            let message = subscribe(vec![varint_parameter(key, 30)]);
+            let frame = encoded(&message);
+            let decoded = ControlMessage::decode(&mut &frame[..])
+                .expect("the parameter's own definition names SUBSCRIBE");
+            assert_eq!(decoded, message);
 
-        let decoded = ControlMessage::decode(&mut &frame[..])
-            .expect("Section 3.6.2 extends SUBSCRIBE's parameters to SUBSCRIBE_TRACKS");
-        assert_eq!(decoded, message);
+            let carried =
+                encoded(&subscribe_tracks(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
+            let frame = retyped(carried, UNDEFINED_PARAMETER as u8, key as u8);
+            let refusal =
+                CodecError::ParameterOutOfScope { key, message_type: SUBSCRIBE_TRACKS_TYPE };
+            assert_eq!(ControlMessage::decode(&mut &frame[..]), Err(refusal.clone()), "{key:#x}");
+
+            let mut out = Vec::new();
+            let err = subscribe_tracks(vec![varint_parameter(key, 30)])
+                .encode(&mut out)
+                .expect_err("the encoder refuses what the decoder refuses");
+            assert_eq!(err, refusal, "{key:#x}");
+        }
+    }
+
+    /// LOCATION_FILTER and FILL_PARAMETERS are carried in a SUBSCRIBE_TRACKS,
+    /// together and apart, although Section 9.18's list leaves both out.
+    ///
+    /// Section 3.6.2: "To join Tracks initiated via the resulting PUBLISHes,
+    /// the subscriber can specify a Location Filter and optionally include
+    /// FILL_PARAMETERS". This codec follows that sentence for these two and
+    /// for no other parameter. The filter is filter type 0x05, Next Object,
+    /// and the FILL_PARAMETERS block is empty.
+    #[test]
+    fn subscribe_tracks_carries_a_location_filter_and_fill_parameters() {
+        for parameters in [
+            vec![bytes_parameter(LOCATION_FILTER, &[0x05])],
+            vec![bytes_parameter(FILL_PARAMETERS, &[0x00])],
+            vec![
+                bytes_parameter(LOCATION_FILTER, &[0x05]),
+                bytes_parameter(FILL_PARAMETERS, &[0x00]),
+            ],
+        ] {
+            let message = subscribe_tracks(parameters);
+            let frame = encoded(&message);
+            let decoded = ControlMessage::decode(&mut &frame[..])
+                .expect("Section 3.6.2 names both parameters in SUBSCRIBE_TRACKS");
+            assert_eq!(decoded, message);
+        }
     }
 
     /// The one Range Filter a SUBSCRIBE may not carry.
