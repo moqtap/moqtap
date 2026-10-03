@@ -1910,34 +1910,41 @@ impl SessionCloser {
         Self { inner: Arc::new(CloserInner { request: OnceLock::new(), cancel }) }
     }
 
-    /// Record a close request and cancel the session.
+    /// Record a hook's close request. The session keeps running until
+    /// [`Self::cancel`].
     ///
     /// The first request wins and returns `true`. A later one changes
     /// nothing and returns `false` — refuse it with
     /// [`Refusal::SessionAlreadyClosing`](crate::capability::Refusal::SessionAlreadyClosing)
     /// rather than letting the second reason overwrite the first.
+    ///
+    /// Recording and cancelling are two calls so that `exec::execute` can
+    /// report the close between them. Cancelling wakes every task in the
+    /// session, and their teardown is reported from other worker threads: a
+    /// stream-end decision on each stream the close cuts, a
+    /// `ControlStreamTruncated`. Cancelling as it records would let those
+    /// reports reach the observer ahead of the `ActionApplied` that caused
+    /// them whenever the deciding thread is descheduled in between.
     pub(crate) fn request(&self, code: u32, reason: Bytes) -> bool {
-        let won = self.inner.request.set((code, reason, CloseOrigin::Hook)).is_ok();
-        // Cancel unconditionally: a losing request still arrived after a
-        // winning one, so the session is already on its way down and this
-        // is idempotent.
+        self.inner.request.set((code, reason, CloseOrigin::Hook)).is_ok()
+    }
+
+    /// End the session: cancel its token. Idempotent.
+    pub(crate) fn cancel(&self) {
         self.inner.cancel.cancel();
-        won
     }
 
     /// Record a close request **without** cancelling the session.
     ///
     /// The first request wins and returns `true`, exactly as
-    /// [`Self::request`] does; the only difference is that the session
-    /// keeps running afterwards.
+    /// [`Self::request`] does; the only difference is the origin it is
+    /// recorded under.
     ///
-    /// That difference is the whole reason this exists. A control-plane
-    /// close has two steps — fix the code and reason, then give the egress
-    /// queues a bounded window to flush — and [`Self::request`] cannot
-    /// express the first without the second, because it cancels as it
-    /// records. A caller that used it would end the session before the
-    /// drain it just asked for had begun, and the drain window would be
-    /// unobservable.
+    /// A control-plane close has two steps — fix the code and reason, then
+    /// give the egress queues a bounded window to flush — so its caller
+    /// cancels only after the drain. A cancel at this point would end the
+    /// session before the drain it just asked for had begun, and the drain
+    /// window would be unobservable.
     ///
     /// Nothing else changes: `run_with_transport` still reads
     /// [`Self::close_args`] at teardown, so a session recorded this way
@@ -2894,17 +2901,21 @@ mod tests {
     async fn the_honouring_drain_writes_in_order_at_release_time() {
         let (mut q, counters) = queue();
         let now = Instant::now();
-        q.push(Pending::bytes(Bytes::from_static(b"0"), now + Duration::from_millis(30)));
+        let head_due = now + Duration::from_millis(30);
+        q.push(Pending::bytes(Bytes::from_static(b"0"), head_due));
         q.push(Pending::bytes(Bytes::from_static(b"1"), now));
         q.push(Pending::bytes(Bytes::from_static(b"2"), now));
         let cancel = CancellationToken::new();
         let mut sink = RecordingSink::default();
-        let started = Instant::now();
         let outcome = drain_honouring_release_times(&mut q, &mut sink, &cancel, no_shape_reports)
             .await
             .expect("no write failed");
         assert_eq!(outcome, DrainOutcome::Complete);
-        assert!(started.elapsed() >= Duration::from_millis(30), "release times were honoured");
+        // Measured against the head's own deadline, not a fresh clock read
+        // taken after the pushes: the drain promises to write nothing before
+        // `head_due`, and time the test thread spends preempted between
+        // `now` and a later read is not time the drain owes.
+        assert!(Instant::now() >= head_due, "release times were honoured");
         assert_eq!(sink.written(), Bytes::from_static(b"012"));
         assert_eq!(counters.snapshot().release_errors.count, 0, "drains are never release samples");
         assert_eq!(
@@ -3172,6 +3183,8 @@ mod tests {
         );
 
         assert!(closer.request(3, Bytes::from_static(b"protocol violation")));
+        assert!(!cancel.is_cancelled(), "recording a close does not yet end the session");
+        closer.cancel();
         assert!(cancel.is_cancelled());
         assert!(closer.is_closing());
         assert!(!closer.request(1, Bytes::from_static(b"too late")));
@@ -3344,10 +3357,11 @@ mod tests {
 
     /// A close recorded on the closer does **not** end the session.
     ///
-    /// `request` cancels as it records, which is right for a hook: the hook
-    /// asked for the session to end. A control-plane close has to fix the
-    /// pair first and let the session keep running through its drain
-    /// window, and it would have no window at all if recording cancelled.
+    /// A hook's close is cancelled by `exec::execute` the moment it has
+    /// been reported, because the hook asked for the session to end. A
+    /// control-plane close has to fix the pair first and let the session
+    /// keep running through its drain window, and it would have no window
+    /// at all if recording cancelled.
     ///
     /// It also checks who the close is *reported as*.
     /// `run_with_transport` turns the recorded triple into the prose on
@@ -3381,7 +3395,7 @@ mod tests {
         assert!(!closer.record(9, Bytes::from_static(b"second")));
         assert!(!closer.request(9, Bytes::from_static(b"second")));
         assert_eq!(closer.close_args(), (7, Bytes::from_static(b"asked")));
-        assert!(cancel.is_cancelled(), "…and `request` still cancels, losing or not");
+        assert!(!cancel.is_cancelled(), "neither recording call ends the session");
 
         // The losing `request` above is a hook's, and it lost. The origin
         // has to lose with it: a session whose close was recorded by the

@@ -233,9 +233,9 @@ impl ProxyHook for ControlMutatingHook {
 ///
 /// # Two gates, because two different things would otherwise be luck
 ///
-/// **A later decision has to exist.** `SessionCloser::request` cancels the
-/// session token synchronously, inside `exec::execute`, so the moment the
-/// first close is recorded every other pipe is racing its own
+/// **A later decision has to exist.** `exec::execute` cancels the session
+/// token synchronously, right after reporting the first close, so from that
+/// moment every other pipe is racing its own
 /// `cancel.cancelled()` branch — and a pipe that takes it never calls a
 /// hook again. So the *first* call blocks until `expected` calls have
 /// arrived. Every one of them is then already past its `select!` and inside

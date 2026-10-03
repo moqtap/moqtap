@@ -678,10 +678,10 @@ pub(crate) enum Plan {
         target: StreamKey,
     },
     /// A session close was recorded in the [`SessionCloser`], **and the
-    /// session token is already cancelled** — `SessionCloser::request`
-    /// cancels as it records, so the caller does not have to. Return from
-    /// the forwarding task; `run_with_transport` reads the code and reason
-    /// back out of the closer at `session.rs:255-256`.
+    /// session token is already cancelled** — [`execute`] cancels it once
+    /// the close has been reported, so the caller does not have to. Return
+    /// from the forwarding task; `run_with_transport` reads the code and
+    /// reason back out of the closer once the session's tasks have stopped.
     ///
     /// The unit itself is **not** forwarded: the hook returned a close
     /// *instead of* an action on it.
@@ -768,6 +768,17 @@ impl Outcome {
 ///    [`Refusal::LengthChanged`], reported against the *inner* kind, which
 ///    is the informative one.
 /// 4. The numeric code range, then the session-closing latch.
+///
+/// # A close is reported before it takes effect
+///
+/// [`Action::CloseSession`] is recorded in [`plan_action`], but the session
+/// is cancelled only here, after its `ActionApplied` — or its
+/// `SessionAlreadyClosing` refusal — has gone out. Cancelling wakes the
+/// session's other tasks on other worker threads, and they report the
+/// teardown they perform: a `Site::StreamEnd` decision on every stream the
+/// close cuts. Cancelled first, those reports could reach the observer
+/// before the close that caused them, and an observer reading in order
+/// would see a stream end for no reason and only then the close.
 pub(crate) fn execute(
     unit: &Unit<'_>,
     action: Action,
@@ -778,6 +789,9 @@ pub(crate) fn execute(
     match plan_action(unit, action, engine, report) {
         Ok(applied) => {
             report.applied(site, applied.action, applied.effect.clone());
+            if matches!(applied.plan, Plan::CloseSession { .. }) {
+                engine.closer.cancel();
+            }
             Outcome {
                 plan: applied.plan,
                 result: Ok(applied.effect),
@@ -788,6 +802,14 @@ pub(crate) fn execute(
         }
         Err(Refused { action, refusal }) => {
             report.refused(site, action, refusal.clone());
+            // A close that lost to an earlier one still ends the session:
+            // the earlier one may be a control-plane close inside its drain
+            // window, and a hook asking for the session to end is not asking
+            // to wait that window out. Only a close that reached the latch
+            // is refused this way, so no other refusal cancels anything.
+            if refusal == Refusal::SessionAlreadyClosing {
+                engine.closer.cancel();
+            }
             let (plan, entered_backpressure) = forward_unchanged(unit, engine, report);
             Outcome {
                 plan,
@@ -2633,9 +2655,85 @@ mod tests {
                 (3, Bytes::from_static(b"bye")),
                 "the first request wins; the second does not overwrite the reason",
             );
-            assert!(h.cancel.is_cancelled(), "SessionCloser::request cancels as it records");
+            assert!(h.cancel.is_cancelled(), "execute cancels the session it recorded a close for");
             // The refused second close still forwarded its unit unchanged.
             assert_eq!(second.plan, Plan::WriteNow(object_bytes()));
+        }
+    }
+
+    /// A close is reported while the session is still running, and ends it
+    /// straight afterwards — whether it won the latch or lost it.
+    ///
+    /// Cancelling wakes the session's other tasks on other worker threads,
+    /// and each reports the teardown it does: a `Site::StreamEnd` decision on
+    /// every stream the close cuts. If the token is already cancelled when
+    /// the close's own event goes out, those reports can overtake it, which
+    /// `action_matrix.rs` would see as an `ActionApplied { StreamEnd, Pass }`
+    /// where the `CloseSession` belongs.
+    /// This observer reads the token at the moment each close event is
+    /// emitted, which turns that ordering into a plain assertion instead of
+    /// a race that only a loaded machine loses.
+    ///
+    /// The losing close is recorded behind a control-plane close still
+    /// inside its drain window: refused, and the session still ends, but
+    /// only after the refusal has been reported.
+    ///
+    /// *Ablation:* move `engine.closer.cancel()` into `plan_action`,
+    /// ahead of the report, and both cases go red on the `seen` assertion.
+    #[test]
+    fn a_close_is_reported_before_the_session_is_cancelled() {
+        struct CancelledAtEvent {
+            cancel: CancellationToken,
+            seen: Mutex<Vec<bool>>,
+        }
+        impl ProxyObserver for CancelledAtEvent {
+            fn on_event(&self, event: &ProxyEvent) {
+                if matches!(
+                    event,
+                    ProxyEvent::ActionApplied { action: ActionKind::CloseSession, .. }
+                        | ProxyEvent::ActionRefused { action: ActionKind::CloseSession, .. }
+                ) {
+                    self.seen.lock().unwrap().push(self.cancel.is_cancelled());
+                }
+            }
+        }
+
+        for &draft in COMPILED_DRAFTS {
+            let m = meta(draft);
+            for behind_control_plane in [false, true] {
+                let mut h = Harness::new();
+                let watch =
+                    CancelledAtEvent { cancel: h.cancel.clone(), seen: Mutex::new(Vec::new()) };
+                if behind_control_plane {
+                    assert!(h.closer.record(7, Bytes::from_static(b"draining")));
+                }
+                let report =
+                    Reporter::new(&watch, true, h.counters.as_ref(), SessionId(1), h.side, Some(4));
+                let mut engine = Engine {
+                    queue: Some(Queue { pending: &mut h.pending, deferred: &mut h.deferred }),
+                    closer: &h.closer,
+                };
+                let out = execute(
+                    &object_unit(&m, Instant::now()),
+                    Action::CloseSession { code: 3, reason: Bytes::from_static(b"bye") },
+                    &mut engine,
+                    &report,
+                );
+                let what =
+                    format!("[{draft:?}] behind a control-plane close: {behind_control_plane}");
+                let expected = if behind_control_plane {
+                    Err(Refusal::SessionAlreadyClosing)
+                } else {
+                    Ok(Effect::SessionClosing { code: 3 })
+                };
+                assert_eq!(out.result, expected, "{what}");
+                assert_eq!(
+                    *watch.seen.lock().unwrap(),
+                    vec![false],
+                    "{what}: exactly one close event, emitted before the session was cancelled",
+                );
+                assert!(h.cancel.is_cancelled(), "{what}: and the session is cancelled after it");
+            }
         }
     }
 

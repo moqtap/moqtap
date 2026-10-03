@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking.** `DraftVersion` gains `Draft21` and `Draft22` (see `moqtap-codec`), which stops a downstream `match` over its variants compiling. `DEFAULT_DRAFT_ORDER` takes them ahead of draft-20, after draft-14: the order is draft-14 first and the newest draft downwards.
 - Requires `moqtap-codec` and `moqtap-client` 0.8.0, both breaking in this cycle.
 
+### Fixed
+
+- A hook's `CloseSession` is reported before the session is cancelled. The stream-end decisions that the close's teardown reports could reach the observer ahead of the close itself.
+
 ## [0.6.0] - 2026-09-20
 
 No public item was added, removed or renamed. The number moves because `moqtap-codec` and `moqtap-client` both carry breaking changes this cycle and this crate's published manifest requires them, and because the change below is breaking for anyone reading profiles through the `serde` feature.

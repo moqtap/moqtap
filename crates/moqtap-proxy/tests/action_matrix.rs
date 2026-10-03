@@ -1154,8 +1154,8 @@ impl ProxyHook for ScriptedHook {
         let action = Self::pop(&mut self.script.lock().expect("script").object);
         self.objects_entered.fetch_add(1, Ordering::SeqCst);
         // The `SessionAlreadyClosing` probe needs two `execute` calls to
-        // race, and `SessionCloser::request` cancels the session the moment
-        // the first one lands. Holding both hooks here until both have
+        // race, and `execute` cancels the session the moment the first one
+        // has been reported. Holding both hooks here until both have
         // arrived makes the second attempt reach the engine deterministically
         // rather than by luck. Bounded, so a broken run fails rather than
         // hangs.
@@ -3299,7 +3299,7 @@ async fn sweep_close_session(draft: DraftVersion, sw: &mut Sweep) {
 
     // `Refusal::SessionAlreadyClosing` — the first close wins. Two object
     // hooks are held at a barrier so that both reach the engine; without it
-    // `SessionCloser::request` cancels the session before the second
+    // the first close cancels the session before the second
     // attempt exists, and the variant would be unreachable by luck rather
     // than by design.
     if draft == DraftVersion::Draft14 {
