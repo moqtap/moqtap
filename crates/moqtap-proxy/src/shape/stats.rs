@@ -1031,7 +1031,7 @@ pub(crate) struct ShapeRecorder {
     ///
     /// `None` is not a degraded mode. A session constructed directly belongs
     /// to no proxy, so there is no aggregate for it to be part of, and it
-    /// keeps reporting its own [`ShapeStats`] exactly as it always did.
+    /// reports only its own [`ShapeStats`].
     proxy: Option<Arc<ProxyRecorder>>,
     /// Whether this session's class list is the one the proxy's rows were
     /// sized from, which decides whether a `Class::Rule(index)` may address

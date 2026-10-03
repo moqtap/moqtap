@@ -148,8 +148,8 @@ const EVERY_DRAFT: [DraftVersion; DraftVersion::ALL.len()] = DraftVersion::ALL;
 ///
 /// Delete the `draft_is_compiled` guard from `run_with_transport` in
 /// `src/session.rs`. Under `cargo test -p moqtap-proxy
-/// --no-default-features --features draft07 --test draft_admission`, thirteen
-/// of the drafts stop being refused and the row reddens with
+/// --no-default-features --features draft07 --test draft_admission`, every
+/// draft but draft-07 stops being refused and the row reddens with
 ///
 /// ```text
 /// thread 'a_session_is_admitted_exactly_when_this_build_carries_its_draft'

@@ -408,9 +408,9 @@ macro_rules! draft_setup_parameters {
     // `KvpValue`, `VarInt` and the varint helper live in this arm rather than
     // at the top of the file because this arm has exactly one caller — the
     // draft-07 gate, the only draft that passes `with_role` — and
-    // the `none` arm below needs none of them. At file scope they were unread
-    // by every other draft, which `RUSTFLAGS="-D warnings"` makes an error on
-    // every matrix row but draft-07's and on `just draft-pairs`'
+    // the `none` arm below needs none of them. At file scope they would be
+    // unread by every other draft, which `RUSTFLAGS="-D warnings"` would make
+    // an error on every matrix row but draft-07's and on `just draft-pairs`'
     // `draft21,draft22`. Kept here they need no `cfg` and no `allow`: the
     // condition is already spelled, once, by which arm the invocation names.
     (with_role) => {

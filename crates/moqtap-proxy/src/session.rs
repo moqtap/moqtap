@@ -1817,13 +1817,13 @@ enum Source {
     /// not be polled again: it resolves immediately every time (see
     /// [`RecvStream::received_reset`]), so re-polling it spins. The caller
     /// latches it off and the branch parks for the rest of the stream,
-    /// which is exactly the disabled read branch this replaced.
+    /// which is exactly a disabled read branch.
     ResetUnobservable,
 }
 
 /// Observe the source stream, **whatever the egress queue is doing**.
 ///
-/// # The defect this exists to close
+/// # Why a shut read branch is not enough
 ///
 /// Both queueing pipe loops gate their read branch on
 /// `PendingQueue::accepts_more()`, and that is the backpressure mechanism:
@@ -1834,11 +1834,10 @@ enum Source {
 /// the shipped default posture.
 ///
 /// A peer's `RESET_STREAM` surfaces **only** as `Err` from `recv.read`.
-/// With the read branch shut it was therefore not observed at all:
-/// `propagate_reset` was unreachable, and the mirrored reset that should
-/// follow the peer's within microseconds arrived up to `max_hold` late.
-/// The other
-/// three branches cannot cover it — `StopWatcher` watches the
+/// With the read branch shut it is therefore not observed at all:
+/// `propagate_reset` is unreachable, and the mirrored reset that should
+/// follow the peer's within microseconds arrives up to `max_hold` late.
+/// The other three branches cannot cover it — `StopWatcher` watches the
 /// *destination's* `stopped()`, the release branch watches this proxy's own
 /// clock, and `cancel` is session teardown.
 ///
@@ -1846,13 +1845,13 @@ enum Source {
 ///
 /// `can_read` still gates **`recv.read`**, which is the only call that
 /// consumes bytes. Nothing about the queue's depth, the admission decision,
-/// or the once-per-stream backpressure latch moves. What changes is that
-/// the shut state is no longer *silent*: instead of parking on nothing, the
+/// or the once-per-stream backpressure latch moves. What differs is that
+/// the shut state is not *silent*: instead of parking on nothing, the
 /// loop parks on [`RecvStream::received_reset`], which reads no bytes and
 /// therefore grants no `MAX_STREAM_DATA` credit. The peer stays blocked at
-/// exactly the same offset it was blocked at before.
+/// exactly the offset a silent shut state would hold it at.
 ///
-/// That is the discriminating property, and it is why the fix is not "poll
+/// That is the discriminating property, and it is why this is not "poll
 /// `recv.read` anyway and park the chunk": a look-ahead slot consumes a
 /// chunk, and — worse — it only re-opens when the queue drains, so under a
 /// dry bucket the *next* reset waits out `max_hold` all the same.
@@ -3000,7 +2999,7 @@ const MAX_CONTROL_PAYLOAD: usize = 1024 * 1024;
 /// varint's length from its first byte, reads the payload length, and then
 /// counts payload bytes down to zero — one varint decode per message and no
 /// per-byte work beyond the header. It allocates nothing and never holds a
-/// message; the bytes go straight out as they always did.
+/// message; the bytes go straight out unchanged.
 ///
 /// # Why not the control parser
 ///

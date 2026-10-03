@@ -346,7 +346,7 @@ impl QlogSpec {
         config.title(self.title);
         config.description(self.description);
 
-        // `None` here can no longer mean "no writer" — `validate` has ruled
+        // `None` here cannot mean "no writer" — `validate` has ruled
         // that out — so it means the streamer failed to write the preamble.
         // quinn logs the underlying `io::Error` through `tracing` and hands
         // back an `Option`, so the reason is not recoverable here; what is

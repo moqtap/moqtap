@@ -112,15 +112,14 @@ fn subgroup_type_is_valid(header_type: u8) -> bool {
 /// # What this catches, observed by making each change and running it
 ///
 /// Deleting the `validate_subgroup_type(header_type)?` call from
-/// `SubgroupHeader::decode`, leaving decoding to proceed as it did before:
+/// `SubgroupHeader::decode`:
 ///
 /// ```text
 /// type 0x00 was accepted; draft-20 Section 11.4.2 lists it as invalid
 /// ```
 ///
-/// Keeping the form check but dropping only the reserved-mode arm — the
-/// behaviour this module had before, which read a mode-3 header as though it
-/// carried no Subgroup ID field:
+/// Keeping the form check but dropping only the reserved-mode arm, so a
+/// mode-3 header is read as though it carried no Subgroup ID field:
 ///
 /// ```text
 /// type 0x16 was accepted; draft-20 Section 11.4.2 lists it as invalid
@@ -365,7 +364,7 @@ fn assert_refusal(ty: u64, got: &CodecError, want: Refusal) {
 /// # What this catches, observed by making each change and running it
 ///
 /// Deleting the `validate_datagram_type(datagram_type)?` call from
-/// `DatagramHeader::decode`, which is how this decoder behaved before:
+/// `DatagramHeader::decode`:
 ///
 /// ```text
 /// type 0x10 was accepted; draft-20 Section 11.3.1 lists it as invalid
@@ -601,7 +600,7 @@ fn a_type_wider_than_one_byte_is_judged_by_its_value() {
 ///
 /// # What this catches, observed by making the change and running it
 ///
-/// Restoring draft-19's up-front refusal of a wide Type:
+/// Substituting draft-19's up-front refusal of a wide Type:
 ///
 /// ```text
 /// a non-minimal spelling of the assigned Type 0x10 must decode: InvalidField
@@ -1104,7 +1103,7 @@ fn the_three_end_of_range_indicators_are_distinguished() {
 ///
 /// # What this catches, observed by making the change and running it
 ///
-/// Restoring draft-19's absolute reading, which resolves the marker's Group ID
+/// Substituting draft-19's absolute reading, which resolves the marker's Group ID
 /// Delta of 0 to group 0 rather than to the group after the Object's:
 ///
 /// ```text

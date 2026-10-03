@@ -2240,13 +2240,12 @@ mod tests {
     ///
     /// # Why the `Truncate` arm is the one that matters
     ///
-    /// Found by the ablation, not by reading. A bare `Terminal::Reset`
-    /// carries **zero bytes**, and a zero-byte charge is granted by any
-    /// bucket — `tokens >= 0` holds even at rate zero — so a `Reset`-only
-    /// fixture passes with the guard deleted and proves nothing. A
-    /// `Truncate` owes its prefix to the wire, and that prefix is exactly
-    /// what a dry bucket would sit on. Both are asserted, in that order, so
-    /// the row says which of the two the guard is for.
+    /// A bare `Terminal::Reset` carries **zero bytes**, and a zero-byte
+    /// charge is granted by any bucket — `tokens >= 0` holds even at rate
+    /// zero — so a `Reset`-only fixture passes with the guard deleted and
+    /// proves nothing. A `Truncate` owes its prefix to the wire, and that
+    /// prefix is exactly what a dry bucket would sit on. Both are asserted,
+    /// in that order, so the row says which of the two the guard is for.
     /// *Ablation, recorded:* remove the `Item::Terminal` early return from
     /// `shaping_grants_head`. The `Reset` still pops; the `Truncate` is held to
     /// `max_hold` and its `expect` reddens with *a truncate owes its prefix to
@@ -2285,9 +2284,9 @@ mod tests {
     /// and not as `matches!(.., Clamped { applied, .. })`: a zero-rate
     /// bucket names no refill instant, so the request this clamp cut short
     /// is unbounded and the only honest value for it is absent. Written as
-    /// a wildcard it passed against a `Duration::MAX` sentinel, which is
-    /// what the field used to hold and what
-    /// `an_unbounded_shaping_wait_reports_no_request_at_all` exists for.
+    /// a wildcard it would pass against a `Duration::MAX` sentinel, which
+    /// `an_unbounded_shaping_wait_reports_no_request_at_all` exists to rule
+    /// out.
     #[test]
     fn a_zero_rate_class_still_delivers_at_the_clamp_and_reports_it() {
         const HOLD: Duration = Duration::from_millis(80);
@@ -2326,10 +2325,10 @@ mod tests {
     /// rate, so it rules out *the report is absent because the class is
     /// switched off*.
     ///
-    /// Asserted as a whole-variant equality, which is the point: the field
-    /// used to carry `Duration::MAX` here, and every inequality an author
-    /// would naturally write against it — `requested > applied` — is
-    /// satisfied by that sentinel exactly as it is by a real request.
+    /// Asserted as a whole-variant equality, which is the point: a
+    /// `Duration::MAX` sentinel here would satisfy every inequality an author
+    /// would naturally write against the field — `requested > applied` —
+    /// exactly as a real request does.
     /// The **pre-clamp** report is asserted per leg for the same reason, and it
     /// is where the two legs stop looking alike: a zero-rate class is silent
     /// until its clamp fires, and a class whose burst cannot cover one of its

@@ -316,8 +316,8 @@ fn decode_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError
         //
         // The table this consults is the registry's, so a type it cannot name
         // is one this draft does not define. Reporting it as an ordinary
-        // malformation, which is what it did before, left the rule enforced
-        // against the frame and invisible to the session.
+        // malformation would leave the rule enforced against the frame and
+        // invisible to the session.
         let encoding =
             param_encoding(abs_key).ok_or(CodecError::UnknownMessageParameter(abs_key))?;
 

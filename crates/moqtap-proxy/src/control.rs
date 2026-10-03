@@ -590,8 +590,8 @@ impl ProxyControl {
     ///
     /// The profile is built through the leg's own
     /// [`TransportInstaller`] when the
-    /// proxy was given one, so a leg keeps building its configuration the
-    /// way it always did.
+    /// proxy was given one, so a leg builds its configuration the same way
+    /// before and after this call.
     ///
     /// # Errors
     ///

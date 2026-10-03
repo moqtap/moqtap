@@ -14,7 +14,7 @@
 //! could put on a control stream, and then calls `message_fields` on what comes
 //! back. That order is the point: a test that called the private extractor
 //! directly would prove the extractor total and prove nothing about whether the
-//! bytes reach it. The whole defect was that they do.
+//! bytes reach it. The hazard is that they do.
 //!
 //! The chain they close, in the shipped binary, is:
 //!
@@ -24,7 +24,7 @@
 //!   -> ProxyEvent::ControlMessage
 //!   -> CliObserver::on_event, when a trace is being written
 //!   -> AnyControlMessage::fields()
-//!   -> draftNN::fields::message_fields    <- the panic was here
+//!   -> draftNN::fields::message_fields    <- where a panic would surface
 //! ```
 //!
 //! # A malformed value is not an error to report
@@ -37,7 +37,7 @@
 //!
 //! # Release mode is a separate claim
 //!
-//! Two of the defects below were an integer overflow on a bare `+`, which
+//! Two of the hazards below are an integer overflow on a bare `+`, which
 //! panics in debug and **silently wraps** in release. A trace recording
 //! `start = 18446744073709551615, end = 0` is worse than a crash: it is a wrong
 //! answer that looks like data. Every overflow test here asserts the rendered
@@ -125,12 +125,12 @@ fn subscribe_ok_with_largest_object(value: &[u8]) -> Vec<u8> {
 /// Drafts 17 and later give 0x09 a Location encoding — the decoder reads two
 /// varints and re-serialises them, so the extractor is handed two varints by
 /// construction. Draft-15 has no such table, and none of `decode_parameters`'
-/// four checks looks at 0x09. `decode_largest_object` unwrapped both reads.
+/// four checks looks at 0x09, so `decode_largest_object` is handed whatever
+/// arrived.
 ///
-/// The whole attack is **eight bytes**, and they are the ones the sweep
-/// recorded: `04 00 05 01 01 01 09 00`.
+/// The whole attack is **eight bytes**: `04 00 05 01 01 01 09 00`.
 ///
-/// *Ablation:* restore `VarInt::decode(&mut buf).unwrap()` in
+/// *Ablation:* read with `VarInt::decode(&mut buf).unwrap()` in
 /// `draft15/fields.rs::decode_largest_object` and this does not fail — it
 /// panics inside the function under test:
 ///
@@ -148,7 +148,7 @@ fn a_draft_15_largest_object_that_is_not_two_varints_renders() {
     assert_eq!(
         empty,
         vec![0x04, 0x00, 0x05, 0x01, 0x01, 0x01, 0x09, 0x00],
-        "the whole message is the eight bytes the sweep recorded"
+        "the whole message is these eight bytes"
     );
 
     // `[]` fails the first read; `[0x00]` fails the *second*, which is the
@@ -250,7 +250,7 @@ fn subscribe_with_parameter(parameter_type: u64, value: &[u8]) -> Vec<u8> {
     wire
 }
 
-/// The two Range Filter values that ran out mid-field.
+/// The two Range Filter values that run out mid-field.
 ///
 /// Returned as data rather than written out per draft, because drafts 19 and 20
 /// gave these five parameters the same codepoints, the same field order and the
@@ -265,8 +265,7 @@ fn subscribe_with_parameter(parameter_type: u64, value: &[u8]) -> Vec<u8> {
 fn the_truncating_triggers() -> Vec<(&'static str, u64, Vec<u8>)> {
     vec![
         // OBJECT_PROPERTY_FILTER carries a Property Type after its SetID, and a
-        // one-byte value holds the SetID and nothing else. `has_remaining` was
-        // never asked.
+        // one-byte value holds the SetID and nothing else.
         ("a property filter with no property type", 0x28, vec![0x00]),
         // 0xC0 opens a three-byte varint with one byte behind it.
         ("a value ending mid-varint", 0x25, vec![0x00, 0xc0]),
@@ -304,11 +303,12 @@ fn filter_name(parameter_type: u64) -> &'static str {
 ///
 /// `param_encoding` gives 0x25-0x29 the length-prefixed encoding and
 /// `check_location_filters` covers 0x21 and 0x23 and skips these five
-/// entirely, so the bytes reaching `decode_range_filter` are arbitrary. It read
-/// three varints with `unwrap`, on a value where `has_remaining` promises one
-/// byte and a MoQT varint may need nine.
+/// entirely, so the bytes reaching `decode_range_filter` are arbitrary:
+/// `has_remaining` promises one byte, a MoQT varint may need nine, and a read
+/// that unwraps would panic.
 ///
-/// *Ablation:* restore the hand-written parse in
+/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
+/// parse that unwraps each varint, in
 /// `draft20/fields.rs::decode_range_filter` and this does not fail — it panics
 /// inside the function under test, in debug and in release alike:
 ///
@@ -325,12 +325,12 @@ fn a_truncated_draft_20_range_filter_renders() {
     assert_eq!(
         subscribe_with_parameter(0x28, &[0x00]),
         vec![0x03, 0x00, 0x0a, 0x01, 0x01, 0x01, 0x6e, 0x01, 0x74, 0x01, 0x28, 0x01, 0x00],
-        "the property-filter trigger is the thirteen bytes the sweep recorded"
+        "the property-filter trigger is these thirteen bytes"
     );
     assert_eq!(
         subscribe_with_parameter(0x25, &[0x00, 0xc0]),
         vec![0x03, 0x00, 0x0b, 0x01, 0x01, 0x01, 0x6e, 0x01, 0x74, 0x01, 0x25, 0x02, 0x00, 0xc0],
-        "the mid-varint trigger is the fourteen bytes the sweep recorded"
+        "the mid-varint trigger is these fourteen bytes"
     );
 
     for (what, parameter_type, value) in the_truncating_triggers() {
@@ -352,11 +352,12 @@ fn a_truncated_draft_20_range_filter_renders() {
 ///
 /// `param_encoding` gives 0x25-0x29 the length-prefixed encoding and
 /// `check_location_filters` covers 0x21 and 0x23 and skips these five
-/// entirely, so the bytes reaching `decode_range_filter` are arbitrary. It read
-/// three varints with `unwrap`, on a value where `has_remaining` promises one
-/// byte and a MoQT varint may need nine.
+/// entirely, so the bytes reaching `decode_range_filter` are arbitrary:
+/// `has_remaining` promises one byte, a MoQT varint may need nine, and a read
+/// that unwraps would panic.
 ///
-/// *Ablation:* restore the hand-written parse in
+/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
+/// parse that unwraps each varint, in
 /// `draft21/fields.rs::decode_range_filter` and this does not fail — it panics
 /// inside the function under test, in debug and in release alike:
 ///
@@ -373,12 +374,12 @@ fn a_truncated_draft_20_range_filter_renders_draft21() {
     assert_eq!(
         subscribe_with_parameter(0x28, &[0x00]),
         vec![0x03, 0x00, 0x0a, 0x01, 0x01, 0x01, 0x6e, 0x01, 0x74, 0x01, 0x28, 0x01, 0x00],
-        "the property-filter trigger is the thirteen bytes the sweep recorded"
+        "the property-filter trigger is these thirteen bytes"
     );
     assert_eq!(
         subscribe_with_parameter(0x25, &[0x00, 0xc0]),
         vec![0x03, 0x00, 0x0b, 0x01, 0x01, 0x01, 0x6e, 0x01, 0x74, 0x01, 0x25, 0x02, 0x00, 0xc0],
-        "the mid-varint trigger is the fourteen bytes the sweep recorded"
+        "the mid-varint trigger is these fourteen bytes"
     );
 
     for (what, parameter_type, value) in the_truncating_triggers() {
@@ -401,11 +402,12 @@ fn a_truncated_draft_20_range_filter_renders_draft21() {
 ///
 /// `param_encoding` gives 0x25-0x29 the length-prefixed encoding and
 /// `check_location_filters` covers 0x21 and 0x23 and skips these five
-/// entirely, so the bytes reaching `decode_range_filter` are arbitrary. It read
-/// three varints with `unwrap`, on a value where `has_remaining` promises one
-/// byte and a MoQT varint may need nine.
+/// entirely, so the bytes reaching `decode_range_filter` are arbitrary:
+/// `has_remaining` promises one byte, a MoQT varint may need nine, and a read
+/// that unwraps would panic.
 ///
-/// *Ablation:* restore the hand-written parse in
+/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
+/// parse that unwraps each varint, in
 /// `draft22/fields.rs::decode_range_filter` and this does not fail — it panics
 /// inside the function under test, in debug and in release alike:
 ///
@@ -422,12 +424,12 @@ fn a_truncated_draft_20_range_filter_renders_draft22() {
     assert_eq!(
         subscribe_with_parameter(0x28, &[0x00]),
         vec![0x03, 0x00, 0x0a, 0x01, 0x01, 0x01, 0x6e, 0x01, 0x74, 0x01, 0x28, 0x01, 0x00],
-        "the property-filter trigger is the thirteen bytes the sweep recorded"
+        "the property-filter trigger is these thirteen bytes"
     );
     assert_eq!(
         subscribe_with_parameter(0x25, &[0x00, 0xc0]),
         vec![0x03, 0x00, 0x0b, 0x01, 0x01, 0x01, 0x6e, 0x01, 0x74, 0x01, 0x25, 0x02, 0x00, 0xc0],
-        "the mid-varint trigger is the fourteen bytes the sweep recorded"
+        "the mid-varint trigger is these fourteen bytes"
     );
 
     for (what, parameter_type, value) in the_truncating_triggers() {
@@ -470,20 +472,21 @@ fn a_truncated_draft_19_range_filter_renders() {
 
 /// The delta that runs off the end of the 64-bit space, on draft-20.
 ///
-/// **This is the test that needs `--release` to be worth anything.** The parse
-/// resolved its two delta baselines with a bare `+`. In debug that is a panic
-/// and this test would report one. In release it *wraps*, and nothing crashes:
+/// **This is the test that needs `--release` to be worth anything.** A parse
+/// that resolved the two delta baselines with a bare `+` would panic in debug,
+/// and this test would report that. In release it *wraps*, and nothing crashes:
 /// the extractor renders `start: 18446744073709551615, end: 0` and the trace
 /// writer records it as though a peer had asked for it. A wrong answer that
 /// looks like data is the worse of the two failures, and only an assertion on
 /// the rendered value catches it.
 ///
-/// `range_filter.rs` has used `checked_add` on both baselines since it was
-/// written, and `tests/range_filters_draft20.rs` has covered
-/// `DeltaOverflow { base: u64::MAX, delta: 2 }` for as long. Neither was
-/// reached from here.
+/// `range_filter.rs` uses `checked_add` on both baselines, and
+/// `tests/range_filters_draft20.rs` covers
+/// `DeltaOverflow { base: u64::MAX, delta: 2 }`. Neither reaches the renderer;
+/// this test does.
 ///
-/// *Ablation:* restore the bare `+` in
+/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
+/// parse that resolves the baselines with a bare `+`, in
 /// `draft20/fields.rs::decode_range_filter`. In debug it panics with
 /// `attempt to add with overflow`; in release it fails as an assertion:
 ///
@@ -513,20 +516,21 @@ fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap() {
 }
 /// The delta that runs off the end of the 64-bit space, on draft-21.
 ///
-/// **This is the test that needs `--release` to be worth anything.** The parse
-/// resolved its two delta baselines with a bare `+`. In debug that is a panic
-/// and this test would report one. In release it *wraps*, and nothing crashes:
+/// **This is the test that needs `--release` to be worth anything.** A parse
+/// that resolved the two delta baselines with a bare `+` would panic in debug,
+/// and this test would report that. In release it *wraps*, and nothing crashes:
 /// the extractor renders `start: 18446744073709551615, end: 0` and the trace
 /// writer records it as though a peer had asked for it. A wrong answer that
 /// looks like data is the worse of the two failures, and only an assertion on
 /// the rendered value catches it.
 ///
-/// `range_filter.rs` has used `checked_add` on both baselines since it was
-/// written, and `tests/range_filters_draft21.rs` has covered
-/// `DeltaOverflow { base: u64::MAX, delta: 2 }` for as long. Neither was
-/// reached from here.
+/// `range_filter.rs` uses `checked_add` on both baselines, and
+/// `tests/range_filters_draft21.rs` covers
+/// `DeltaOverflow { base: u64::MAX, delta: 2 }`. Neither reaches the renderer;
+/// this test does.
 ///
-/// *Ablation:* restore the bare `+` in
+/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
+/// parse that resolves the baselines with a bare `+`, in
 /// `draft21/fields.rs::decode_range_filter`. In debug it panics with
 /// `attempt to add with overflow`; in release it fails as an assertion:
 ///
@@ -557,20 +561,21 @@ fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap_draft21(
 
 /// The delta that runs off the end of the 64-bit space, on draft-22.
 ///
-/// **This is the test that needs `--release` to be worth anything.** The parse
-/// resolved its two delta baselines with a bare `+`. In debug that is a panic
-/// and this test would report one. In release it *wraps*, and nothing crashes:
+/// **This is the test that needs `--release` to be worth anything.** A parse
+/// that resolved the two delta baselines with a bare `+` would panic in debug,
+/// and this test would report that. In release it *wraps*, and nothing crashes:
 /// the extractor renders `start: 18446744073709551615, end: 0` and the trace
 /// writer records it as though a peer had asked for it. A wrong answer that
 /// looks like data is the worse of the two failures, and only an assertion on
 /// the rendered value catches it.
 ///
-/// `range_filter.rs` has used `checked_add` on both baselines since it was
-/// written, and `tests/range_filters_draft22.rs` has covered
-/// `DeltaOverflow { base: u64::MAX, delta: 2 }` for as long. Neither was
-/// reached from here.
+/// `range_filter.rs` uses `checked_add` on both baselines, and
+/// `tests/range_filters_draft22.rs` covers
+/// `DeltaOverflow { base: u64::MAX, delta: 2 }`. Neither reaches the renderer;
+/// this test does.
 ///
-/// *Ablation:* restore the bare `+` in
+/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
+/// parse that resolves the baselines with a bare `+`, in
 /// `draft22/fields.rs::decode_range_filter`. In debug it panics with
 /// `attempt to add with overflow`; in release it fails as an assertion:
 ///
@@ -1300,10 +1305,9 @@ const EVERY_DRAFT: std::ops::RangeInclusive<u8> = 7..=22;
 /// the one place where a value has provably not been through the answering
 /// draft's `check_authorization_tokens`. Drafts 12 through 20 name 0x03 in the
 /// setup namespace and route a `Bytes` value straight into their own token
-/// renderer, and drafts 12 and 13 read it with `unwrap`.
+/// renderer, which reads it varint by varint.
 ///
-/// The empty value is the shortest trigger there is and the one the audit
-/// recorded:
+/// The empty value is the shortest trigger there is:
 ///
 /// ```text
 /// setup_option_name(13, &KeyValuePair { key: 0x03, value: KvpValue::Bytes(vec![]) })
@@ -1313,7 +1317,7 @@ const EVERY_DRAFT: std::ops::RangeInclusive<u8> = 7..=22;
 /// after the Alias on the two forms that carry a Type behind it. `0x01` is
 /// REGISTER, the longest form and so the one with the most places to stop.
 ///
-/// *Ablation:* restore `VarInt::decode(&mut buf).unwrap()` in
+/// *Ablation:* read with `VarInt::decode(&mut buf).unwrap()` in
 /// `draft13/fields.rs::auth_token_to_json` and this does not fail — it panics
 /// inside the function under test:
 ///

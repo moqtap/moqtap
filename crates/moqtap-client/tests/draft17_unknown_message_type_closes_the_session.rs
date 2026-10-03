@@ -2,16 +2,14 @@
 //! Draft-17 Section 9: "An endpoint that receives an unknown message type MUST
 //! close the session."
 //!
-//! # Why this rule needed a gate five drafts late
+//! # Why this rule needs a gate of its own
 //!
-//! All the drafts carry that sentence, in those words. Drafts 08 through 14
-//! answered it; drafts 15 through 19 did not, and none of the five said so. An
-//! exclusion that is written down can be checked against the draft. This one was
-//! never written down — the rule was simply absent from five tables, each of
-//! which reads, in its own doc comment, as though every sentence in its draft had
-//! been accounted for. That is the failure mode a "**Not** X" line exists to
-//! prevent, and it is why the sweep that found this one enumerated what the
-//! tables answer as well as what they refuse.
+//! All the drafts carry that sentence, in those words. An exclusion that is
+//! written down can be checked against the draft; a rule that is simply absent
+//! from a table cannot, because the table still reads, in its own doc comment,
+//! as though every sentence in its draft had been accounted for. That is the
+//! failure mode a "**Not** X" line exists to prevent, and it is why this rule is
+//! checked by what the session does rather than by what the table says.
 //!
 //! # Why draft-17 carries it
 //!

@@ -2668,11 +2668,11 @@ mod tests {
     /// and each reports the teardown it does: a `Site::StreamEnd` decision on
     /// every stream the close cuts. If the token is already cancelled when
     /// the close's own event goes out, those reports can overtake it, which
-    /// `action_matrix.rs` would see as an `ActionApplied { StreamEnd, Pass }`
-    /// where the `CloseSession` belongs.
+    /// an observer reading events in order would see as a stream end with no
+    /// cause, followed by the close.
     /// This observer reads the token at the moment each close event is
-    /// emitted, which turns that ordering into a plain assertion instead of
-    /// a race that only a loaded machine loses.
+    /// emitted, so the ordering is asserted directly and does not depend on
+    /// thread scheduling.
     ///
     /// The losing close is recorded behind a control-plane close still
     /// inside its drain window: refused, and the session still ends, but

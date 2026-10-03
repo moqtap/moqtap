@@ -549,8 +549,8 @@ fn decode_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError
         //
         // The table this consults is the registry's, so a type it cannot name
         // is one this draft does not define. Reporting it as an ordinary
-        // malformation, which is what it did before, left the rule enforced
-        // against the frame and invisible to the session.
+        // malformation would leave the rule enforced against the frame and
+        // invisible to the session.
         let encoding =
             param_encoding(abs_key).ok_or(CodecError::UnknownMessageParameter(abs_key))?;
 
@@ -1505,9 +1505,8 @@ pub enum ControlMessage {
 /// Refusing at the encoder keeps the two readings from ever diverging on the
 /// wire.
 fn check_discriminators(message: &ControlMessage) -> Result<(), CodecError> {
-    // One arm, where drafts 17 to 19 have two. Written as an `if let` rather
-    // than a one-armed `match` because that is what it now is; a second
-    // discriminator would restore the `match`.
+    // One arm, where drafts 17 to 19 have two, so an `if let` rather than a
+    // one-armed `match`; a second discriminator would make it a `match`.
     if let ControlMessage::RequestError(m) = message {
         let code_is_redirect = m.error_code.into_inner() == request_error_codes::REDIRECT;
         if code_is_redirect != m.redirect.is_some() {

@@ -578,9 +578,9 @@ mod tests {
     /// exactly one iteration, because that one finds nothing armed and
     /// takes the untimed `wait`.
     ///
-    /// That wake used to be excluded by sleeping 20 ms first, on the
-    /// reasoning that one iteration cannot take longer than that. It
-    /// usually cannot — the probe measured deltas of 0, 0 and then 1
+    /// Sleeping 20 ms first would exclude that wake, on the reasoning that
+    /// one iteration cannot take longer than that. It usually cannot — the
+    /// probe measured deltas of 0, 0 and then 1
     /// across three runs of the same binary — but a settle is a guess at
     /// somebody else's scheduling, and a wrong guess fails a wheel that is
     /// working. Counting the wake that is known to be coming needs no
@@ -1038,8 +1038,8 @@ mod tests {
     // cores, `release_error_p50_is_within_the_platform_budget` exactly as it
     // is written below: **7 red in 10 loaded runs** (p50 5.14 / 5.34 ms
     // against its 5 ms bound, p95 14-15 ms, max 63-67 ms), against 0 red in
-    // 10 idle runs. The paired form was tried and is *worse*: at session
-    // level the wheel-versus-tokio pairs came out 12.58/12.03, 10.49/11.12,
+    // 10 idle runs. The paired form is *worse*: at session level the
+    // wheel-versus-tokio pairs came out 12.58/12.03, 10.49/11.12,
     // 12.58/12.87, 12.58/11.94, 12.58/12.09, 12.58/11.45 and 12.58/13.26 ms
     // — the wheel slower than its own control in four of seven — so the
     // difference the pairing was supposed to preserve was 0 ns against a

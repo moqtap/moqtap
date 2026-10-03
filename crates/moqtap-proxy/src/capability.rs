@@ -186,16 +186,14 @@ pub enum ActionKind {
     /// [`StreamAction::OpenAfter`](crate::action::StreamAction::OpenAfter).
     ///
     /// `open_after_and_serialize_after_are_constructible` — the pair of
-    /// doc-tests that used to prove this capability's *absence* now proves
-    /// its presence, and they remain the crate's only compile-time proof
-    /// that the two variants exist with the shape they do. They are ordinary
-    /// doc-tests rather than inverted `compile_fail` blocks on purpose: a
+    /// doc-tests below are the crate's only compile-time proof that the two
+    /// variants exist with the shape they do. They are ordinary doc-tests
+    /// rather than inverted `compile_fail` blocks on purpose: a
     /// `compile_fail` block that fails for the *wrong* reason reports `ok`
-    /// exactly as loudly as one that fails for the right one, which is how
-    /// the two blocks this replaces went on passing while asserting a
-    /// **struct**-variant syntax (`OpenAfter { after: … }`) that never
-    /// matched the tuple variants that actually exist. An ordinary
-    /// doc-test can only pass by compiling *and* running.
+    /// exactly as loudly as one that fails for the right one, so a block
+    /// asserting a **struct**-variant syntax (`OpenAfter { after: … }`)
+    /// would go on passing against the tuple variants that actually exist.
+    /// An ordinary doc-test can only pass by compiling *and* running.
     ///
     /// ```
     /// // open_after_and_serialize_after_are_constructible (1 of 2)
@@ -325,14 +323,13 @@ pub enum Support {
     ///    hook is offered one. Same fact as case 1, a different decoder,
     ///    and a different report — which is what [`Instead`] is for.
     ///
-    /// There was a third, and its going is worth a sentence because it is
-    /// the shape of thing this enum is easiest to be wrong about. A fetch
-    /// stream on drafts 18, 19 and 20 used to occupy this verdict, on the
-    /// grounds that nothing on such a stream settles the Group Order its
-    /// Group IDs are differences against. Nothing on the *stream* still
-    /// does; the FETCH that opened it always did, and the session reads it
-    /// now — see `fetch_group_order_is_needed`. The cell was answering a
-    /// question about a draft with a fact about one component.
+    /// A fetch stream on drafts 18, 19 and 20 is not a third, and it is
+    /// worth a sentence because it is the shape of thing this enum is easiest
+    /// to be wrong about. Nothing on such a stream settles the Group Order
+    /// its Group IDs are differences against, but the FETCH that opened it
+    /// does, and the session reads it — see `fetch_group_order_is_needed`.
+    /// Placing it here would answer a question about a draft with a fact
+    /// about one component.
     ///
     /// A caller that reads the table by draft number alone will not see
     /// case 1 coming, which is why the table answers by build rather than by
@@ -1164,12 +1161,11 @@ const fn object_framing_bypass(
 /// [`ProxySession::run`](crate::session::ProxySession::run) asks this before
 /// it dials and refuses with
 /// [`ProxyError::DraftNotCompiled`](crate::error::ProxyError::DraftNotCompiled)
-/// when the answer is `false`, so the run that the paragraph below describes
-/// no longer happens to anybody. One predicate serves both, which is what
-/// keeps the table's verdict and the session's admission from becoming two
-/// lists that disagree — and the paragraph below stays because it is still
-/// the reason the verdict is [`Support::Unreachable`] rather than
-/// [`Support::Yes`].
+/// when the answer is `false`, so no session reaches the run the paragraph
+/// below describes. One predicate serves both, which is what keeps the
+/// table's verdict and the session's admission from becoming two lists that
+/// disagree — and the paragraph below is the reason the verdict is
+/// [`Support::Unreachable`] rather than [`Support::Yes`].
 ///
 /// # The mechanism, so the verdict is not taken on trust
 ///
@@ -1971,17 +1967,16 @@ mod tests {
     /// the first object on it — stated here, per draft, and deliberately not
     /// read from [`has_implicit_subgroup_id_mode`].
     ///
-    /// Two tests below turn on this fact and both used to take it from that
-    /// predicate, which made each of them agree with whatever it said. Both
-    /// narrowings were run. Removing draft-15 — the exact omission that once
-    /// let the engine forward a stream whose Subgroup ID had silently become
-    /// the second object's — left both passing, as did narrowing the predicate
-    /// all the way to drafts 17-22.
+    /// Two tests below turn on this fact, and taking it from that predicate
+    /// would make each of them agree with whatever it said. Removing draft-15
+    /// from it — the omission that lets the engine forward a stream whose
+    /// Subgroup ID has silently become the second object's — would leave both
+    /// passing, as would narrowing it all the way to drafts 17-22.
     ///
-    /// Eight other tests caught that second cut, so the fence was real; it was
+    /// Eight other tests catch that second cut, so the fence is real; it is
     /// simply not here. `tests/action_matrix.rs` keeps its own copy of this
     /// fact, transcribed from the drafts rather than read off the engine, and
-    /// the end-to-end probes it guards are what failed. This is the in-crate
+    /// the end-to-end probes it guards are what fail. This is the in-crate
     /// statement of the same fact, and the two are checked against each other
     /// by every verdict they both predict.
     ///
@@ -2785,13 +2780,10 @@ mod tests {
 
     /// The control site is honoured on all the drafts, 17-22 included.
     ///
-    /// Those drafts moved the control plane onto a pair of unidirectional
-    /// streams, and while the engine still took the first bidirectional
-    /// stream to be the control stream this column published
-    /// `Conditional(SiteSeesTheControlStream)` there — the site was shown a
-    /// request stream and SETUP never reached the hook. `session.rs` now
-    /// identifies the pair by its stream type, so the whole control plane
-    /// reaches the site and the split is gone.
+    /// Those drafts carry the control plane on a pair of unidirectional
+    /// streams and requests on bidirectional ones. `session.rs` identifies
+    /// the pair by its stream type, so the whole control plane reaches the
+    /// site on every draft and the column does not split.
     ///
     /// The draft rows are written out rather than derived, so the claim is
     /// made against the draft numbers and not against the function under

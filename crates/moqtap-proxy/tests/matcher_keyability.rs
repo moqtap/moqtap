@@ -748,7 +748,7 @@ async fn a_dead_keyed_profile_stops_the_session_before_it_opens_the_relay_leg() 
 
     // The control arm. `track_alias` is carried by every framed unit on
     // every draft, so this profile is admitted and the session proceeds
-    // exactly as it always did. Without it the assertion above would also
+    // normally. Without it the assertion above would also
     // pass against a build that refused every profile, or that never dialled
     // at all.
     let live = dial_reached_relay(

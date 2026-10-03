@@ -661,11 +661,11 @@ fn a_resync_onto_a_malformed_header_does_not_attribute_its_events_either() {
 #[test]
 fn a_header_written_by_the_js_encoder_reads_back() {
     // Fixed bytes rather than a description, because the risk is encoding: the
-    // JS encoder writes an epoch-millisecond timestamp as a float64, and this
-    // side used to read `startTime` as missing and reject the whole file
-    // before a single event. Every trace the browser recorder ever wrote was
-    // unopenable here, and nothing in either test suite could see it, because
-    // each side only ever read its own bytes.
+    // JS encoder writes an epoch-millisecond timestamp as a float64, and a
+    // reader that took that `startTime` for a missing one would reject every
+    // trace the browser recorder writes before a single event. Neither test
+    // suite could see that on its own, because each side reads only its own
+    // bytes.
     const JS_HEADER: &[u8] = &[
         0xb9, 0x00, 0x05, 0x68, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c, 0x70, 0x6d, 0x6f,
         0x71, 0x2d, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2d, 0x31, 0x34, 0x6b,

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-03
+
+### Changed
+
+- Documentation only: doc comments state their reasoning without describing earlier behaviour. No API or behaviour change.
+
 ## [0.3.0] - 2026-09-03
 
 **Breaking, which is why the next release is 0.3.0 and not 0.2.1.**

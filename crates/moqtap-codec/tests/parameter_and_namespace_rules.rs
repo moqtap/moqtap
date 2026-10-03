@@ -5,13 +5,13 @@
 //! and the bytes it becomes. None of them reads a constant back.
 //!
 //! Two of these rules are the reason the file exists rather than a test module
-//! beside each draft. They are worded identically in drafts 17, 18 and 19, and
-//! the defect they cover was present in all three at once — a decoder that panicked
-//! on a delta-encoded key and an encoder that truncated a uint8 parameter. A
+//! beside each draft. They are worded identically in drafts 17, 18 and 19, so
+//! one defect — a decoder that panics on a delta-encoded key, or an encoder
+//! that truncates a uint8 parameter — would show up in all three at once. A
 //! single file makes a draft that drifts out of line visible as a missing row
 //! rather than as a test nobody wrote.
 //!
-//! # What breaking each fix does, observed by making the change and running
+//! # What breaking each rule does, observed by making the change and running
 //!
 //! The observed output for each is in the docstring of the test that catches
 //! it; they are not predictions.
@@ -392,8 +392,8 @@ fn an_oversized_uint8_parameter_is_refused_not_truncated() {
 /// PROTOCOL_VIOLATION."
 ///
 /// Section 3.6 makes a client migrate to this URI, so an unbounded one is handed
-/// straight to connection setup. The encoder already refused to write one; only
-/// the direction we trust was unbounded.
+/// straight to connection setup. The encoder refuses to write one too, and the
+/// decoder is the direction that faces a peer nobody vouches for.
 #[test]
 fn an_oversized_goaway_uri_is_refused_and_the_maximum_is_not() {
     fn goaway(uri_len: usize) -> Vec<u8> {

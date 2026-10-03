@@ -935,9 +935,9 @@ fn two_nan_store_keys_are_written_once() {
 
 /// An input map carrying one key twice is invalid under RFC 8949, and SPEC.md
 /// leaves the two readers free to disagree about which entry wins — but not to
-/// lose the other one. The field takes the first entry; the second used to be
-/// dropped along with it, because the store was filtered by key *name*, so a
-/// value the file carried reached neither the field nor the store.
+/// lose the other one. The field takes the first entry, and the second has to
+/// reach the store: filtering the store by key *name* would drop it along with
+/// the first, so a value the file carried would reach neither.
 #[test]
 fn a_duplicate_key_on_input_keeps_the_entry_no_field_took() {
     let header = read(cbor_map(&[

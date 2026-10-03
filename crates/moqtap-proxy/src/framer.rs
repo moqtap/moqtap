@@ -107,7 +107,7 @@ const UNBOUNDED_MEASURING_PAD: usize = usize::MAX / 2;
 /// Construct with [`FramerConfig::default`] and adjust fields, or with
 /// [`FramerConfig::new`] and the builder setters. The struct is
 /// `#[non_exhaustive]` so later releases can add knobs without a break;
-/// that also means a struct literal no longer compiles from outside this
+/// that also means a struct literal does not compile from outside this
 /// crate.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -1190,9 +1190,8 @@ impl Meta {
 /// ID to the first object, which drafts fold a mode field into the
 /// header-type octet, which drafts may omit the publisher priority — stays
 /// in the codec beside the decoders that define it. This crate keeps no
-/// copy of it, which is the point: the copy it used to keep (a mask
-/// constant and a thirteen-arm match) had already drifted from draft-16's
-/// own decoder.
+/// copy of it, which is the point: a local copy (a mask constant and a
+/// per-draft match) drifts from the decoders it copies.
 ///
 /// Where a draft encodes the subgroup ID implicitly as the first object's
 /// ID, the codec stores zero and [`AnySubgroupHeader::subgroup_id`]

@@ -342,20 +342,19 @@ PER_DRAFT_FILE = re.compile(r"^draft(\d\d)_(?!\d\d_)")
 # rendering it could not open, so a draft the tree has and `--drafts` does not
 # stops the run rather than quietly narrowing it.
 #
-# # The floor was the last written-down draft number, and it had already lapsed
+# # Why the floor is read off the tree too
 #
 # A derivation that can grow can also shrink, and shrinking is the silent
 # direction: every guard above passes more, no count moves, and the rules that
 # no longer reach a draft report nothing at all. So the derived set is held
-# against a floor - and the floor was `frozenset(range(7, 20))`, a hand-written
-# range that stopped at draft-19 while the tree had already moved past it. It was
-# still doing its job, because a floor only has to be a *lower* bound, but it
-# was doing it one draft behind, and the day somebody deleted `src/draft20/`
-# nothing here would have said so. That is the same defect one paragraph up,
-# written into the guard against it.
+# against a floor - and a hand-written floor such as `frozenset(range(7, 20))`
+# lapses as soon as the tree moves past it. It still does its job, because a
+# floor only has to be a *lower* bound, but one draft behind: the day somebody
+# deleted `src/draft20/`, nothing here would say so. That is the same defect
+# one paragraph up, written into the guard against it.
 #
-# `declared_drafts` is the fix and it is the same fix: read the floor off the
-# tree too, from a place that is not the one the set above is read from. The
+# `declared_drafts` applies the same answer: read the floor off the tree too,
+# from a place that is not the one the set above is read from. The
 # manifests declare a `draftNN` cargo feature per draft; the modules and test
 # files are what `implemented_drafts` walks. Two independent statements of one
 # set, each of which has to account for the other, and no number to bump. A

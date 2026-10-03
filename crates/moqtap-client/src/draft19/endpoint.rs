@@ -3928,7 +3928,7 @@ mod responder_tests {
 
     /// A peer's REQUEST_UPDATE is held to the same rule the requester side is:
     /// draft-19 Section 10.9 puts it on its request's own stream, and the
-    /// audited receive path already refuses one whose Request ID names a
+    /// requester's receive path already refuses one whose Request ID names a
     /// different request. Routing the peer's updates through that same handler
     /// is what keeps the two directions from disagreeing.
     #[test]
@@ -4269,13 +4269,12 @@ mod tests {
     ///
     /// Table 5's Stream column reads "Request" for all three, the same value it
     /// gives REQUEST_UPDATE. Only SETUP is "Control" on its own; GOAWAY is
-    /// "Control, Request". The placement had all three exactly inverted — the
-    /// control stream accepted them and returned `Ok`, and the request stream
-    /// fell through to the catch-all and refused them — so a conforming peer
+    /// "Control, Request". Inverting the placement accepts them on the control
+    /// stream and refuses them on the request stream, so a conforming peer
     /// sending NAMESPACE on the SUBSCRIBE_NAMESPACE stream that asked for it
-    /// had its announcement dropped.
+    /// would have its announcement dropped.
     ///
-    /// Restoring the control-stream arms (`Namespace(ref m) =>
+    /// Adding control-stream arms (`Namespace(ref m) =>
     /// self.receive_namespace(m)` and its two siblings) fails this test at the
     /// second half with:
     ///

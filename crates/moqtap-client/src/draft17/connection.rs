@@ -3860,8 +3860,8 @@ mod accept_on_the_wire {
     ///
     /// # What it catches
     ///
-    /// Restoring the origin guard on this draft's `respond`, so that no
-    /// response is written on a stream this endpoint opened:
+    /// Making the origin guard on this draft's `respond` unconditional, so
+    /// that no response is written on a stream this endpoint opened:
     ///
     /// ```text
     /// the subscriber's update is this endpoint's to answer:

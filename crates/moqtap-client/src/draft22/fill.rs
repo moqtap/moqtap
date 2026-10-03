@@ -707,7 +707,7 @@ mod tests {
     }
 
     /// The inner chain starts at 0, so the first nested type is written as its
-    /// own number and not as a delta from the enclosing `0x23`. Decision D2.
+    /// own number and not as a delta from the enclosing `0x23`.
     #[test]
     fn the_nested_type_delta_chain_restarts_at_zero() {
         let fill = FillParameters::inherited()

@@ -27,11 +27,11 @@ env:
 jobs:
   # Publishing is irreversible: crates.io permits a yank but never a replace.
   # So the whole of CI runs first, at the tagged commit, and `publish` does not
-  # start unless it is green. Before this, `ci.yml` and `publish.yml` both
-  # triggered on a tag push and raced — a crate could reach the registry while
+  # start unless it is green. Were `ci.yml` and `publish.yml` both to trigger
+  # on a tag push, they would race — a crate could reach the registry while
   # its own test matrix was still running, or after it had gone red.
   #
-  # `ci.yml` therefore no longer triggers on tags itself. It is reached here
+  # `ci.yml` therefore does not trigger on tags itself. It is reached here
   # instead, so a tag produces exactly one CI run rather than two.
   ci:
     uses: ./.github/workflows/ci.yml

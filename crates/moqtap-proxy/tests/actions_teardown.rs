@@ -4,12 +4,12 @@
 //!
 //! # What each group here is for
 //!
-//! **A non-reset read failure must not become a FIN.** `propagate_reset`
-//! used to mirror only `TransportError::StreamReset`; every other read
-//! failure dropped the destination `SendStream`, and quinn's `Drop` calls
-//! `finish()`. The player then reads a truncated group to EOF and commits it
-//! as complete. `a_non_reset_read_failure_resets_a_data_stream` proves the
-//! peer now sees a reset, on **both** data pipes — `pipe_data_passthrough`
+//! **A non-reset read failure must not become a FIN.** Were
+//! `propagate_reset` to mirror only `TransportError::StreamReset`, every other
+//! read failure would drop the destination `SendStream`, and quinn's `Drop`
+//! calls `finish()`. The player then reads a truncated group to EOF and
+//! commits it as complete. `a_non_reset_read_failure_resets_a_data_stream`
+//! proves the peer sees a reset, on **both** data pipes — `pipe_data_passthrough`
 //! (`Interest::NONE`) and `pipe_data_framed` (`Interest::STREAMS`) are
 //! separate functions with separate `propagate_reset` call sites.
 //! `a_non_reset_read_failure_on_the_control_stream_does_not_synthesize_a_reset`
@@ -489,7 +489,7 @@ async fn non_reset_read_failure_case(pipe: Pipe) {
 
     // The relay dies: connection-level loss, not a RESET_STREAM. This is the
     // failure class this test is about — every read on the relay leg now
-    // fails with something `propagate_reset` used to ignore.
+    // fails with something other than a stream reset.
     relay.close(0x9, b"relay died");
 
     let (rest, ending) = tokio::time::timeout(common::TIMEOUT, drain_reporting_loss(&mut recv))
@@ -1176,26 +1176,21 @@ async fn close_session_carries_the_requested_code_and_reason() {
 /// makes first-wins falsifiable: with one fixed code the test could not tell
 /// it from last-wins.
 ///
-/// # This used to assert "at least one refusal", and that was the bug
+/// # Why the hook holds the decisions rather than racing them
 ///
 /// Both decisions are stream ends, and the first one cancels the session as
-/// it is recorded, so the second was reaching a hook only if its pipe won a
-/// `tokio::select!` coin flip against a `cancel.cancelled()` branch that had
-/// just gone ready. The test bought trials with streams — 24 of them — and
-/// then asserted only what a race can promise: at least one refusal, and
-/// `hook.calls() >= 2`.
+/// it is recorded, so without a hold the second reaches a hook only if its
+/// pipe wins a `tokio::select!` coin flip against a `cancel.cancelled()`
+/// branch that has just gone ready. A race can promise only "at least one
+/// refusal" and `hook.calls() >= 2`, and buying trials with streams does not
+/// help: the trials are not the streams but the FINs already delivered when
+/// the first close lands, a packet-batching detail no test can see or set.
+/// Over 20 runs on an idle box, 24 streams with a 300 ms sleep between the
+/// writes and the FINs give **2 to 11 decisions**, median 6; without the
+/// sleep, 1 to 3, and **8 runs in 20 fail outright**, each after waiting the
+/// full 10 s for a second decision that never comes.
 ///
-/// It was not enough. Measured on 2026-08-26, 20 runs on an idle box with
-/// the 300 ms sleep that separated the writes from the FINs: **2 to 11
-/// decisions out of 24 streams**, median 6 — not the ~12 an independent
-/// coin flip per stream would give, because the trials are not the streams.
-/// They are the FINs already delivered when the first close lands, and that
-/// is a packet-batching detail no test can see or set. Twenty more runs
-/// with the sleep removed, so that fewer of them have arrived: 1 to 3
-/// decisions, and **8 runs in 20 failed outright**, each after waiting the
-/// full 10 s for a second decision that was never coming.
-///
-/// So the fix is not a longer wait or more streams. [`CountingCloseHook`]
+/// So the answer is not a longer wait or more streams. [`CountingCloseHook`]
 /// holds the first decision inside the hook until the second has arrived,
 /// and holds the second until the first has been applied — after which
 /// **exactly two** decisions, **exactly one** applied close and **exactly
@@ -1230,7 +1225,7 @@ async fn a_second_close_session_is_refused() {
     // Open every stream and write to it first, so the proxy has accepted all
     // of them and spawned a forwarding task for each before any of them
     // ends. Then FIN them together. Whether the two FINs are delivered in
-    // one batch or a hundred milliseconds apart no longer decides anything:
+    // one batch or a hundred milliseconds apart decides nothing:
     // the first stream end waits inside the hook for the second, and until
     // it returns nothing has been closed and nothing has been cancelled.
     let mut sends = Vec::new();

@@ -314,8 +314,8 @@ macro_rules! peer_setup {
 macro_rules! draft_setup_parameters {
     // `KvpValue`, `VarInt` and the varint helper are local to this arm, whose
     // only caller is the draft-07 gate — the one draft that
-    // passes `with_role`. At file scope they were unread by every other draft
-    // and `RUSTFLAGS="-D warnings"` makes that an error on every
+    // passes `with_role`. At file scope they would be unread by every other
+    // draft, and `RUSTFLAGS="-D warnings"` would make that an error on every
     // `just draft-matrix` row but draft-07's. Here the condition is stated once,
     // by the invocation, so there is no `cfg` list and no `allow` to go stale.
     (with_role) => {

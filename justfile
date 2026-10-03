@@ -41,7 +41,7 @@ test:
 
 # The feature combinations `cargo test --workspace` does not compile. A feature
 # that is off by default is built by nothing unless something names it, and each
-# row below was, at one point, named by nothing at all:
+# row below is one such feature:
 #
 #   * `quinn-socket` compiles the socket adapter, its suite, and the committed
 #     adapter that reports every impairment and forwards the datagram untouched
@@ -273,14 +273,13 @@ draft-pairs:
 # `--all-targets` on the single-draft rows, `--lib` on the zero-draft ones, and
 # the split is the whole of what this recipe compiles.
 #
-# It was `--lib` everywhere, which made `just check` weaker than CI: the
-# `features` job in `.github/workflows/ci.yml` has run
+# `--lib` everywhere would make `just check` weaker than CI: the `features` job
+# in `.github/workflows/ci.yml` runs
 # `cargo clippy -p moqtap-{client,proxy} --features draftNN --all-targets
-# -- -D warnings` per draft since 2026-08-25, and its comment records why —
-# under a single draft the client's ~200 test targets and the proxy's ~37 were
-# compiled by no job at all, and when the flag was first added thirteen of the
-# then-drafts failed at the first line of `tests/common/mod.rs`. A local
-# recipe that checks less than CI is a local recipe that sends a red build.
+# -- -D warnings` per draft, and its comment records why — under a single
+# draft the client's ~200 test targets and the proxy's ~37 are compiled by no
+# other job. A local recipe that checks less than CI is a local recipe that
+# sends a red build.
 #
 # The zero-draft rows stay `--lib` because that is what CI asserts there too,
 # and because the proxy's zero-draft row is asserting a *refusal* at
@@ -304,16 +303,16 @@ draft-matrix:
     # skipping the row — an exit 0 there would mean that constant had quietly
     # acquired a fallback.
     #
-    # `$6` is why that row is no longer weaker than the other twenty-nine.
+    # `$6` is why that row is not weaker than the other twenty-nine.
     #
     # An exit code is one bit and 101 is what cargo answers for *any* failed
     # compile, so a row asserting a non-zero exit is satisfied by every way the
     # build can break — including the ways that never reach the thing it exists
-    # to test. That is not hypothetical here: for most of one session this row
-    # was green while `capability::DEFAULT_DRAFT` was never evaluated at all,
-    # because `moqtap-client`'s own zero-draft build failed first and cargo
-    # stopped there. The 101 came from a dependency several crates away, and
-    # nothing in the row could tell the difference.
+    # to test. That is not hypothetical here: the row is green, with
+    # `capability::DEFAULT_DRAFT` never evaluated at all, whenever
+    # `moqtap-client`'s own zero-draft build fails first and cargo stops there.
+    # The 101 then comes from a dependency several crates away, and nothing in
+    # the exit code can tell the difference.
     #
     # So the row names the diagnostic. Everything after `$5` is a fixed string
     # — matched with `grep -F`, so no regex escaping and no accidental

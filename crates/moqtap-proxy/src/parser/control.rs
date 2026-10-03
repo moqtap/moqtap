@@ -329,15 +329,14 @@ mod tests {
 
     /// A frame the decoder refuses costs that frame and no more.
     ///
-    /// The parser used to `break` out of the loop on a decode error, having
-    /// already advanced past the frame. Everything buffered behind the bad
-    /// frame was dropped on the floor with it — so one malformed message could
-    /// cost an arbitrary number of good ones, and the stricter the codec became
-    /// about draft-19's MUSTs, the more of the stream a single refusal took
-    /// with it. That is backwards for a proxy whose purpose is to report the
-    /// traffic it sees.
+    /// Breaking out of the loop on a decode error, having already advanced
+    /// past the frame, would drop everything buffered behind the bad frame
+    /// with it — so one malformed message could cost an arbitrary number of
+    /// good ones, and the stricter the codec about draft-19's MUSTs, the more
+    /// of the stream a single refusal would take with it. That is backwards
+    /// for a proxy whose purpose is to report the traffic it sees.
     ///
-    /// *Ablation (measured):* restore `continue` to `break`.
+    /// *Ablation (measured):* turn the `continue` into `break`.
     ///
     /// ```text
     /// ---- parser::control::tests::a_refused_frame_does_not_cost_the_frames_behind_it stdout ----
@@ -374,21 +373,21 @@ mod tests {
 
     /// A refused frame comes back, with its bytes and its type.
     ///
-    /// The parser used to step over one in silence. Two things were lost with
-    /// it. An observer could not tell a control message this proxy failed to
-    /// read from one the peer never sent — opposite conclusions, and for a
-    /// tool whose product is the account of the traffic, the wrong one to
-    /// default to. And on the mutating control pipe, where this parser *is*
-    /// the forwarding path, the frame was deleted from the session: the peer
-    /// received a stream with a message missing from the middle of it, and
-    /// neither endpoint had anything to attribute that to.
+    /// Stepping over one in silence would lose two things. An observer could
+    /// not tell a control message this proxy failed to read from one the peer
+    /// never sent — opposite conclusions, and for a tool whose product is the
+    /// account of the traffic, the wrong one to default to. And on the
+    /// mutating control pipe, where this parser *is* the forwarding path, the
+    /// frame would be deleted from the session: the peer would receive a
+    /// stream with a message missing from the middle of it, and neither
+    /// endpoint would have anything to attribute that to.
     ///
     /// Capturing mode is what the second half needs, so both modes are
     /// checked here — the observation-only parser must not start copying
     /// bytes it has no forwarding use for.
     ///
     /// *Ablation (measured):* drop the `items.push(ParsedItem::Refused(..))`
-    /// and step over the frame in silence, as the parser used to.
+    /// and step over the frame in silence.
     ///
     /// ```text
     /// ---- parser::control::tests::a_refused_frame_comes_back_with_its_bytes_and_its_type stdout ----

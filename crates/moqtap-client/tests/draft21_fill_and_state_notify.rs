@@ -396,11 +396,10 @@ async fn a_subscription_asks_for_a_fill_reads_its_stream_and_takes_a_state_notif
         .expect("the peer task hung")
         .expect("the peer task panicked");
 
-    // Decision D1: the value opens with a `Number of Parameters` count, so a
-    // block holding one nested LOCATION_FILTER is `01` and not the bare
-    // parameter. The rest is the filter: type 0x21 written as a delta from 0
-    // because the nested scope restarts the chain (D2), a length of 4, and the
-    // four fields.
+    // The value opens with a `Number of Parameters` count, so a block holding
+    // one nested LOCATION_FILTER is `01` and not the bare parameter. The rest
+    // is the filter: type 0x21 written as a delta from 0 because the nested
+    // scope restarts the chain, a length of 4, and the four fields.
     assert_eq!(
         saw.fill_value,
         vec![0x01, 0x21, 0x04, 4, 0, 2, 9],

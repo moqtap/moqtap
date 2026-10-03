@@ -1818,18 +1818,16 @@ impl Connection {
     /// and so does this client's own [`Endpoint::receive_message`] — writing
     /// one here produces a frame this implementation would itself refuse.
     ///
-    /// All four now have somewhere better to go, and none of them should come
+    /// All four have somewhere better to go, and none of them should come
     /// through here. REQUEST_UPDATE goes on the stream its request opened, with
     /// [`send_on_request_stream`](Self::send_on_request_stream). NAMESPACE and
     /// NAMESPACE_DONE go on a peer's SUBSCRIBE_NAMESPACE stream, with
     /// [`namespace_on`](Self::namespace_on) and
     /// [`namespace_done_on`](Self::namespace_done_on); PUBLISH_SKIPPED goes on
     /// a peer's SUBSCRIBE_TRACKS stream, with
-    /// [`publish_skipped_on`](Self::publish_skipped_on). Those three arrived
-    /// with the accept path — before it there was no peer-opened stream to put
-    /// them on, which is why this method still takes them rather than refusing
-    /// them outright. Narrowing what it accepts changes an existing outbound
-    /// route and is not part of accepting requests.
+    /// [`publish_skipped_on`](Self::publish_skipped_on). This method still
+    /// takes those three rather than refusing them, so that an existing
+    /// outbound route keeps working; refusing them here is a separate change.
     ///
     /// [`Endpoint::receive_message`]: crate::draft22::endpoint::Endpoint::receive_message
     ///
@@ -3583,9 +3581,9 @@ impl Connection {
             // one side or the other, on this draft, which is the decision a `_`
             // arm makes silently and invisibly on every draft at once.
             //
-            // Adding one variant to `CodecError` was tried, and produces
-            // one `E0004` per draft, each naming the variant that has
-            // nowhere to go. That is the whole mechanism.
+            // Adding one variant to `CodecError` produces one `E0004` per
+            // draft, each naming the variant that has nowhere to go. That is
+            // the whole mechanism.
             //
             // The nesting stops at `VarInt`, whose variants report how the bytes
             // ran out rather than a rule an endpoint states, so there is nothing

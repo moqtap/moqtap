@@ -408,7 +408,7 @@ fn the_two_ends_of_one_alias_rule_are_told_apart() {
     assert_ne!(peers.cause(), ours.cause(), "the whole point of the pair");
 }
 
-/// The counterexample to "a code means the peer", found by looking for one.
+/// The counterexample to "a code means the peer".
 ///
 /// It is tempting to read `EndpointError::session_error_code` as the whole
 /// answer: a variant the draft answers with a session close is one a peer broke

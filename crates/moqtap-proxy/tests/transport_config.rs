@@ -224,14 +224,12 @@ async fn listener_builds_a_profile_through_the_supplied_installer() {
 /// A leg carrying a profile, a capture spec **and** an installer runs on the
 /// installer's base.
 ///
-/// This is the combination in which the installer used to be skipped. The
-/// reason was real — a sink is attached by mutating a
-/// `quinn::TransportConfig`, and the trait used to hand back an `Arc` there
-/// is no way to mutate — but the consequence was this crate's cardinal
-/// failure: a caller sets an installer, sets a capture beside it, and the
-/// installer is never called, with nothing anywhere saying so. `build` now
-/// returns the config by value, so the base is the installer's and the sink
-/// goes on top of it.
+/// This is the combination in which skipping the installer is tempting: a
+/// sink is attached by mutating a `quinn::TransportConfig`, and an `Arc` is
+/// no way to mutate one. Skipping it would be this crate's cardinal failure:
+/// a caller sets an installer, sets a capture beside it, and the installer is
+/// never called, with nothing anywhere saying so. `build` returns the config
+/// by value, so the base is the installer's and the sink goes on top of it.
 ///
 /// Both halves are asserted, because either alone would pass against the
 /// wrong code. Datagram support is off, which is the installer's base

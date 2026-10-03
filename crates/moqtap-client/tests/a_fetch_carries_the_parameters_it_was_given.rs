@@ -389,15 +389,14 @@ mod draft20 {
     /// in front of this one. A key below 0x21 is appended after it and never
     /// exercises the search at all.
     ///
-    /// Two of the codec's rules narrowed this to one usable key, and the two
-    /// that were tried first each failed the gate for its own reason. The value
-    /// is `2` because Section 12.5 holds GROUP_ORDER to `{1, 2}`.
+    /// Two of the codec's rules narrow this to one usable key. The value is `2`
+    /// because Section 12.5 holds GROUP_ORDER to `{1, 2}`.
     ///
-    /// The obvious pick was one of the Range Filters, since 0x25 through 0x29
-    /// all sort above the filter and all admit a FETCH. They are
-    /// length-prefixed: draft-20 puts them in the same value class as
-    /// AUTHORIZATION_TOKEN regardless of key parity, so a `Varint` there
-    /// decodes as `ControlMessageLengthMismatch` rather than as a wrong value.
+    /// The Range Filters, 0x25 through 0x29, also sort above the filter and all
+    /// admit a FETCH, but they are length-prefixed: draft-20 puts them in the
+    /// same value class as AUTHORIZATION_TOKEN regardless of key parity, so a
+    /// `Varint` there decodes as `ControlMessageLengthMismatch` rather than as a
+    /// wrong value.
     /// That leaves 0x0A, 0x20, 0x22 and 0x35 as the plainly varint-valued
     /// parameters a FETCH may carry, and 0x22 is the only one of the four above
     /// 0x21.
@@ -571,15 +570,14 @@ mod draft21 {
     /// in front of this one. A key below 0x21 is appended after it and never
     /// exercises the search at all.
     ///
-    /// Two of the codec's rules narrowed this to one usable key, and the two
-    /// that were tried first each failed the gate for its own reason. The value
-    /// is `2` because Section 10.5 holds GROUP_ORDER to `{1, 2}`.
+    /// Two of the codec's rules narrow this to one usable key. The value is `2`
+    /// because Section 10.5 holds GROUP_ORDER to `{1, 2}`.
     ///
-    /// The obvious pick was one of the Range Filters, since 0x25 through 0x29
-    /// all sort above the filter and all admit a FETCH. They are
-    /// length-prefixed: draft-21 puts them in the same value class as
-    /// AUTHORIZATION_TOKEN regardless of key parity, so a `Varint` there
-    /// decodes as `ControlMessageLengthMismatch` rather than as a wrong value.
+    /// The Range Filters, 0x25 through 0x29, also sort above the filter and all
+    /// admit a FETCH, but they are length-prefixed: draft-21 puts them in the
+    /// same value class as AUTHORIZATION_TOKEN regardless of key parity, so a
+    /// `Varint` there decodes as `ControlMessageLengthMismatch` rather than as a
+    /// wrong value.
     /// That leaves 0x0A, 0x20, 0x22 and 0x35 as the plainly varint-valued
     /// parameters a FETCH may carry, and 0x22 is the only one of the four above
     /// 0x21.
@@ -699,15 +697,14 @@ mod draft22 {
     /// in front of this one. A key below 0x21 is appended after it and never
     /// exercises the search at all.
     ///
-    /// Two of the codec's rules narrowed this to one usable key, and the two
-    /// that were tried first each failed the gate for its own reason. The value
-    /// is `2` because Section 9.20.8 holds GROUP_ORDER to `{1, 2}`.
+    /// Two of the codec's rules narrow this to one usable key. The value is `2`
+    /// because Section 9.20.8 holds GROUP_ORDER to `{1, 2}`.
     ///
-    /// The obvious pick was one of the Range Filters, since 0x25 through 0x29
-    /// all sort above the filter and all admit a FETCH. They are
-    /// length-prefixed: draft-22 puts them in the same value class as
-    /// AUTHORIZATION_TOKEN regardless of key parity, so a `Varint` there
-    /// decodes as `ControlMessageLengthMismatch` rather than as a wrong value.
+    /// The Range Filters, 0x25 through 0x29, also sort above the filter and all
+    /// admit a FETCH, but they are length-prefixed: draft-22 puts them in the
+    /// same value class as AUTHORIZATION_TOKEN regardless of key parity, so a
+    /// `Varint` there decodes as `ControlMessageLengthMismatch` rather than as a
+    /// wrong value.
     /// That leaves 0x0A, 0x20, 0x22 and 0x35 as the plainly varint-valued
     /// parameters a FETCH may carry, and 0x22 is the only one of the four above
     /// 0x21.

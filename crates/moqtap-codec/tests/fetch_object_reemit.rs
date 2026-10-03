@@ -516,7 +516,7 @@ mod draft20 {
     /// An End of Range marker survives a removal in front of it, because the
     /// writer re-derives its two fields against the new predecessor.
     ///
-    /// Draft-19's writer reproduced a marker's bytes verbatim, on the reading
+    /// Draft-19's writer reproduces a marker's bytes verbatim, on the reading
     /// that its Group ID and Object ID are absolute. Draft-20's corpus reads
     /// them as ordinary deltas — Section 11.4.4.2 says only that the two
     /// fields "are present" and settles neither — so a marker after a removed
@@ -525,7 +525,7 @@ mod draft20 {
     ///
     /// # Ablation
     ///
-    /// Restoring draft-19's verbatim marker arm in
+    /// Substituting draft-19's verbatim marker arm in
     /// `FetchObjectWriter::header_for`:
     ///
     /// ```text
@@ -817,7 +817,7 @@ mod draft21 {
     /// An End of Range marker survives a removal in front of it, because the
     /// writer re-derives its two fields against the new predecessor.
     ///
-    /// Draft-19's writer reproduced a marker's bytes verbatim, on the reading
+    /// Draft-19's writer reproduces a marker's bytes verbatim, on the reading
     /// that its Group ID and Object ID are absolute. Draft-21's corpus reads
     /// them as ordinary deltas — Section 11.4.1.2 says only that the two
     /// fields "are present" and settles neither — so a marker after a removed
@@ -826,7 +826,7 @@ mod draft21 {
     ///
     /// # Ablation
     ///
-    /// Restoring draft-19's verbatim marker arm in
+    /// Substituting draft-19's verbatim marker arm in
     /// `FetchObjectWriter::header_for`:
     ///
     /// ```text
@@ -1119,7 +1119,7 @@ mod draft22 {
     /// An End of Range marker survives a removal in front of it, because the
     /// writer re-derives its two fields against the new predecessor.
     ///
-    /// Draft-19's writer reproduced a marker's bytes verbatim, on the reading
+    /// Draft-19's writer reproduces a marker's bytes verbatim, on the reading
     /// that its Group ID and Object ID are absolute. Draft-22's corpus reads
     /// them as ordinary deltas — Section 11.4.1.2 says only that the two
     /// fields "are present" and settles neither — so a marker after a removed
@@ -1128,7 +1128,7 @@ mod draft22 {
     ///
     /// # Ablation
     ///
-    /// Restoring draft-19's verbatim marker arm in
+    /// Substituting draft-19's verbatim marker arm in
     /// `FetchObjectWriter::header_for`:
     ///
     /// ```text

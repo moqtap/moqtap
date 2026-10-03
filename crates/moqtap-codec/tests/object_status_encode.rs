@@ -54,9 +54,9 @@
 //!
 //! # What this gate catches, observed by making each change and running it
 //!
-//! The status field being typed means the *literal* pre-typing encode path —
-//! converting the draft-neutral `u64` straight to a `VarInt` — no longer
-//! compiles, so it cannot be ablated. What can be, and what a "just make it
+//! The status field being typed means the *literal* untyped encode path —
+//! converting the draft-neutral `u64` straight to a `VarInt` — does not
+//! compile, so it cannot be ablated. What can be, and what a "just make it
 //! compile" fix actually looks like, is silently defaulting a code the target
 //! draft does not assign instead of refusing it:
 //! `ObjectStatus::from_u64(code).unwrap_or(ObjectStatus::Normal)` in the

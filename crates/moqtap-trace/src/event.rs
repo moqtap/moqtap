@@ -1253,10 +1253,10 @@ fn get_trace_id(pairs: &[(Value, Value)]) -> Result<Option<[u8; TRACE_ID_LEN]>, 
 /// caller then still has the derivation's upstream and downstream
 /// subscriptions, which are what make it a derivation at all.
 ///
-/// It used to return an error, which cost more than the field. `read_next`
-/// propagates it, so `collect::<Result<Vec<_>, _>>()` — the documented idiom —
-/// stopped at that event and yielded none of the ones after it. One namespace
-/// an encoder wrote oddly took the rest of the recording with it.
+/// An error here would cost more than the field. `read_next` propagates it,
+/// so `collect::<Result<Vec<_>, _>>()` — the documented idiom — would stop at
+/// that event and yield none of the ones after it: one namespace an encoder
+/// wrote oddly would take the rest of the recording with it.
 fn get_namespace(pairs: &[(Value, Value)]) -> Option<Vec<Vec<u8>>> {
     let Some(Value::Array(items)) = get_value(pairs, "ns") else {
         return None;

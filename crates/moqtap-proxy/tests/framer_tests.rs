@@ -215,10 +215,10 @@ const FIRST_OBJECT_SUBGROUP_STREAMS: &[(DraftVersion, u8)] = &[
 /// A draft this build compiled, for the handful of claims below that are
 /// about the framer rather than about a draft.
 ///
-/// Those tests used to name a draft outright, which made them pass or fail
-/// on whether that one draft happened to be in the build's feature set
-/// rather than on the framer. `DRAFTS` is cfg-built and the file-level
-/// gate guarantees it is not empty.
+/// Naming a draft outright would make those tests pass or fail on whether
+/// that one draft happened to be in the build's feature set rather than on
+/// the framer. `DRAFTS` is cfg-built and the file-level gate guarantees it is
+/// not empty.
 fn a_compiled_draft() -> DraftVersion {
     DRAFTS[0]
 }
@@ -637,10 +637,10 @@ fn an_object_many_times_the_cap_still_lets_framing_resume() {
 /// far larger than the default cap, then a normal object, arriving in the
 /// 8 KiB reads `pipe_data_framed` performs.
 ///
-/// This used to latch bypass on the middle object and silently cost every
-/// later object on the stream its addressability, without so much as an
-/// error to say so: one oversized object degraded the whole stream instead
-/// of only itself.
+/// Latching bypass on the middle object would silently cost every later
+/// object on the stream its addressability, without so much as an error to
+/// say so: one oversized object would degrade the whole stream instead of
+/// only itself.
 ///
 /// One draft rather than a sweep — ten mebibytes per draft is the whole
 /// draft set's worth of cost for one claim — and it has to come from
@@ -843,9 +843,9 @@ fn subgroup_id_mode_zero_is_reported_as_zero() {
     // header shape in the vector corpus, so reporting `None` here would
     // hide the majority of live traffic from any subgroup matcher.
     //
-    // Swept over the compiled members of those four rather than named, for
-    // the same reason its sibling below is: no other draft has a mode
-    // field to report, and a build without 17-22 has no decoder to ask.
+    // Swept over the compiled members of `MODE_FIELD_DRAFTS` rather than
+    // named, for the same reason its sibling below is: no other draft has a
+    // mode field to report, and a build without 17-22 has no decoder to ask.
     for &draft in MODE_FIELD_DRAFTS {
         let stream = stream_without_a_subgroup_id_field(draft, 0x10, 7);
 

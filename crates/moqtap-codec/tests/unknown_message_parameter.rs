@@ -286,8 +286,7 @@ mod draft19 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead — which is what it did
-    /// before it had a variant — fails with:
+    /// Reporting this as an ordinary malformation instead fails with:
     ///
     /// ```text
     /// a type this draft does not define was not named as unknown:
@@ -356,8 +355,7 @@ mod draft20 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead — which is what it did
-    /// before it had a variant — fails with:
+    /// Reporting this as an ordinary malformation instead fails with:
     ///
     /// ```text
     /// a type this draft does not define was not named as unknown:
@@ -425,8 +423,7 @@ mod draft21 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead — which is what it did
-    /// before it had a variant — fails with:
+    /// Reporting this as an ordinary malformation instead fails with:
     ///
     /// ```text
     /// a type this draft does not define was not named as unknown:
@@ -495,8 +492,7 @@ mod draft22 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead — which is what it did
-    /// before it had a variant — fails with:
+    /// Reporting this as an ordinary malformation instead fails with:
     ///
     /// ```text
     /// a type this draft does not define was not named as unknown:

@@ -15,10 +15,10 @@
 //!
 //! And **nothing observes**: [`NoOpProxyObserver`] answers `false` to
 //! `wants_events`, and the session carries a [`ShapeProfile`], which is what
-//! arms framing. That combination is the whole point. The SETUP peek used to
-//! sit behind the observer gate, so this session — the one whose profile
-//! most needs the draft — performed no detection at all, and the shared cell
-//! it published into would have been a cell nothing ever wrote. A row run
+//! arms framing. That combination is the whole point. With the SETUP peek
+//! behind the observer gate, this session — the one whose profile most needs
+//! the draft — would perform no detection at all, and the shared cell it
+//! publishes into would be a cell nothing ever wrote. A row run
 //! with an observer attached proves nothing about it: the observer would
 //! have turned the detection on.
 //!

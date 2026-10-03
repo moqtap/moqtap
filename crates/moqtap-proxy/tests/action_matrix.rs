@@ -49,11 +49,11 @@
 //! # Coverage caveat on the Control column
 //!
 //! On drafts 17-22 the harness drives control bytes down the first
-//! bidirectional stream, which is exactly the topology the proxy wrongly
-//! assumes those drafts use. Harness and proxy therefore share one mistake,
-//! so those cells prove the actions execute correctly on whatever the site
-//! *was* shown, not that the site was shown the real control plane. They are
-//! labelled *asserted-against-assumption* in the coverage report.
+//! bidirectional stream, which on those drafts is a request stream rather
+//! than the unidirectional control pair. A request stream reaches the same
+//! site with the same framing, so those cells prove the actions execute on
+//! it; the pair that carries SETUP is driven in `control_plane_uni.rs`. They
+//! are labelled *probed on a request stream* in the coverage report.
 //!
 //! # Which drafts this file sweeps
 //!
@@ -115,8 +115,8 @@ use moqtap_proxy::shape::StreamKey;
 ///
 /// Each element carries its own `#[cfg]`, so the sweep axis is the enabled
 /// set and not a hardcoded list. Under the default (all-drafts) build
-/// that is all of them and every cardinality assertion below reads the
-/// same number it always did; under `--features draft14` the sweep runs
+/// that is all of them and every cardinality assertion below reads its
+/// full-set number; under `--features draft14` the sweep runs
 /// one draft and the `DRAFTS.len() * …` products shrink with it, so the
 /// counts stay claims about coverage rather than about the feature set.
 const DRAFTS: &[DraftVersion] = &[
@@ -2508,7 +2508,7 @@ async fn sweep_fetch_streams(draft: DraftVersion, sw: &mut Sweep) {
     // their own, and `arm_fetch` is the whole difference: their Group IDs are
     // differences the FETCH's Group Order gives a direction to, and the
     // session has now been told it. The objects below state all four of
-    // their fields on those three as on 15-17, so the first object's deltas
+    // their fields on those drafts as on 15-17, so the first object's deltas
     // are its absolute Location and every later one opens a group of its
     // own — which nothing here asserts about, because what this column
     // measures is what may be done to an object rather than where it sits.
@@ -3829,7 +3829,7 @@ fn the_sweep_reports_per_cell_coverage() {
     let _ = writeln!(
         report,
         "  probed on a request stream: {assumption} Control cells on drafts 17-22 — \
-         this harness drives control bytes down a bidirectional stream, which on those four \
+         this harness drives control bytes down a bidirectional stream, which on those \
          drafts is a request stream rather than the unidirectional control pair; the \
          compensating end-to-end assertions are in control_plane_uni.rs, which drives the \
          pair itself and reads back decoded messages",

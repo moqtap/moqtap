@@ -72,12 +72,12 @@ fn d20_option_name(key: u64) -> Option<&'static str> {
 /// Draft-20's parameter table gives 0x25-0x29 `LengthPrefixed`, which stores
 /// the value verbatim, and `check_location_filters` covers 0x21 and 0x23 and
 /// nothing else — so the bytes arriving here are whatever a peer sent, one
-/// level down inside `FILL_PARAMETERS` as well as at the top. A parse written
-/// out again here read its varints with `unwrap` and resolved its two delta
-/// baselines with `+`, on a value where `Buf::has_remaining` promises one more
-/// byte and a MoQT varint may need nine. The bare `+` was the worse half: in
-/// release it wrapped rather than panicking, and a filter recorded as
-/// `start = u64::MAX, end = 0` is a wrong answer that looks like data.
+/// level down inside `FILL_PARAMETERS` as well as at the top. A second parse
+/// written out here would have to repeat both guards the value needs: a varint
+/// read that unwraps panics where `Buf::has_remaining` promises one more byte
+/// and a MoQT varint needs nine, and a bare `+` on a delta baseline wraps in
+/// release, recording a filter as `start = u64::MAX, end = 0` — a wrong answer
+/// that looks like data.
 ///
 /// [`RangeFilter::decode_moqt`] is the same read done once, with `checked_add`
 /// on both baselines and a `Malformed` for every field the value ends before.

@@ -249,17 +249,15 @@ jobs:
       - run: cargo clippy -p moqtap-proxy --no-default-features --features ${{ matrix.draft }} --lib -- -D warnings
       # Test and example targets under a reduced draft set. Everything above
       # this line is `--lib`, and the three-OS `test` matrix runs the tests only
-      # under the default all-drafts build, so the proxy's ~37 test binaries and
-      # its example were compiled by NO job under a single draft: a `#[cfg]` in
-      # a test file naming a draft that this cell does not enable is a build
-      # failure nobody would have seen until somebody ran it by hand.
+      # under the default all-drafts build, so without these rows the proxy's
+      # ~37 test binaries and its example would be compiled by NO job under a
+      # single draft: a `#[cfg]` in a test file naming a draft that this cell
+      # does not enable would be a build failure nobody sees until somebody
+      # runs it by hand.
       #
-      # The client sat in that gap longer and with far more behind it. Its
-      # shared loopback harness imported one draft's framed streams with no
-      # `cfg` at all, so on all but one of the drafts every one of its ~200
-      # test targets failed at the first line of `tests/common/mod.rs`, and
-      # four more test files named a draft they never gated. Measured on
-      # 2026-08-25 by running this row by hand for each draft.
+      # The client has far more behind it. Its shared loopback harness serves
+      # ~200 test targets, so one ungated draft import in `tests/common/mod.rs`
+      # would fail every one of them at its first line on every draft but one.
       - run: cargo clippy -p moqtap-proxy --no-default-features --features ${{ matrix.draft }} --all-targets -- -D warnings
       - run: cargo clippy -p moqtap-client --no-default-features --features ${{ matrix.draft }} --all-targets -- -D warnings
       # Those invocations on their own are a gate that cannot fail, and the

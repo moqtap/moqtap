@@ -652,11 +652,10 @@ const DELTA_END: [&[u8]; 2] = [&[0x03, 4, 0], &[0x04, 4, 0, 2]];
 /// four for one ending at Object 9 — which is written as `9` and not as `10`,
 /// because Section 5.1.2's range is inclusive.
 ///
-/// [`DELTA_END`]'s reason on two drafts. Caught by neither `just draft-pairs`
-/// row: `draft07,draft22` enables no reader and `draft21,draft22` enables one,
-/// so only the single-draft matrix rows other than draft-20 and draft-21 see
-/// this one unread, which is why it is gated here rather than after a red build
-/// reported it.
+/// [`DELTA_END`]'s reason on two drafts. Ungated, it would be unread — an
+/// error under `RUSTFLAGS="-D warnings"` — on every build that compiles this
+/// file without draft-20 or draft-21: the `draft07,draft22` row of `just
+/// draft-pairs`, and the single-draft matrix rows for drafts 15 to 19 and 22.
 #[cfg(any(feature = "draft20", feature = "draft21"))]
 const FIELD_COUNT: [&[u8]; 3] = [&[4, 0], &[4, 0, 2], &[4, 0, 2, 9]];
 

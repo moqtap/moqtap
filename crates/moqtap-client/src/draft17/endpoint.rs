@@ -3033,14 +3033,13 @@ mod responder_tests {
     /// draft-18 moved that one to its new SUBSCRIBE_TRACKS stream, but on this
     /// draft there is no such request and all three share the one stream.
     ///
-    /// The placement had all three exactly inverted — the control stream
-    /// accepted them and returned `Ok`, and the request stream fell through to
-    /// the catch-all and refused them — so a conforming peer sending NAMESPACE
-    /// on the SUBSCRIBE_NAMESPACE stream that asked for it had its announcement
-    /// dropped, which is what made SUBSCRIBE_NAMESPACE unusable end to end on
-    /// this draft.
+    /// Inverting the placement accepts them on the control stream and refuses
+    /// them on the request stream, so a conforming peer sending NAMESPACE on
+    /// the SUBSCRIBE_NAMESPACE stream that asked for it would have its
+    /// announcement dropped, which makes SUBSCRIBE_NAMESPACE unusable end to
+    /// end.
     ///
-    /// Restoring the control-stream arms (`Namespace(ref m) =>
+    /// Adding control-stream arms (`Namespace(ref m) =>
     /// self.receive_namespace(m)` and its two siblings) fails this test at the
     /// second half with:
     ///

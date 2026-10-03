@@ -2634,7 +2634,12 @@ mod tests {
                 None => seen.push(cite.sentence),
             }
         }
-        assert_eq!(seen.len(), 94, "the sentence count moved; re-run the draft sweep");
+        assert_eq!(
+            seen.len(),
+            94,
+            "the sentence count moved; recount the cited sentences against the rendered drafts \
+             and update this number"
+        );
     }
 
     /// The code name a row carries is a name its own sentence uses.

@@ -763,7 +763,7 @@ async fn the_control_plane_is_the_uni_pair_and_a_bidi_is_a_request_stream_draft2
     topology_gate(DraftVersion::Draft22).await;
 }
 
-/// The body of the four rows above.
+/// The body of the rows above.
 async fn topology_gate(draft: DraftVersion) {
     common::init_crypto();
     let alpn = draft.quic_alpn();
@@ -991,7 +991,7 @@ async fn an_injection_lands_on_the_uni_control_stream_and_not_on_a_request_strea
 /// Two messages precede it and one follows.
 const INJECTED_AT: usize = 2;
 
-/// The body of the four rows above.
+/// The body of the rows above.
 async fn injection_gate(draft: DraftVersion) {
     common::init_crypto();
     let alpn = draft.quic_alpn();

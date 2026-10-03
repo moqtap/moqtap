@@ -245,10 +245,10 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
 /// The draft every fixture in this file is built for: the **newest** one
 /// this build compiled.
 ///
-/// Newest rather than oldest so the default all-drafts build keeps running
-/// what it always ran (draft-20, the hardest half of the framer: drafts
-/// 14-22 delta-encode object IDs). Nothing here elides, so no ID is
-/// rewritten and byte equality is the ordering assertion on every draft.
+/// Newest rather than oldest because the newest draft exercises the hardest
+/// half of the framer: drafts 14-22 delta-encode object IDs. Nothing here
+/// elides, so no ID is rewritten and byte equality is the ordering assertion
+/// on every draft.
 const DRAFT: DraftVersion = COMPILED_DRAFTS[COMPILED_DRAFTS.len() - 1];
 
 /// `spawn_proxy_with` needs the ALPN the front-end endpoint advertises.

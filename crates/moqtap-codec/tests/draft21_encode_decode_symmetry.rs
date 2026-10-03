@@ -172,8 +172,8 @@ fn in_range_uint8_parameter_values_still_round_trip() {
 /// first and checking after produces a frame that passes every later check and
 /// carries a value nobody asked for.
 ///
-/// With the truncating one-liner restored, this test fails with the corrupted
-/// value visible in the bytes:
+/// With the range check replaced by the truncating one-liner above, this test
+/// fails with the corrupted value visible in the bytes:
 ///
 /// ```text
 /// GROUP_ORDER = 258 must not encode; its low byte is a valid Descending and the
@@ -306,9 +306,9 @@ fn a_datagram_with_the_status_bit_carries_its_status() {
 /// Section 9.20.22: "The allowed values are 0 (do not send Properties) or 1
 /// (send Properties), and the default is 1. If an endpoint receives a value
 /// outside this range, it MUST close the session with PROTOCOL_VIOLATION." The
-/// same sentence GROUP_ORDER and FORWARD carry, on a type that did not exist a
-/// draft ago — so a codec that ported forward the uint8 range table unchanged
-/// would write and read a value the draft says to close a session over.
+/// same sentence GROUP_ORDER and FORWARD carry, on a type new in draft-20 — so
+/// a codec that carried a draft-19 uint8 range table forward unchanged would
+/// write and read a value the draft says to close a session over.
 ///
 /// # Ablation
 ///
@@ -365,13 +365,13 @@ fn include_properties_is_held_to_its_range_in_both_directions() {
 /// malformation makes Section 3.3.2's permission unusable. This codec reads it
 /// as "the same type again".
 ///
-/// A type whose definition does **not** permit repeats keeps the old answer, so
+/// A type whose definition does **not** permit repeats is still refused, so
 /// the permission is per type rather than a blanket relaxation. That is the half
 /// this test would lose without its second loop.
 ///
 /// # Ablation
 ///
-/// Restoring draft-19's `abs_key != AUTHORIZATION_TOKEN` in place of
+/// Substituting draft-19's `abs_key != AUTHORIZATION_TOKEN` for
 /// `parameter_may_repeat`, which is what a copied-forward duplicate check is:
 ///
 /// ```text

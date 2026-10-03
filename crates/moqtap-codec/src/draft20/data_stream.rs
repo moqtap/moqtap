@@ -41,8 +41,8 @@
 //! minimal one-byte form. The draft does not settle which clause governs;
 //! rejecting a legal-but-non-minimal encoding risks failing a conformant peer
 //! and emitting one risks tripping a stricter peer, so the asymmetry is the
-//! safe default. Draft-19's decoder refused every wide spelling outright, which
-//! is the behaviour this replaces.
+//! safe default. The draft-19 decoder refuses every wide spelling outright;
+//! this one reads the whole field.
 //!
 //! # The payload rule
 //!
@@ -305,8 +305,8 @@ impl SubgroupHeader {
     /// that open and why permissive-on-receive is the choice here; the encoder
     /// is the strict half and always writes the one-byte form.
     ///
-    /// Draft-19 refused every wide spelling before looking at the value, which
-    /// is the behaviour this replaces. Reading the whole field is also what
+    /// The draft-19 module refuses every wide spelling before looking at the
+    /// value; this one reads the whole field, which is also what
     /// lets `stream_type_error` tell a padding or SETUP stream — both assigned,
     /// both several bytes wide — from a Type Table 3 does not assign.
     pub fn decode(buf: &mut impl Buf) -> Result<Self, CodecError> {

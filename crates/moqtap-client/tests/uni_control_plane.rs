@@ -544,10 +544,10 @@ fn joining_fetch_request(
 /// forgot the filter, wrote it under the wrong type, or shifted an end
 /// location by one renders differently from one that got it right.
 ///
-/// Keeping the range in the rendering is what carries decision D4 into this
-/// file: draft-19 wrote "the last Object, plus 1", draft-20 Sections 5.1.2 and
-/// 10.13 make the range inclusive, and a ported `+ 1` is invisible in a
-/// parameter count.
+/// The range stays in the rendering because the end location changed meaning:
+/// draft-19 wrote "the last Object, plus 1", draft-20 Sections 5.1.2 and 10.13
+/// make the range inclusive, and a ported `+ 1` is invisible in a parameter
+/// count.
 #[cfg(feature = "draft20")]
 fn draft20_fetch_request(
     request_id: u64,
@@ -577,10 +577,10 @@ fn draft20_fetch_request(
 /// forgot the filter, wrote it under the wrong type, or shifted an end
 /// location by one renders differently from one that got it right.
 ///
-/// Keeping the range in the rendering is what carries decision D4 into this
-/// file: draft-19 wrote "the last Object, plus 1", draft-21 Sections 3.3.1 and
-/// 9.11 make the range inclusive, and a ported `+ 1` is invisible in a
-/// parameter count.
+/// The range stays in the rendering because the end location changed meaning:
+/// draft-19 wrote "the last Object, plus 1", draft-21 Sections 3.3.1 and 9.11
+/// make the range inclusive, and a ported `+ 1` is invisible in a parameter
+/// count.
 #[cfg(feature = "draft21")]
 fn draft21_fetch_request(
     request_id: u64,
@@ -610,10 +610,10 @@ fn draft21_fetch_request(
 /// forgot the filter, wrote it under the wrong type, or shifted an end
 /// location by one renders differently from one that got it right.
 ///
-/// Keeping the range in the rendering is what carries decision D4 into this
-/// file: draft-19 wrote "the last Object, plus 1", draft-22 Sections 3.2 and
-/// 3.3.1 make the range inclusive, and a ported `+ 1` is invisible in a
-/// parameter count.
+/// The range stays in the rendering because the end location changed meaning:
+/// draft-19 wrote "the last Object, plus 1", draft-22 Sections 3.2 and 3.3.1
+/// make the range inclusive, and a ported `+ 1` is invisible in a parameter
+/// count.
 #[cfg(feature = "draft22")]
 fn draft22_fetch_request(
     request_id: u64,
@@ -641,8 +641,8 @@ fn draft22_fetch_request(
 /// `none` when the message carries no filter, which Section 10.13 defines as
 /// `{0,0}` through Largest Object. Otherwise the `vi64` fields in wire order,
 /// decoded by the codec's own decoder rather than by anything here: the shape
-/// of a filter comes from how many varints its value holds (decision D3), and
-/// a peer that guessed from the byte length would agree with a wrong encoder.
+/// of a filter comes from how many varints its value holds, and a peer that
+/// guessed from the byte length would agree with a wrong encoder.
 ///
 /// A value that is not a well-formed filter renders as its own complaint
 /// instead of panicking. The peer is reporting what arrived, and a filter it
@@ -669,8 +669,8 @@ fn draft20_range_text(parameters: &[KeyValuePair]) -> String {
 /// `none` when the message carries no filter, which Section 9.11 defines as
 /// `{0,0}` through Largest Object. Otherwise the `vi64` fields in wire order,
 /// decoded by the codec's own decoder rather than by anything here: the shape
-/// of a filter comes from how many varints its value holds (decision D3), and
-/// a peer that guessed from the byte length would agree with a wrong encoder.
+/// of a filter comes from how many varints its value holds, and a peer that
+/// guessed from the byte length would agree with a wrong encoder.
 ///
 /// A value that is not a well-formed filter renders as its own complaint
 /// instead of panicking. The peer is reporting what arrived, and a filter it
@@ -4551,10 +4551,10 @@ fn draft22_describe_fetch(m: &moqtap_codec::draft22::message::Fetch) -> String {
 ///   parameter, so the rendering says `range=none` and a helper that invented
 ///   a filter is caught.
 /// * **`fetch_range`** — the same message with the caller's range carried as
-///   `LOCATION_FILTER`. This is where decision D4 reaches the wire: the range
-///   ends at object 1 and the filter must say 1. A draft-19 encoder ported
-///   forward would write 2 there, and with the range in the rendering that is
-///   a failure rather than a fetch of one object too many.
+///   `LOCATION_FILTER`. This is where the inclusive end reaches the wire: the
+///   range ends at object 1 and the filter must say 1. A draft-19 encoder
+///   ported forward would write 2 there, and with the range in the rendering
+///   that is a failure rather than a fetch of one object too many.
 /// * **a SUBSCRIBE carrying `FILL_PARAMETERS`** — what draft-20 turned the
 ///   joining fetch into. Sections 5.1.3 and 10.2.15: the parameter's presence
 ///   asks the publisher to open a fill fetch stream carrying the Objects
@@ -4671,10 +4671,10 @@ async fn draft20_fetch_requests(
 ///   parameter, so the rendering says `range=none` and a helper that invented
 ///   a filter is caught.
 /// * **`fetch_range`** — the same message with the caller's range carried as
-///   `LOCATION_FILTER`. This is where decision D4 reaches the wire: the range
-///   ends at object 1 and the filter must say 1. A draft-19 encoder ported
-///   forward would write 2 there, and with the range in the rendering that is
-///   a failure rather than a fetch of one object too many.
+///   `LOCATION_FILTER`. This is where the inclusive end reaches the wire: the
+///   range ends at object 1 and the filter must say 1. A draft-19 encoder
+///   ported forward would write 2 there, and with the range in the rendering
+///   that is a failure rather than a fetch of one object too many.
 /// * **a SUBSCRIBE carrying `FILL_PARAMETERS`** — what draft-21 turned the
 ///   joining fetch into. Sections 3.4 and 9.20.16: the parameter's presence
 ///   asks the publisher to open a fill fetch stream carrying the Objects
@@ -4791,11 +4791,11 @@ async fn draft21_fetch_requests(
 ///   parameter, so the rendering says `range=none` and a helper that invented
 ///   a filter is caught.
 /// * **`fetch_range`** — the same message with the caller's range carried as
-///   `LOCATION_FILTER`. This is where decision D4 reaches the wire: the range
-///   ends at object 1 and the filter, Location Filter Type 0x04, must say 1.
-///   A draft-19 encoder ported
-///   forward would write 2 there, and with the range in the rendering that is
-///   a failure rather than a fetch of one object too many.
+///   `LOCATION_FILTER`. This is where the inclusive end reaches the wire: the
+///   range ends at object 1 and the filter, Location Filter Type 0x04, must
+///   say 1. A draft-19 encoder ported forward would write 2 there, and with
+///   the range in the rendering that is a failure rather than a fetch of one
+///   object too many.
 /// * **a SUBSCRIBE carrying `FILL_PARAMETERS`** — what takes the joining
 ///   fetch's place on draft-22. Sections 3.4 and 9.20.15: the parameter's presence
 ///   asks the publisher to open a fill fetch stream carrying the Objects

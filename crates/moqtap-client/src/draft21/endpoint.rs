@@ -4216,7 +4216,7 @@ mod responder_tests {
 
     /// A peer's REQUEST_UPDATE is held to the same rule the requester side is:
     /// draft-21 Section 9.5 puts it on its request's own stream, and the
-    /// audited receive path already refuses one whose Request ID names a
+    /// requester's receive path already refuses one whose Request ID names a
     /// different request. Routing the peer's updates through that same handler
     /// is what keeps the two directions from disagreeing.
     #[test]
@@ -4550,13 +4550,12 @@ mod tests {
     ///
     /// Table 5's Stream column reads "Request" for all three, the same value it
     /// gives REQUEST_UPDATE. Only SETUP is "Control" on its own; GOAWAY is
-    /// "Control, Request". The placement had all three exactly inverted — the
-    /// control stream accepted them and returned `Ok`, and the request stream
-    /// fell through to the catch-all and refused them — so a conforming peer
+    /// "Control, Request". Inverting the placement accepts them on the control
+    /// stream and refuses them on the request stream, so a conforming peer
     /// sending NAMESPACE on the SUBSCRIBE_NAMESPACE stream that asked for it
-    /// had its announcement dropped.
+    /// would have its announcement dropped.
     ///
-    /// Restoring the control-stream arms (`Namespace(ref m) =>
+    /// Adding control-stream arms (`Namespace(ref m) =>
     /// self.receive_namespace(m)` and its two siblings) fails this test at the
     /// second half with:
     ///
@@ -4911,8 +4910,8 @@ mod tests {
     /// and no Fetch Type registry, so a FETCH names a track the way
     /// a SUBSCRIBE does and the range travels in a parameter.
     ///
-    /// Restoring draft-19's `+ 1` on the end object — which is what a port that
-    /// kept the arithmetic would do — fails with:
+    /// Substituting draft-19's `+ 1` on the end object — which is what a port
+    /// that kept the arithmetic would do — fails with:
     ///
     /// ```text
     /// assertion `left == right` failed

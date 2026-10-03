@@ -4,16 +4,14 @@
 //! `adopt` reaches a draft through a macro row list in `dispatch.rs`, and a
 //! draft missing from it falls to an arm that answers "not enabled in this
 //! build" at runtime. Nothing at compile time can see that: the arm is there
-//! for a build that leaves a feature off, so it is legal for every draft. Drafts
-//! 21 and 22 were missing from the list. The sweep below is over
-//! `DraftVersion::ALL` rather than a list of its own, so a draft added to the
-//! enum and not to the facade is a failure here.
+//! for a build that leaves a feature off, so it is legal for every draft. The
+//! loop below is over `DraftVersion::ALL` rather than a list of its own, so a
+//! draft added to the enum and not to the facade is a failure here.
 //!
 //! The version check is the second half for the same reason. `SetupComplete`
-//! carries a literal per draft module, and a module copied from its
-//! predecessor kept the predecessor's number: drafts 21 and 22 both reported
-//! draft-20's `0xff000014`. The expected value comes from
-//! `DraftVersion::version_varint`, not from the module.
+//! carries a literal per draft module, and a module copied from its predecessor
+//! keeps the predecessor's number unless someone edits it. The expected value
+//! comes from `DraftVersion::version_varint`, not from the module.
 //!
 //! # What this catches, observed by making each change and running it
 //!
@@ -24,7 +22,7 @@
 //! draft Draft22 not enabled in this build
 //! ```
 //!
-//! Restoring `0xff000000 + 20` in draft-21's `Connection::adopt`:
+//! Writing `0xff000000 + 20` in draft-21's `Connection::adopt`:
 //!
 //! ```text
 //! assertion `left == right` failed: Draft21 reported another draft's version in SetupComplete

@@ -225,9 +225,9 @@ async fn draft16_setup_and_publish_namespace_reach_a_foreign_relay() {
     // the whole message.
     //
     // One parameter, PATH (key 1), carrying an empty value. It is not required:
-    // the same run with `parameters: Vec::new()` was tried and the relay
-    // completed the handshake, because the container grants anonymous access at
-    // the empty prefix and an absent PATH resolves to the same root. It is here
+    // the relay completes the handshake with `parameters: Vec::new()` too,
+    // because the container grants anonymous access at the empty prefix and an
+    // absent PATH resolves to the same root. It is here
     // for what it costs the *decoders*. An empty parameter list is one varint on
     // the wire and proves nothing about key-value coding; PATH is an odd key,
     // which in this draft means a length-prefixed byte string, so sending it
