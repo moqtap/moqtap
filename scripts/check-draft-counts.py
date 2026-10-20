@@ -184,8 +184,6 @@ NOT_THE_DRAFT_SET = {
     # relative to whichever tree is being read, so these sit beside the
     # workspace's own; the fragments are distinctive enough that neither tree
     # excuses the other's lines by accident.
-    ("README.md", "Fifteen arms across the"):
-        "arms in one file that shared a bug, not drafts (testlab)",
     ("container_src/src/main.rs", "declared capacity — fifteen"):
         "minutes of backoff, not drafts",
     ("container_src/src/pace.rs", "`-j` default of sixteen"):
@@ -194,8 +192,6 @@ NOT_THE_DRAFT_SET = {
         "a local named for draft-16, not a count",
     ("container_src/src/setup.rs", "assert_eq!(sixteen.stage"):
         "the same local",
-    ("docs/findings.md", "fifteen, into nothing at all"):
-        "two of the fifteen read stops in `delivery.rs`, named a sentence earlier",
     ("docs/findings.md", "Two of the sixteen stop a draft short"):
         "rules in the catalogue, not drafts",
     ("docs/findings.md", "have fired on the fourteen"):
