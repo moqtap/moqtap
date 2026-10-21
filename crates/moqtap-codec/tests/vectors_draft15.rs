@@ -137,12 +137,17 @@ fn run_subgroup_vectors(relative_path: &str) {
                 "[{}] group_id mismatch",
                 vector.id
             );
-            assert_eq!(
-                header.subgroup_id.into_inner().to_string(),
-                js_str(expected, "subgroup_id"),
-                "[{}] subgroup_id mismatch",
-                vector.id
-            );
+            // Table 6 gives some types no Subgroup ID field and takes the ID
+            // from the first object instead. The header holds no value for it,
+            // so it is checked below against the first object decoded.
+            if !header.subgroup_id_from_first_object() {
+                assert_eq!(
+                    header.subgroup_id.into_inner().to_string(),
+                    js_str(expected, "subgroup_id"),
+                    "[{}] subgroup_id mismatch",
+                    vector.id
+                );
+            }
             // The corpus carries `end_of_group`, and reading it here is what
             // stops the field disagreeing with the bytes beside it: a vector can
             // annotate a first-object-mode stream as end-of-group and match a
@@ -188,6 +193,24 @@ fn run_subgroup_vectors(relative_path: &str) {
 
             for dropped in 0..objects.len() {
                 dispatch_check::check_elide(&any_header, &objects, dropped);
+            }
+
+            if header.subgroup_id_from_first_object() {
+                assert_eq!(
+                    any_header.subgroup_id(),
+                    None,
+                    "[{}] header claims a Subgroup ID it does not carry",
+                    vector.id
+                );
+                let first = objects.first().unwrap_or_else(|| {
+                    panic!("[{}] no first object to take the ID from", vector.id)
+                });
+                assert_eq!(
+                    first.object_id.to_string(),
+                    js_str(expected, "subgroup_id"),
+                    "[{}] subgroup_id (from first object) mismatch",
+                    vector.id
+                );
             }
 
             if vector.is_canonical() {
