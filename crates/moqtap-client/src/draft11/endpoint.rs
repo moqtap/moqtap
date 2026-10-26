@@ -2346,6 +2346,12 @@ impl Endpoint {
             .get(&msg.track_namespace.0)
             .ok_or(EndpointError::UnknownNamespace)?;
         let sm = self.announces.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+        // A cancellation that crossed this endpoint's own withdrawal: the
+        // announcement is already over and the peer could not have known, so
+        // there is nothing to end and nothing it did wrong.
+        if sm.state() == AnnounceState::Done {
+            return Ok(());
+        }
         sm.on_announce_cancel()?;
         Ok(())
     }

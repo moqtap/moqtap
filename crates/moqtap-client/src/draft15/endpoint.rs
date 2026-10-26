@@ -2715,6 +2715,12 @@ impl Endpoint {
             .own_publish_namespace_id(&msg.track_namespace)
             .ok_or(EndpointError::UnknownNamespace)?;
         let sm = self.publish_namespaces.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+        // A cancellation that crossed this endpoint's own withdrawal: the
+        // announcement is already over and the peer could not have known, so
+        // there is nothing to end and nothing it did wrong.
+        if sm.state() == PublishNamespaceState::Done {
+            return Ok(());
+        }
         sm.on_publish_namespace_cancel()?;
         Ok(())
     }

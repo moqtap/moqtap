@@ -412,6 +412,26 @@ macro_rules! outbound_announce_gates {
                 assert_eq!(ep.session_state(), SessionState::Active, "still a message");
             }
 
+            /// A cancellation that crossed this endpoint's withdrawal in flight
+            /// is accepted, and the session keeps running.
+            ///
+            /// The peer sent it before the withdrawal reached it, so it broke
+            /// nothing; refusing it would end a session over a race and charge
+            /// the peer for it.
+            #[test]
+            fn a_cancellation_that_crossed_this_endpoints_withdrawal_is_accepted() {
+                let (mut ep, ours) = ours_accepted();
+                crate::we_withdraw!($withdraw, ep, ours, crate::namespace())
+                    .expect("the publisher may stop serving what it announced");
+                ep.receive_message(ControlMessage::$cancelvariant(crate::peers_cancel!(
+                    $cancel,
+                    ours,
+                    crate::namespace()
+                )))
+                .expect("a cancellation crossing the withdrawal is not the peer's fault");
+                assert_eq!(ep.session_state(), SessionState::Active, "a race, not a violation");
+            }
+
             /// A cancellation about an announcement this endpoint never made is
             /// refused, and the refusal says which record came up empty.
             #[test]
