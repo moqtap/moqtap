@@ -18,9 +18,10 @@
 //!   owns a bidirectional stream, and the handle owns that stream.
 //!
 //! `AnyConnection` carries only the handful of protocol methods whose
-//! arguments can be reconciled across every draft (`subscribe`, `fetch`,
-//! `track_status`, `subscribe_namespace`). The rest differ too much in
-//! signature — match on the variant to reach them.
+//! arguments can be reconciled across every draft that has the message
+//! (`subscribe`, `fetch`, `track_status`, `subscribe_namespace`,
+//! `publish_namespace`, `publish`, `subscribe_tracks`). The rest differ too
+//! much in signature — match on the variant to reach them.
 
 use std::sync::Arc;
 
@@ -2592,6 +2593,29 @@ impl AnyFetchReader {
     }
 }
 
+/// `forward` as the FORWARD parameter, key 0x10, which is where drafts 15
+/// through 22 carry the field drafts 12 through 14 write inline in a PUBLISH.
+/// The codec owns the value's encoding on each draft, so this hands it over as
+/// a plain varint.
+#[cfg(any(
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22",
+))]
+fn forward_parameter(forward: moqtap_codec::types::Forward) -> Vec<KeyValuePair> {
+    use moqtap_codec::kvp::KvpValue;
+    use moqtap_codec::varint::VarInt;
+    vec![KeyValuePair {
+        key: VarInt::from_u64(0x10).expect("0x10 fits in VarInt"),
+        value: KvpValue::Varint(VarInt::from_u64(forward as u64).expect("0 or 1 fits in VarInt")),
+    }]
+}
+
 impl AnyConnection {
     /// Connect to a MoQT server using the requested draft. Builds the
     /// draft-specific `ClientConfig` from the provided [`AnyClientConfig`]
@@ -3369,12 +3393,12 @@ impl AnyConnection {
 
     /// Send an UNSUBSCRIBE for the given request ID. Drafts 07 through 16.
     ///
-    /// # Drafts 17 through 20 have no such message
+    /// # Drafts 17 through 22 have no such message
     ///
-    /// Draft-17 deleted UNSUBSCRIBE, and drafts 18, 19 and 20 keep it deleted:
+    /// Draft-17 deleted UNSUBSCRIBE, and every later draft keeps it deleted:
     /// a subscriber ends a subscription by **resetting its request stream**,
     /// which is [`AnyRequest::cancel`], or waits for PUBLISH_DONE. So the error
-    /// those four return is not a gap to be filled later — there is nothing to
+    /// those drafts return is not a gap to be filled later — there is nothing to
     /// wire — and a caller reaching for it on one of them wants `cancel` on the
     /// handle `subscribe` returned.
     #[allow(unused_variables)]
@@ -4604,7 +4628,7 @@ impl AnyConnection {
     }
 
     /// Send a TRACK_STATUS query for the given track. Supported on drafts 11
-    /// through 20. From draft-15 on, passes an empty parameter list.
+    /// through 22. From draft-15 on, passes an empty parameter list.
     ///
     /// # Which message this sends, and why the name moved
     ///
@@ -4750,14 +4774,13 @@ impl AnyConnection {
     }
 
     /// Send a SUBSCRIBE_NAMESPACE (or SUBSCRIBE_ANNOUNCES on drafts 11–12).
-    /// Supported on drafts 11 through 20. Drafts 16 and 17 pass default
+    /// Supported on drafts 11 through 22. Drafts 16 and 17 pass default
     /// subscribe options; every draft from 12 on passes an empty parameter
     /// list.
     ///
     /// From draft-18 this is the renumbered SUBSCRIBE_NAMESPACE (0x50), which
     /// asks for NAMESPACE and NAMESPACE_DONE only. SUBSCRIBE_TRACKS, the other
-    /// half of the draft-18 split, has no entry point here — reach a draft's
-    /// own `Connection::subscribe_tracks` through the variant.
+    /// half of the draft-18 split, is [`AnyConnection::subscribe_tracks`].
     ///
     /// The returned [`AnyRequest`] must be held while the request is live: on
     /// drafts 17-22 it owns the bidirectional stream the request went out on
@@ -4859,7 +4882,7 @@ impl AnyConnection {
     }
 
     /// Offer a namespace to the peer: PUBLISH_NAMESPACE, or ANNOUNCE on the
-    /// drafts that called it that. Supported on drafts 11 through 20. From
+    /// drafts that called it that. Supported on drafts 11 through 22. From
     /// draft-12 on, passes an empty parameter list.
     ///
     /// This is the first entry point here that asks the peer to **hold state**
@@ -5000,10 +5023,10 @@ impl AnyConnection {
     ///   draft-14, PUBLISH_NAMESPACE_DONE carry the tuple itself.
     /// - **Draft-16** names the request ID, having moved the whole message onto
     ///   the identifier the announcement was allocated.
-    /// - **Drafts 17 through 20** name neither, because there is no message: the
+    /// - **Drafts 17 through 22** name neither, because there is no message: the
     ///   announcement lives exactly as long as its bidirectional stream, so
     ///   withdrawing one is [`AnyRequest::cancel`] or simply dropping the
-    ///   handle. Those four return an error here rather than silently doing
+    ///   handle. Those drafts return an error here rather than silently doing
     ///   nothing, on the same terms as [`AnyConnection::unsubscribe`] — it is
     ///   not a gap waiting to be wired, there is nothing to send.
     ///
@@ -5049,6 +5072,349 @@ impl AnyConnection {
                 "publish_namespace_done: draft {:?} withdraws a namespace by ending the \
                  announcement's own stream, so there is no message to send; cancel or drop \
                  the request handle instead",
+                other.draft()
+            ))),
+        }
+    }
+
+    /// Offer the peer a track: PUBLISH. Drafts 12 through 22.
+    ///
+    /// Like [`AnyConnection::publish_namespace`], this asks the peer to hold
+    /// state: a relay that accepts records this session as the track's
+    /// publisher and forwards the offer to whoever subscribed to a matching
+    /// prefix. A caller whose offer was accepted owes the peer
+    /// [`AnyConnection::publish_done`] or a closed session.
+    ///
+    /// # Why `forward` is the one choice offered
+    ///
+    /// It is the only property of the offer every draft can express — a field
+    /// on drafts 12 through 14, the FORWARD parameter (key 0x10) from draft-15
+    /// on — and it decides whether the peer should expect objects at all.
+    /// [`Forward::DontForward`](moqtap_codec::types::Forward::DontForward)
+    /// offers a track without promising any. Everything else is sent as the
+    /// emptiest form its draft allows: ascending group order and no Largest
+    /// Location on drafts 12 through 14, and no track extensions or
+    /// properties after that.
+    ///
+    /// # What comes back, and where
+    ///
+    /// Drafts 12 through 16 carry the offer on the control stream and the
+    /// handle is a [`AnyRequest::ControlPlane`]; the answer is PUBLISH_OK or
+    /// PUBLISH_ERROR on 12 through 14 and PUBLISH_OK or REQUEST_ERROR on 15 and
+    /// 16, correlated by Request ID. From draft-17 the offer owns a
+    /// bidirectional stream, and from draft-18 the acceptance on it is
+    /// REQUEST_OK. Read either with [`AnyConnection::recv_response`].
+    ///
+    /// Drafts 07 through 11 have no PUBLISH and are refused.
+    ///
+    /// The returned [`AnyRequest`] must be held while the offer is live: on
+    /// drafts 17-22 dropping it resets the stream, which cancels the offer.
+    #[allow(unused_variables)]
+    pub async fn publish(
+        &mut self,
+        namespace: moqtap_codec::types::TrackNamespace,
+        track_name: Vec<u8>,
+        track_alias: moqtap_codec::varint::VarInt,
+        forward: moqtap_codec::types::Forward,
+    ) -> Result<AnyRequest, AnyConnectionError> {
+        let draft = self.draft();
+        match self {
+            // Drafts 12 through 14 carry Forward inline. `None` for the Largest
+            // Location is what writes Content Exists as 0.
+            #[cfg(feature = "draft12")]
+            Self::Draft12(c) => c
+                .publish(
+                    namespace,
+                    track_name,
+                    track_alias,
+                    moqtap_codec::types::GroupOrder::Ascending,
+                    None,
+                    forward,
+                    Vec::new(),
+                )
+                .await
+                .map(|request_id| AnyRequest::ControlPlane { request_id, draft })
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft13")]
+            Self::Draft13(c) => c
+                .publish(
+                    namespace,
+                    track_name,
+                    track_alias,
+                    moqtap_codec::types::GroupOrder::Ascending,
+                    None,
+                    forward,
+                    Vec::new(),
+                )
+                .await
+                .map(|request_id| AnyRequest::ControlPlane { request_id, draft })
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft14")]
+            Self::Draft14(c) => c
+                .publish(
+                    namespace,
+                    track_name,
+                    track_alias,
+                    moqtap_codec::types::GroupOrder::Ascending,
+                    None,
+                    forward,
+                    Vec::new(),
+                )
+                .await
+                .map(|request_id| AnyRequest::ControlPlane { request_id, draft })
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft15")]
+            Self::Draft15(c) => c
+                .publish(namespace, track_name, track_alias, forward_parameter(forward))
+                .await
+                .map(|request_id| AnyRequest::ControlPlane { request_id, draft })
+                .map_err(AnyConnectionError::from),
+            // Draft-16's helper takes the track extensions *before* the
+            // parameters, the reverse of the order drafts 17 on take their
+            // properties in.
+            #[cfg(feature = "draft16")]
+            Self::Draft16(c) => c
+                .publish(namespace, track_name, track_alias, Vec::new(), forward_parameter(forward))
+                .await
+                .map(|request_id| AnyRequest::ControlPlane { request_id, draft })
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft17")]
+            Self::Draft17(c) => c
+                .publish(namespace, track_name, track_alias, forward_parameter(forward), Vec::new())
+                .await
+                .map(AnyRequest::Draft17)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft18")]
+            Self::Draft18(c) => c
+                .publish(namespace, track_name, track_alias, forward_parameter(forward), Vec::new())
+                .await
+                .map(AnyRequest::Draft18)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => c
+                .publish(namespace, track_name, track_alias, forward_parameter(forward), Vec::new())
+                .await
+                .map(AnyRequest::Draft19)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft20")]
+            Self::Draft20(c) => c
+                .publish(namespace, track_name, track_alias, forward_parameter(forward), Vec::new())
+                .await
+                .map(AnyRequest::Draft20)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => c
+                .publish(namespace, track_name, track_alias, forward_parameter(forward), Vec::new())
+                .await
+                .map(AnyRequest::Draft21)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft22")]
+            Self::Draft22(c) => c
+                .publish(namespace, track_name, track_alias, forward_parameter(forward), Vec::new())
+                .await
+                .map(AnyRequest::Draft22)
+                .map_err(AnyConnectionError::from),
+            #[allow(unreachable_patterns)]
+            other => Err(AnyConnectionError::facade(format!(
+                "publish: PUBLISH first appears in draft-12; draft {:?} has no such message",
+                other.draft()
+            ))),
+        }
+    }
+
+    /// End a publication this session offered with
+    /// [`AnyConnection::publish`]: PUBLISH_DONE, or SUBSCRIBE_DONE on drafts
+    /// 12 and 13, which end a PUBLISH-established subscription with the same
+    /// message as any other. Drafts 12 through 22.
+    ///
+    /// Only after the peer accepted. Every draft's endpoint refuses the done
+    /// for an offer that was rejected or never answered, because there is no
+    /// subscription to end: a rejected offer owes nothing, and an unanswered
+    /// one ends with the session on drafts 12 through 16 and with the handle's
+    /// reset from draft-17.
+    ///
+    /// `stream_count` is the number of data streams the publication opened,
+    /// which is `0` for an offer that sent no objects. **Draft-14 ignores it**:
+    /// that draft's endpoint writes 0 itself, which is right for a publication
+    /// that opened no streams and wrong for one that did.
+    ///
+    /// # The FIN after it
+    ///
+    /// From draft-17 the done is the last message on the offer's own stream,
+    /// and draft-18 Section 10.11 asks for the FIN straight after it: "A sender
+    /// SHOULD send FIN on the subscription's bidi stream immediately after
+    /// sending PUBLISH_DONE." Drafts 19 through 22 send it inside their own
+    /// helper. The draft-17 and draft-18 helpers leave the send half open, so
+    /// this finishes it for them; a finished handle does nothing on drop, so
+    /// the publication is not then cancelled by the drop that follows.
+    ///
+    /// `request` is borrowed: on drafts 12 through 16 the handle carries no
+    /// stream, and from draft-17 the receive half stays open after the FIN.
+    #[allow(unused_variables)]
+    pub async fn publish_done(
+        &mut self,
+        request: &mut AnyRequest,
+        status_code: moqtap_codec::varint::VarInt,
+        stream_count: moqtap_codec::varint::VarInt,
+        reason: Vec<u8>,
+    ) -> Result<(), AnyConnectionError> {
+        match (self, request) {
+            #[cfg(feature = "draft12")]
+            (Self::Draft12(c), AnyRequest::ControlPlane { request_id, .. }) => c
+                .subscribe_done(*request_id, status_code, stream_count, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft13")]
+            (Self::Draft13(c), AnyRequest::ControlPlane { request_id, .. }) => c
+                .subscribe_done(*request_id, status_code, stream_count, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft14")]
+            (Self::Draft14(c), AnyRequest::ControlPlane { request_id, .. }) => c
+                .publish_done(*request_id, status_code, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft15")]
+            (Self::Draft15(c), AnyRequest::ControlPlane { request_id, .. }) => c
+                .publish_done(*request_id, status_code, stream_count, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft16")]
+            (Self::Draft16(c), AnyRequest::ControlPlane { request_id, .. }) => c
+                .publish_done(*request_id, status_code, stream_count, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft17")]
+            (Self::Draft17(c), AnyRequest::Draft17(s)) => {
+                c.publish_done(s, status_code, stream_count, reason)
+                    .await
+                    .map_err(AnyConnectionError::from)?;
+                s.finish().await.map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft18")]
+            (Self::Draft18(c), AnyRequest::Draft18(s)) => {
+                c.publish_done(s, status_code, stream_count, reason)
+                    .await
+                    .map_err(AnyConnectionError::from)?;
+                s.finish().await.map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft19")]
+            (Self::Draft19(c), AnyRequest::Draft19(s)) => c
+                .publish_done(s, status_code, stream_count, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft20")]
+            (Self::Draft20(c), AnyRequest::Draft20(s)) => c
+                .publish_done(s, status_code, stream_count, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            (Self::Draft21(c), AnyRequest::Draft21(s)) => c
+                .publish_done(s, status_code, stream_count, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft22")]
+            (Self::Draft22(c), AnyRequest::Draft22(s)) => c
+                .publish_done(s, status_code, stream_count, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            // A handle from another draft, one `publish` never returns (a
+            // draft-16 namespace subscription), a draft with no PUBLISH, or a
+            // build with no drafts enabled.
+            #[allow(unreachable_patterns)]
+            (connection, request) => {
+                let (on, of) = (connection.draft(), request.draft());
+                Err(AnyConnectionError::facade(if on == of {
+                    format!(
+                        "publish_done: this draft {on:?} handle is not one `publish` returns; \
+                         PUBLISH first appears in draft-12"
+                    )
+                } else {
+                    format!(
+                        "publish_done: a draft {of:?} request cannot be ended on a draft {on:?} \
+                         connection"
+                    )
+                }))
+            }
+        }
+    }
+
+    /// Ask the peer to offer every track under a namespace prefix:
+    /// SUBSCRIBE_TRACKS. Drafts 18 through 22.
+    ///
+    /// The other half of the draft-18 split described on
+    /// [`AnyConnection::subscribe_namespace`]: that one asks for namespaces,
+    /// this one for the tracks inside them. A peer that accepts answers
+    /// REQUEST_OK on the request's own stream and then sends a PUBLISH, each on
+    /// a new bidirectional stream, for every matching track — and this side
+    /// owes each of those an answer. A caller that wants the answer and not
+    /// the tracks names a prefix nothing matches.
+    ///
+    /// `forward` goes out as the FORWARD parameter, and the PUBLISH messages
+    /// the subscription brings carry it.
+    ///
+    /// # Ending it
+    ///
+    /// Hold the handle for as long as the subscription should stand, and drop
+    /// it or [`AnyRequest::cancel`] it to end the subscription: both reset the
+    /// stream. What a FIN does depends on the draft. Draft-18 counts it as a
+    /// cancellation: "A SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS can be
+    /// cancelled by closing the stream with either a FIN or RESET_STREAM."
+    /// Drafts 19 through 22 do not — draft-22 Section 6.4.2.2: "A FIN only
+    /// indicates that an endpoint will send no further messages in that
+    /// direction; it is not a request cancellation."
+    ///
+    /// # Drafts 12 through 17
+    ///
+    /// Refused here, though the question exists: those drafts ask it with the
+    /// namespace subscription [`AnyConnection::subscribe_namespace`] sends. On
+    /// drafts 12 through 15 every SUBSCRIBE_ANNOUNCES or SUBSCRIBE_NAMESPACE
+    /// brings the matching PUBLISH messages, with no way to decline them; on
+    /// drafts 16 and 17 Subscribe Options value 0x00 requests them, and that is
+    /// the value the facade sends. Drafts before 12 have no PUBLISH.
+    #[allow(unused_variables)]
+    pub async fn subscribe_tracks(
+        &mut self,
+        namespace_prefix: moqtap_codec::types::TrackNamespace,
+        forward: moqtap_codec::types::Forward,
+    ) -> Result<AnyRequest, AnyConnectionError> {
+        match self {
+            #[cfg(feature = "draft18")]
+            Self::Draft18(c) => c
+                .subscribe_tracks(namespace_prefix, forward_parameter(forward))
+                .await
+                .map(AnyRequest::Draft18)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => c
+                .subscribe_tracks(namespace_prefix, forward_parameter(forward))
+                .await
+                .map(AnyRequest::Draft19)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft20")]
+            Self::Draft20(c) => c
+                .subscribe_tracks(namespace_prefix, forward_parameter(forward))
+                .await
+                .map(AnyRequest::Draft20)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => c
+                .subscribe_tracks(namespace_prefix, forward_parameter(forward))
+                .await
+                .map(AnyRequest::Draft21)
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft22")]
+            Self::Draft22(c) => c
+                .subscribe_tracks(namespace_prefix, forward_parameter(forward))
+                .await
+                .map(AnyRequest::Draft22)
+                .map_err(AnyConnectionError::from),
+            #[allow(unreachable_patterns)]
+            other => Err(AnyConnectionError::facade(format!(
+                "subscribe_tracks: SUBSCRIBE_TRACKS first appears in draft-18; draft {:?} has \
+                 no such message (drafts 12 through 17 bring tracks with \
+                 subscribe_namespace: always on 12 to 15, through Subscribe Options on 16 \
+                 and 17)",
                 other.draft()
             ))),
         }

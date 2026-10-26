@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `AnyConnection::publish` and `AnyConnection::publish_done` on drafts 12 through 22: offer the peer a track, and end an accepted offer.
+- `AnyConnection::subscribe_tracks` on drafts 18 through 22.
+
 ### Fixed
 
+- On drafts 12 and 13, a SUBSCRIBE_UPDATE for a PUBLISH this endpoint made ended the session. It is now accepted.
 - On drafts 07 through 16, a namespace cancellation that crossed this endpoint's own withdrawal ended the session. It is now accepted and the session continues.
 
 ## [0.8.1] - 2026-10-03

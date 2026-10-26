@@ -308,6 +308,79 @@ macro_rules! peers_ok {
     };
 }
 
+/// This endpoint's own PUBLISH, in the three shapes it takes across the five
+/// drafts: inline fields on 12 through 14, parameters alone on 15, and track
+/// extensions ahead of the parameters on 16. Keyed on the SUBSCRIBE_OK shape,
+/// which splits the drafts the same way.
+#[macro_export]
+macro_rules! we_publish {
+    (expires, $ep:expr, $track:expr, $alias:expr) => {
+        $ep.publish(
+            $crate::namespace(),
+            $track.to_vec(),
+            $crate::v($alias),
+            GroupOrder::Ascending,
+            None,
+            Forward::DontForward,
+            Vec::new(),
+        )
+    };
+    (params, $ep:expr, $track:expr, $alias:expr) => {
+        $ep.publish($crate::namespace(), $track.to_vec(), $crate::v($alias), Vec::new())
+    };
+    (ext, $ep:expr, $track:expr, $alias:expr) => {
+        $ep.publish($crate::namespace(), $track.to_vec(), $crate::v($alias), Vec::new(), Vec::new())
+    };
+}
+
+/// The PUBLISH_OK the peer accepts this endpoint's offer with. Drafts 12
+/// through 14 echo a subscription filter in it, in the same three shapes their
+/// SUBSCRIBE takes; from draft-15 it is the Request ID and parameters.
+#[macro_export]
+macro_rules! peers_publish_ok {
+    (filter_varint, $id:expr) => {
+        PublishOk {
+            request_id: $id,
+            forward: Forward::DontForward,
+            subscriber_priority: 128,
+            group_order: GroupOrder::Ascending,
+            filter_type: $crate::v(0x2),
+            start_group: None,
+            start_object: None,
+            end_group: None,
+            parameters: Vec::new(),
+        }
+    };
+    (filter_type, $id:expr) => {
+        PublishOk {
+            request_id: $id,
+            forward: Forward::DontForward,
+            subscriber_priority: 128,
+            group_order: GroupOrder::Ascending,
+            filter_type: FilterType::LargestObject,
+            start_group: None,
+            start_object: None,
+            end_group: None,
+            parameters: Vec::new(),
+        }
+    };
+    (location, $id:expr) => {
+        PublishOk {
+            request_id: $id,
+            forward: Forward::DontForward,
+            subscriber_priority: 128,
+            group_order: GroupOrder::Ascending,
+            filter_type: FilterType::LargestObject,
+            start_location: None,
+            end_group: None,
+            parameters: Vec::new(),
+        }
+    };
+    (bare, $id:expr) => {
+        PublishOk { request_id: $id, parameters: Vec::new() }
+    };
+}
+
 /// The message the publisher ends the subscription with.
 #[macro_export]
 macro_rules! we_finish {
@@ -348,7 +421,7 @@ macro_rules! peers_setup {
     }};
 }
 
-/// One draft's seven gates.
+/// One draft's eight gates.
 macro_rules! update_gates {
     ($draft:ident, $feat:literal, $ver:expr, $setup:tt, $submsg:tt, $updmsg:tt, $accept:tt,
      $finish:tt, $sec:literal) => {
@@ -584,6 +657,43 @@ macro_rules! update_gates {
 
                 crate::receive_update!($updmsg, ep, PEERS_UPDATE, ours.into_inner())
                     .expect("an identifier the session had carried was refused");
+                still_running(&ep);
+            }
+
+            /// An update naming a PUBLISH this endpoint made, after the peer
+            /// accepted it, is accepted and the session goes on.
+            ///
+            /// The peer is the subscriber of that subscription, and the
+            /// subscriber is who sends an update. This is the case a probe
+            /// offering a track to a relay meets: the relay may narrow or
+            /// pause what it accepted, and closing over it would end the
+            /// session over conforming traffic and blame the relay for it.
+            ///
+            /// # What it catches, observed by making the change and running it
+            ///
+            /// Leaving this endpoint's own offers out of the set of identifiers
+            /// that have existed:
+            ///
+            /// ```text
+            /// the peer's update of the offer it accepted: UpdateForUnknownRequest(0)
+            /// ```
+            ///
+            /// Made by removing the outbound-publish lookup from the draft-12 set. It
+            /// reddens this gate on draft-12 alone, and the same cut on draft-13
+            /// reddens draft-13's; drafts 14 through 16 keep both directions of
+            /// PUBLISH in one map.
+            #[test]
+            fn an_update_for_a_publish_this_endpoint_made_is_accepted() {
+                let mut ep = publishing();
+                let (ours, _) = crate::we_publish!($accept, ep, BETA, ALIAS + 1)
+                    .expect("this endpoint's own PUBLISH");
+                ep.receive_message(ControlMessage::PublishOk(crate::peers_publish_ok!(
+                    $submsg, ours
+                )))
+                .expect("the peer accepts the offer");
+
+                crate::receive_update!($updmsg, ep, PEERS_UPDATE, ours.into_inner())
+                    .expect("the peer's update of the offer it accepted");
                 still_running(&ep);
             }
 

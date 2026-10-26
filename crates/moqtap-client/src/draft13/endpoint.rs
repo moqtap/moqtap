@@ -1796,9 +1796,12 @@ impl Endpoint {
         // every request this session has carried has existed. Only a
         // subscription the peer opened has a transition for an update, so for
         // the rest the message is accepted and the state left alone - which is
-        // also what a PUBLISH-established subscription needs, since Section
-        // 8.10 counts the parameters set in PUBLISH_OK among the ones an
-        // update may change.
+        // also what a PUBLISH-established subscription needs: Section 4.1
+        // says that once PUBLISH and PUBLISH_OK succeed "the subscription can
+        // be updated by the subscriber using SUBSCRIBE_UPDATE". That holds
+        // whichever side published: the peer is the subscriber of every
+        // PUBLISH this endpoint made, so an update naming one of those is the
+        // subscriber's to send.
         // Section 8.20 takes the update away from this request kind outright:
         // "the subscriber cannot send SUBSCRIBE_UPDATE or UNSUBSCRIBE". A track status
         // the peer asked for and one this endpoint asked for are the same kind
@@ -1810,6 +1813,7 @@ impl Endpoint {
         }
         let existed = self.subscriptions.contains_key(&id)
             || self.inbound_publishes.contains_key(&id)
+            || self.publishes.contains_key(&id)
             || self.fetches.contains_key(&id)
             || self.subscribe_namespaces.contains_key(&id)
             || self.announces.contains_key(&id);
