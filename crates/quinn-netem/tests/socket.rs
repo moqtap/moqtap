@@ -727,7 +727,11 @@ fn gate_conservation_across_the_adapter(wrap: Wrap) {
     assert_eq!(s.dropped_queue_full, 4, "phase 4");
     assert_eq!(s.datagrams_duplicated, 0, "no duplication in this profile");
 
-    let drops = s.dropped_loss + s.dropped_blackout + s.dropped_mtu + s.dropped_queue_full;
+    let drops = s.dropped_loss
+        + s.dropped_blackout
+        + s.dropped_mtu
+        + s.dropped_queue_full
+        + s.dropped_rate_oversize;
     assert_eq!(
         inner.sends() as u64 + drops,
         s.datagrams_seen,
@@ -757,7 +761,11 @@ fn gate_duplication_adds_one_crossing_each(wrap: Wrap) {
     let s = handle.stats();
     assert_eq!(s.datagrams_seen, N);
     assert_eq!(s.datagrams_duplicated, N, "certainty means every one of them");
-    let drops = s.dropped_loss + s.dropped_blackout + s.dropped_mtu + s.dropped_queue_full;
+    let drops = s.dropped_loss
+        + s.dropped_blackout
+        + s.dropped_mtu
+        + s.dropped_queue_full
+        + s.dropped_rate_oversize;
     assert_eq!(drops, 0, "nothing in this profile drops");
     assert_eq!(
         inner.sends() as u64,

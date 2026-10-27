@@ -102,7 +102,7 @@ fn every_error_reached_from_an_input() -> Vec<ProfileError> {
         }),
         // A queue that is full before anything arrives.
         refusal(DirectionProfile {
-            rate: Some(RateModel { queue_bytes: 0, ..healthy_rate() }),
+            rate: Some(RateModel { queue_bytes: 1499, ..healthy_rate() }),
             ..blank()
         }),
         // A bucket that never earns a token.
@@ -189,10 +189,10 @@ fn every_profile_error_is_reachable_and_renders_its_message() {
             ProfileError::BlackoutZeroLength => {
                 "blackout window has for_ns 0, which can never fire".into()
             }
-            ProfileError::RateWithZeroQueue => {
-                "rate model has queue_bytes 0, which tail-drops every datagram on an empty queue"
-                    .into()
-            }
+            ProfileError::RateQueueBelowDatagram { queue_bytes, min_wire_bytes } => format!(
+                "rate model queue_bytes {queue_bytes} is below one on-wire datagram of \
+                 {min_wire_bytes} bytes"
+            ),
             ProfileError::RateWithZeroBps => {
                 "rate model has bps 0; a profile that drops everything says so with a loss model"
                     .into()
@@ -234,6 +234,35 @@ fn the_burst_message_names_the_configured_depth_and_the_datagram_it_cannot_hold(
     assert_eq!(
         too_shallow.validate().expect_err("a 1000-byte bucket cannot hold a datagram").to_string(),
         "rate model burst_bytes 1000 is below one on-wire datagram of 1500 bytes"
+    );
+}
+
+/// A queue below one datagram is refused at 0 and one byte under the bound,
+/// and accepted at the bound.
+#[test]
+fn a_queue_below_one_datagram_is_refused_with_the_configured_numbers() {
+    let with_queue = |queue_bytes| DirectionProfile {
+        rate: Some(RateModel { queue_bytes, ..healthy_rate() }),
+        ..blank()
+    };
+
+    for queue_bytes in [0, 1499] {
+        assert_eq!(
+            with_queue(queue_bytes).validate(),
+            Err(ProfileError::RateQueueBelowDatagram { queue_bytes, min_wire_bytes: 1500 })
+        );
+    }
+    assert_eq!(
+        with_queue(1499).validate().expect_err("1499 < 1500").to_string(),
+        "rate model queue_bytes 1499 is below one on-wire datagram of 1500 bytes"
+    );
+    assert_eq!(with_queue(1500).validate(), Ok(()), "one datagram exactly fits");
+
+    let small_mtu = DirectionProfile { mtu_blackhole: Some(1200), ..with_queue(1199) };
+    assert_eq!(
+        small_mtu.validate(),
+        Err(ProfileError::RateQueueBelowDatagram { queue_bytes: 1199, min_wire_bytes: 1200 }),
+        "the bound follows mtu_blackhole"
     );
 }
 

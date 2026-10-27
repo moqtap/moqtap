@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
+### Added
+
+- `DropCause::RateOversize` and `StatsSnapshot::dropped_rate_oversize`, for
+  datagrams larger than the rate model's queue or burst, which were previously
+  counted as `RateQueueFull`.
+
+### Changed
+
+- `ProfileError::RateWithZeroQueue` is replaced by `RateQueueBelowDatagram`,
+  which rejects a queue smaller than one datagram.
+
 ## [0.1.3] - 2026-09-02
 
 ### Fixed

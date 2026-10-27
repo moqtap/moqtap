@@ -122,7 +122,7 @@ fn every_model_armed() -> DirectionProfile {
 /// 2. Every bucket the identity sums over is non-zero. This is the precondition
 ///    that stops the identity passing by absence, and it is the reason the
 ///    profile arms all six models plus the MTU black hole plus a blackout.
-/// 3. The identity itself, plus the byte accounting: the seven buckets sum to
+/// 3. The identity itself, plus the byte accounting: the eight buckets sum to
 ///    `datagrams_seen`, and `wire_bytes_out` is exactly the bytes of the
 ///    datagrams that were not dropped plus the bytes of the extra copies.
 ///
@@ -194,7 +194,8 @@ fn stats_conserve() {
         + got.dropped_loss
         + got.dropped_blackout
         + got.dropped_mtu
-        + got.dropped_queue_full;
+        + got.dropped_queue_full
+        + got.dropped_rate_oversize;
     assert_eq!(accounted, got.datagrams_seen, "every datagram lands in exactly one bucket");
 
     // 3b. The bytes, as the documented bound and as the exact equality.
@@ -296,7 +297,8 @@ fn conservation_alone_is_satisfied_by_an_engine_that_impairs_nothing() {
         + got.dropped_loss
         + got.dropped_blackout
         + got.dropped_mtu
-        + got.dropped_queue_full;
+        + got.dropped_queue_full
+        + got.dropped_rate_oversize;
     assert_eq!(accounted, got.datagrams_seen, "the identity holds");
     assert!(got.wire_bytes_out <= got.wire_bytes_in, "and so does the byte bound");
 
@@ -307,7 +309,11 @@ fn conservation_alone_is_satisfied_by_an_engine_that_impairs_nothing() {
     assert_eq!(got.datagrams_duplicated, 0);
     assert_eq!(got.datagrams_corrupted, 0);
     assert_eq!(
-        got.dropped_loss + got.dropped_blackout + got.dropped_mtu + got.dropped_queue_full,
+        got.dropped_loss
+            + got.dropped_blackout
+            + got.dropped_mtu
+            + got.dropped_queue_full
+            + got.dropped_rate_oversize,
         0
     );
 }

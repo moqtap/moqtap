@@ -87,9 +87,12 @@ fn a_datagram_larger_than_the_burst_is_dropped_and_not_aborted_on() {
         );
         assert_eq!(
             decision.cause(),
-            DropCause::RateQueueFull,
-            "{name:?} uplink: the rate model refused it, so the rate model's cause"
+            DropCause::RateOversize,
+            "{name:?} uplink: too large for the burst, not congestion"
         );
+        let stats = engine.stats();
+        assert_eq!(stats.dropped_rate_oversize, 1, "{name:?} uplink");
+        assert_eq!(stats.dropped_queue_full, 0, "{name:?} uplink");
     }
 }
 
@@ -147,7 +150,7 @@ fn a_refused_datagram_leaves_nothing_in_the_queue() {
 /// never reaches the bucket, and the fix above must not have moved the
 /// boundary between them.
 #[test]
-fn a_datagram_larger_than_the_queue_is_still_the_queues_refusal() {
+fn a_datagram_larger_than_the_queue_is_oversize() {
     let profile = DirectionProfile {
         rate: Some(RateModel { bps: 10_000_000, burst_bytes: 4096, queue_bytes: 8192 }),
         ..DirectionProfile::default()
@@ -157,6 +160,32 @@ fn a_datagram_larger_than_the_queue_is_still_the_queues_refusal() {
 
     let decision = engine.decide(0, 16_384, Tick(0));
     assert_eq!(decision.verdict, Verdict::Drop);
-    assert_eq!(decision.cause(), DropCause::RateQueueFull);
+    assert_eq!(decision.cause(), DropCause::RateOversize);
     assert_eq!(decision.queue_backlog_bytes, 0, "it never entered the queue");
+    let stats = engine.stats();
+    assert_eq!(stats.dropped_rate_oversize, 1);
+    assert_eq!(stats.dropped_queue_full, 0);
+}
+
+/// A full queue is still congestion: `RateQueueFull`, not `RateOversize`.
+#[test]
+fn a_genuine_overflow_is_still_queue_full() {
+    let profile = DirectionProfile {
+        rate: Some(RateModel { bps: 10_000_000, burst_bytes: 4096, queue_bytes: 8192 }),
+        ..DirectionProfile::default()
+    };
+    let mut engine = Impairer::new(profile, 1, quinn_netem::Direction::Downlink)
+        .expect("burst 4096 is above the assumed 1500-byte path");
+
+    // Same tick, so nothing drains: six fill 7368 of 8192 bytes, the seventh overflows.
+    for seq in 0..6 {
+        assert_ne!(engine.decide(seq, NORMAL_WIRE, Tick(0)).verdict, Verdict::Drop, "seq {seq}");
+    }
+    let decision = engine.decide(6, NORMAL_WIRE, Tick(0));
+    assert_eq!(decision.verdict, Verdict::Drop);
+    assert_eq!(decision.cause(), DropCause::RateQueueFull);
+    assert!(decision.queue_backlog_bytes > 0, "the queue holds the earlier datagrams");
+    let stats = engine.stats();
+    assert_eq!(stats.dropped_queue_full, 1);
+    assert_eq!(stats.dropped_rate_oversize, 0);
 }

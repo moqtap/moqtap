@@ -69,6 +69,9 @@ const WIRE: u32 = 1228;
 /// the queue.
 const JUMBO: u32 = 1500;
 
+/// Over the rate model's queue, sent in phase C, which has no MTU black hole.
+const OVERSIZE: u32 = 2500;
+
 /// Exactly the MTU black hole. The comparison is strictly-greater, so this size
 /// passes — a boundary an implementation that wrote `>=` would fail here and
 /// nowhere else.
@@ -93,8 +96,9 @@ const GATE_FIXTURE: &str = include_str!("fixtures/pattern_mode_gate.log");
 /// models are consulted in.
 fn wire_of(seq: u64) -> u32 {
     match seq {
-        5 | 23 | 37 | 88 => JUMBO,
+        5 | 23 | 37 => JUMBO,
         40 => AT_THE_LIMIT,
+        88 => OVERSIZE,
         _ => WIRE,
     }
 }
@@ -135,7 +139,7 @@ fn phase_b() -> DirectionProfile {
 /// Ticks `[80ms, ..)`: phase B plus corruption, which is the only model in the
 /// fixture whose recorded numbers are generator output rather than arithmetic.
 fn phase_c() -> DirectionProfile {
-    DirectionProfile { corrupt: Some(CorruptModel { p: ALWAYS }), ..phase_b() }
+    DirectionProfile { corrupt: Some(CorruptModel { p: ALWAYS }), mtu_blackhole: None, ..phase_b() }
 }
 
 /// The whole gate profile: phase A as armed, with two timeline steps.
@@ -232,6 +236,7 @@ fn cause_code(c: DropCause) -> u64 {
         DropCause::Blackout => 2,
         DropCause::Mtu => 3,
         DropCause::RateQueueFull => 4,
+        DropCause::RateOversize => 5,
     }
 }
 
@@ -240,12 +245,13 @@ const EVERY_VERDICT: [Verdict; 4] =
     [Verdict::Pass, Verdict::Delay, Verdict::Reorder, Verdict::Drop];
 
 /// Every drop cause the format defines.
-const EVERY_CAUSE: [DropCause; 5] = [
+const EVERY_CAUSE: [DropCause; 6] = [
     DropCause::NotDropped,
     DropCause::Loss,
     DropCause::Blackout,
     DropCause::Mtu,
     DropCause::RateQueueFull,
+    DropCause::RateOversize,
 ];
 
 /// Ten runs in one process agree, and run 0 equals the hand-computed fixture.

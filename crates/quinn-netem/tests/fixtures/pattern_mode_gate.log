@@ -27,11 +27,13 @@
 #
 #  Sizes are ON-WIRE bytes.  Every datagram is 1228 (a 1200-byte payload plus
 #  20 bytes of IPv4 header and 8 of UDP) except:
-#      seq 5, 23, 37, 88  ->  1500   (over the MTU limit)
+#      seq 5, 23, 37      ->  1500   (over the MTU limit)
 #      seq 40             ->  1400   (exactly the limit; the limit passes)
+#      seq 88             ->  2500   (over the queue threshold)
 #
 #  Armed on every phase:
 #      rate           bps 8000000, burst_bytes 1500, queue_bytes 2000
+#  Armed on phases A and B:
 #      mtu_blackhole  1400
 #
 #  A timeline swaps the rest of the profile twice:
@@ -47,7 +49,7 @@
 #        dup        p = 1
 #        corrupt: none.  blackouts: none.
 #    phase C, at_ns 80ms           seq 80..99
-#        phase B plus corrupt p = 1
+#        phase B plus corrupt p = 1, minus mtu_blackhole
 #
 #  Every probability in the profile is exactly 0 or exactly 1, so no verdict
 #  on any line depends on the value of a generator draw.  The reorder and
@@ -63,8 +65,8 @@
 #     20..24 inclusive and seq 25 NOT.  Drop, cause 2.  Consumes no draw and
 #     never touches the queue, so the queue's backlog and its drain clock are
 #     exactly where the last admitted datagram left them.
-#  3. MTU.  Strictly greater than 1400 drops, cause 3.  So 1500 drops and the
-#     1400 at seq 40 passes.  No draw, no queue.
+#  3. MTU (phases A and B).  Strictly greater than 1400 drops, cause 3.  So
+#     1500 drops and the 1400 at seq 40 passes.  No draw, no queue.
 #  4. LOSS.  Phase A: the named index list.  Phases B and C: seq % 5 == 4,
 #     i.e. the 5th, 10th, ... datagram.  Drop, cause 1.  No draw either way —
 #     both of these loss models are deterministic in seq.
@@ -76,14 +78,16 @@
 #
 #         backlog := max(0, backlog - microseconds_since_the_last_ADMISSION
 #                                     _ATTEMPT)
+#         if wire_bytes > 2000           -> drop, cause 5, backlog unchanged
 #         if backlog + wire_bytes > 2000 -> drop, cause 4, backlog unchanged
 #         else                            -> backlog := backlog + wire_bytes
 #
 #     Column 11 is the backlog AFTER this decision, this datagram included.
 #     A datagram dropped at step 2, 3 or 4 never reaches the queue, so it
 #     neither drains it nor is counted in it, and its column 11 repeats the
-#     previous admitted line's.  A tail drop DOES drain first, so its column
-#     11 is the post-drain backlog and is never the pre-drain one.
+#     previous line's.  A tail drop DOES drain first, so its column
+#     11 is the post-drain backlog and is never the pre-drain one.  So does
+#     the cause-5 drop at seq 88: 1684 at seq 87 drains 1000 to 684.
 #
 #     THE BUCKET, also in bytes, and it is what column 7 is about.  Depth
 #     1500, refilling at the same 1 byte per microsecond, and it starts FULL.
@@ -158,8 +162,9 @@
 #     dropped, loss (cause 1)      3, 7, 11, 29, 44, and then 54, 59, 64, 69,
 #                                  74, 79, 84, 89, 94, 99
 #     dropped, blackout (cause 2)  20, 21, 22, 23, 24
-#     dropped, MTU (cause 3)       5, 37, 88
+#     dropped, MTU (cause 3)       5, 37
 #     dropped, queue full (4)      16, 34, 41, 49
+#     dropped, oversize (5)        88
 #     bucket named a later tick    2, 10, 14, 19, 27, 32, 40, 47, 52, 57, 62,
 #                                  67, 72, 77, 82, 87, 92, 97.  At 67 and 87
 #                                  the reorder model then took the release
@@ -184,7 +189,7 @@
 #
 #  Counts, as a cheap whole-file check: 100 records; 26 with verdict 0, 37
 #  with verdict 1, 10 with verdict 2, 27 with verdict 3; and of the 27 drops,
-#  15 loss, 5 blackout, 3 MTU, 4 queue-full.
+#  15 loss, 5 blackout, 2 MTU, 4 queue-full, 1 oversize.
 #
 0 0 0 0 1228 0 0 18446744073709551615 4294967295 0 1228
 1 0 0 0 1228 1000000 1000000 18446744073709551615 4294967295 0 1456
@@ -274,8 +279,8 @@
 85 0 1 0 1228 85000000 87000000 87000000 569 2 1228
 86 0 1 0 1228 86000000 88000000 88000000 822 0 1456
 87 0 2 0 1228 87000000 87000000 87000000 686 1 1684
-88 0 3 3 1500 88000000 88000000 18446744073709551615 4294967295 0 1684
-89 0 3 1 1228 89000000 89000000 18446744073709551615 4294967295 0 1684
+88 0 3 5 2500 88000000 88000000 18446744073709551615 4294967295 0 684
+89 0 3 1 1228 89000000 89000000 18446744073709551615 4294967295 0 684
 90 0 1 0 1228 90000000 92000000 92000000 593 5 1228
 91 0 2 0 1228 91000000 91000000 91000000 451 2 1456
 92 0 1 0 1228 92000000 94184000 94184000 811 6 1684

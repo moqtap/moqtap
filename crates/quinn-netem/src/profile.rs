@@ -202,14 +202,14 @@ pub enum ProfileError {
     /// `Window { for_ns: 0, .. }` — an empty interval contains no instant, so
     /// the blackout is configured and can never fire.
     BlackoutZeroLength,
-    /// `RateModel { queue_bytes: 0, .. }`.
-    ///
-    /// The queue's arrival test is `backlog + wire_bytes > queue_bytes`. At
-    /// zero that is `0 + n > 0`, true for every datagram — so the profile
-    /// drops 100% of traffic and reports every drop as a full queue whose
-    /// recorded backlog is zero bytes. A profile that means "drop everything"
-    /// says so with a [`crate::model::LossModel`].
-    RateWithZeroQueue,
+    /// `RateModel` whose `queue_bytes` is below one on-wire datagram, so the
+    /// queue can never admit a full-size packet.
+    RateQueueBelowDatagram {
+        /// The configured tail-drop threshold.
+        queue_bytes: u64,
+        /// The largest on-wire datagram this direction can forward.
+        min_wire_bytes: u64,
+    },
     /// `RateModel { bps: 0, .. }`. At a zero rate the bucket never accumulates
     /// a token, so no datagram is ever grantable — 100% loss, again reported
     /// as queue overflow on an empty queue.
@@ -311,9 +311,10 @@ impl std::fmt::Display for ProfileError {
             Self::BlackoutZeroLength => {
                 write!(f, "blackout window has for_ns 0, which can never fire")
             }
-            Self::RateWithZeroQueue => write!(
+            Self::RateQueueBelowDatagram { queue_bytes, min_wire_bytes } => write!(
                 f,
-                "rate model has queue_bytes 0, which tail-drops every datagram on an empty queue"
+                "rate model queue_bytes {queue_bytes} is below one on-wire datagram of \
+                 {min_wire_bytes} bytes"
             ),
             Self::RateWithZeroBps => write!(
                 f,
@@ -399,10 +400,13 @@ impl DirectionProfile {
             if rate.bps == 0 {
                 return Err(ProfileError::RateWithZeroBps);
             }
-            if rate.queue_bytes == 0 {
-                return Err(ProfileError::RateWithZeroQueue);
-            }
             let min_wire_bytes = self.largest_on_wire_datagram();
+            if rate.queue_bytes < min_wire_bytes {
+                return Err(ProfileError::RateQueueBelowDatagram {
+                    queue_bytes: rate.queue_bytes,
+                    min_wire_bytes,
+                });
+            }
             if rate.burst_bytes < min_wire_bytes {
                 return Err(ProfileError::RateBurstBelowDatagram {
                     burst_bytes: rate.burst_bytes,
@@ -887,7 +891,19 @@ mod tests {
                     rate: Some(RateModel { bps: 10 * MBPS, burst_bytes: 64 * KIB, queue_bytes: 0 }),
                     ..healthy()
                 },
-                ProfileError::RateWithZeroQueue,
+                ProfileError::RateQueueBelowDatagram { queue_bytes: 0, min_wire_bytes: 1400 },
+            ),
+            (
+                "queue one byte short of a datagram",
+                DirectionProfile {
+                    rate: Some(RateModel {
+                        bps: 10 * MBPS,
+                        burst_bytes: 64 * KIB,
+                        queue_bytes: 1399,
+                    }),
+                    ..healthy()
+                },
+                ProfileError::RateQueueBelowDatagram { queue_bytes: 1399, min_wire_bytes: 1400 },
             ),
             (
                 "bucket shallower than one datagram",

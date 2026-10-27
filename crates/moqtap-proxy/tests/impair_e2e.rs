@@ -311,7 +311,11 @@ async fn bind_with_socket_serves_a_client_over_the_supplied_socket() {
          bind_with_socket ignores its socket argument and binds one of its own"
     );
     assert_eq!(
-        stats.dropped_loss + stats.dropped_blackout + stats.dropped_mtu + stats.dropped_queue_full,
+        stats.dropped_loss
+            + stats.dropped_blackout
+            + stats.dropped_mtu
+            + stats.dropped_queue_full
+            + stats.dropped_rate_oversize,
         0,
         "a profile with no models armed dropped something"
     );
@@ -616,7 +620,11 @@ async fn upstream_socket_carries_the_relay_leg() {
         "the counters and the decision log disagree about how many datagrams crossed the socket"
     );
     assert_eq!(
-        stats.dropped_loss + stats.dropped_blackout + stats.dropped_mtu + stats.dropped_queue_full,
+        stats.dropped_loss
+            + stats.dropped_blackout
+            + stats.dropped_mtu
+            + stats.dropped_queue_full
+            + stats.dropped_rate_oversize,
         0,
         "a profile with no models armed dropped something"
     );
@@ -980,11 +988,16 @@ async fn five_percent_downlink_loss_still_delivers_every_object() {
             + stats.dropped_loss
             + stats.dropped_blackout
             + stats.dropped_mtu
-            + stats.dropped_queue_full,
+            + stats.dropped_queue_full
+            + stats.dropped_rate_oversize,
         downlink.len() as u64,
         "{left_the_socket} datagram(s) reached the socket below the shim and {} were reported \
          dropped, out of {} decided: the shim is announcing drops it does not perform",
-        stats.dropped_loss + stats.dropped_blackout + stats.dropped_mtu + stats.dropped_queue_full,
+        stats.dropped_loss
+            + stats.dropped_blackout
+            + stats.dropped_mtu
+            + stats.dropped_queue_full
+            + stats.dropped_rate_oversize,
         downlink.len()
     );
 
@@ -1158,7 +1171,11 @@ async fn calibration_a_corrupt_datagram_is_rejected_by_the_aead() {
         downlink.len()
     );
     assert_eq!(
-        stats.dropped_loss + stats.dropped_blackout + stats.dropped_mtu + stats.dropped_queue_full,
+        stats.dropped_loss
+            + stats.dropped_blackout
+            + stats.dropped_mtu
+            + stats.dropped_queue_full
+            + stats.dropped_rate_oversize,
         0,
         "a datagram was dropped, so the client's silence is explained by loss and says nothing \
          about the AEAD"
@@ -1291,7 +1308,8 @@ mod webtransport_ingress {
             stats.dropped_loss
                 + stats.dropped_blackout
                 + stats.dropped_mtu
-                + stats.dropped_queue_full,
+                + stats.dropped_queue_full
+                + stats.dropped_rate_oversize,
             0,
             "a profile with no models armed dropped something"
         );

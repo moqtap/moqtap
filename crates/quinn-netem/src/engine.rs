@@ -191,6 +191,8 @@ struct Counters {
     dropped_mtu: u64,
     /// Tail-dropped at the bounded byte queue.
     dropped_queue_full: u64,
+    /// Dropped as larger than the rate model's queue or burst.
+    dropped_rate_oversize: u64,
     /// On-wire bytes offered.
     wire_bytes_in: u64,
     /// On-wire bytes released, duplicates included.
@@ -237,7 +239,7 @@ impl Impairer {
     ///
     /// `wire_bytes` is a number a peer chooses, so no value of it is a reason
     /// to abort: a datagram larger than the rate model can ever emit is
-    /// dropped as [`DropCause::RateQueueFull`].
+    /// dropped as [`DropCause::RateOversize`].
     pub fn decide(&mut self, seq: u64, wire_bytes: u32, now: Tick) -> Decision {
         // Destructured rather than accessed through `self`, so the shared borrow
         // of the profile and the mutable borrows of the generators, the bucket
@@ -282,40 +284,22 @@ impl Impairer {
             // panic this function documents.
             let bytes_per_second = rate.bps.div_ceil(8);
 
-            // The rule is one comparison — the backlog plus this datagram
-            // against the threshold — and both refusals below satisfy it.
-            //
-            // `TailDropped` is congestion: the queue is genuinely holding bytes
-            // and this datagram would take it past its threshold. `NeverFits`
-            // is a datagram larger than the whole threshold, which is a
-            // configuration that refuses the first datagram of an idle link.
-            // The two are reported here under one cause, and that is a known
-            // rough edge rather than a considered equivalence: a queue
-            // threshold below one datagram drops everything with a recorded
-            // backlog of zero, which is the mis-attribution this crate is
-            // otherwise careful to avoid. It is left as a drop rather than a
-            // panic because a profile that reaches it is one the validator
-            // accepted, and crashing a datagram path on an accepted profile is
-            // worse than reporting the drop under a slightly wrong name.
+            // `TailDropped` is congestion; `NeverFits` is a datagram larger than the
+            // whole threshold.
             match offer(queue, bytes_per_second, rate.queue_bytes, wire_bytes, now) {
                 Admission::Queued => {}
-                Admission::TailDropped | Admission::NeverFits => {
+                Admission::TailDropped => {
                     return counters
                         .finish(wire_bytes, dropped(DropCause::RateQueueFull, now, queue))
                 }
+                Admission::NeverFits => {
+                    return counters
+                        .finish(wire_bytes, dropped(DropCause::RateOversize, now, queue))
+                }
             }
 
-            // `Never` is the bucket saying what `NeverFits` says about the
-            // queue: this datagram exceeds what the rate model can ever emit,
-            // so no wait produces a tick to arm it. `validate_models` cannot
-            // rule it out, because it sizes `burst_bytes` against a 1500-byte
-            // path while a UDP datagram may be 65535 bytes on the wire.
-            //
-            // `RateQueueFull` is imprecise here — the queue may hold nothing —
-            // but it is the same imprecision `NeverFits` already accepts about
-            // the same rate model, so the two answer alike. A distinct
-            // `DropCause` would cost a public enum variant, a `StatsSnapshot`
-            // field and a log discriminant.
+            // `Never`: the datagram exceeds the burst, which `validate_models` cannot
+            // rule out for a datagram above the assumed path size.
             match charge(bucket, bytes_per_second, rate.burst_bytes, wire_bytes, now) {
                 RateGrant::Now => {}
                 RateGrant::Later(at) => release = at,
@@ -325,7 +309,7 @@ impl Impairer {
                     // backlog is recorded.
                     queue.withdraw(wire_bytes);
                     return counters
-                        .finish(wire_bytes, dropped(DropCause::RateQueueFull, now, queue));
+                        .finish(wire_bytes, dropped(DropCause::RateOversize, now, queue));
                 }
             }
         }
@@ -444,6 +428,7 @@ impl Impairer {
             dropped_blackout: c.dropped_blackout,
             dropped_mtu: c.dropped_mtu,
             dropped_queue_full: c.dropped_queue_full,
+            dropped_rate_oversize: c.dropped_rate_oversize,
             wire_bytes_in: c.wire_bytes_in,
             wire_bytes_out: c.wire_bytes_out,
             queue_backlog_bytes: self.queue.backlog_bytes(),
@@ -490,6 +475,7 @@ impl Counters {
                 DropCause::Blackout => self.dropped_blackout += 1,
                 DropCause::Mtu => self.dropped_mtu += 1,
                 DropCause::RateQueueFull => self.dropped_queue_full += 1,
+                DropCause::RateOversize => self.dropped_rate_oversize += 1,
                 DropCause::NotDropped => unreachable!("a Drop verdict always carries a cause"),
             },
         }
@@ -789,6 +775,9 @@ pub enum DropCause {
     /// "the link was congested" and "these datagrams were unlucky" call for
     /// different fixes, and a single drop counter cannot tell them apart.
     RateQueueFull = 4,
+    /// Larger than the rate model's queue or burst, so the rate model can
+    /// never forward it.
+    RateOversize = 5,
 }
 
 /// Where the corrupt model's single bit-flip goes.

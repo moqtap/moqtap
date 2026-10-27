@@ -394,11 +394,7 @@ pub struct RateModel {
     /// this is the only path that may report a full queue: an ungrantable
     /// datagram is a configuration error, not a disposal question.
     ///
-    /// `0` is [`ProfileError::RateWithZeroQueue`]: a zero threshold makes the
-    /// arrival test true for every datagram, so the queue-full cause is
-    /// reported for 100% of traffic with a recorded backlog of zero bytes —
-    /// the same mis-attribution, reached through this field instead of through
-    /// the bucket.
+    /// Below one on-wire datagram is [`ProfileError::RateQueueBelowDatagram`].
     pub queue_bytes: u64,
 }
 

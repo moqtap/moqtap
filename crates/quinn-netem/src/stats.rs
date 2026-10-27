@@ -7,12 +7,12 @@
 //!
 //! # The conservation identity, and why `datagrams_seen` is counted separately
 //!
-//! Every decision lands in exactly one of seven buckets — passed, delayed,
-//! reordered, and the four drop causes — which sum to `datagrams_seen`. That
+//! Every decision lands in exactly one of eight buckets — passed, delayed,
+//! reordered, and the five drop causes — which sum to `datagrams_seen`. That
 //! identity says the counters account for every datagram the engine was handed
 //! rather than for the ones somebody remembered to increment.
 //!
-//! Deriving `datagrams_seen` as the sum of the seven would make the identity
+//! Deriving `datagrams_seen` as the sum of the eight would make the identity
 //! arithmetic instead of evidence: it would hold for an engine that counts
 //! nothing and for one that never ran. Counted independently it is a statement
 //! that can be false. For the same reason the test asserting it also asserts a
@@ -67,6 +67,8 @@ pub struct Stats {
     dropped_mtu: AtomicU64,
     /// Tail-dropped at the bounded byte queue.
     dropped_queue_full: AtomicU64,
+    /// Dropped as larger than the rate model's queue or burst.
+    dropped_rate_oversize: AtomicU64,
     /// On-wire bytes offered.
     wire_bytes_in: AtomicU64,
     /// On-wire bytes released, duplicates included.
@@ -108,6 +110,7 @@ impl Stats {
             dropped_blackout: self.dropped_blackout.load(Relaxed),
             dropped_mtu: self.dropped_mtu.load(Relaxed),
             dropped_queue_full: self.dropped_queue_full.load(Relaxed),
+            dropped_rate_oversize: self.dropped_rate_oversize.load(Relaxed),
             wire_bytes_in: self.wire_bytes_in.load(Relaxed),
             wire_bytes_out: self.wire_bytes_out.load(Relaxed),
             queue_backlog_bytes: self.backlog_total(),
@@ -126,7 +129,7 @@ impl Stats {
     /// Every decision passes through the one `match` below and increments
     /// exactly one bucket, which is what makes the conservation identity a
     /// property of the control flow rather than of a reviewer having remembered
-    /// to increment something on each of seven branches.
+    /// to increment something on each of eight branches.
     ///
     /// `dir` selects which direction's backlog gauge this decision overwrites.
     /// Nothing else is kept per direction: a running total is a statement about
@@ -157,6 +160,7 @@ impl Stats {
                 DropCause::Blackout => &self.dropped_blackout,
                 DropCause::Mtu => &self.dropped_mtu,
                 DropCause::RateQueueFull => &self.dropped_queue_full,
+                DropCause::RateOversize => &self.dropped_rate_oversize,
                 DropCause::NotDropped => panic!(
                     "a dropped {wire_bytes}-byte datagram arrived at the counters with no \
                      cause; it belongs in no bucket and counting it would leave the \
@@ -275,6 +279,8 @@ pub struct StatsSnapshot {
     pub dropped_mtu: u64,
     /// Tail-dropped at the bounded byte queue's `queue_bytes` threshold.
     pub dropped_queue_full: u64,
+    /// Larger than the rate model's queue or burst, so never forwardable.
+    pub dropped_rate_oversize: u64,
     /// ON-WIRE bytes offered.
     pub wire_bytes_in: u64,
     /// ON-WIRE bytes released, duplicates included.
@@ -314,9 +320,9 @@ mod tests {
     }
 
     /// One decision of every verdict and every drop cause, folded in, lands in
-    /// seven distinct buckets that sum to the number of decisions.
+    /// eight distinct buckets that sum to the number of decisions.
     ///
-    /// Written as an exact expected snapshot rather than as seven separate
+    /// Written as an exact expected snapshot rather than as eight separate
     /// field assertions, because the failure that matters is two verdicts
     /// sharing a bucket, and that shows up as one number too high beside
     /// another too low. Comparing the whole struct prints both.
@@ -331,6 +337,7 @@ mod tests {
             dropped(DropCause::Blackout),
             dropped(DropCause::Mtu),
             dropped(DropCause::RateQueueFull),
+            dropped(DropCause::RateOversize),
         ];
         for d in &decisions {
             stats.record(Direction::Downlink, 100, d);
@@ -340,7 +347,7 @@ mod tests {
         assert_eq!(
             got,
             StatsSnapshot {
-                datagrams_seen: 7,
+                datagrams_seen: 8,
                 datagrams_passed: 1,
                 datagrams_delayed: 1,
                 datagrams_reordered: 1,
@@ -350,7 +357,8 @@ mod tests {
                 dropped_queue_full: 1,
                 // Seven decisions of 100 bytes offered; the three that were not
                 // dropped are the only ones that left.
-                wire_bytes_in: 700,
+                dropped_rate_oversize: 1,
+                wire_bytes_in: 800,
                 wire_bytes_out: 300,
                 ..StatsSnapshot::default()
             }
@@ -362,8 +370,9 @@ mod tests {
             + got.dropped_loss
             + got.dropped_blackout
             + got.dropped_mtu
-            + got.dropped_queue_full;
-        assert_eq!(buckets, got.datagrams_seen, "the seven buckets account for every decision");
+            + got.dropped_queue_full
+            + got.dropped_rate_oversize;
+        assert_eq!(buckets, got.datagrams_seen, "the eight buckets account for every decision");
     }
 
     /// A duplicate is one extra datagram on the wire and one extra count; a
