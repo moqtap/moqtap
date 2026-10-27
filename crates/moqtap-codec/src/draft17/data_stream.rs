@@ -405,7 +405,7 @@ impl SubgroupObject {
     ///
     /// The datagram carrier is the exception, and the draft is what makes it
     /// one: Section 10.3.1 states the same rule again as a per-datagram
-    /// framing rule, so [`DatagramHeader::decode`] refuses it outright.
+    /// framing rule, so [`DatagramHeader::decode_object`] refuses it outright.
     pub fn properties_permitted(&self) -> bool {
         self.extension_headers.is_empty() || self.status() == ObjectStatus::Normal
     }
@@ -1029,7 +1029,7 @@ impl DatagramHeader {
     /// sits: "If an endpoint receives properties on an Object with status that
     /// is not Normal, it MUST close the session with a PROTOCOL_VIOLATION."
     /// Section 10.3.1 then states it again for this carrier in terms of the two
-    /// bits, which is why [`Self::decode`] refuses the shape rather than merely
+    /// bits, which is why [`Self::decode_object`] refuses the shape rather than merely
     /// reporting it — see [`SubgroupObject::properties_permitted`] for why the
     /// subgroup carrier is the other way round.
     pub fn properties_permitted(&self) -> bool {

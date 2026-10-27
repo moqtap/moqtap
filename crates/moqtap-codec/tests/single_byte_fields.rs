@@ -130,14 +130,6 @@ fn refuses_a_widened_field(
 ///
 /// Draft-15 moved the field into a parameter and dropped it from the message,
 /// so the sweep stops at 14.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Reading draft-12's FETCH_OK Group Order with `VarInt::decode` again:
-///
-/// ```text
-/// [draft-12] Group Order is one octet, so a two-byte varint in its place must be refused
-/// ```
 #[test]
 fn group_order_is_one_octet() {
     {
@@ -225,14 +217,6 @@ fn group_order_is_one_octet() {
 /// Order, Forward or Content Exists a protocol error. So the probe here is the
 /// width and not the range — `0x40 0x01` is refused because `0x40` is not where
 /// the next field starts, not because 64 is out of range.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Reading draft-16's End Of Track with `VarInt::decode` again:
-///
-/// ```text
-/// [draft-16] End Of Track is one octet, so a two-byte varint in its place must be refused
-/// ```
 #[test]
 fn end_of_track_is_one_octet() {
     {
@@ -349,20 +333,6 @@ fn end_of_track_is_one_octet() {
 /// direction or the other — one that refuses 0x0 everywhere refuses the most
 /// common SUBSCRIBE in the corpus, and one that accepts it everywhere lets a
 /// reply tell the subscriber nothing.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Pointing draft-11's SUBSCRIBE_OK arm at the ordinary reader:
-///
-/// ```text
-/// [draft-11] a SUBSCRIBE_OK that defers to the publisher's order must be refused: Ok(())
-/// ```
-///
-/// and pointing draft-12's SUBSCRIBE arm at the strict reader:
-///
-/// ```text
-/// [draft-12] a SUBSCRIBE that defers to the publisher's order must be accepted
-/// ```
 #[test]
 fn group_order_zero_is_refused_only_where_a_draft_says_so() {
     // draft-11 SUBSCRIBE_OK, the earliest shape this file reaches.

@@ -678,16 +678,6 @@ fn d22_data_stream_fetch() {
 /// `varint.json`, which `vectors_varint.rs` owns and which is counted here so
 /// the total is the whole corpus rather than the part this file happens to
 /// reach.
-///
-/// # Ablation
-///
-/// Removing `publish-state-notify.json` from [`MESSAGE_FILES`] leaves every
-/// other test passing and fails here with the file named:
-///
-/// ```text
-/// transport/draft22/codec/messages/publish-state-notify.json is in the corpus
-/// and no runner above opens it
-/// ```
 #[test]
 fn d22_every_committed_vector_is_run() {
     use std::collections::BTreeSet;

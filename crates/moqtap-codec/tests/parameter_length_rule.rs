@@ -23,41 +23,6 @@
 //! `the_two_namespaces_are_read_separately` is the test that says so: it puts
 //! the *same bytes* under the *same key* in a setup message and in a SUBSCRIBE,
 //! and requires opposite answers.
-//!
-//! # Recorded failures
-//!
-//! Each was produced by making the change and running the tests, on draft-09.
-//!
-//! Dropping the check entirely, and - separately - reading the first varint of
-//! the value and ignoring whatever follows it, both fail with:
-//!
-//! ```text
-//! a DELIVERY TIMEOUT with a byte after its varint is not a DELIVERY TIMEOUT:
-//! Ok([3, 16, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 1, 3, 2, 1, 2])
-//! ```
-//!
-//! Applying the setup list to version-specific parameters as well:
-//!
-//! ```text
-//! an authorization string is not a number, whatever its bytes look like:
-//! Err(ParameterLengthMismatch(2))
-//! ```
-//!
-//! Applying the version-specific list to setup parameters instead:
-//!
-//! ```text
-//! a MAX_SUBSCRIBE_ID with a byte after its varint is not a MAX_SUBSCRIBE_ID:
-//! Ok([64, 64, 25, 1, 192, 0, 0, 0, 255, 0, 0, 9, 1, 2, 13, 97, 45, 116, 111,
-//! 107, 101, 110, 45, 118, 97, 108, 117, 101])
-//! ```
-//!
-//! Leaving the reader unchecked, so only the writer holds the rule:
-//!
-//! ```text
-//! the reader must refuse what the writer would not have written:
-//! Ok(Subscribe(Subscribe { subscribe_id: VarInt(1), ..., parameters:
-//! [KeyValuePair { key: VarInt(3), value: Bytes([2, 3]) }] }))
-//! ```
 
 #[cfg(any(
     feature = "draft07",

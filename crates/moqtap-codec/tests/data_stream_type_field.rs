@@ -136,19 +136,6 @@ fn status_datagram(draft: DraftVersion) -> Option<Vec<u8>> {
 /// field early and would stop one field short of the payload. The assertion is
 /// on what is left in the buffer after the header: exactly the payload, and
 /// nothing else.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Pointing draft-11's `Datagram::decode` at `DatagramHeader::decode` without
-/// consuming the type first, which is what the draft-neutral entry point used
-/// to do on all seven:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-11] the header decode must stop at
-/// the payload, leaving exactly it
-///   left: 5
-///  right: 4
-/// ```
 #[test]
 fn a_datagram_type_is_read_as_a_type_and_not_as_a_track_alias() {
     for &draft in DRAFTS {
@@ -176,27 +163,6 @@ fn a_datagram_type_is_read_as_a_type_and_not_as_a_track_alias() {
 /// infallible `encode` beside it — which is the writer a caller reaches for
 /// when it has no refusal to handle, and which could keep a headerless framing
 /// to itself.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Dropping the type field from draft-09's `Datagram::encode_checked`:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-09] the checked writer must write
-/// the bytes a peer expects
-///   left: "2a070380005041594c"
-///  right: "012a070380005041594c"
-/// ```
-///
-/// and from draft-09's infallible `Datagram::encode`, which the first
-/// ablation leaves untouched:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-09] the infallible writer must
-/// write the same bytes
-///   left: "2a07038000"
-///  right: "012a07038000"
-/// ```
 #[test]
 fn a_datagram_is_written_with_the_type_field_it_was_read_with() {
     for &draft in DRAFTS {
@@ -232,16 +198,6 @@ fn a_datagram_is_written_with_the_type_field_it_was_read_with() {
 /// message a way through this entry point: without it every datagram decodes
 /// as the payload-bearing one, so a status datagram arrives as an ordinary
 /// object whose status octet has become part of its payload.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Making draft-13's `Datagram::decode` ignore `is_status` and always take the
-/// payload branch:
-///
-/// ```text
-/// [draft-13] a status datagram must decode as one, and this decoded as a
-/// payload datagram with 1 byte(s) left over
-/// ```
 #[test]
 fn a_status_datagram_is_reachable_through_the_draft_neutral_entry_point() {
     for &draft in DRAFTS {
@@ -289,16 +245,6 @@ fn a_status_datagram_is_reachable_through_the_draft_neutral_entry_point() {
 /// status on both drafts — because a payload that happened to start with an
 /// unassigned code would make the misread fail for a reason that says nothing
 /// about the type numbering.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Putting draft-12's `DatagramStatus` back at 0x02 and `DatagramStatusExt` at
-/// 0x03, the numbers this codec carried before:
-///
-/// ```text
-/// [draft-12] type 0x02 is a payload datagram that ends its group, and this
-/// decoded as a status datagram
-/// ```
 #[test]
 fn drafts_12_and_13_number_end_of_group_below_the_status_datagram() {
     // A payload whose first byte reads as an assigned Object Status, so a
@@ -346,18 +292,6 @@ fn drafts_12_and_13_number_end_of_group_below_the_status_datagram() {
 /// stream type; until now nothing wrote it back, so a caller opening a stream
 /// with `encode` produced bytes that `decode_stream` reads with every field one
 /// place late.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Pointing draft-12's arm of `AnySubgroupHeader::encode_stream` at `encode`,
-/// which is what a caller had to reach for before:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-12] the bytes written must be the
-/// bytes a peer expects
-///   left: "2a070380"
-///  right: "142a070380"
-/// ```
 #[test]
 fn a_subgroup_stream_can_be_written_from_its_first_byte() {
     for &draft in DRAFTS {

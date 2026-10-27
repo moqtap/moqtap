@@ -310,16 +310,6 @@ fn a_datagram_with_the_status_bit_carries_its_status() {
 /// same sentence GROUP_ORDER and FORWARD carry, on a type new in draft-20 — so
 /// a codec that carried a draft-19 uint8 range table forward unchanged would
 /// write and read a value the draft says to close a session over.
-///
-/// # Ablation
-///
-/// Leaving `0x35` out of `uint8_value_in_range` — which is what the draft-19
-/// table does, because draft-19 has no such parameter:
-///
-/// ```text
-/// INCLUDE_PROPERTIES 2 was written; the decoder refuses it, so the peer closes
-/// the session over a frame this codec produced
-/// ```
 #[test]
 fn include_properties_is_held_to_its_range_in_both_directions() {
     for value in [0u64, 1] {

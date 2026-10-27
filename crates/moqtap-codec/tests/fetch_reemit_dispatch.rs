@@ -38,32 +38,6 @@
 //!    passes just as well for a writer that deleted the bytes and re-encoded
 //!    nothing — which is the bug this whole path exists to prevent, and which
 //!    is byte-perfect right up to the moment a survivor is renumbered.
-//!
-//! # Ablation, measured
-//!
-//! `AnyFetchObjectWriter::reemit_object` answering `Unchanged` for every
-//! frame — byte deletion, which is what this path replaced. Three of the five
-//! gates fail and **the byte-identity gate is not one of them**, which is the
-//! whole reason gate 3 exists:
-//!
-//! ```text
-//! ---- a_removal_reframes_exactly_on_the_drafts_that_encode_against_a_predecessor stdout ----
-//! Draft15: no survivor of any removal was reframed, though this draft writes
-//! every frame against the one before it
-//!
-//! ---- removing_a_frame_leaves_every_survivor_where_it_was stdout ----
-//! [Draft15 fetch-stream-two-objects] re-emitted frame 0: invalid field value
-//!
-//! ---- the_framing_is_re_emitted_from_a_prefix_of_the_frame stdout ----
-//! Draft15: no fetch stream in the corpus reframes its second frame, so this
-//! gate observed nothing
-//! ```
-//!
-//! The second message is worth reading twice. The survivor of a removed first
-//! frame does not merely arrive under the wrong Location — on this stream it
-//! does not decode at all, because it inherits from an object that is no
-//! longer there. `tests/actions_objects.rs` has the other half, where the
-//! survivor decodes cleanly and is simply somebody else.
 
 #![cfg(any(
     feature = "draft07",

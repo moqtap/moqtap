@@ -243,14 +243,6 @@ fn kvp_decode_truncated_value_bytes() {
 /// The read stays bounded without the cap: a declared length longer than the
 /// bytes actually present is refused before anything is allocated, so what was
 /// removed was a rule, not a defence.
-///
-/// # Observed with the fix reverted
-///
-/// Restoring the `MAX_KVP_VALUE_LEN` check in `decode_d07`:
-///
-/// ```text
-/// drafts 07-10 state no value cap, but a 65536-byte parameter was refused: Err(ValueTooLong(65536))
-/// ```
 #[test]
 fn the_pre_draft_11_parameter_has_no_length_cap() {
     let oversized = KeyValuePair {
@@ -300,14 +292,6 @@ fn the_pre_draft_11_parameter_has_no_length_cap() {
 /// parameter one byte over the first is already inside a payload one byte over
 /// the second. What this adds is which of the two rules the error names, and it
 /// is the layer that owns the one the value broke.
-///
-/// # What breaking the fix does, observed by making the change and running
-///
-/// Pointing `encode_list_checked` at `encode_list` and dropping the check:
-///
-/// ```text
-/// a list holding one over-long value must be refused, got Ok(())
-/// ```
 #[test]
 fn kvp_encode_list_checked_refuses_what_decode_refuses() {
     let oversized = KeyValuePair {

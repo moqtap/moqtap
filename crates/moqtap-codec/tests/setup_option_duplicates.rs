@@ -33,46 +33,6 @@
 //! `a_repeated_track_property_is_not_this_rules_business` holds that shared
 //! codec to exactly this: a repeat reaching it through the Track Property
 //! wrappers is carried, not refused.
-//!
-//! # Recorded failures
-//!
-//! Each was produced by making the change and running the tests, on draft-17.
-//!
-//! Dropping the sender's check:
-//!
-//! ```text
-//! a sender may not repeat an option type:
-//! Ok([175, 0, 0, 8, 1, 2, 47, 97, 0, 2, 47, 98])
-//! ```
-//!
-//! Dropping the receiver's check:
-//!
-//! ```text
-//! a repeated PATH is one the reader can name, and must refuse:
-//! Ok(Setup(Setup { options: [KeyValuePair { key: VarInt(1), value:
-//! Bytes([97, 97]) }, KeyValuePair { key: VarInt(1), value: Bytes([98, 98]) }] }))
-//! ```
-//!
-//! Making the receiver refuse every repeat rather than only known types:
-//!
-//! ```text
-//! a receiver must allow duplicates of options it cannot name:
-//! Err(DuplicateParameter(65))
-//! ```
-//!
-//! Dropping the AUTHORIZATION TOKEN carve-out:
-//!
-//! ```text
-//! an endpoint can specify one or more tokens in SETUP:
-//! Err(DuplicateParameter(3))
-//! ```
-//!
-//! Pointing the rule at Track Properties as well:
-//!
-//! ```text
-//! the Setup Option rule is stated about Setup Options:
-//! Err(DuplicateParameter(2))
-//! ```
 
 #[cfg(any(
     feature = "draft17",

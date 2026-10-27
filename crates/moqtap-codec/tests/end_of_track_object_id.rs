@@ -28,32 +28,6 @@
 //! group". A check that held every terminal status to object zero would refuse a
 //! legal end-of-track-and-group marker, so `an_end_of_track_and_group_marker_
 //! ends_one_past_the_last_object` is asserted beside it on every draft.
-//!
-//! # Recorded failures
-//!
-//! Each was produced by making the change and running the tests, on draft-08.
-//!
-//! Dropping the check:
-//!
-//! ```text
-//! an end of track ends at object zero: Ok([1, 0, 0, 5])
-//! ```
-//!
-//! Leaving the reader unchecked, so only the writer holds the rule:
-//!
-//! ```text
-//! the reader refuses it too: Ok(ObjectHeader { object_id: VarInt(1),
-//! extension_count: VarInt(0), extensions: [], payload_length: VarInt(0),
-//! object_status: EndOfTrack })
-//! ```
-//!
-//! Widening the check to every terminal status rather than 0x5 alone, and -
-//! separately - pointing it at 0x4 instead of 0x5, both fail with:
-//!
-//! ```text
-//! end of track and group ends one past the last object, not at zero:
-//! Err(EndOfTrackObjectId(1))
-//! ```
 
 #[cfg(any(feature = "draft08", feature = "draft09", feature = "draft10"))]
 use moqtap_codec::varint::VarInt;

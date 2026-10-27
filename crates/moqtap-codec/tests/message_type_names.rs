@@ -53,39 +53,6 @@
 //! sweep, so the shapes that produce one are refused rather than returned: a
 //! draft directory with no message files, and a draft whose files named no ids
 //! at all.
-//!
-//! # Ablation, each of these run
-//!
-//! Pointing the draft-18 arm of `message_type_name` at `draft17::message`, which
-//! is the mistake per-draft dispatch exists to make impossible and which no
-//! amount of checking against the union would see:
-//!
-//! ```text
-//! thread 'draft18_names_agree_with_the_corpus' panicked at
-//! crates\moqtap-codec\tests\message_type_names.rs:
-//! draft18: assigned by the corpus, not named by this crate: 0x50
-//! subscribe_namespace, 0x51 subscribe_tracks
-//! ```
-//!
-//! Spelling draft-19's `PublishSkipped` arm `"publish_blocked"`, which is what
-//! draft-18 calls the same wire value:
-//!
-//! ```text
-//! thread 'draft19_names_agree_with_the_corpus' panicked at
-//! crates\moqtap-codec\tests\message_type_names.rs:
-//! draft19: 0xf is publish_skipped in the corpus, publish_blocked in this crate
-//! ```
-//!
-//! And dropping the draft-18 row from [`ALIASES`], which is what a second name
-//! on one id looks like before someone has said why it is there:
-//!
-//! ```text
-//! thread 'draft18_names_agree_with_the_corpus' panicked at
-//! crates\moqtap-codec\tests\message_type_names.rs:
-//! draft18/publish-ok.json: 0x7 is also filed as publish_ok, and this crate
-//! answers request_ok. Either the corpus assigns one id to two messages, or
-//! publish_ok is an alias that needs a row in ALIASES saying so.
-//! ```
 
 mod test_vectors;
 

@@ -729,25 +729,6 @@ fn check_group_order(message: &ControlMessage) -> Result<(), CodecError> {
     Ok(())
 }
 
-/// Hold a namespace-plus-name pair to the Full Track Name cap.
-///
-/// Draft-14 Section 2.4.1: "The maximum total length of a Full Track Name is
-/// 4,096 bytes, computed as the sum of the lengths of each Track Namespace tuple
-/// field and the Track Name length field. If an endpoint receives a Full Track
-/// Name exceeding this length, it MUST close the session with a
-/// PROTOCOL_VIOLATION."
-///
-/// The two lengths arrive as separate fields, so neither the namespace decoder
-/// nor the name decoder can settle this alone: a namespace at 4,000 bytes and a
-/// name at 500 are each legal by themselves. It has to live where a message
-/// decodes both.
-///
-/// Draft-14 states no separate cap on a Track Namespace on its own — that
-/// sentence arrives in draft-16 — so this pairwise sum is the only bound the
-/// draft gives. A control message may be 65,535 bytes, so without it a peer can
-/// hand the application a Full Track Name sixteen times the permitted size, and
-/// two relays that disagree about whether it was legal disagree about cache
-/// identity.
 /// Refuse a message whose discriminator disagrees with the fields beside it.
 ///
 /// Several draft-14 messages carry a field that says which of the following
@@ -816,6 +797,25 @@ fn read_reason_phrase(buf: &mut impl Buf) -> Result<Vec<u8>, CodecError> {
     read_bytes(buf, len)
 }
 
+/// Hold a namespace-plus-name pair to the Full Track Name cap.
+///
+/// Draft-14 Section 2.4.1: "The maximum total length of a Full Track Name is
+/// 4,096 bytes, computed as the sum of the lengths of each Track Namespace tuple
+/// field and the Track Name length field. If an endpoint receives a Full Track
+/// Name exceeding this length, it MUST close the session with a
+/// PROTOCOL_VIOLATION."
+///
+/// The two lengths arrive as separate fields, so neither the namespace decoder
+/// nor the name decoder can settle this alone: a namespace at 4,000 bytes and a
+/// name at 500 are each legal by themselves. It has to live where a message
+/// decodes both.
+///
+/// Draft-14 states no separate cap on a Track Namespace on its own — that
+/// sentence arrives in draft-16 — so this pairwise sum is the only bound the
+/// draft gives. A control message may be 65,535 bytes, so without it a peer can
+/// hand the application a Full Track Name sixteen times the permitted size, and
+/// two relays that disagree about whether it was legal disagree about cache
+/// identity.
 fn check_full_track_name(namespace: &TrackNamespace, track_name: &[u8]) -> Result<(), CodecError> {
     let total = namespace.field_bytes_len().saturating_add(track_name.len());
     if total > MAX_FULL_TRACK_NAME_LENGTH {

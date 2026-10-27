@@ -14,15 +14,14 @@
 //! (Termination), Section 7.10 (ANNOUNCE_ERROR), Section 7.16
 //! (SUBSCRIBE_ERROR), Section 7.18 (FETCH_ERROR), Section 7.19 (SUBSCRIBE_DONE)
 //! and Section 7.26 (SUBSCRIBE_ANNOUNCES_ERROR). Draft-09 assigns code points
-//! in two further places, neither of which is a `Code`/`Reason` table and
-//! neither of which belongs here:
+//! in two further places, neither of which is a `Code`/`Reason` table:
 //!
 //! - Section 7.24 assigns TRACK_STATUS Status Codes 0x00 through 0x04 in a
 //!   prose list. That registry is closed — the draft says the field "MUST hold
 //!   one of the following values. Any other value is a malformed message" —
-//!   which is the opposite of the open registries below, so folding it in would
-//!   misrepresent it. [`super::message::TrackStatus`] carries the field as a
-//!   raw `VarInt`.
+//!   which is the opposite of the open registries below, so it is modelled
+//!   apart from them, as [`TrackStatusCode`]. [`super::message::TrackStatus`]
+//!   carries the field as a raw `VarInt`.
 //! - Section 8.1.1.1 assigns Object Status 0x0, 0x1, 0x3, 0x4 and 0x5 (0x2 is
 //!   not assigned). That registry is [`super::types::ObjectStatus`], next to
 //!   the data-stream code that reads it.

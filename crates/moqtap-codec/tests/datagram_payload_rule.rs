@@ -28,17 +28,6 @@
 /// (End of Group), then four bytes that the draft forbids. Decoding stops after
 /// the status, so the header alone cannot see them — which is exactly why the
 /// predicate exists rather than a decoder refusal.
-///
-/// # Observed with the fix reverted
-///
-/// Replacing draft-17's `permits_payload` body with `true`:
-///
-/// ```text
-/// ---- a_status_datagram_permits_no_payload_and_a_normal_one_does stdout ----
-///
-/// thread 'a_status_datagram_permits_no_payload_and_a_normal_one_does' (8768) panicked at crates\moqtap-codec\tests\datagram_payload_rule.rs:
-/// draft-17 says an End-of-Group datagram may carry a payload
-/// ```
 #[test]
 fn a_status_datagram_permits_no_payload_and_a_normal_one_does() {
     // STATUS bit set, End of Group, four trailing bytes.

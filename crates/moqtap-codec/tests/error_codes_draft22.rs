@@ -353,16 +353,6 @@ fn greasing_and_unknown_codes_decode_to_none() {
 /// PUBLISH_DONE." So `from_u64` answering `None` is exactly the required
 /// behaviour, and the message decoder carries the raw code up so a caller can
 /// apply the INTERNAL_ERROR reading itself.
-///
-/// # Ablation
-///
-/// Restoring `SubscriptionEnded = 0x3` to `PublishDoneStatusCode`, in the enum
-/// and in `from_u64` together:
-///
-/// ```text
-/// PUBLISH_DONE 0x3 (draft-19 SUBSCRIPTION_ENDED) is unassigned in draft-22
-/// and decoded to Some(SubscriptionEnded)
-/// ```
 #[test]
 fn the_three_codes_draft20_removed_are_unassigned() {
     assert!(

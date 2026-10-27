@@ -37,8 +37,6 @@ fn varint(v: u64) -> VarInt {
     VarInt::from_u64(v).unwrap()
 }
 
-/// A parameter with a varint value. Every type used below is even, so the value
-/// is written bare and the pair is two fields on the wire.
 /// A well-formed Token structure carrying `payload`.
 ///
 /// The AUTHORIZATION TOKEN parameter's value is a Token, not opaque bytes: an
@@ -59,6 +57,8 @@ fn token_value(payload: &[u8]) -> Vec<u8> {
     value
 }
 
+/// A parameter with a varint value. Every type used below is even, so the value
+/// is written bare and the pair is two fields on the wire.
 fn param(key: u64, value: u64) -> KeyValuePair {
     KeyValuePair { key: varint(key), value: KvpValue::Varint(varint(value)) }
 }

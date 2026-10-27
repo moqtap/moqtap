@@ -377,27 +377,6 @@ fn the_checked_datagram_encoder_writes_only_what_the_decoder_accepts() {
 /// alias and group ID from the type's own remaining bytes. This asserts the
 /// leading octet as well as the refusal, because the refusal is only
 /// interesting given what that octet means to such a decoder.
-///
-/// # Ablation
-///
-/// Reverting `SubgroupHeader::decode` to the bit-4 test was run and gives:
-///
-/// ```text
-/// thread 'a_padding_frame_is_refused_rather_than_read_as_a_header'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// a padding stream decoded as a subgroup header: track alias 19, group 43
-/// ```
-///
-/// Removing the type check from `DatagramHeader::decode` gives the other half:
-///
-/// ```text
-/// thread 'a_padding_frame_is_refused_rather_than_read_as_a_header'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// a padding datagram decoded as a datagram header: track alias 19, group 43
-/// ```
-///
-/// The 19 and 43 are the padding type's own third and fourth octets, read as a
-/// Track Alias and a Group ID — the invented header this refusal replaces.
 #[test]
 fn a_padding_frame_is_refused_rather_than_read_as_a_header() {
     let stream_type = varint(PADDING_STREAM_TYPE);
@@ -457,29 +436,6 @@ fn a_padding_frame_is_refused_rather_than_read_as_a_header() {
 /// than narrowed: a two-byte 0x8010 carries the value 0x10, an assigned subgroup
 /// Type, and its low octet is 0x10 as well, so a decoder that truncated would
 /// read it as a valid header.
-///
-/// # Ablation
-///
-/// Removed the `wide_type_refusal` call from `SubgroupHeader::decode`, leaving
-/// the one-byte read:
-///
-/// ```text
-/// thread 'a_type_wider_than_one_byte_is_refused_by_what_it_is' (48484) panicked at
-/// crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// SETUP is a Type Table 3 assigns, so a subgroup reader must refuse it without naming the unknown-stream-type rule, got UnknownStreamType(175)
-/// ```
-///
-/// The same ablation fires
-/// [`a_padding_frame_is_refused_rather_than_read_as_a_header`] with the case
-/// that costs more:
-///
-/// ```text
-/// Table 3 assigns the padding stream type, so it must be refused without naming the unknown-stream-type rule that would end the session, got UnknownStreamType(240)
-/// ```
-///
-/// 175 and 240 are 0xAF and 0xF0, the first bytes of the two wide Types — so
-/// the reader both ended the session over an assigned stream and named a number
-/// the peer never sent.
 #[test]
 fn a_type_wider_than_one_byte_is_refused_by_what_it_is() {
     let mut setup = varint(0x2F00);
@@ -526,26 +482,6 @@ fn a_type_wider_than_one_byte_is_refused_by_what_it_is() {
 /// may be followed by a payload, and the bytes behind it reach the application
 /// as one. The framing answers first, and every row here is checked through
 /// `permits_payload` as well as through the decoder, so the two cannot drift.
-///
-/// # Ablation
-///
-/// Reverting `permits_payload` to the status-only test — dropping its leading
-/// `if self.has_status() { return false; }` — was run and gives:
-///
-/// ```text
-/// thread 'a_status_datagram_may_not_be_followed_by_payload_bytes'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// status 0x0: a datagram with no payload field permits no payload
-/// ```
-///
-/// Dropping the refusal from `decode_object` instead, so the predicate stands
-/// but nothing consults it:
-///
-/// ```text
-/// thread 'a_status_datagram_may_not_be_followed_by_payload_bytes'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// status 0x0: decode_object accepted 4 byte(s) after a header with no payload field
-/// ```
 #[test]
 fn a_status_datagram_may_not_be_followed_by_payload_bytes() {
     // Type 0x20: STATUS bit set, explicit object ID, explicit priority.
@@ -615,19 +551,6 @@ fn a_status_datagram_may_not_be_followed_by_payload_bytes() {
 ///
 /// The stream is `subgroup-object-status-end-of-group` from the draft-18
 /// corpus: a four-byte object, then a zero-length one carrying End of Group.
-///
-/// # Ablation
-///
-/// Answering `Some(PayloadPermission::Permitted)` for every status was run and
-/// gives:
-///
-/// ```text
-/// thread 'a_subgroup_object_meta_reports_the_payload_rule'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// assertion `left == right` failed: an End of Group object may not carry a payload
-///   left: Some(Permitted)
-///  right: Some(Forbidden)
-/// ```
 #[test]
 fn a_subgroup_object_meta_reports_the_payload_rule() {
     let bytes: &[u8] =
@@ -683,17 +606,6 @@ fn a_subgroup_object_meta_reports_the_payload_rule() {
 ///
 /// The stream is an object with delta 0 followed by one with delta 2^64 - 1, so
 /// the sum overflows on the second object rather than on the first.
-///
-/// # Ablation
-///
-/// Replacing the `ObjectIdOverflow` in `read_object` and `read_object_meta`
-/// with `InvalidField` was run and gives:
-///
-/// ```text
-/// thread 'a_wrapped_object_id_delta_is_reported_as_its_own_error'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// read_object reported a wrapped Object ID as invalid field value, which a session cannot act on
-/// ```
 #[test]
 fn a_wrapped_object_id_delta_is_reported_as_its_own_error() {
     let mut bytes = vec![0x10, 0x01, 0x00, 0x80];
@@ -747,23 +659,6 @@ fn a_wrapped_object_id_delta_is_reported_as_its_own_error() {
 /// Each row drops one thing from flags 0x1C — the shape the corpus's first
 /// objects use — and every one of them is a reference to an Object that does
 /// not exist.
-///
-/// # Ablation
-///
-/// Defaulting an inherited Priority instead of refusing it —
-/// `self.prior_publisher_priority.unwrap_or(128)` in place of the `ok_or` —
-/// was run and gives:
-///
-/// ```text
-/// thread 'a_first_fetch_object_may_not_reference_the_object_before_it'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// flags 0x0c (no Priority) references an Object that does not exist, but it resolved to group 0 object 0
-/// ```
-///
-/// The two missing-delta rows are guarded twice over — the Group ID rule and
-/// the Object ID rule each refuse a frame with no prior Object — so no
-/// single-point change to either makes them pass, and the Priority row is what
-/// this ablation reaches.
 #[test]
 fn a_first_fetch_object_may_not_reference_the_object_before_it() {
     // Flags, then the fields those flags announce, then a payload length of 0.
@@ -812,17 +707,6 @@ fn a_first_fetch_object_may_not_reference_the_object_before_it() {
 /// Draft-18 Section 11.4.4: the field "is a variable-length integer. When less
 /// than 128, the bits represent flags described below", then Table 7 assigns
 /// 0x8C and 0x10C, and then: "Any other value is a PROTOCOL_VIOLATION."
-///
-/// # Ablation
-///
-/// Widening the decoder's flags arm to `flags if flags <= 0xFF` was run and
-/// gives:
-///
-/// ```text
-/// thread 'a_fetch_frame_refuses_a_serialization_flags_value_the_draft_leaves_undefined'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// Serialization Flags 0x80 is not a value draft-18 defines, but it decoded
-/// ```
 #[test]
 fn a_fetch_frame_refuses_a_serialization_flags_value_the_draft_leaves_undefined() {
     for flags in [0x80u64, 0x8B, 0x8D, 0x10B, 0x10D, 0x1000, u64::MAX] {
@@ -870,17 +754,6 @@ fn a_fetch_frame_refuses_a_serialization_flags_value_the_draft_leaves_undefined(
 /// say what a marker reports, only what the Object after it inherits, so that
 /// is a decision this crate makes — see `DEFAULT_PUBLISHER_PRIORITY` in
 /// `src/data_dispatch.rs`, which is where it is written down.
-///
-/// # Ablation
-///
-/// Letting a marker overwrite the prior Subgroup ID and Priority — assigning
-/// them to `None` alongside `prior_location` — was run and gives:
-///
-/// ```text
-/// thread 'an_end_of_range_marker_moves_the_location_but_not_the_subgroup_or_priority'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// the object after a marker must inherit the last real object's fields: InvalidField
-/// ```
 #[test]
 fn an_end_of_range_marker_moves_the_location_but_not_the_subgroup_or_priority() {
     let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
@@ -943,19 +816,6 @@ fn an_end_of_range_marker_moves_the_location_but_not_the_subgroup_or_priority() 
 /// ID Delta + 1). If the computed Group ID would be less than 0 or greater than
 /// 2^64-1, the Subscriber MUST close the Session with error
 /// 'PROTOCOL_VIOLATION'."
-///
-/// # Ablation
-///
-/// Applying the ascending arithmetic under both orders — `GroupOrder::Descending
-/// => prior_group.checked_add(delta)...` — was run and gives:
-///
-/// ```text
-/// thread 'a_group_id_delta_follows_the_group_order'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// assertion `left == right` failed: a descending delta of 0 moves one group down
-///   left: 21
-///  right: 19
-/// ```
 #[test]
 fn a_group_id_delta_follows_the_group_order() {
     // First object: group 20, object 0, priority 128, subgroup mode 0b00.
@@ -1016,17 +876,6 @@ fn a_group_id_delta_follows_the_group_order() {
 /// produces bytes that do not parse back as what was handed over. Refusing
 /// before the first byte is written keeps a rejected frame out of the stream
 /// entirely, rather than leaving a partial one for the next read to run into.
-///
-/// # Ablation
-///
-/// Dropping the agreement check from `FetchObjectHeader::encode` was run and
-/// gives:
-///
-/// ```text
-/// thread 'a_fetch_frame_that_disagrees_with_its_own_flags_is_not_written'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// flags 0x1c with no Priority must be refused, got Ok(())
-/// ```
 #[test]
 fn a_fetch_frame_that_disagrees_with_its_own_flags_is_not_written() {
     let complete = FetchObjectHeader {

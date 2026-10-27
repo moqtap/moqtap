@@ -507,7 +507,7 @@ fn check_track_status(
 /// whether they are on the wire.
 ///
 /// Presence is not a property of the Rust value: the decoder derives it from a
-/// Filter Type, a Content Exists flag or a Fetch Type, and reads exactly the
+/// Filter Type or a Content Exists flag, and reads exactly the
 /// fields that discriminator names. An encoder that instead writes whatever
 /// happens to be `Some` produces a frame its own reader refuses - short by the
 /// missing fields, so the declared length runs out mid-payload, or long by the

@@ -1338,7 +1338,7 @@ fn parameter_in_scope(key: u64, message: MessageType) -> bool {
 /// Section 10.2.1 answers this with a close, which the drafts below do not.
 /// Draft-16 Section 9.2.2, and drafts 07 through 15 under the older name
 /// Version Specific Parameters, end the same sentence "it MUST be ignored" —
-/// so this check belongs to drafts 17, 18 and 19 and to no draft before them.
+/// so this check belongs to drafts 17 and later and to no draft before them.
 ///
 /// Applied on both sides. A parameter outside its scope is one the peer must
 /// close the session over, so writing one is a way to end a session rather than

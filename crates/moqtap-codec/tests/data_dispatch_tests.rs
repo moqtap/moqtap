@@ -1756,21 +1756,6 @@ fn fetch_objects_draft22_resolve_deltas_against_the_prior_object() {
 /// an End of Non-Existent Range up to group 9, object 4 — and the bytes differ
 /// between them, which is why the wire is built from each draft's own header
 /// type rather than written once.
-///
-/// # Ablation
-///
-/// Draft-18's marker branch set to `publisher_priority: None`, so it reports
-/// the 128 default instead:
-///
-/// ```text
-/// thread 'an_end_of_range_marker_reports_the_priority_in_force_on_every_draft'
-/// panicked at crates\moqtap-codec\tests\data_dispatch_tests.rs:
-/// assertion `left == right` failed: draft-18: a marker reports the Priority in force, not the 128 default
-///   left: 128
-///  right: 64
-/// ```
-///
-/// The other three drafts pass under it, which is the disagreement itself.
 #[cfg(any(
     feature = "draft16",
     feature = "draft17",

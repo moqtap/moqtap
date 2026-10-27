@@ -272,31 +272,6 @@ enum GreasingRange {
 /// a draft on the `Reserved` side must have the row and be held to the range,
 /// a draft on the `NotYet` side must have no reserved row at all — so moving
 /// this boundary fails against whichever draft it is moved across.
-///
-/// # Ablation
-///
-/// Moving it down one draft puts draft-16 on the side that requires the row,
-/// and draft-16 has none to find:
-///
-/// ```text
-/// thread 'draft16_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// assertion `left == right` failed: registry "Session Termination Error Codes"
-/// has 0 reserved rows, expected the one greasing range
-///   left: 0
-///  right: 1
-/// ```
-///
-/// Moving it up one draft is the other side of the same claim, and is what
-/// [`no_reserved_rows`] is for: draft-17 then has to have no reservation, and
-/// it has one.
-///
-/// ```text
-/// thread 'draft17_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// draft-17 "Session Termination Error Codes": the extraction reserves
-/// 0x7f * N + 0x9D, but no draft before 17 sets a range aside
-/// ```
 fn greasing_era(draft: u64) -> GreasingRange {
     if draft >= 17 {
         GreasingRange::Reserved
@@ -319,31 +294,6 @@ fn greasing_era(draft: u64) -> GreasingRange {
 /// the range the same sentence defines — `0x7f * 1 + 0x9D` is `0x11C`, and the
 /// largest member a varint can carry is `0x3fffffffffffffde`. Drafts 18 and 19
 /// print both corrected values.
-///
-/// # Ablation
-///
-/// Moving `InvalidFilter` onto the first member of the range — `0x36` becoming
-/// `0x9D` in `draft19::error_codes`, in the variant and in its `from_u64` arm
-/// together, so that the crate really accepts it — is caught before the
-/// comparison with the draft has a chance to call it an unassigned code point:
-///
-/// ```text
-/// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// draft-19 REQUEST_ERROR Codes: RequestErrorCode accepts 0x9d, which the
-/// draft reserves for greasing rather than assigning
-/// ```
-///
-/// The same move made in `tools/registries/draft-19.json` instead — the
-/// extraction reporting `0x9D` as an assignment — is the other side, and is
-/// named as the extraction's defect rather than the crate's:
-///
-/// ```text
-/// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// draft-19 REQUEST_ERROR Codes: the extraction reports 0x9d as assigned,
-/// inside the range this same registry reserves for greasing
-/// ```
 fn is_greased(code: u64) -> bool {
     code >= 0x9D && (code - 0x9D).is_multiple_of(0x7f)
 }
@@ -435,43 +385,6 @@ fn upper_snake(camel: &str) -> String {
 /// decoded is one no caller enumerating the registry will consider; a code point
 /// in `ALL` that `from_u64` refuses is a registry entry that cannot arrive off
 /// the wire. Only once they agree is either compared with the draft.
-///
-/// # Ablation
-///
-/// Dropping `RequestErrorCode::InvalidFilter` from `ALL` and leaving its
-/// `from_u64` arm alone — the shape a hand-written list decays into — is the
-/// disagreement, reported as the two sets:
-///
-/// ```text
-/// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// assertion `left == right` failed: RequestErrorCode::ALL and
-/// RequestErrorCode::from_u64 describe different sets
-///   left: {..., 52: "REDIRECT", 53: "CONFLICTING_FILTERS"}
-///  right: {..., 52: "REDIRECT", 53: "CONFLICTING_FILTERS", 54: "INVALID_FILTER"}
-/// ```
-///
-/// All three of these are reported against the `registries!` line of the draft
-/// whose registry it is, because that is where this macro is expanded.
-///
-/// Naming it twice instead is a list that reads as one entry longer than the
-/// registry it describes:
-///
-/// ```text
-/// assertion `left == right` failed: RequestErrorCode::ALL names one code
-/// point twice: [..., ConflictingFilters, InvalidFilter, InvalidFilter]
-///   left: 19
-///  right: 20
-/// ```
-///
-/// And renumbering `InvalidFilter` to `0x10000`, in the variant and its
-/// `from_u64` arm together, is the one case the sweep alone could not see — it
-/// is out of range, so without `ALL` it would simply not be swept:
-///
-/// ```text
-/// RequestErrorCode::ALL declares 0x10000, which is above the 0xffff this
-/// sweep reaches; raise CEILING
-/// ```
 macro_rules! codec_registry {
     ($ty:ty, $name:expr) => {{
         // Spelled out by the caller rather than taken from `stringify!` here:
@@ -611,18 +524,6 @@ fn same_registry(
 /// What is derived is that the list is complete. Every registry the extraction
 /// carries has to appear, which is what stops a draft from being called gated
 /// on the strength of the registries someone remembered to list.
-///
-/// # Ablation
-///
-/// Dropping the `publish_error` line from the draft-13 list leaves that
-/// registry compared against nothing, and the list says so:
-///
-/// ```text
-/// thread 'draft13_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// draft-13: the extraction carries publish_error, which this test compares
-/// against nothing
-/// ```
 macro_rules! registries {
     ($draft:expr, { $($id:literal => $ty:ident),+ $(,)? }) => {{
         let doc = extracted($draft);
@@ -823,21 +724,6 @@ fn draft17_error_registries_match_the_extracted_draft() {
     });
 }
 
-/// # Ablation
-///
-/// Draft-17 assigns PUBLISH_DONE `0x5` to `EXPIRED` and `0x6` to
-/// `TOO_FAR_BEHIND`; draft-18 swaps them. Copying draft-17's pairing into
-/// `draft18::error_codes` — both names still present, both code points still
-/// accepted, only the pairing wrong — is caught by name and not by count:
-///
-/// ```text
-/// thread 'draft18_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// assertion `left == right` failed: draft-18 PUBLISH_DONE Codes: 0x5 is
-/// TOO_FAR_BEHIND in the draft, EXPIRED in PublishDoneStatusCode
-///   left: "EXPIRED"
-///  right: "TOO_FAR_BEHIND"
-/// ```
 #[cfg(feature = "draft18")]
 #[test]
 fn draft18_error_registries_match_the_extracted_draft() {
@@ -851,35 +737,6 @@ fn draft18_error_registries_match_the_extracted_draft() {
     });
 }
 
-/// # Ablation
-///
-/// Both of these take a coordinated edit, and that is the point of the `ALL`
-/// cross-check standing in front of them: dropping the `from_u64` arm alone, or
-/// adding one alone, is caught earlier as the crate disagreeing with itself,
-/// and only a change made in both places gets as far as the draft.
-///
-/// Dropping one of the draft's assignments — `InvalidFilter` out of
-/// `RequestErrorCode::ALL` and its `0x36` arm out of `from_u64` — is reported
-/// against the draft that assigns it:
-///
-/// ```text
-/// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// draft-19 REQUEST_ERROR Codes: assigned by the draft, not accepted by
-/// RequestErrorCode: 0x36 INVALID_FILTER
-/// ```
-///
-/// Accepting a code point the draft does not assign — a plausible
-/// `InvalidPriority = 0x37` added to the enum, to `ALL` and to `from_u64` — is
-/// the direction a spec-driven iteration cannot see, and is reported the other
-/// way round:
-///
-/// ```text
-/// thread 'draft19_error_registries_match_the_extracted_draft' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// draft-19 REQUEST_ERROR Codes: accepted by RequestErrorCode, not assigned by
-/// the draft: 0x37 INVALID_PRIORITY
-/// ```
 #[cfg(feature = "draft19")]
 #[test]
 fn draft19_error_registries_match_the_extracted_draft() {
@@ -902,16 +759,6 @@ fn draft19_error_registries_match_the_extracted_draft() {
 /// draft-19, so a registry copied forward keeps decoding them and every
 /// "implement what the draft assigns" test still passes. Only comparing as a
 /// set in both directions reports it.
-///
-/// # Ablation
-///
-/// Copying draft-19's `PublishDoneStatusCode` forward whole — the row and its
-/// `from_u64` arm together, which is what a `cp -r draft19 draft20` produces:
-///
-/// ```text
-/// draft-20 PUBLISH_DONE Codes: accepted by PublishDoneStatusCode, not assigned
-/// by the draft: 0x3 SUBSCRIPTION_ENDED
-/// ```
 #[cfg(feature = "draft20")]
 #[test]
 fn draft20_error_registries_match_the_extracted_draft() {
@@ -926,16 +773,6 @@ fn draft20_error_registries_match_the_extracted_draft() {
 }
 /// Draft-21 keeps draft-20's four registries unchanged: same rows, same names.
 /// The three codes draft-20 removed stay removed.
-///
-/// # Ablation
-///
-/// Copying draft-19's `PublishDoneStatusCode` into draft-21 — the row and its
-/// `from_u64` arm together — fails here:
-///
-/// ```text
-/// draft-21 PUBLISH_DONE Codes: accepted by PublishDoneStatusCode, not assigned
-/// by the draft: 0x3 SUBSCRIPTION_ENDED
-/// ```
 #[cfg(feature = "draft21")]
 #[test]
 fn draft21_error_registries_match_the_extracted_draft() {
@@ -994,21 +831,6 @@ fn same_object_status(draft: u64, doc: &Value, codec: &BTreeMap<u64, String>) {
     );
 }
 
-/// # Ablation
-///
-/// Renumbering a status — `EndOfTrack` moved from `0x4` to `0x5` in
-/// `draft19::types`, the code point drafts 07-10 used for a status of their
-/// own — fails against Table 16:
-///
-/// ```text
-/// thread 'object_status_registries_match_the_extracted_drafts' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// assertion `left == right` failed: draft-19 Object Status: the draft assigns
-/// {0: "NORMAL", 3: "END_OF_GROUP", 4: "END_OF_TRACK"}, this crate accepts
-/// {0: "NORMAL", 3: "END_OF_GROUP", 5: "END_OF_TRACK"}
-///   left: {0: "NORMAL", 3: "END_OF_GROUP", 4: "END_OF_TRACK"}
-///  right: {0: "NORMAL", 3: "END_OF_GROUP", 5: "END_OF_TRACK"}
-/// ```
 #[test]
 fn object_status_registries_match_the_extracted_drafts() {
     #[cfg(feature = "draft07")]
@@ -1159,27 +981,6 @@ const OBJECT_STATUS_ERAS: &[&[u64]] =
 /// must differ, which is what catches an extraction collapsing onto its
 /// neighbour; a pair inside one run must be identical, which is what catches
 /// one drifting away from a draft it is supposed to match.
-///
-/// # Ablation
-///
-/// Moving draft-10 into its own run — the shape this test would have if the
-/// coincidence between 08, 09 and 10 had been excluded rather than stated:
-///
-/// ```text
-/// thread 'the_extracted_drafts_are_distinguishable_from_each_other' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// drafts 8 and 10 assign identical error code points, but this test has them
-/// in different runs
-/// ```
-///
-/// And putting draft-11 into the run its Object Status registry left is the
-/// other direction, which is the one an exclusion could not have caught:
-///
-/// ```text
-/// thread 'the_extracted_drafts_are_distinguishable_from_each_other' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// drafts 8 and 11 are in one run, but their Object Status assignments differ
-/// ```
 #[test]
 fn the_extracted_drafts_are_distinguishable_from_each_other() {
     fn partitions(eras: &[&[u64]], what: &str) -> BTreeMap<u64, usize> {
@@ -1271,19 +1072,6 @@ fn the_extracted_drafts_are_distinguishable_from_each_other() {
 /// column. Both are thresholds rather than equalities — draft-20 prints the
 /// same Object Status table draft-19 does, so a `draft == 19` test would have
 /// failed against a draft that agrees with it completely.
-///
-/// # Ablation
-///
-/// Deleting the `name` from one draft-19 REQUEST_ERROR row in
-/// `tools/registries/draft-19.json` — the row-level form of that fallback —
-/// leaves every comparison above passing and fails here:
-///
-/// ```text
-/// thread 'symbolic_names_appear_in_the_drafts_that_print_them' panicked at
-/// crates\moqtap-codec\tests\registry_conformance.rs:
-/// draft-19 request_error 0x36: draft-14 and later name their error codes, so
-/// this row should carry a name and it carries none
-/// ```
 #[test]
 fn symbolic_names_appear_in_the_drafts_that_print_them() {
     for draft in DRAFTS {

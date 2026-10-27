@@ -194,35 +194,6 @@ fn read_19(bytes: &[u8]) -> d20::SubgroupObject {
 /// which only a row marked "Yes" may be. A row marked "No" must be refused with
 /// nothing written, and a row marked "Yes" must survive the round trip with its
 /// bytes.
-///
-/// # Ablation
-///
-/// Reverting `SubgroupObjectReader::write_object` to draft-18's inference —
-/// dropping the `declared != 0 && !object.permits_payload()` refusal so the
-/// payload length alone decides which field is written — makes an End of Group
-/// object holding a payload encode as an ordinary payload object with its
-/// status silently gone:
-///
-/// ```text
-/// thread 'the_registry_decides_which_draft22_statuses_may_carry_a_payload'
-/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:
-/// draft-22 status 0x3 is registered "Payload: No", so write_object must refuse
-/// it a payload; it wrote [00, 03, 61, 62, 63]
-/// ```
-///
-/// Moving a row instead of removing the check — `payload_permission` answering
-/// `Permitted` for End of Group, as a status registered later with
-/// "Payload: Yes" would — fails against the extracted column rather than
-/// agreeing with itself:
-///
-/// ```text
-/// thread 'the_registry_decides_which_draft22_statuses_may_carry_a_payload'
-/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:
-/// assertion `left == right` failed: draft-22 Table 17 marks 0x3 "Payload: no",
-/// ObjectStatus::permits_payload disagrees
-///   left: true
-///  right: false
-/// ```
 #[test]
 fn the_registry_decides_which_draft22_statuses_may_carry_a_payload() {
     let reg = object_status_registry(19);
@@ -468,18 +439,6 @@ mod d18 {
 /// draft-22's registry backwards over a draft that has none, and it has to be
 /// argued here rather than arrived at by sharing one conversion across every
 /// draft.
-///
-/// # Ablation
-///
-/// Giving draft-18's `write_object` draft-22's refusal — the shared-helper
-/// mistake this exists to catch — erases the difference:
-///
-/// ```text
-/// thread 'draft18_reads_the_same_rule_off_the_payload_length_and_draft22_off_the_registry'
-/// panicked at crates\moqtap-codec\tests\object_status_payload_rule.rs:
-/// draft-18 has no per-status Payload column, so its encoder cannot be refusing
-/// status 0x3 a payload on the registry's authority: invalid field value
-/// ```
 #[cfg(feature = "draft18")]
 #[test]
 fn draft18_reads_the_same_rule_off_the_payload_length_and_draft22_off_the_registry() {

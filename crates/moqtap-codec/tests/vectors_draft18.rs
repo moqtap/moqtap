@@ -344,19 +344,6 @@ fn run_datagram_vectors(relative_path: &str) {
 /// Re-encoding is checked frame by frame and then over the whole stream, so a
 /// decoder that silently dropped a field — or an encoder that wrote one the
 /// flags do not announce — cannot pass by agreeing with itself.
-///
-/// # Ablation
-///
-/// Dropping the `+ 1` an absent Object ID Delta implies — returning the prior
-/// Object's ID rather than the one after it — was run and gives:
-///
-/// ```text
-/// thread 'd18_data_stream_fetch'
-/// panicked at crates\moqtap-codec\tests\vectors_draft18.rs:
-/// assertion `left == right` failed: [fetch-stream-two-objects] object_id mismatch
-///   left: "0"
-///  right: "1"
-/// ```
 fn run_fetch_vectors(relative_path: &str) {
     let path = vectors_dir().join(relative_path);
     let file = load_vectors(&path);

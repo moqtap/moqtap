@@ -103,18 +103,6 @@ fn ns_outcome(got: &Result<TrackNamespace, CodecError>) -> String {
 /// An empty field is not the same namespace as no field, but the two render
 /// identically, and an empty field makes two distinct namespaces compare equal
 /// under the prefix matching a relay routes on.
-///
-/// # Observed with the fix reverted
-///
-/// Removing the `len == 0` arm from `TrackNamespace::decode_rules`:
-///
-/// ```text
-/// ---- draft_16_refuses_a_zero_length_namespace_field stdout ----
-///
-/// thread 'draft_16_refuses_a_zero_length_namespace_field' (56344) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
-/// draft-16 NAMESPACE accepted a zero-length field: Ok(Namespace(Namespace { namespace_suffix: TrackNamespace([[]]) }))
-/// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-/// ```
 #[test]
 fn draft_16_refuses_a_zero_length_namespace_field() {
     use moqtap_codec::draft16::message::ControlMessage;
@@ -148,18 +136,6 @@ fn draft_16_refuses_a_zero_length_namespace_field() {
 /// on any of the nine closes sessions over traffic those drafts permit. Ten
 /// drafts share one reader, so tightening it is the easy mistake and this is
 /// the gate against it.
-///
-/// # Observed with the fix reverted
-///
-/// Setting `reject_empty_field: true` in `TrackNamespace::decode`:
-///
-/// ```text
-/// ---- drafts_before_16_accept_a_zero_length_namespace_field stdout ----
-///
-/// thread 'drafts_before_16_accept_a_zero_length_namespace_field' (12696) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
-/// draft-15 PUBLISH_NAMESPACE refused a zero-length field: Err(EmptyNamespaceField)
-/// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-/// ```
 #[test]
 fn drafts_before_16_accept_a_zero_length_namespace_field() {
     use moqtap_codec::draft15::message::ControlMessage;
@@ -197,18 +173,6 @@ fn drafts_before_16_accept_a_zero_length_namespace_field() {
 ///
 /// The sum is what the draft caps, not any one field: two fields of 2,500 bytes
 /// are each legal alone and together are not.
-///
-/// # Observed with the fix reverted
-///
-/// Removing the `max_namespace_bytes` arm from `TrackNamespace::decode_rules`:
-///
-/// ```text
-/// ---- draft_16_refuses_a_namespace_over_4096_bytes stdout ----
-///
-/// thread 'draft_16_refuses_a_namespace_over_4096_bytes' (65036) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
-/// draft-16 accepted a 4097-byte namespace: Ok(1 fields, 4097 bytes)
-/// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-/// ```
 #[test]
 fn draft_16_refuses_a_namespace_over_4096_bytes() {
     use moqtap_codec::draft16::message::ControlMessage;
@@ -251,18 +215,6 @@ fn draft_16_refuses_a_namespace_over_4096_bytes() {
 /// when the prefix already names the whole namespace. Tightening the field
 /// content rules is the change that would take this with it, since the two are
 /// applied by the same reader, so it is gated beside them.
-///
-/// # Observed with the fix reverted
-///
-/// Setting `min_fields: 1` in `TrackNamespace::decode_allow_empty`:
-///
-/// ```text
-/// ---- draft_16_accepts_a_namespace_suffix_of_no_fields stdout ----
-///
-/// thread 'draft_16_accepts_a_namespace_suffix_of_no_fields' (12500) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
-/// draft-16 refused an empty namespace suffix: Err(InvalidNamespaceTupleSize(0))
-/// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-/// ```
 #[test]
 fn draft_16_accepts_a_namespace_suffix_of_no_fields() {
     use moqtap_codec::draft16::message::ControlMessage;
@@ -294,19 +246,6 @@ fn draft_16_accepts_a_namespace_suffix_of_no_fields() {
 /// - No fields at all: drafts 07 through 16 define a Track Namespace as "between
 ///   1 and 32 Track Namespace Fields"; draft-17 redefines it as "between 0 and
 ///   32" and drops the sentence that made zero a session-closing error.
-///
-/// # Observed with the fix reverted
-///
-/// Changing `reject_empty_field` in `TrackNamespaceRules::for_draft` from
-/// `draft >= 16` to `draft >= 15`:
-///
-/// ```text
-/// ---- each_draft_gets_the_rules_that_draft_states stdout ----
-///
-/// thread 'each_draft_gets_the_rules_that_draft_states' (10648) panicked at crates\moqtap-codec\tests\track_namespace_rules.rs:
-/// draft-15 refused a zero-length field: Err(EmptyNamespaceField)
-/// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-/// ```
 #[test]
 fn each_draft_gets_the_rules_that_draft_states() {
     let empty_field = namespace(&[b""]);
@@ -360,14 +299,6 @@ fn each_draft_gets_the_rules_that_draft_states() {
 /// SUBSCRIBE_NAMESPACE is the vehicle because its prefix is one of the six and
 /// carries no Track Name, which separates this cap from the Full Track Name cap
 /// that applies where a name sits beside the namespace.
-///
-/// # Observed with the fix reverted
-///
-/// Restoring `TrackNamespace::decode(buf)?` at the SUBSCRIBE_NAMESPACE prefix:
-///
-/// ```text
-/// draft-16 SUBSCRIBE_NAMESPACE accepted a 5000-byte namespace: Ok(2 fields, 5000 bytes)
-/// ```
 #[test]
 fn draft_16_applies_its_namespace_rules_at_every_position() {
     use moqtap_codec::draft16::message::ControlMessage;

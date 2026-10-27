@@ -75,22 +75,6 @@ fn frame(msg_type: u64, body: &[u8]) -> Vec<u8> {
 ///
 /// The first option's delta is u64::MAX and the second's is 1, so the sum passes
 /// the end. Twelve bytes of control message; nothing about it needs a session.
-///
-/// # Observed with the fix reverted
-///
-/// Restoring `let abs_key = prev_key + delta;` in `decode_kvp_delta` on all three
-/// drafts and running `cargo test -p moqtap-codec --all-features --test
-/// parameter_and_namespace_rules setup_option_key`:
-///
-/// ```text
-/// ---- setup_option_key_may_not_wrap_past_the_end_of_the_range stdout ----
-///
-/// thread 'setup_option_key_may_not_wrap_past_the_end_of_the_range' (7244) panicked at crates\moqtap-codec\src\draft17\message.rs:
-/// attempt to add with overflow
-/// ```
-///
-/// A remote peer reaches that line with a control message it chooses, so the
-/// panic is the finding rather than a test artefact.
 #[test]
 fn setup_option_key_may_not_wrap_past_the_end_of_the_range() {
     // Setup option type u64::MAX is odd, so its value is length-prefixed.
@@ -160,23 +144,6 @@ fn parameter_key_may_not_wrap_past_the_end_of_the_range() {
 ///
 /// Drafts 17, 18 and 19: "Parameters MUST be serialized in ascending order by
 /// Type." The delta is a difference, so `[0x22, 0x02]` has no representation.
-///
-/// # Observed with the fix reverted
-///
-/// Restoring `let delta = abs_key - prev_key;` in draft-17's
-/// `encode_parameters`:
-///
-/// ```text
-/// ---- descending_parameters_are_refused_rather_than_wrapped stdout ----
-///
-/// thread 'descending_parameters_are_refused_rather_than_wrapped' (21352) panicked at crates\moqtap-codec\src\draft17\message.rs:
-/// attempt to subtract with overflow
-/// ```
-///
-/// The panic is the debug-build symptom. A release build has no overflow check
-/// there, so the same input writes the wrapped difference as a nine-byte delta
-/// and the peer resolves it to an unrelated key — which is why refusing beats
-/// emitting.
 #[test]
 fn descending_parameters_are_refused_rather_than_wrapped() {
     use moqtap_codec::draft17::message as d17;
@@ -341,18 +308,6 @@ fn out_of_range_uint8_parameters_are_refused_on_every_draft_that_defines_them() 
 /// GROUP_ORDER 258 would otherwise go out as the byte 0x02 — a well-formed
 /// Descending, indistinguishable on the wire from one the caller meant, and one
 /// no receiver could question.
-///
-/// # Observed with the fix reverted
-///
-/// Restoring `buf.put_u8(v.into_inner() as u8);` in draft-17's
-/// `encode_parameters`:
-///
-/// ```text
-/// ---- an_oversized_uint8_parameter_is_refused_not_truncated stdout ----
-///
-/// thread 'an_oversized_uint8_parameter_is_refused_not_truncated' (59216) panicked at crates\moqtap-codec\tests\parameter_and_namespace_rules.rs:
-/// draft-17 truncated GROUP_ORDER 258 instead of refusing it: Ok(())
-/// ```
 #[test]
 fn an_oversized_uint8_parameter_is_refused_not_truncated() {
     use moqtap_codec::draft17::message as d17;
@@ -473,17 +428,6 @@ fn an_oversized_reason_phrase_is_refused_and_the_maximum_is_not() {
 /// An empty field is not the same namespace as no field, but the two render
 /// identically and an empty field makes two distinct namespaces compare equal
 /// under the prefix-matching rules, which is a routing hazard at a relay.
-///
-/// # Observed with the fix reverted
-///
-/// Removing the `len == 0` arm from `TrackNamespace::decode_elements_moqt`:
-///
-/// ```text
-/// ---- a_zero_length_namespace_field_is_refused stdout ----
-///
-/// thread 'a_zero_length_namespace_field_is_refused' (59212) panicked at crates\moqtap-codec\tests\parameter_and_namespace_rules.rs:
-/// draft-17 accepted a zero-length namespace field: Ok(Subscribe(Subscribe { request_id: VarInt(1), required_request_id_delta: VarInt(0), track_namespace: TrackNamespace([[]]), track_name: [116], parameters: [] }))
-/// ```
 #[test]
 fn a_zero_length_namespace_field_is_refused() {
     // One field, length 0.

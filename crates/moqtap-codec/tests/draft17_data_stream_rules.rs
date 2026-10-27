@@ -97,17 +97,6 @@ fn datagram_bytes(ty: u8) -> Vec<u8> {
 /// values are the dangerous half: a `0x16` that decoded would report a Subgroup
 /// ID of 0, indistinguishable from the 0 that mode `0b00` genuinely means,
 /// leaving a consumer no way to tell a real subgroup from an invented one.
-///
-/// # Ablation
-///
-/// Narrowed the check in `SubgroupHeader::decode` to
-/// `header_type & SUBGROUP_BASE_BIT == 0`:
-///
-/// ```text
-/// thread 'subgroup_header_types_outside_the_draft_are_refused' (13236) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// type 0x16 is not one draft-17 defines, but decode accepted it
-/// ```
 #[test]
 fn subgroup_header_types_outside_the_draft_are_refused() {
     for ty in 0x00u8..=0x7f {
@@ -199,15 +188,6 @@ fn assert_refusal(ty: u8, got: &CodecError, want: Refusal) {
 /// low octet is 0x10 as well — so a decoder that truncated would read it as a
 /// valid header. It has to be refused instead, and by decoding the field rather
 /// than by looking at one byte of it.
-///
-/// # Ablation
-///
-/// Removed the `wide_type_refusal` call from `SubgroupHeader::decode`, leaving
-/// the one-byte read:
-///
-/// ```text
-/// PLACEHOLDER
-/// ```
 #[test]
 fn a_type_wider_than_one_byte_is_refused_by_what_it_is() {
     // SETUP, 0x2F00, as its two-byte MoQT varint: 0xAF 0x00.
@@ -244,21 +224,6 @@ fn a_type_wider_than_one_byte_is_refused_by_what_it_is() {
 /// A header value carries its type byte verbatim, so nothing stops one being
 /// built with a type the draft forbids. `encode` writes it as given;
 /// `encode_checked` refuses, and leaves the buffer untouched when it does.
-///
-/// # Ablation
-///
-/// Dropped the `subgroup_type_is_valid` guard from
-/// `SubgroupHeader::encode_checked`:
-///
-/// ```text
-/// thread 'the_checked_subgroup_encoder_refuses_a_type_the_decoder_would' (62756) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// encode_checked wrote type 0x00, which decode refuses
-/// ```
-///
-/// The sweep reports `0x00` rather than a reserved-mode value: it walks every
-/// byte from zero, and the first failure is a type that is not a subgroup
-/// header at all.
 #[test]
 fn the_checked_subgroup_encoder_refuses_a_type_the_decoder_would() {
     for ty in 0x00u8..=0xff {
@@ -289,19 +254,6 @@ fn the_checked_subgroup_encoder_refuses_a_type_the_decoder_would() {
 /// END_OF_GROUP (0x02), because "an object status message cannot signal end of
 /// group", and any byte outside the form `0b00X0XXXX` — and of both says the
 /// endpoint "MUST close the session with a PROTOCOL_VIOLATION".
-///
-/// # Ablation
-///
-/// Deleted the `datagram_type_is_valid` guard from `DatagramHeader::decode`:
-///
-/// ```text
-/// thread 'datagram_types_outside_the_draft_are_refused' (44368) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// type 0x10 is not one draft-17 defines, but decode accepted it
-/// ```
-///
-/// `0x10` is the first byte to get through: it is a subgroup header type, and
-/// without the form check the datagram decoder reads it as a datagram.
 #[test]
 fn datagram_types_outside_the_draft_are_refused() {
     for ty in 0x00u8..=0x7f {
@@ -345,20 +297,6 @@ const PROPERTIES: &[u8] = &[0x3C, 0x02];
 /// method applies with nothing to fire on: a header with no stated status is
 /// Normal, so neither the lossy-status rule nor the one forbidding properties
 /// beside a status that is not Normal can reach.
-///
-/// # Ablation
-///
-/// Dropped the `datagram_type_is_valid` guard from
-/// `DatagramHeader::encode_checked`:
-///
-/// ```text
-/// thread 'the_checked_datagram_encoder_refuses_a_type_the_decoder_would' (53440) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// encode_checked wrote type 0x10, which decode refuses
-/// ```
-///
-/// The sweep reaches a subgroup header type before it reaches the STATUS and
-/// END_OF_GROUP pair, so `0x10` is what it reports first.
 #[test]
 fn the_checked_datagram_encoder_refuses_a_type_the_decoder_would() {
     for ty in 0x00u8..=0xff {
@@ -400,22 +338,6 @@ fn the_checked_datagram_encoder_refuses_a_type_the_decoder_would() {
 /// `permits_payload` that reads only the status answers yes for a datagram
 /// framed as carrying a status and carrying the code 0x0, and four bytes the
 /// draft says are not part of the object reach the application as its content.
-///
-/// # Ablation
-///
-/// Reverted `permits_payload` to `match self.object_status { None => true,
-/// Some(status) => status == ObjectStatus::Normal }`:
-///
-/// ```text
-/// thread 'a_status_datagram_refuses_the_bytes_that_follow_it' (51796) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// a status datagram carrying 0x00 accepted a payload: (32, Some(Normal), [222, 173, 190, 239])
-/// ```
-///
-/// The tuple is the datagram that rule lets through: type 0x20 with the
-/// STATUS bit set, a Normal status, and four payload bytes the draft says are
-/// not there. Codes 0x03 and 0x04 are refused either way, which is why only the
-/// Normal one appears.
 #[test]
 fn a_status_datagram_refuses_the_bytes_that_follow_it() {
     // Type 0x20 (STATUS), alias 1, group 0, object 5, priority 128, then the
@@ -452,16 +374,6 @@ fn a_status_datagram_refuses_the_bytes_that_follow_it() {
 /// zero", while the framing rule of Section 10.3.1 removes the payload from
 /// every datagram with the bit set. The framing rule is the stricter one and
 /// the one that governs a decoded datagram.
-///
-/// # Ablation
-///
-/// Reverted `permits_payload` to consult only `object_status`:
-///
-/// ```text
-/// thread 'the_status_bit_forbids_a_payload_even_for_the_normal_code' (67708) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// the STATUS bit did not forbid a payload
-/// ```
 #[test]
 fn the_status_bit_forbids_a_payload_even_for_the_normal_code() {
     let bytes = hex("20 01 00 05 80 00");
@@ -480,19 +392,6 @@ fn the_status_bit_forbids_a_payload_even_for_the_normal_code() {
 /// MUST have an empty payload." An object that states no status states no
 /// permission either, and the accessor answers `None` there rather than
 /// guessing.
-///
-/// # Ablation
-///
-/// Made `SubgroupObjectMeta::payload_permission` answer
-/// `Some(PayloadPermission::Permitted)` for every stated status:
-///
-/// ```text
-/// thread 'object_framing_reports_the_payload_permission_of_its_status' (16444) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// assertion `left == right` failed: status 0x3
-///   left: Some(Permitted)
-///  right: Some(Forbidden)
-/// ```
 #[test]
 fn object_framing_reports_the_payload_permission_of_its_status() {
     // Header type 0x10: no properties, subgroup-ID mode 0, explicit priority.
@@ -543,24 +442,6 @@ fn object_framing_reports_the_payload_permission_of_its_status() {
 /// The priority byte is 0xC0 on purpose: read as a variable-length integer it
 /// would claim three bytes rather than one, so a decoder that mistook the field
 /// for a varint desynchronizes instead of quietly agreeing.
-///
-/// # Ablation
-///
-/// Swapped `FETCH_OBJECT_ID_BIT` and `FETCH_GROUP_ID_BIT`, so 0x04 names the
-/// Group ID and 0x08 the Object ID:
-///
-/// ```text
-/// thread 'fetch_object_fields_are_present_exactly_as_the_flags_say' (55148) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// assertion `left == right` failed: flags 0x04: group ID
-///   left: Some(12)
-///  right: None
-/// ```
-///
-/// The same swap leaves every fetch vector passing, `d17_data_stream_fetch`
-/// included: each of them sets both bits or neither, so the two readings agree
-/// on every byte string in the corpus. This test is the only thing that parts
-/// them.
 #[test]
 fn fetch_object_fields_are_present_exactly_as_the_flags_say() {
     for flags in 0x00u8..=0x7f {
@@ -668,23 +549,6 @@ fn fetch_object_body(flags: u64) -> Vec<u8> {
 /// publisher that ignores the SHOULD writes no Subgroup ID; a decoder that
 /// honoured the mode bits anyway would read the Object ID as one and take the
 /// stream apart from there.
-///
-/// # Ablation
-///
-/// Dropped the `flags & FETCH_DATAGRAM_BIT == 0` term from
-/// `fetch_has_subgroup_id`:
-///
-/// ```text
-/// thread 'the_datagram_flag_overrides_the_subgroup_mode_bits' (55812) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// datagram-flagged object: VarInt(UnexpectedEnd)
-/// ```
-///
-/// It fails on the buffer running out rather than on a wrong Subgroup ID, which
-/// is the point: reading a field that is not there consumes the Object ID and
-/// the priority in its place and then walks off the end of the object. The
-/// presence sweep sees the same break as a misplaced value —
-/// `flags 0x43: subgroup ID  left: Some(3)  right: None`.
 #[test]
 fn the_datagram_flag_overrides_the_subgroup_mode_bits() {
     // Flags 0x5F: DATAGRAM, priority, group ID, object ID, and mode bits 0b11
@@ -704,16 +568,6 @@ fn the_datagram_flag_overrides_the_subgroup_mode_bits() {
 /// Section 10.4.4 reads the field as a bit set "when less than 128", defines
 /// `0x8C` and `0x10C` in Table 6, and says of everything else: "Any other value
 /// is a PROTOCOL_VIOLATION."
-///
-/// # Ablation
-///
-/// Removed the `fetch_flags_are_defined` guard from `FetchObjectHeader::decode`:
-///
-/// ```text
-/// thread 'fetch_serialization_flags_the_draft_does_not_define_are_refused' (32144) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// flags 0x080 are not defined, but decode accepted them
-/// ```
 #[test]
 fn fetch_serialization_flags_the_draft_does_not_define_are_refused() {
     for flags in 0x00u64..=0x1ff {
@@ -749,17 +603,6 @@ fn fetch_serialization_flags_the_draft_does_not_define_are_refused() {
 /// allows one to open a FETCH response — so it must not be reported as
 /// referencing a prior object, which is the condition Section 10.4.4 makes a
 /// PROTOCOL_VIOLATION on the first object.
-///
-/// # Ablation
-///
-/// Deleted the `end_of_range().is_some()` short circuit from
-/// `references_prior_object`, leaving the absent Priority field to decide:
-///
-/// ```text
-/// thread 'the_end_of_range_markers_inherit_nothing' (57204) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// 808c: an end-of-range marker inherits nothing
-/// ```
 #[test]
 fn the_end_of_range_markers_inherit_nothing() {
     for (hex_bytes, expected) in
@@ -797,16 +640,6 @@ fn the_end_of_range_markers_inherit_nothing() {
 /// SUBGROUP mode `0b00` is the case worth pinning: it leaves the Subgroup ID
 /// field off the wire like modes `0b01` and `0b10` do, but Table 7 fixes the ID
 /// at zero rather than drawing it from anywhere, so it inherits nothing.
-///
-/// # Ablation
-///
-/// Added mode `0x00` to the mode arm of `references_prior_object`:
-///
-/// ```text
-/// thread 'an_object_that_inherits_a_field_reports_it' (12736) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// flags 0x1c: inherits nothing
-/// ```
 #[test]
 fn an_object_that_inherits_a_field_reports_it() {
     // Group, object and priority all present; subgroup mode 0b00 fixes the
@@ -849,16 +682,6 @@ fn an_object_that_inherits_a_field_reports_it() {
 /// There is no default to fall back on: a Group ID the flags announce and the
 /// value omits cannot be invented, and skipping the field would slide the next
 /// one into its place and desynchronize every object after it.
-///
-/// # Ablation
-///
-/// Deleted the presence-agreement check from `FetchObjectHeader::encode`:
-///
-/// ```text
-/// thread 'the_fetch_encoder_refuses_fields_that_disagree_with_the_flags' (53584) panicked at
-/// crates\moqtap-codec\tests\draft17_data_stream_rules.rs:
-/// encode wrote an object whose flags announce a group ID it does not have
-/// ```
 #[test]
 fn the_fetch_encoder_refuses_fields_that_disagree_with_the_flags() {
     let complete = FetchObjectHeader {

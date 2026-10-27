@@ -26,27 +26,6 @@
 //! second gate is the corruption the proxy would otherwise ship: a survivor
 //! that decodes to a different Object ID is not a dropped object, it is a
 //! renumbered stream, and nothing about the bytes looks wrong.
-//!
-//! # Ablation, measured
-//!
-//! Forwarding each object's own header instead of re-encoding it - which is
-//! exactly what byte deletion does - cut in all five drafts at once. Thirteen
-//! of the twenty-three gates fail, and **the five byte-identity gates are
-//! among the ones that still pass**, which is the whole reason the second
-//! gate exists: verbatim forwarding is byte-perfect on a stream with nothing
-//! removed.
-//!
-//! ```text
-//! assertion `left == right` failed: a survivor was renumbered by the removal
-//!   left: [(10, Some(3), 0, Some(128)), (10, Some(3), 1, Some(128)),
-//!          (11, Some(3), 0, Some(128))]
-//!  right: [(10, Some(3), 0, Some(128)), (10, Some(3), 2, Some(128)),
-//!          (11, Some(3), 0, Some(128))]
-//! ```
-//!
-//! Object 2 arrives at the subscriber as object 1. Nothing errors, nothing
-//! looks short, and the stream is one object's worth of numbering out for the
-//! rest of its life.
 
 // ─────────────────────────────────────────────────────────────
 // Draft-19: signed group deltas, and the fullest flag set
@@ -522,17 +501,6 @@ mod draft20 {
     /// fields "are present" and settles neither — so a marker after a removed
     /// object is exactly the frame that needs reframing, and forwarding its
     /// bytes would move the Location it names.
-    ///
-    /// # Ablation
-    ///
-    /// Substituting draft-19's verbatim marker arm in
-    /// `FetchObjectWriter::header_for`:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the marker was moved by a removal in front of it
-    ///   left: [(10, None, 9, Some(128))]
-    ///  right: [(11, None, 9, Some(128))]
-    /// ```
     #[test]
     fn an_end_of_range_marker_is_reframed_against_the_new_predecessor() {
         for flags in [0x8Cu64, 0x10C, 0x20C] {
@@ -823,17 +791,6 @@ mod draft21 {
     /// fields "are present" and settles neither — so a marker after a removed
     /// object is exactly the frame that needs reframing, and forwarding its
     /// bytes would move the Location it names.
-    ///
-    /// # Ablation
-    ///
-    /// Substituting draft-19's verbatim marker arm in
-    /// `FetchObjectWriter::header_for`:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the marker was moved by a removal in front of it
-    ///   left: [(10, None, 9, Some(128))]
-    ///  right: [(11, None, 9, Some(128))]
-    /// ```
     #[test]
     fn an_end_of_range_marker_is_reframed_against_the_new_predecessor() {
         for flags in [0x8Cu64, 0x10C, 0x20C] {
@@ -1125,17 +1082,6 @@ mod draft22 {
     /// fields "are present" and settles neither — so a marker after a removed
     /// object is exactly the frame that needs reframing, and forwarding its
     /// bytes would move the Location it names.
-    ///
-    /// # Ablation
-    ///
-    /// Substituting draft-19's verbatim marker arm in
-    /// `FetchObjectWriter::header_for`:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the marker was moved by a removal in front of it
-    ///   left: [(10, None, 9, Some(128))]
-    ///  right: [(11, None, 9, Some(128))]
-    /// ```
     #[test]
     fn an_end_of_range_marker_is_reframed_against_the_new_predecessor() {
         for flags in [0x8Cu64, 0x10C, 0x20C] {
