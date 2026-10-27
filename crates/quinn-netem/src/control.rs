@@ -591,8 +591,8 @@ mod tests {
     /// Only the off half is asserted here, which is a weaker claim than it
     /// looks: an empty log is what a `record_decisions` that does nothing also
     /// produces. The claim that gives it teeth — recording on yields exactly
-    /// one record per datagram — needs the log's own append and render, which
-    /// are not implemented yet.
+    /// one record per datagram — is exercised by the gates in `tests/socket.rs`
+    /// that turn recording on.
     #[test]
     fn recording_is_off_by_default() {
         let handle = ImpairHandle::detached();

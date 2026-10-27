@@ -545,7 +545,7 @@ impl AsyncUdpSocket for ImpairedUdpSocket {
         }
 
         // Refused before anything is decided or counted, so quinn's retry of
-        // the whole transmit costs a sequence number and a set of counter
+        // the whole transmit costs no sequence number and no counter
         // increments for a datagram that was never accepted.
         let queued = lock(&self.shared.state).egress_bytes;
         if queued > 0 && queued >= self.bound(Direction::Downlink) {
