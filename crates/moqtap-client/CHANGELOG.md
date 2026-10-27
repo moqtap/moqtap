@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - On drafts 12 and 13, a SUBSCRIBE_UPDATE for a PUBLISH this endpoint made ended the session. It is now accepted.
 - On drafts 07 through 16, a namespace cancellation that crossed this endpoint's own withdrawal ended the session. It is now accepted and the session continues.
+- `SendStream::stream_id` and `RecvStream::stream_id` returned quinn's stream index rather than the QUIC stream ID.
 
 ## [0.8.1] - 2026-10-03
 

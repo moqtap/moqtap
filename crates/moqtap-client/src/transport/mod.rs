@@ -346,7 +346,7 @@ impl SendStream {
     /// Get the QUIC stream ID (transport-level identifier).
     pub fn stream_id(&self) -> u64 {
         match self {
-            SendStream::Quic(s) => s.id().index(),
+            SendStream::Quic(s) => u64::from(s.id()),
             #[cfg(feature = "webtransport")]
             SendStream::WebTransport(_) => 0, // WebTransport doesn't expose stream IDs
         }
@@ -516,7 +516,7 @@ impl RecvStream {
     /// Get the QUIC stream ID (transport-level identifier).
     pub fn stream_id(&self) -> u64 {
         match self {
-            RecvStream::Quic(s) => s.id().index(),
+            RecvStream::Quic(s) => u64::from(s.id()),
             #[cfg(feature = "webtransport")]
             RecvStream::WebTransport(_) => 0,
         }
