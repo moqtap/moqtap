@@ -1089,37 +1089,6 @@ async fn one_stream_under(
 /// statement about the release path and is gated separately, by
 /// [`a_zero_rate_class_starves_and_the_other_flows`], on the same fixture
 /// shape: a 0-bps class with `queue.max_hold` pinned.
-///
-/// # Ablations, both recorded
-///
-/// **(a) Drop the `|| shaping_enabled` term** from `objects_enabled`
-/// (`session.rs`, the gating expression), leaving everything else. The
-/// shaped arm falls to the pass-through pipe and `pipe_data`'s
-/// `debug_assert!` catches it *first*, inside the forwarding task:
-///
-/// ```text
-/// panicked at crates\moqtap-proxy\src\session.rs, in pipe_data:
-/// a session with a ShapeProfile must be framed: shaping cannot classify a byte pump
-/// ```
-///
-/// That kills the stream's task, so the relay receives nothing and this
-/// test's own anchor reddens next, with `left: []` against the whole
-/// 57-byte fixture. The other five tests in the file stay green — which is
-/// what makes it a claim about the term and not about the harness.
-///
-/// **(b) Drop the term *and* the `debug_assert!`**, which is what a
-/// `--release` gate would see. The pass-through pipe forwards the bytes,
-/// the anchor is satisfied, and the counter assertion is the one that
-/// fires:
-///
-/// ```text
-/// panicked at crates\moqtap-proxy\tests\actions_shaping.rs, in the body below:
-/// a ShapeProfile is configuration, not a hook capability: it must arm the
-/// framer with Interest::NONE and no observer, but framers_created was 0
-/// ```
-///
-/// Both were measured; (b) is why the counter assertion is here rather
-/// than left to the `debug_assert!` alone.
 #[tokio::test]
 async fn a_shape_profile_arms_without_a_hook() {
     let unshaped =
@@ -1207,75 +1176,6 @@ async fn a_shape_profile_arms_without_a_hook() {
 /// class row instead would keep the identity true and redden here, which is
 /// the whole reason the two rows are separate — "no rule claimed it" and
 /// "no rule could have" are different answers.
-///
-/// # Ablations, both recorded
-///
-/// **(a) Ship the storage with no writer.** Remove the `note_object_seen`
-/// call from the `FramerOut::Object` arm of `pipe_data_framed`
-/// (`session.rs`), leaving the field, the accessor and the recorder in
-/// place. Both zero arms still pass, which is the point — an all-zero
-/// `ShapeStats` is exactly what a recorder with no producer reports. The
-/// shaped arm fires:
-///
-/// ```text
-/// panicked at crates\moqtap-proxy\tests\actions_shaping.rs, the objects_seen assertion:
-/// assertion `left == right` failed: a shaped session must count the objects the
-/// shaper saw: three objects went through and objects_seen was 0
-///   left: 0
-///  right: 3
-/// ```
-///
-/// **(b) Lose the gate.** Hoist the call out from behind
-/// `if ctx.shaping_enabled`, so anything framed is recorded. The shaped arm
-/// still passes and so does the `Interest::NONE` arm — that one never
-/// frames, so its call site is never reached. The **observer** arm fires,
-/// on the whole-struct compare (`bytes_shaped: 54` is the three 16-byte
-/// payloads plus their per-object framing, and is why that figure is
-/// bounded rather than pinned in the assertions below):
-///
-/// ```text
-/// panicked at crates\moqtap-proxy\tests\actions_shaping.rs, the observer arm:
-/// assertion `left == right` failed: an event observer is not a ShapeProfile:
-/// it may arm framing, but it must not start recording shaping statistics
-///   left: ShapeStats { classes: [], .., objects_seen: 3, bytes_shaped: 54, .. }
-///  right: ShapeStats { classes: [], .., objects_seen: 0, bytes_shaped: 0, .. }
-/// ```
-///
-/// Measured under (b): `cargo test -p moqtap-proxy` reports **exactly one**
-/// failing test — this one, at that assertion, 23 targets and 344 other
-/// tests green. So the observer arm is not merely the first detector of a
-/// lost gate, it is the only one in the crate.
-///
-/// **(c) Count only what a rule saw.** Empty the body of
-/// `ShapeRecorder::note_unshapeable_seen`, so the header is charged on
-/// release and never entered on the left. The equality against `stream_len`
-/// is exactly what catches it, and the shortfall is the header:
-///
-/// ```text
-/// assertion `left == right` failed: bytes_shaped accounts for every byte of
-/// the stream: the objects on the class row and the header on the unshapeable one
-///   left: 54
-///  right: 59
-/// ```
-///
-/// A bound would not: `54` passes `bytes_shaped < stream_len`, and passes it
-/// with a `3 * ONE_STREAM_PAYLOAD` floor under it as well.
-///
-/// **(d) Merge the two unnamed rows.** In `ShapeRecorder::row`, send
-/// `Class::Unshapeable` to `&self.default_class`. The identity still holds —
-/// nothing was lost, it was misfiled — and the row separation is what
-/// reddens:
-///
-/// ```text
-/// assertion `left == right` failed: an all-None matcher claims everything: a
-/// non-zero default row means the rule did not fire
-///   left: ClassStats { name: "", bytes_delivered: 5, .., objects_delivered: 1, .. }
-///  right: ClassStats { name: "", bytes_delivered: 0, .., objects_delivered: 0, .. }
-/// ```
-///
-/// Which is the whole argument for two rows: with one, a header would read as
-/// a rule that failed to claim its traffic, and that is the diagnosis an
-/// author would act on.
 #[tokio::test]
 async fn shape_stats_are_zero_without_a_profile_and_move_with_one() {
     let unshaped = one_stream_under(None, Arc::new(NoOpProxyObserver)).await;
@@ -1773,31 +1673,6 @@ async fn block_admits_at_most_depth_objects() {
 /// The fixture is deliberately far under `EgressConfig::max_pending_bytes` —
 /// four 5 KB objects against 1 MiB — so the engine's own budget cannot be
 /// what fires it.
-///
-/// # Ablations, both run, and one of them says something about this test
-///
-/// **(a) Make the latch level-triggered** — drop
-/// `&& !self.backpressure_reported` from `PendingQueue::push`. This was
-/// expected to redden here. **Measured: it does not, and it cannot.** Under
-/// `Overflow::Block` the read branch closes the instant `accepts_more()`
-/// turns false, so no *second* push can observe a full queue and there is
-/// nothing for a level trigger to double-report. The ablation is real and
-/// it does redden — `exec::tests::backpressure_is_reported_once_per_stream`
-/// fails, which is where the latch is gated, on a fixture that keeps
-/// pushing past the limit because it has no read branch to close. Recorded
-/// here rather than quietly dropped: this row's "exactly one" is a claim
-/// about the **producer**, not about the latch.
-///
-/// **(b) Compute the shape depth beside `accepts_more()` rather than inside
-/// it** — the one this row exists for. `push` never sees a full queue, the
-/// event is never emitted, and the assertion reddens with an empty vector:
-///
-/// ```text
-/// assertion `left == right` failed: exactly one EgressQueueFull per stream, on the
-/// push that closed the read branch: []
-///   left: 0
-///  right: 1
-/// ```
 #[tokio::test]
 async fn block_reports_backpressure_once() {
     let run = admission_run(Overflow::Block).await;
@@ -2970,24 +2845,6 @@ async fn a_starved_class_resumes_and_loses_nothing() {
 ///
 /// The fixture offers the **low** class first and holds both at a barrier, so
 /// the order under test is the discipline's and not the arrival order's.
-///
-/// # Ablations
-///
-/// **(a) Recorded, deterministic: swap the two priorities** — give video the
-/// 9 and audio the 1, one line in the fixture. Video drains first and the
-/// ordering assertion reddens:
-///
-/// ```text
-/// assertion failed: StrictPriority must drain the high class before the low
-/// class starts, but the low class's first object preceded the high class's
-/// last
-/// ```
-///
-/// **(b) `Discipline::Fifo`**, the obvious ablation, also reddens — but as a
-/// *race*, not a certainty: with `Fifo` the two streams interleave and the
-/// low class's first object lands somewhere inside the high class's run.
-/// That is why (a) is the recorded ablation. An ablation whose red is a coin
-/// flip does not tell you what the gate measures.
 #[tokio::test]
 async fn the_high_class_is_served_first() {
     const OBJECTS: u64 = 8;
@@ -3045,31 +2902,6 @@ async fn the_high_class_is_served_first() {
 /// The `starved_behind_other_class` assertion beside it is not decoration: it
 /// is the only half of this row that `Discipline::Fifo` can be told apart by.
 /// See the second ablation.
-///
-/// # Ablations
-///
-/// **(a) Recorded, deterministic: swap the two priorities**, giving video the
-/// 9 and audio the 1. `StrictPriority` is the only discipline that reads
-/// `ClassRule::priority`, so this ablates exactly the mechanism under test.
-/// Video takes the bucket, audio never completes, and the byte-equality
-/// assertion reddens after the harness timeout.
-///
-/// **(b) `Discipline::Fifo`**, the obvious ablation for this row, on the
-/// grounds that a non-zero shared bucket is grantable under both
-/// disciplines. **Measured: it does not redden the byte ratio.** With a
-/// burst of one object exactly one unit is grantable at each refill instant,
-/// so the two streams race for it — and under `Fifo`, which arbitrates
-/// nothing, the winner is decided by the runtime's wake order, which on a
-/// current-thread runtime went the same way all eight times. `video * 4 <
-/// audio` therefore held with `Fifo` configured, and the run was 0.10 s
-/// rather than the ~0.16 s a genuine share would take.
-///
-/// That is why `starved_behind_other_class` is asserted here. `Fifo` never
-/// parks a class — `Scheduler::discipline_holds` returns before it looks at
-/// anything — so under `Fifo` the counter is **0** and the assertion reddens
-/// deterministically, whichever way the token race happens to go. That
-/// ablation is kept, with the measurement that made it insufficient
-/// written down beside it rather than the claim quietly repeated.
 #[tokio::test]
 async fn strict_priority_decides_who_gets_a_shared_bucket() {
     const OBJECTS: u64 = 8;
@@ -3487,18 +3319,6 @@ async fn a_bucket_never_delivers_above_its_ceiling() {
 /// means. The counter has a producer only on the `ResetStream` arm — see
 /// `expiry_reset_gives_up_on_the_stream`, which is the same fixture with one
 /// field changed.
-///
-/// # Ablations, both recorded
-///
-/// **(a) Make `Expiry::Deliver` refuse instead of delivering** — return
-/// `false` from that arm of `PendingQueue::expire_head`. Nothing after the
-/// first object ever reaches the wire and the byte-equality assertion
-/// reddens with a 208-byte prefix against the 4877-byte stream.
-///
-/// **(b) Drop the `ShapeReport::Clamped` emission.** The stream still
-/// arrives, so (a)'s assertion stays green; the clamp assertion is the one
-/// that fires, with `left: []`. That is the "it worked but nothing says so"
-/// failure, and it is why both halves are in one body.
 #[tokio::test]
 async fn expiry_delivers_by_default() {
     const OBJECTS: u64 = 6;
@@ -3558,18 +3378,6 @@ async fn expiry_delivers_by_default() {
 /// bound — no more than the stream header can have arrived, because no object
 /// was ever granted — and that is the shape
 /// `cancel_with_a_terminal_behind_the_hold` already uses.
-///
-/// # Ablations, both recorded
-///
-/// **(a) Drop the `ShapeReport::Expired` emission.** The stream is still
-/// reset and `objects_expired` still moves, so the first two assertions stay
-/// green; the event assertion fires with `left: []`.
-///
-/// **(b) Reset without setting `objects_expired`** — delete the
-/// `note_expired` call. The reset happens, the event fires, and the counter
-/// assertion reddens with `0`. Two independent halves, two independent
-/// ablations, because a reset nobody counted and a count nobody caused are
-/// different bugs.
 #[tokio::test]
 async fn expiry_reset_gives_up_on_the_stream() {
     const OBJECTS: u64 = 6;
@@ -3702,28 +3510,6 @@ fn fin_class(run: &PacedRun) -> ClassStats {
 /// — the shaping unambiguously happens — while the run's output says
 /// nothing about it. A capability that can decline must say so in the run's
 /// own output, or its absence is indistinguishable from its success.
-///
-/// # Ablation, recorded
-///
-/// Delete the `on_shape` call from the release loop in
-/// `egress::drain_honouring_release_times` (leave the `pop_next_due` loop
-/// otherwise untouched, so the report is the only thing removed). The
-/// bytes still arrive, `objects_delivered` is still 4 on both legs, and the
-/// open leg still reports its four clamps. Only the FIN leg goes quiet:
-///
-/// ```text
-/// ---- shaping_reports_do_not_depend_on_a_fin stdout ----
-/// thread 'shaping_reports_do_not_depend_on_a_fin' (9800) panicked at
-/// crates\moqtap-proxy\tests\actions_shaping.rs:
-/// a source that FINs is the ordinary MoQT subgroup shape: header, a few
-/// objects, FIN. Every one of its 4 objects was held to max_hold and released
-/// by the clamp, and the run reported no clamp at all
-/// ```
-///
-/// The three assertions above it — the whole stream arrived,
-/// `objects_delivered == 4`, and the open leg's four clamps — all stay green
-/// under that ablation. That is the isolation: only the FIN leg's report
-/// moves.
 #[tokio::test]
 async fn shaping_reports_do_not_depend_on_a_fin() {
     // Both legs concurrently: two independent proxies on two ports, so the
@@ -3798,27 +3584,6 @@ async fn shaping_reports_do_not_depend_on_a_fin() {
 /// are again the "it happened" half: the stream really was abandoned by the
 /// shaper on the FIN leg too, which is what made the missing event silent
 /// rather than merely absent.
-///
-/// # Ablation, recorded
-///
-/// Same ablation as the clamp gate — delete the `on_shape` call from
-/// `egress::drain_honouring_release_times`'s release loop. The destination
-/// is still reset with `0x2A` on both legs and `objects_expired` still
-/// moves, so every other assertion here stays green:
-///
-/// ```text
-/// ---- expiry_reports_do_not_depend_on_a_fin stdout ----
-/// thread 'expiry_reports_do_not_depend_on_a_fin' (12420) panicked at
-/// crates\moqtap-proxy\tests\actions_shaping.rs:
-/// assertion `left == right` failed: the shaper abandoned this stream and the
-/// run must say so, on both legs (source FINs)
-///   left: []
-///  right: [Expired]
-/// ```
-///
-/// The `Ending::Reset(0x2A)` and `objects_expired > 0` assertions on the same
-/// leg stay green underneath it, which is the shape of the defect: the stream
-/// was abandoned by the shaper and the run said nothing.
 #[tokio::test]
 async fn expiry_reports_do_not_depend_on_a_fin() {
     const CODE: u64 = 0x2A;
@@ -5070,68 +4835,6 @@ const ACCEPTANCE_OBJECTS: u64 = 8;
 /// them, they say: the video objects reached the shaper, the shaper refused
 /// them *because its bucket was dry* and said so, the audio objects reached
 /// the shaper and were passed whole, and the report names both.
-///
-/// # Ablations, both recorded
-///
-/// **(a) Drop `|| shaping_enabled` from
-/// `objects_enabled`** (`session.rs:295`), leaving every other term. The
-/// session falls to the pass-through pipe and `pipe_data`'s `debug_assert!`
-/// (`session.rs:2202`) catches it first, in the forwarding task:
-///
-/// ```text
-/// panicked at crates\moqtap-proxy\src\session.rs:
-/// a session with a ShapeProfile must be framed: shaping cannot classify a byte pump
-/// ```
-///
-/// Both stream tasks die, so no destination stream is ever opened and this
-/// test reddens at its accept — after the harness's 10 s ceiling, which is
-/// the one posture in this file that exceeds the 600 ms budget and does so
-/// only while broken:
-///
-/// ```text
-/// panicked at crates\moqtap-proxy\tests\actions_shaping.rs:
-/// both destination streams were opened and their headers forwarded: Elapsed(())
-/// ```
-///
-/// **(b) The same, with the `debug_assert!` also removed** — which is what a
-/// `--release` build would see, and the form that shows the *behaviour*
-/// rather than the guard. The pass-through pipe forwards both streams
-/// verbatim, in 0.03 s, and the wire assertion goes first:
-///
-/// ```text
-/// assertion `left == right` failed: a dry bucket must deliver no media at all:
-/// the video destination holds 1629 bytes against a 5-byte header
-///   left: 1629
-///  right: 5
-/// ```
-///
-/// Neutralising that one and re-running — because an ablation that stops at
-/// the first panic has only measured the first assertion — the next red is
-/// the video row's *reason*:
-///
-/// ```text
-/// ...and say *why* it got nothing: a dry bucket is an episode, not a silence.
-/// Without this a zero is indistinguishable from a class that was never offered
-/// anything: ClassStats { name: "video", bytes_delivered: 0, bytes_dropped: 0,
-/// objects_delivered: 0, objects_dropped: 0, tokens_exhausted_episodes: 0, ... }
-/// ```
-///
-/// and neutralising *that* one, the audio row:
-///
-/// ```text
-/// assertion `left == right` failed: and must account every object byte the
-/// flowing class carried — the whole stream less its unshapeable header:
-/// ClassStats { name: "audio", bytes_delivered: 0, ... }
-///   left: 0
-///  right: 1624
-/// ```
-///
-/// Three of the four go red; `video_row.bytes_delivered == 0` is the one that
-/// does **not**, because under (b) the shaper never ran and zero is the
-/// field's default. That is the measured form of the "(3) alone" bullet
-/// above, and it is why `tokens_exhausted_episodes` is asserted beside it: a
-/// starved class and an absent shaper report the same zero, and only the
-/// episode count tells them apart.
 #[tokio::test]
 async fn starve_video_while_audio_flows_from_config_alone() {
     common::init_crypto();

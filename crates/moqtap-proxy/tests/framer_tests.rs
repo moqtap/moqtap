@@ -164,27 +164,6 @@ const MODE_FIELD_DRAFTS: &[DraftVersion] = &[
 ///
 /// Neither omission could fail. A draft left out of a sweep is a draft the
 /// sweep says nothing about, and a test that says nothing passes.
-///
-/// # Ablations, measured
-///
-/// Both new members were cut separately, because a sweep stops at its first
-/// failed assertion and one cut covering both would only ever prove the
-/// earlier one. Draft-15's `subgroup_id_from_first_object` forced to `false`:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-15] first-object subgroup ID
-/// ```
-///
-/// Then reverted, and draft-20's `subgroup_id_mode` made to report mode 1 as
-/// mode 0:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-20] first-object subgroup ID
-/// ```
-///
-/// Each reddens one test — 16 passed, 1 failed. The mode-0 sweep above stays
-/// green under the draft-20 cut, which is what says the two modes are being
-/// told apart rather than both read off one branch.
 const FIRST_OBJECT_SUBGROUP_STREAMS: &[(DraftVersion, u8)] = &[
     #[cfg(feature = "draft11")]
     (DraftVersion::Draft11, 0x0A),

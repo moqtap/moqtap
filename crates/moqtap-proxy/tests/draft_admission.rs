@@ -140,44 +140,6 @@ const EVERY_DRAFT: [DraftVersion; DraftVersion::ALL.len()] = DraftVersion::ALL;
 /// *every* draft would satisfy the first half on a reduced build and would
 /// be caught by nothing at all on an all-drafts build, where the first half
 /// has no draft to fire on.
-///
-/// # Ablations, run
-///
-/// Two mutations, because the row has two halves and each is reddened by a
-/// different one.
-///
-/// Delete the `draft_is_compiled` guard from `run_with_transport` in
-/// `src/session.rs`. Under `cargo test -p moqtap-proxy
-/// --no-default-features --features draft07 --test draft_admission`, every
-/// draft but draft-07 stops being refused and the row reddens with
-///
-/// ```text
-/// thread 'a_session_is_admitted_exactly_when_this_build_carries_its_draft'
-/// (21564) panicked at crates\moqtap-proxy\tests\draft_admission.rs:
-/// Draft08 was never compiled into this build, so a session on it forwards
-/// every stream uninterpreted and reports success: it must be refused by
-/// name, got upstream connection failed: invalid socket address syntax
-/// ```
-///
-/// That tail is the whole of the evidence for the failure this guard
-/// prevents: with it gone, a draft-07 build takes a draft-08 session as far
-/// as resolving its relay address.
-///
-/// Widen the guard to refuse every draft — `if true` in place of the
-/// `!draft_is_compiled(draft)` test. Under `cargo test -p moqtap-proxy
-/// --all-features --test draft_admission` every one of the drafts is
-/// compiled, so the other half reddens instead:
-///
-/// ```text
-/// thread 'a_session_is_admitted_exactly_when_this_build_carries_its_draft'
-/// (53496) panicked at crates\moqtap-proxy\tests\draft_admission.rs:
-/// this build compiled Draft07, so a session on it must be admitted and fail
-/// on the address instead, got this session is configured for Draft07, which
-/// this build did not compile: it would forward every stream uninterpreted,
-/// surface no object to any hook, claim nothing with any shaping class, and
-/// report success. Build with the matching draftNN feature, or configure a
-/// draft this build carries
-/// ```
 #[tokio::test]
 async fn a_session_is_admitted_exactly_when_this_build_carries_its_draft() {
     for draft in EVERY_DRAFT {

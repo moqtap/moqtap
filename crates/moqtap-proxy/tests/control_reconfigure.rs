@@ -1614,36 +1614,6 @@ fn windowed_proxy(relay: SocketAddr) -> TransparentProxy {
 /// connection wrote it and the newer one could not. That is what makes the row
 /// a statement about *when each connection was made* rather than two unrelated
 /// brackets that happen to sit at different scales.
-///
-/// # Ablations, both run
-///
-/// **(a) Store the profile and never read it.** Delete the install from
-/// `ControlPlane::set_client_transport`, keeping the store, so a request lands
-/// in the plane and never on the endpoint. The late client then negotiates
-/// quinn's default and writes straight past the ceiling:
-///
-/// ```text
-/// a client that connected after the call negotiated the 65536-byte window, so
-/// 131072 bytes must not go in — they did
-/// ```
-///
-/// **(b) Retro-apply the profile to the connection that already exists.** This
-/// one has no source-level form, and that is a fact about quinn rather than
-/// about the proxy: a connection takes its `TransportConfig` once at setup,
-/// the only per-connection window setter quinn exposes is the connection-level
-/// `set_receive_window`, and a *shrink* there is booked as a debt worked off
-/// against future grants because credit already advertised in
-/// `MAX_STREAM_DATA` cannot be retracted. There is no edit to this crate that
-/// makes a live connection feel a smaller per-stream window. So the ablation
-/// was run against the fixture instead, which produces exactly the observable
-/// a retro-applying implementation would: connect the first client *after* the
-/// call rather than before it, changing nothing else. The cross-arm anchor
-/// reddens at once:
-///
-/// ```text
-/// a connection on quinn's default window takes 131072 bytes whatever the
-/// shaper does
-/// ```
 #[tokio::test]
 async fn a_transport_profile_reaches_the_next_client_and_never_the_one_already_connected() {
     common::init_crypto();

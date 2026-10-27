@@ -1558,19 +1558,6 @@ fn never_grants(max_hold: Duration) -> ShapeProfile {
 /// looking like the strongest available claim. `applied` is asserted on
 /// both legs for the same reason it always was: a clamp that reports no
 /// ceiling is not a clamp.
-///
-/// # Ablations, both run
-///
-/// **(a) Restore the sentinel** — `requested: Some(Duration::MAX)` in
-/// `egress::PendingQueue::expire_head`'s `Expiry::Deliver` arm. The delayed
-/// leg is untouched; the shaped leg reddens with
-/// `left: [HoldClamped { requested: Some(18446744073709551615.999999999s), applied: 60ms }]`.
-///
-/// **(b) Report the shaped clamp's ceiling as its request** —
-/// `requested: Some(self.shape_hold)`. The stream still arrives and the
-/// clamp is still reported, so nothing else in the file moves; this leg
-/// reddens with `requested: Some(60ms)`, which is the fabrication the
-/// absent field exists to refuse.
 #[tokio::test]
 async fn hold_clamped_reports_no_request_for_an_unbounded_wait() {
     const MAX_HOLD: Duration = Duration::from_millis(60);

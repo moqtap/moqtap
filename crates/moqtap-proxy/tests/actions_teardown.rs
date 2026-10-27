@@ -47,33 +47,6 @@
 //! unreachable end to end and the observed code is `0x0`. The substance —
 //! *reset rather than FIN* — holds either way, and this file asserts the
 //! code that is actually produced rather than the one the mapping suggests.
-//!
-//! # Ablations, each measured
-//!
-//! Every test below has a named source change that reddens it, run and
-//! recorded rather than reasoned about. Restore each one after running it.
-//!
-//! | Ablation | Reddens | Stays green |
-//! |---|---|---|
-//! | `propagate_reset`: drop the `synthesized_reset_code` reset+report | both `a_non_reset_read_failure_resets_*` | `a_clean_fin_stays_a_fin`, `a_mirrored_reset_*`, all four propagation legs |
-//! | `propagate_reset`: drop `if st.is_control_stream` | both `..._control_stream_does_not_synthesize_a_reset` (they see `Reset(0)`) | the data-stream tests |
-//! | `propagate_reset`: drop `if let Some(code) = mirrored` | all four propagation legs **and** `a_mirrored_reset_*` | `a_clean_fin_stays_a_fin` |
-//! | `run_stream_end`: `Target::StreamEnd { is_control_stream: false }` | `reset_stream_at_the_control_streams_end_is_refused` | `reset_stream_reaches_the_peer_with_the_requested_code` |
-//! | `exec::execute`: drop `check_error_code` on `ResetStream` | `an_out_of_range_reset_code_is_refused_before_anything_is_sent` | the rest |
-//! | `pipe_data_framed` FIN branch: `Plan::Terminal => {}` | `reset_stream_reaches_the_peer_with_the_requested_code` | `a_clean_fin_stays_a_fin` |
-//! | `run_with_transport`: hard-code `client.close(0, b"proxy session ended")` | `close_session_carries_the_requested_code_and_reason` | the rest |
-//! | `SessionCloser::request`: always return `true` | `a_second_close_session_is_refused` | the rest |
-//!
-//! The `Plan::Terminal => {}` ablation must be applied to the **framed** FIN
-//! branch: `pipe_data_passthrough` carries a byte-identical block, and
-//! ablating that one instead leaves every test here green, because
-//! `Interest::STREAMS` never takes the pass-through pipe. That near-miss is
-//! recorded because it is the shape of a test that measures nothing.
-//!
-//! Every test here runs on [`DRAFT`] — draft-14 — and the file's
-//! CLIENT_SETUP fixture is a draft-14 message, so the whole file is gated
-//! on that draft rather than compiled into rows whose codec cannot build
-//! the fixture.
 
 #![cfg(feature = "draft14")]
 

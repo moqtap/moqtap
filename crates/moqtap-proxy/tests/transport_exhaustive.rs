@@ -369,43 +369,6 @@ fn a_refused_shape_profile() -> ShapeError {
 /// than by naming the variant, because that conversion is the path the
 /// proxy itself takes and the only path available for
 /// [`ControlError::Shape`].
-///
-/// # Ablation, run
-///
-/// Adding `#[non_exhaustive]` to `ControlError` in `src/control.rs` does not
-/// fail this test — it stops this crate compiling at all, which is the
-/// stronger outcome and the reason the attribute is absent. The whole of
-/// what `cargo test -p moqtap-proxy --test transport_exhaustive --no-run`
-/// then reports:
-///
-/// ```text
-/// error[E0004]: non-exhaustive patterns: `&_` not covered
-///    --> crates\moqtap-proxy\tests\transport_exhaustive.rs:308:11
-///     |
-/// 308 |     match error {
-///     |           ^^^^^ pattern `&_` not covered
-///     |
-/// note: `ControlError` defined here
-///   --> crates\moqtap-proxy\src\control.rs:171:1
-///    |
-/// 171 | pub enum ControlError {
-///    | ^^^^^^^^^^^^^^^^^^^^^
-///    = note: the matched value is of type `&ControlError`
-///    = note: `ControlError` is marked as non-exhaustive, so a wildcard `_`
-///      is necessary to match exhaustively
-/// ```
-///
-/// The `171` in that note is the mutated file: the attribute is the line
-/// above the enum, so a reader looking for `pub enum ControlError` in the
-/// tree as it stands finds it one line higher.
-///
-/// One error and not two, which is worth knowing before somebody reaches for
-/// the attribute as a way of protecting both halves: `#[non_exhaustive]` on
-/// an enum stops downstream *matching* and leaves downstream *construction*
-/// alone, so the fixture list below still compiles and only the match
-/// breaks. Guarding construction as well takes the attribute on each variant
-/// — which would also make this file's fixture list impossible to write, and
-/// with it any table of expected answers a caller might keep.
 #[test]
 fn every_control_error_variant_is_matchable_and_constructible_from_outside_the_crate() {
     let profile_error = profile_with(|p| p.receive_window = Some(VARINT_MAX + 1))

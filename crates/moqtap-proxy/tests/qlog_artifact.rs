@@ -1280,36 +1280,6 @@ async fn a_leg_given_both_a_raw_config_and_a_spec_is_refused_and_captures_nothin
 /// exists, so no sink is built and no preamble is written. It works only
 /// because these specs write through [`LazyFile`] — an eagerly opened file
 /// would be there whatever the proxy decided.
-///
-/// # Ablation, run
-///
-/// The two-leg check at the top of `TransparentProxy::run` in `src/proxy.rs`
-/// made unreachable, which is the whole of the mutation: the copies below it
-/// already write `None`, so removing the refusal restores exactly the silent
-/// drop. What comes back is what the mutation *is* — the proxy binds and
-/// serves:
-///
-/// ```text
-/// a spec set on a proxy template has to be refused rather than dropped, and as the leg
-/// it was set on: the copy the proxy makes cannot carry it, so a proxy that came up
-/// would report success and never create the file — Err(Elapsed(()))
-/// ```
-///
-/// `test result: FAILED. 0 passed; 1 failed ... finished in 10.01s`, against
-/// 0.03 s green. The first attempt at this row awaited `run()` bare and did
-/// not fail at all under the mutation — it **hung**, because a proxy that
-/// accepts the template is a proxy whose accept loop never returns, and a
-/// gate that hangs is worse than one that is missing. That is why the call is
-/// bounded, and why `Elapsed` rather than `Ok(())` is the message on record.
-///
-/// The capture directory listed `[]` under the mutation too, exactly as it
-/// does against a correct build — which is what makes the refusal assertion
-/// the load-bearing half and the listing the half that proves nothing was
-/// begun on the way to it.
-///
-/// Recorded without the `file:line` prefix rustc prints and without the
-/// per-run thread id, because editing this paragraph moves the line it would
-/// name.
 #[tokio::test]
 async fn a_proxy_template_carrying_a_spec_is_refused_on_either_leg() {
     common::init_crypto();

@@ -658,43 +658,6 @@ async fn a_configured_window_is_exactly_the_credit_a_source_gets() {
 /// Neither side is load-sensitive: the first is a liveness anchor and the
 /// second is a negative claim over a window. See [`DRAIN_CEILING`] for the
 /// measurement — 82 370 bytes, against a ceiling of 131 072.
-///
-/// # Ablations, all three recorded
-///
-/// **(a) Drop the window.** Pass `None` for the narrow arm too, changing
-/// nothing else — the shipped default posture, and the run the header's
-/// figures came from. The source pushes straight past the ceiling and the
-/// negative half reddens, which is the headline claim doing its job:
-///
-/// ```text
-/// with a 65536-byte listener window the shaper's stall must reach the source:
-/// 131072 bytes went in before it felt anything
-/// ```
-///
-/// The remaining two remove the *shaper* rather than the window. Neither
-/// reaches the headline assertion, and that is the point of the guards
-/// standing above it: without them, "the source stalled" would be a
-/// sentence about a fixture with nobody draining its relay leg, and it
-/// would read exactly the same.
-///
-/// **(b) Drop the shaping profile.** Leave `config.shape` at `None`, keep
-/// the small window. There is then no shaper to stop any read, so whatever
-/// the source eventually feels comes from somewhere this file is not
-/// testing. The class row is empty and says so:
-///
-/// ```text
-/// a shaped session reports one row per configured class; an empty list means the
-/// profile never reached the session, and every claim below it is about a byte pump
-/// ```
-///
-/// **(c) Swap `Overflow::Block` for `Overflow::DropTail`.** The queue then
-/// discards rather than stalling, so the read branch never shuts and
-/// `blocked_episodes` stays zero by design. The control arm's liveness
-/// anchor is what reports it, at its ceiling:
-///
-/// ```text
-/// timed out waiting for the wide arm's read branch to shut
-/// ```
 #[tokio::test]
 async fn a_small_listener_window_makes_the_shapers_stall_reach_the_source() {
     common::init_crypto();

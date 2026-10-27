@@ -234,25 +234,6 @@ fn census_of(control: &ProxyControl, n: usize) -> Option<Vec<SessionId>> {
 /// registry that removed *an* entry on any disconnect rather than the right
 /// one would still be holding a single id at that point, and it would be
 /// `SessionId(1)`.
-///
-/// # Ablation, run
-///
-/// Making the registry retain the sessions that have ended — the body of
-/// `ControlPlane::end` in `src/control.rs` emptied to `let _ = id;`, so the
-/// census hands back every id it has ever been given — leaves the first
-/// three readings correct and the fourth permanently `[1, 2]`. The row never
-/// reaches its whole-sequence comparison at all; it fails at the last wait,
-/// ten seconds in:
-///
-/// ```text
-/// thread 'the_census_names_the_sessions_that_are_forwarding_and_no_others'
-/// panicked at crates\moqtap-proxy\tests\control_registry.rs:
-/// timed out waiting for the census to drop the session whose client went away
-/// ```
-///
-/// That is the never-removes failure exactly, and nothing else in the file
-/// noticed: the address row below passed in that same mutated run. A census
-/// read once, at one instant, would have passed too.
 #[tokio::test]
 async fn the_census_names_the_sessions_that_are_forwarding_and_no_others() {
     common::init_crypto();
@@ -325,29 +306,6 @@ async fn the_census_names_the_sessions_that_are_forwarding_and_no_others() {
 /// endpoint is gone once the accept loop has returned, and a handle that
 /// kept reporting its address would be handing out somewhere nothing can be
 /// reached.
-///
-/// # Ablation, run
-///
-/// Making the handle report the configured address instead of the resolved
-/// one — the bound arm of `ProxyControl::local_addr` in `src/control.rs`
-/// replaced with `Ok("127.0.0.1:0".parse().expect("literal"))`, which is
-/// exactly the `bind_addr` this fixture supplies — leaves both `NotBound`
-/// readings correct, because the mutation only speaks while there is a
-/// listener to speak about. The dial is what fails:
-///
-/// ```text
-/// thread 'the_reported_address_is_one_a_client_connects_through'
-/// panicked at crates\moqtap-proxy\tests\control_registry.rs:
-/// a client cannot dial the address the handle reported: invalid remote address: 127.0.0.1:0
-/// ```
-///
-/// The refusal comes from quinn rather than from an assertion, and that is
-/// the whole point of dialling rather than comparing: port 0 is not an
-/// address a peer can be at, and it is precisely what a handle answering out
-/// of its own configuration hands back. The census row above fails in the
-/// same mutated run for the same reason, reported from inside the shared
-/// harness instead — `crates\moqtap-proxy\tests\common\mod.rs:218:39: client
-/// connect: InvalidRemoteAddress(127.0.0.1:0)`.
 #[tokio::test]
 async fn the_reported_address_is_one_a_client_connects_through() {
     common::init_crypto();

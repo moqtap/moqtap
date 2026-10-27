@@ -45,16 +45,6 @@
 //! Doing it at the framer's own API instead would have made
 //! `Impairment { ObjectNotAddressable }`, which `session.rs` emits and the
 //! framer does not, unassertable.
-//!
-//! # Ablations
-//!
-//! Every test here names an ablation under `*Ablation (measured)*`, and
-//! every one of those was applied to a private copy of the workspace,
-//! compiled and run. Seventeen ablations, seventeen genuine failures; the
-//! doc comments quote the observed bytes or counter values rather than
-//! predicting them, and say which *other* tests the same ablation takes
-//! down. Two of them passed on the first attempt and the fixtures were the
-//! thing at fault, not the implementation — see [`OVERSIZED_PAYLOAD`].
 
 mod common;
 
