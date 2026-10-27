@@ -657,22 +657,35 @@ fn an_unknown_event_type_does_not_collect_its_fields_twice() {
     assert!(unknown.extra.is_empty(), "fields were collected into extra as well");
 }
 
-/// A real draft-18 session against `cloudflare/moq-rs`, recorded by
-/// `moqtap intercept`.
-///
-/// Draft-18 gives each request its own bidirectional stream, so these are four
-/// distinct QUIC streams. The proxy does not see stream IDs and writes 0 for
-/// all of them, so the recorded id distinguishes nothing. The assertion pins
-/// today's behaviour so the change is visible when it lands, not because the
-/// behaviour is right.
+/// A real draft-18 session against `cloudflare/moq-rs` names five distinct streams, each
+/// numbered for its type and initiator as RFC 9000 Section 2.1 numbers them.
 #[test]
-fn a_third_party_capture_shows_four_streams_all_declaring_id_zero() {
+fn a_third_party_capture_numbers_its_streams_as_quic_does() {
     let Some(root) = root() else { return };
-    let (segments, _) =
-        read_segments(&case_bytes(&root, "capture-observer-draft18-moq-rs", "capture.moqtrace"));
+    let (segments, _) = read_segments(&case_bytes(
+        &root,
+        "capture-observer-draft18-moq-rs-stream-ids",
+        "capture.moqtrace",
+    ));
+    let events = &segments[0].events;
 
-    let opened: Vec<u64> = segments[0]
-        .events
+    let control: Vec<(u64, Option<u64>)> = events
+        .iter()
+        .filter_map(|event| match event.data {
+            EventData::ControlMessage { message_type, stream_id, .. } => {
+                Some((message_type, stream_id))
+            }
+            _ => None,
+        })
+        .collect();
+    // SETUP on the client's and the relay's unidirectional control streams (2 and 3 mod 4),
+    // then SUBSCRIBE and SUBSCRIBE_OK on one client-initiated bidirectional stream (0 mod 4).
+    assert_eq!(
+        control,
+        vec![(0x2F00, Some(2)), (0x2F00, Some(3)), (0x03, Some(0)), (0x04, Some(0))]
+    );
+
+    let opened: Vec<u64> = events
         .iter()
         .filter_map(|event| match event.data {
             EventData::StreamOpened { stream_id, .. } => Some(stream_id),
@@ -680,5 +693,17 @@ fn a_third_party_capture_shows_four_streams_all_declaring_id_zero() {
         })
         .collect();
 
-    assert_eq!(opened, vec![0, 0, 0, 0]);
+    assert_eq!(opened, vec![7, 11], "the relay's subgroup streams follow its control stream");
+    assert!(opened.iter().all(|id| id % 4 == 3), "server-initiated unidirectional: {opened:?}");
+
+    for event in events {
+        if let EventData::ObjectHeader { stream_id, .. } = event.data {
+            assert!(opened.contains(&stream_id), "object on unopened stream {stream_id}");
+        }
+    }
+
+    let mut streams: Vec<u64> = control.iter().filter_map(|(_, id)| *id).chain(opened).collect();
+    streams.sort_unstable();
+    streams.dedup();
+    assert_eq!(streams, vec![0, 2, 3, 7, 11]);
 }
