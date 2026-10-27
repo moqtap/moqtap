@@ -122,6 +122,7 @@ fn proxy_event_control_message() {
     let event = ProxyEvent::ControlMessage {
         session_id: SessionId(1),
         side: ProxySide::ClientToProxy,
+        stream_id: Some(2),
         message: msg,
     };
     let debug = format!("{event:?}");
@@ -176,6 +177,7 @@ fn proxy_event_object() {
     let event = ProxyEvent::Object {
         session_id: SessionId(1),
         side: ProxySide::ProxyToClient,
+        stream_id: 7,
         meta: ObjectMeta {
             draft: DraftVersion::Draft19,
             stream_kind: DataStreamType::Subgroup,
@@ -197,15 +199,31 @@ fn proxy_event_object() {
 
 #[test]
 fn proxy_event_stream_events() {
-    let bi =
-        ProxyEvent::BiStreamOpened { session_id: SessionId(1), side: ProxySide::ClientToProxy };
-    let uni =
-        ProxyEvent::UniStreamOpened { session_id: SessionId(2), side: ProxySide::RelayToProxy };
-    let closed =
-        ProxyEvent::StreamClosed { session_id: SessionId(3), side: ProxySide::ProxyToRelay };
+    let bi = ProxyEvent::BiStreamOpened {
+        session_id: SessionId(1),
+        side: ProxySide::ClientToProxy,
+        stream_id: 4,
+    };
+    let uni = ProxyEvent::UniStreamOpened {
+        session_id: SessionId(2),
+        side: ProxySide::RelayToProxy,
+        stream_id: 7,
+    };
+    let closed = ProxyEvent::StreamClosed {
+        session_id: SessionId(3),
+        side: ProxySide::ProxyToRelay,
+        stream_id: 6,
+    };
+    let reset = ProxyEvent::StreamReset {
+        session_id: SessionId(4),
+        side: ProxySide::RelayToProxy,
+        stream_id: 11,
+        code: 3,
+    };
     assert!(format!("{bi:?}").contains("BiStreamOpened"));
-    assert!(format!("{uni:?}").contains("UniStreamOpened"));
+    assert!(format!("{uni:?}").contains("stream_id: 7"));
     assert!(format!("{closed:?}").contains("StreamClosed"));
+    assert!(format!("{reset:?}").contains("stream_id: 11"));
 }
 
 #[test]

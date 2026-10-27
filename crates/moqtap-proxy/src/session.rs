@@ -1985,7 +1985,12 @@ async fn propagate_reset(
         report_unconfirmed(st, report);
         st.deferred.clear();
         let _ = send.reset(code);
-        ctx.emit(|| ProxyEvent::StreamReset { session_id: ctx.session_id, side, code });
+        ctx.emit(|| ProxyEvent::StreamReset {
+            session_id: ctx.session_id,
+            side,
+            stream_id: st.stream_id,
+            code,
+        });
         return;
     }
 
@@ -2051,6 +2056,7 @@ fn propagate_stop(
     recv: &mut PeekedRecv,
     st: &mut StreamState<'_>,
     side: ProxySide,
+    dest_stream_id: u64,
     ctx: &ForwardCtx,
     report: &exec::Reporter<'_>,
 ) {
@@ -2060,6 +2066,7 @@ fn propagate_stop(
         ctx.emit(|| ProxyEvent::StreamReset {
             session_id: ctx.session_id,
             side: reported_side,
+            stream_id: dest_stream_id,
             code,
         });
         let _ = run_stream_end(StreamEnd::Stopped { code }, st, side, ctx, report);
@@ -2391,6 +2398,7 @@ async fn forward_control_stream(
     ctx.emit(|| ProxyEvent::BiStreamOpened {
         session_id: ctx.session_id,
         side: ProxySide::ClientToProxy,
+        stream_id: client_recv.stream_id(),
     });
 
     // Open bi to relay
@@ -2398,6 +2406,7 @@ async fn forward_control_stream(
     ctx.emit(|| ProxyEvent::BiStreamOpened {
         session_id: ctx.session_id,
         side: ProxySide::ProxyToRelay,
+        stream_id: relay_send.stream_id(),
     });
 
     // Pipe client→relay and relay→client concurrently
@@ -2863,12 +2872,17 @@ async fn forward_request_streams(
         // A task the session has to abort is a task whose abort yields, and
         // the drains get their turn.
         let (source_send, source_recv) = source.accept_bi().await?;
-        ctx.emit(|| ProxyEvent::BiStreamOpened { session_id: ctx.session_id, side });
+        ctx.emit(|| ProxyEvent::BiStreamOpened {
+            session_id: ctx.session_id,
+            side,
+            stream_id: source_recv.stream_id(),
+        });
 
         let (dest_send, dest_recv) = dest.open_bi().await?;
         ctx.emit(|| ProxyEvent::BiStreamOpened {
             session_id: ctx.session_id,
             side: egress_side(side),
+            stream_id: dest_send.stream_id(),
         });
 
         // Two directions, two keys, two registrations — the rule every
@@ -3277,6 +3291,7 @@ async fn pipe_control_passthrough(
     ctx: &ForwardCtx,
 ) -> Result<(), ProxyError> {
     let stream_id = recv.stream_id();
+    let dest_stream_id = send.stream_id();
     let mut buf = [0u8; 8192];
 
     // Where the destination stream's message boundaries are — the only
@@ -3461,7 +3476,15 @@ async fn pipe_control_passthrough(
                                 pending: &mut pending,
                                 deferred: &mut deferred,
                             };
-                            propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                            propagate_stop(
+                                &e,
+                                &mut recv,
+                                &mut st,
+                                side,
+                                dest_stream_id,
+                                ctx,
+                                &report,
+                            );
                             return Err(e);
                         }
 
@@ -3482,12 +3505,13 @@ async fn pipe_control_passthrough(
                                     &forwarded,
                                     &mut refused_seen,
                                     side,
+                                    stream_id,
                                     ctx,
                                     &report,
                                 );
                             }
                         } else if let Some(p) = parser.as_mut() {
-                            emit_parsed_frames(p, data, &mut refused_seen, side, ctx, &report);
+                            emit_parsed_frames(p, data, &mut refused_seen, side, stream_id, ctx, &report);
                         }
                     }
                     None => {
@@ -3506,6 +3530,7 @@ async fn pipe_control_passthrough(
                         ctx.emit(|| ProxyEvent::StreamClosed {
                             session_id: ctx.session_id,
                             side,
+                            stream_id,
                         });
                         let _ = send.finish();
                         return Ok(());
@@ -3542,7 +3567,15 @@ async fn pipe_control_passthrough(
                                     pending: &mut pending,
                                     deferred: &mut deferred,
                                 };
-                                propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                                propagate_stop(
+                                    &e,
+                                    &mut recv,
+                                    &mut st,
+                                    side,
+                                    dest_stream_id,
+                                    ctx,
+                                    &report,
+                                );
                                 return Err(e);
                             }
                         } else {
@@ -3566,7 +3599,7 @@ async fn pipe_control_passthrough(
                         pending: &mut pending,
                         deferred: &mut deferred,
                     };
-                    propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                    propagate_stop(&e, &mut recv, &mut st, side, dest_stream_id, ctx, &report);
                     return Err(e);
                 }
             }
@@ -3617,6 +3650,7 @@ async fn pipe_control_mutating(
     ctx: &ForwardCtx,
 ) -> Result<(), ProxyError> {
     let stream_id = recv.stream_id();
+    let dest_stream_id = send.stream_id();
     let mut buf = [0u8; 8192];
 
     // No `ControlFrameWalker` here, and none is needed: this pipe withholds
@@ -3780,7 +3814,15 @@ async fn pipe_control_mutating(
                                     pending: &mut pending,
                                     deferred: &mut deferred,
                                 };
-                                propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                                propagate_stop(
+                                    &e,
+                                    &mut recv,
+                                    &mut st,
+                                    side,
+                                    dest_stream_id,
+                                    ctx,
+                                    &report,
+                                );
                                 return Err(e);
                             }
                         }
@@ -3806,6 +3848,7 @@ async fn pipe_control_mutating(
                         ctx.emit(|| ProxyEvent::StreamClosed {
                             session_id: ctx.session_id,
                             side,
+                            stream_id,
                         });
                         let _ = send.finish();
                         return Ok(());
@@ -3854,7 +3897,7 @@ async fn pipe_control_mutating(
                             pending: &mut pending,
                             deferred: &mut deferred,
                         };
-                        propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                        propagate_stop(&e, &mut recv, &mut st, side, dest_stream_id, ctx, &report);
                         return Err(e);
                     }
                 }
@@ -3895,7 +3938,15 @@ async fn pipe_control_mutating(
                                     pending: &mut pending,
                                     deferred: &mut deferred,
                                 };
-                                propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                                propagate_stop(
+                                    &e,
+                                    &mut recv,
+                                    &mut st,
+                                    side,
+                                    dest_stream_id,
+                                    ctx,
+                                    &report,
+                                );
                                 return Err(e);
                             }
                         } else {
@@ -3916,7 +3967,7 @@ async fn pipe_control_mutating(
                         pending: &mut pending,
                         deferred: &mut deferred,
                     };
-                    propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                    propagate_stop(&e, &mut recv, &mut st, side, dest_stream_id, ctx, &report);
                     return Err(e);
                 }
             }
@@ -4164,7 +4215,12 @@ async fn forward_mutated_frames(
             }
 
             if ctx.observer_enabled {
-                ctx.observer.on_event(&control_event(ctx.session_id, side, frame.message));
+                ctx.observer.on_event(&control_event(
+                    ctx.session_id,
+                    side,
+                    stream_id,
+                    frame.message,
+                ));
             }
         }
     }
@@ -4185,6 +4241,7 @@ fn emit_parsed_frames(
     data: &[u8],
     refused_seen: &mut u64,
     side: ProxySide,
+    stream_id: u64,
     ctx: &ForwardCtx,
     report: &exec::Reporter<'_>,
 ) {
@@ -4214,7 +4271,12 @@ fn emit_parsed_frames(
                 // bytes were forwarded before this function was called, so
                 // the impairment above is the whole of what is owed here.
                 if let ParsedItem::Frame(frame) = item {
-                    ctx.observer.on_event(&control_event(ctx.session_id, side, frame.message));
+                    ctx.observer.on_event(&control_event(
+                        ctx.session_id,
+                        side,
+                        stream_id,
+                        frame.message,
+                    ));
                 }
             }
         }
@@ -4329,12 +4391,14 @@ fn report_refused_frames(
 fn control_event(
     session_id: SessionId,
     side: ProxySide,
+    stream_id: u64,
     message: moqtap_codec::dispatch::AnyControlMessage,
 ) -> ProxyEvent {
+    let stream_id = Some(stream_id);
     if message.is_setup() {
-        ProxyEvent::SetupMessage { session_id, side, message }
+        ProxyEvent::SetupMessage { session_id, side, stream_id, message }
     } else {
-        ProxyEvent::ControlMessage { session_id, side, message }
+        ProxyEvent::ControlMessage { session_id, side, stream_id, message }
     }
 }
 
@@ -4402,6 +4466,7 @@ async fn forward_uni_streams(
                 ctx.emit(|| ProxyEvent::UniStreamOpened {
                     session_id: ctx.session_id,
                     side,
+                    stream_id,
                 });
 
                 // What the `Site::StreamOpen` decision changed about how
@@ -4768,6 +4833,7 @@ async fn pipe_data_passthrough(
     ctx: &ForwardCtx,
 ) -> Result<(), ProxyError> {
     let stream_id = recv.stream_id();
+    let dest_stream_id = send.stream_id();
     let mut buf = [0u8; 8192];
     let mut serving_requests = true;
 
@@ -4815,7 +4881,15 @@ async fn pipe_data_passthrough(
                                 pending: &mut pending,
                                 deferred: &mut deferred,
                             };
-                            propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                            propagate_stop(
+                                &e,
+                                &mut recv,
+                                &mut st,
+                                side,
+                                dest_stream_id,
+                                ctx,
+                                &report,
+                            );
                             return Err(e);
                         }
                     }
@@ -4844,6 +4918,7 @@ async fn pipe_data_passthrough(
                         ctx.emit(|| ProxyEvent::StreamClosed {
                             session_id: ctx.session_id,
                             side,
+                            stream_id,
                         });
                         let _ = send.finish();
                         return Ok(());
@@ -4883,7 +4958,7 @@ async fn pipe_data_passthrough(
                         pending: &mut pending,
                         deferred: &mut deferred,
                     };
-                    propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                    propagate_stop(&e, &mut recv, &mut st, side, dest_stream_id, ctx, &report);
                     return Err(e);
                 }
             }
@@ -4941,6 +5016,7 @@ async fn pipe_data_framed(
     let draft = ctx.resolved_draft().await;
     let caps = Capabilities::for_draft(draft);
     let stream_id = recv.stream_id();
+    let dest_stream_id = send.stream_id();
     let mut buf = [0u8; 8192];
     let mut serving_requests = true;
     let mut framer: Option<ObjectFramer> = None;
@@ -5107,6 +5183,7 @@ async fn pipe_data_framed(
                                     ctx.emit(|| ProxyEvent::DataStreamHeader {
                                         session_id: ctx.session_id,
                                         side,
+                                        stream_id,
                                         header: header.clone(),
                                     });
                                     if let DataStreamHeaderKind::Subgroup(h) = &header {
@@ -5344,6 +5421,7 @@ async fn pipe_data_framed(
                                     ctx.emit(|| ProxyEvent::Object {
                                         session_id: ctx.session_id,
                                         side,
+                                        stream_id,
                                         meta,
                                     });
                                     if !ctx.object_hook {
@@ -5393,7 +5471,12 @@ async fn pipe_data_framed(
                                                         deferred: &mut deferred,
                                                     };
                                                     propagate_stop(
-                                                        &e, &mut recv, &mut st, side, ctx,
+                                                        &e,
+                                                        &mut recv,
+                                                        &mut st,
+                                                        side,
+                                                        dest_stream_id,
+                                                        ctx,
                                                         &report,
                                                     );
                                                     return Err(e);
@@ -5430,7 +5513,12 @@ async fn pipe_data_framed(
                                                         deferred: &mut deferred,
                                                     };
                                                     propagate_stop(
-                                                        &e, &mut recv, &mut st, side, ctx,
+                                                        &e,
+                                                        &mut recv,
+                                                        &mut st,
+                                                        side,
+                                                        dest_stream_id,
+                                                        ctx,
                                                         &report,
                                                     );
                                                     return Err(e);
@@ -5589,7 +5677,15 @@ async fn pipe_data_framed(
                                         pending: &mut pending,
                                         deferred: &mut deferred,
                                     };
-                                    propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                                    propagate_stop(
+                                        &e,
+                                        &mut recv,
+                                        &mut st,
+                                        side,
+                                        dest_stream_id,
+                                        ctx,
+                                        &report,
+                                    );
                                     return Err(e);
                                 }
                             }
@@ -5624,7 +5720,15 @@ async fn pipe_data_framed(
                                         pending: &mut pending,
                                         deferred: &mut deferred,
                                     };
-                                    propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                                    propagate_stop(
+                                        &e,
+                                        &mut recv,
+                                        &mut st,
+                                        side,
+                                        dest_stream_id,
+                                        ctx,
+                                        &report,
+                                    );
                                     return Err(e);
                                 }
                             }
@@ -5657,6 +5761,7 @@ async fn pipe_data_framed(
                         ctx.emit(|| ProxyEvent::StreamClosed {
                             session_id: ctx.session_id,
                             side,
+                            stream_id,
                         });
                         let _ = send.finish();
                         return Ok(());
@@ -5701,7 +5806,7 @@ async fn pipe_data_framed(
                             pending: &mut pending,
                             deferred: &mut deferred,
                         };
-                        propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                        propagate_stop(&e, &mut recv, &mut st, side, dest_stream_id, ctx, &report);
                         return Err(e);
                     }
                 }
@@ -5737,7 +5842,7 @@ async fn pipe_data_framed(
                         pending: &mut pending,
                         deferred: &mut deferred,
                     };
-                    propagate_stop(&e, &mut recv, &mut st, side, ctx, &report);
+                    propagate_stop(&e, &mut recv, &mut st, side, dest_stream_id, ctx, &report);
                     return Err(e);
                 }
             }

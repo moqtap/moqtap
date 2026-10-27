@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-27
+
+### Changed
+
+- Stream, object and close events carry the QUIC stream ID; `ControlMessage` and `SetupMessage` carry `stream_id: Option<u64>`.
+- Requires `moqtap-client` 0.8.2 and `quinn-netem` 0.2.0. Every `stream_id`, hook contexts included, is the full QUIC stream ID rather than quinn's stream index.
+
 ## [0.8.1] - 2026-10-03
 
 ### Changed

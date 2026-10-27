@@ -95,6 +95,8 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side sent the message.
         side: ProxySide,
+        /// QUIC stream ID the message arrived on, on `side`'s connection; `None` if unknown.
+        stream_id: Option<u64>,
         /// The decoded setup message.
         message: AnyControlMessage,
     },
@@ -105,6 +107,8 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side sent the message.
         side: ProxySide,
+        /// QUIC stream ID the message arrived on, on `side`'s connection; `None` if unknown.
+        stream_id: Option<u64>,
         /// The decoded control message.
         message: AnyControlMessage,
     },
@@ -115,6 +119,8 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side opened the stream.
         side: ProxySide,
+        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        stream_id: u64,
         /// The parsed header.
         header: DataStreamHeaderKind,
     },
@@ -146,6 +152,8 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side sent the object.
         side: ProxySide,
+        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        stream_id: u64,
         /// The object's identity and framing, without its payload.
         meta: ObjectMeta,
     },
@@ -189,6 +197,8 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side opened the stream.
         side: ProxySide,
+        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        stream_id: u64,
     },
 
     /// A unidirectional stream was opened or accepted.
@@ -197,6 +207,8 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side opened the stream.
         side: ProxySide,
+        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        stream_id: u64,
     },
 
     /// Inline parse failed (non-fatal — bytes are still forwarded).
@@ -219,6 +231,8 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side closed.
         side: ProxySide,
+        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        stream_id: u64,
     },
 
     /// A peer tore a stream down abnormally — either `RESET_STREAM` from
@@ -242,6 +256,8 @@ pub enum ProxyEvent {
         /// this is the ingress side the bytes were arriving on; for a
         /// `STOP_SENDING` it is the egress side they were leaving on.
         side: ProxySide,
+        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        stream_id: u64,
         /// The peer's application error code, forwarded verbatim.
         code: u64,
     },
