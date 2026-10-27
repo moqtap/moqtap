@@ -76,11 +76,12 @@
 //!
 //! # Where the era split shows up on the data plane
 //!
-//! `stream_id()` reports a stream's ordinal within its own (initiator,
-//! directionality) class. Drafts 07 through 16 carry control on a bidirectional
-//! stream, so the first subgroup either side opens is its first unidirectional
-//! stream: ordinal `0`. From draft-17 control moved to one unidirectional
-//! stream each way, which takes that ordinal, and the subgroup is `1`. Both
+//! `stream_id()` reports the QUIC stream ID, which is 4 * ordinal plus the
+//! stream's (initiator, directionality) class (RFC 9000 Section 2.1). Drafts 07
+//! through 16 carry control on a bidirectional stream, so the first subgroup
+//! either side opens is its first unidirectional stream: ordinal `0`. From
+//! draft-17 control moved to one unidirectional stream each way, which takes
+//! that ordinal, and the subgroup is `1`. Both
 //! ends are asserted, which is what makes the number the transport's rather
 //! than a counter of subgroups kept beside it.
 //!
@@ -367,9 +368,9 @@ macro_rules! draft_setup_parameters {
 /// Where the first subgroup stream falls among the unidirectional streams its
 /// own side opened.
 ///
-/// `stream_id()` reports quinn's `StreamId::index()` — the stream's ordinal
-/// within its own (initiator, directionality) class, not the raw QUIC stream
-/// number — and that ordinal is where the era split shows up on the data plane.
+/// `stream_id()` reports the QUIC stream ID, 4 * ordinal plus the stream's
+/// (initiator, directionality) class, and the ordinal is where the era split
+/// shows up on the data plane.
 /// Drafts 07 through 16 carry control on a **bidirectional** stream, so the
 /// first subgroup either side opens is the first unidirectional stream it has
 /// opened at all. From draft-17 control moved to one unidirectional stream each
@@ -487,9 +488,10 @@ macro_rules! subgroup_gate {
                 .expect("opening the subgroup did not finish")
                 .expect("open a subgroup stream");
                 assert_eq!(writer.draft(), DRAFT, "the writer reports the draft framing it");
+                // Client-initiated unidirectional: 4 * ordinal + 2.
                 assert_eq!(
                     writer.stream_id(),
-                    first_subgroup_index!($handshake),
+                    first_subgroup_index!($handshake) * 4 + 2,
                     "the number reported has to be the transport's own, and on this draft the \
                      control stream has {} unidirectional streams of this side's ahead of it",
                     first_subgroup_index!($handshake),
@@ -511,9 +513,10 @@ macro_rules! subgroup_gate {
                     .expect("the echoed subgroup never arrived")
                     .expect("accept the echoed subgroup");
                 assert_eq!(reader.draft(), DRAFT, "the reader reports the draft framing it");
+                // Server-initiated unidirectional: 4 * ordinal + 3.
                 assert_eq!(
                     reader.stream_id(),
-                    first_subgroup_index!($handshake),
+                    first_subgroup_index!($handshake) * 4 + 3,
                     "the peer's control stream sits ahead of its subgroup on exactly the drafts \
                      where it is unidirectional, and the number reported must show it"
                 );

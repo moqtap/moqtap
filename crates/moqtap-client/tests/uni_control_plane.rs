@@ -3650,17 +3650,14 @@ macro_rules! uni_control_plane_gates {
                             )
                         });
                 assert_eq!(subscribe_id(&request), OTHER_PEER_REQUEST_ID);
-                // The two handles are deliberately not compared by
-                // `stream_id`. `RequestStream::stream_id` reports quinn's
-                // `StreamId::index`, which counts within a (direction,
-                // initiator) class and so numbers the first stream each side
-                // opens 0 — the outbound request and the inbound one both
-                // answer 0 here. That the two are distinct streams is asserted
-                // where it is observable instead: the peer reads the inbound
-                // answer off the receive half of the stream it opened, and the
-                // outbound answer arrives through the handle this endpoint
-                // opened.
-                //
+                // Client-initiated bidirectional streams are 0 mod 4,
+                // server-initiated ones 1 mod 4 (RFC 9000 Section 2.1).
+                assert_eq!(
+                    (outbound.stream_id() % 4, inbound.stream_id() % 4),
+                    (0, 1),
+                    "{}: the outbound request is on this endpoint's stream, the inbound on the peer's",
+                    $draft_label
+                );
                 // The parity rule is what lets one map per request kind serve
                 // both directions: the ids can never collide.
                 assert_eq!(

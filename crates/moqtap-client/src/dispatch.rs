@@ -1483,12 +1483,8 @@ impl AnyRequest {
     /// correlation drafts 17-19 offer — gets `Some` exactly when the draft
     /// provides one.
     ///
-    /// The number is quinn's `StreamId::index()`, an ordinal within the
-    /// stream's own (initiator, directionality) class rather than the QUIC
-    /// stream number; every request stream is client-initiated and
-    /// bidirectional, so within that use the ordinals separate cleanly. See
-    /// [`AnySubgroupWriter::stream_id`], where the distinction matters because
-    /// data streams and control streams are not of one class.
+    /// The number is the QUIC stream ID (RFC 9000 Section 2.1), as on
+    /// [`AnySubgroupWriter::stream_id`].
     pub fn stream_id(&self) -> Option<u64> {
         match self {
             Self::ControlPlane { .. } => None,
@@ -1861,14 +1857,8 @@ impl AnySubgroupWriter {
     /// subgroup stream *is* a stream on every draft, so there is no era for the
     /// option to describe.
     ///
-    /// The number is the transport's own, and it is quinn's `StreamId::index()`
-    /// — the stream's ordinal **within its (initiator, directionality) class**
-    /// rather than the QUIC stream number. So the first unidirectional stream
-    /// this side opens reports `0` whatever else is open, and a number from
-    /// here identifies a stream only alongside who opened it and which way it
-    /// runs. That is what [`AnyRequest::stream_id`] reports too, where all the
-    /// streams being compared are of one class and the ordinal separates them
-    /// cleanly.
+    /// The number is the QUIC stream ID (RFC 9000 Section 2.1): its low two
+    /// bits say who opened the stream and which way it runs.
     pub fn stream_id(&self) -> u64 {
         data_stream_dispatch! {
             AnySubgroupWriter, self,

@@ -382,9 +382,11 @@ macro_rules! fetch_gate {
                     .expect("the fetch stream never arrived")
                     .expect("accept the fetch stream");
                 assert_eq!(reader.draft(), DRAFT, "the reader reports the draft framing it");
+                // A server-initiated unidirectional stream's ID is 4 * ordinal + 3
+                // (RFC 9000 Section 2.1).
                 assert_eq!(
                     reader.stream_id(),
-                    first_uni_index!($handshake),
+                    first_uni_index!($handshake) * 4 + 3,
                     "the number reported has to be the transport's own, and on this draft the \
                      peer's control stream has {} unidirectional streams ahead of the fetch",
                     first_uni_index!($handshake),
