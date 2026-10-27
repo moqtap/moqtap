@@ -193,16 +193,6 @@ fn fetch_cannot_fetch_error_from_receiving() {
 /// the End Location is known." A publisher that has the whole range to hand and
 /// is still working out its End Location delivers the response first, so the
 /// stream can finish while the answer is still owed.
-///
-/// # Ablation, run
-///
-/// Deleting the `FetchState::Pending` arm of `on_stream_fin`, which narrows
-/// the graph past what the draft allows:
-///
-/// ```text
-/// on_stream_fin from Pending should succeed: InvalidTransition {
-/// from: Pending, event: "on_stream_fin" }
-/// ```
 #[test]
 fn fetch_pending_to_unanswered_via_fin() {
     let mut sm = FetchStateMachine::new();
@@ -217,16 +207,6 @@ fn fetch_pending_to_unanswered_via_fin() {
 /// canceled due to congestion or other reasons by either the publisher or
 /// subscriber." A stream reset settles the delivery half of a fetch the same way
 /// a FIN does, and says nothing about the answer.
-///
-/// # Ablation, run
-///
-/// The same arm deleted from `on_stream_reset`, which is a second copy of
-/// it and not the one above:
-///
-/// ```text
-/// on_stream_reset from Pending should succeed: InvalidTransition {
-/// from: Pending, event: "on_stream_reset" }
-/// ```
 #[test]
 fn fetch_pending_to_unanswered_via_reset() {
     let mut sm = FetchStateMachine::new();
@@ -240,17 +220,6 @@ fn fetch_pending_to_unanswered_via_reset() {
 /// relative to object delivery." After the delivery, then, and the FETCH_OK that
 /// arrives once the objects are all through is the last thing the fetch was
 /// waiting for.
-///
-/// # Ablation, run
-///
-/// Sending the trailing FETCH_OK to `Receiving` rather than `Done` — an
-/// answer that arrives but does not end the fetch:
-///
-/// ```text
-/// assertion `left == right` failed
-///   left: Receiving
-///  right: Done
-/// ```
 #[test]
 fn fetch_unanswered_to_done_via_fetch_ok() {
     let mut sm = FetchStateMachine::new();
@@ -267,15 +236,6 @@ fn fetch_unanswered_to_done_via_fetch_ok() {
 /// immediately or wait until the cached objects have been delivered before
 /// resetting the stream." Waiting is the order gated here: the stream ends and
 /// the error follows it.
-///
-/// # Ablation, run
-///
-/// Dropping `Unanswered` from `on_fetch_error`'s pattern:
-///
-/// ```text
-/// on_fetch_error from Unanswered should succeed: InvalidTransition {
-/// from: Unanswered, event: "on_fetch_error" }
-/// ```
 #[test]
 fn fetch_unanswered_to_done_via_error() {
     let mut sm = FetchStateMachine::new();
@@ -290,15 +250,6 @@ fn fetch_unanswered_to_done_via_error() {
 /// draft-14 Section 9.19: a FETCH_CANCEL says the subscriber "is no longer
 /// interested in receiving objects for the fetch". A subscriber whose stream has
 /// ended with no answer may stop waiting for one.
-///
-/// # Ablation, run
-///
-/// Dropping `Unanswered` from `on_fetch_cancel`'s pattern:
-///
-/// ```text
-/// on_fetch_cancel from Unanswered should succeed: InvalidTransition {
-/// from: Unanswered, event: "on_fetch_cancel" }
-/// ```
 #[test]
 fn fetch_unanswered_to_done_via_cancel() {
     let mut sm = FetchStateMachine::new();
@@ -331,16 +282,6 @@ fn fetch_full_lifecycle_with_the_answer_last() {
 /// "can reset the unidirectional stream", immediately or after the cached
 /// objects. Either way the reset arrives at a fetch the error has already ended,
 /// and it is expected rather than wrong.
-///
-/// # Ablation, run
-///
-/// Deleting the `FetchState::Done` arm from both stream events, so a fetch
-/// that has ended treats its own stream closing as a violation:
-///
-/// ```text
-/// a reset after the error should be tolerated: InvalidTransition {
-/// from: Done, event: "on_stream_reset" }
-/// ```
 #[test]
 fn fetch_done_ignores_the_close_that_follows_an_error() {
     let mut sm = FetchStateMachine::new();
@@ -356,15 +297,6 @@ fn fetch_done_ignores_the_close_that_follows_an_error() {
 /// unidirectional stream, even if it is in the middle of delivering an object."
 /// So every cancel is followed by a close, and refusing it would make an error
 /// out of the one thing the cancel was for.
-///
-/// # Ablation, run
-///
-/// The same deletion, reaching the other of the two events:
-///
-/// ```text
-/// a FIN after the cancel should be tolerated: InvalidTransition {
-/// from: Done, event: "on_stream_fin" }
-/// ```
 #[test]
 fn fetch_done_ignores_the_close_that_follows_a_cancel() {
     let mut sm = FetchStateMachine::new();
@@ -380,15 +312,6 @@ fn fetch_done_ignores_the_close_that_follows_a_cancel() {
 /// draft-14 Section 9.16.3: "The Objects in the response are delivered on a
 /// single unidirectional stream." One stream ends once, so a second ending for a
 /// fetch still waiting on its answer is the driver's mistake and not the peer's.
-///
-/// # Ablation, run
-///
-/// Adding `FetchState::Unanswered => Ok(())` to `on_stream_fin`, which is
-/// the tolerant answer given to a state that has not earned it:
-///
-/// ```text
-/// on_stream_fin from Unanswered should fail
-/// ```
 #[test]
 fn fetch_cannot_stream_fin_from_unanswered() {
     let mut sm = FetchStateMachine::new();

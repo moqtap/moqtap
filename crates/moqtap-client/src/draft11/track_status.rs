@@ -1,6 +1,6 @@
-/// TrackStatus lifecycle states (draft-10).
+/// TrackStatus lifecycle states (draft-11).
 ///
-/// Draft-07 TRACK_STATUS is a single request/response pair:
+/// Draft-11 TRACK_STATUS is a single request/response pair:
 /// the requester sends TRACK_STATUS_REQUEST, and the publisher
 /// replies with TRACK_STATUS. There are no OK / ERROR variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub enum TrackStatusError {
     },
 }
 
-/// Pure state machine for a MoQT track status request (draft-10).
+/// Pure state machine for a MoQT track status request (draft-11).
 /// Transitions: Idle → Pending → Done.
 pub struct TrackStatusStateMachine {
     state: TrackStatusState,

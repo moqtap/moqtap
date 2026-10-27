@@ -52,15 +52,6 @@
 //! refuse the second, and the relation it forbids is worded three different
 //! ways across the range. Judging it needs this record and is a rule of its
 //! own; nothing here decides it.
-//!
-//! # Ablations, measured
-//!
-//! Nine cuts are recorded here, each made, run and reverted, and each sitting on
-//! the gate it reddens - from 1 failing test to 103. Three gates carry no cut:
-//! the two that check a second answer is refused are measured by the cuts on the
-//! gates above them, and the one naming a request that never arrived is refused
-//! by an empty record whether or not the lookup reads its key, so only the cut
-//! that makes the lookup ignore the key can move it.
 
 #![allow(clippy::items_after_test_module)]
 

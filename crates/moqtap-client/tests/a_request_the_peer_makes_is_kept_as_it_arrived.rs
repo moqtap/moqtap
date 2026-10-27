@@ -29,10 +29,6 @@
 //! recorded on arrival and only on arrival, which is what makes
 //! "did the peer ask this" a question the endpoint can answer at all. The last
 //! gate in each group is the one that says so.
-//!
-//! # Ablations, measured
-//!
-//! Recorded on the gates they redden.
 
 use moqtap_codec::types::TrackNamespace;
 use moqtap_codec::varint::VarInt;

@@ -27,36 +27,6 @@
 //! * An object written before any subgroup header is refused, because there is
 //!   no stream state for it to be measured against and the bytes would land
 //!   in front of the header that frames them.
-//!
-//! # Recorded failures
-//!
-//! Each was produced by making the change and running the tests, on draft-07.
-//!
-//! Dropping the comparison - keeping the state but never reading it:
-//!
-//! ```text
-//! an object may not repeat the id of the one before it: Ok(())
-//! ```
-//!
-//! Refusing only an id equal to the last one, letting a smaller one through:
-//!
-//! ```text
-//! an object may not go backwards: Ok(())
-//! ```
-//!
-//! Moving the mark to the id of a refused object instead of leaving it on the
-//! last one written:
-//!
-//! ```text
-//! the mark stays on the last object written, not the last one refused: Ok(())
-//! ```
-//!
-//! Seeding the state in `FramedSendStream::new` instead of in
-//! `write_subgroup_header`:
-//!
-//! ```text
-//! an object cannot precede the header that frames it: Ok(())
-//! ```
 
 mod common;
 

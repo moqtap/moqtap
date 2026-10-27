@@ -13,55 +13,6 @@
 //! kind each draft has needs its own arm in it. What each test below asserts is
 //! the consequence rather than the record: a cancelled request refuses the
 //! answer it would have taken a moment earlier.
-//!
-//! # Ablations, run
-//!
-//! Each arm is cut on its own, because a single cut stops at the first
-//! assertion that reaches it.
-//!
-//! Removing the `subscriptions` arm from draft-17's `cancel_request`:
-//!
-//! ```text
-//! a cancelled subscription must be recorded: UnknownRequest(0)
-//! ```
-//!
-//! Removing the `subscribe_tracks` arm from draft-18's — the seventh request
-//! kind, which draft-17 does not have:
-//!
-//! ```text
-//! a cancelled track subscription must be recorded: UnknownRequest(0)
-//! ```
-//!
-//! Narrowing `SubscriptionStateMachine::on_request_cancelled` on draft-19 back
-//! to `Active` alone, so a subscription may only be withdrawn once it has been
-//! answered:
-//!
-//! ```text
-//! a cancelled subscription must be recorded: Subscription(InvalidTransition
-//! { from: Subscribing, event: "on_request_cancelled" })
-//! ```
-//!
-//! Making `TrackStatusStateMachine::on_request_cancelled` refuse `Done` on
-//! draft-18:
-//!
-//! ```text
-//! a request that has already ended still accepts the cancel that follows it:
-//! TrackStatus(InvalidTransition { from: Done, event: "on_request_cancelled" })
-//! ```
-//!
-//! Letting draft-17's subscription machine take a cancel from `Idle`:
-//!
-//! ```text
-//! a request with no stream yet cannot be cancelled, and these accepted it:
-//! ["subscription"]
-//! ```
-//!
-//! And returning `Ok(())` from the end of draft-17's `cancel_request` instead
-//! of naming the id nothing carries:
-//!
-//! ```text
-//! `cancel_request` must refuse a request id nothing carries, got Ok(())
-//! ```
 
 #![cfg(all(feature = "draft17", feature = "draft18", feature = "draft19"))]
 

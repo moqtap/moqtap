@@ -24,7 +24,7 @@ pub enum SubscriptionError {
     },
 }
 
-/// Pure state machine for a MoQT subscription (draft-10).
+/// Pure state machine for a MoQT subscription (draft-11).
 /// Transitions: Idle → Subscribing → Active → Done.
 pub struct SubscriptionStateMachine {
     state: SubscriptionState,

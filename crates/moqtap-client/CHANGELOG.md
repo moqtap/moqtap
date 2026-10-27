@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.2] - 2026-10-26
+## [0.8.2] - 2026-10-27
 
 ### Added
 
 - `AnyConnection::publish` and `AnyConnection::publish_done` on drafts 12 through 22: offer the peer a track, and end an accepted offer.
 - `AnyConnection::subscribe_tracks` on drafts 18 through 22.
+
+### Changed
+
+- Documentation fixes.
 
 ### Fixed
 

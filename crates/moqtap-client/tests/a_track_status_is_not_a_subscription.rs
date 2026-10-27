@@ -60,20 +60,6 @@
 //! the drafts whose behaviour is most particular with no gate at all. The
 //! divergence is the reason to write more, not less, which is what
 //! `closing_gates!` is for.
-//!
-//! # Ablations, measured
-//!
-//! Four cuts are recorded on the six drafts that refuse, each run and reverted,
-//! each on the gate it reddens. Two of them let an update name a track status,
-//! on the four control-stream drafts and on the two stream-era ones; the other
-//! two are the guard cut in the withdrawal's handler and the guard widened past
-//! the one request kind the sentence is about.
-//!
-//! One gate carries no cut. The rule about an identifier the session never
-//! carried is a different sentence with a close code of its own, and nothing
-//! changed here touches the path that raises it.
-//!
-//! The two closing drafts carry a cut of their own, recorded on the gate below.
 
 #![allow(clippy::items_after_test_module)]
 
@@ -798,24 +784,6 @@ macro_rules! closing_gates {
             /// ended for some other reason would satisfy a state check on its
             /// own, and PROTOCOL_VIOLATION is the half of the sentence that
             /// reaches the peer.
-            ///
-            /// # Ablation, measured
-            ///
-            /// `track_statuses` put back into the updatable set, which is what
-            /// drafts 17 and 18 shipped and what the four gates above them
-            /// catch there:
-            ///
-            /// ```text
-            /// thread 'draft19::an_update_naming_a_track_status_the_peer_asked_for_closes_the_session'
-            /// panicked at crates\moqtap-client\tests\a_track_status_is_not_a_subscription.rs:
-            /// a track status is not one of the six kinds an update may name: ()
-            /// ```
-            ///
-            /// It reddens two — this gate on both closing drafts — out of 40.
-            /// The other two gates below stay green under it, because both fail
-            /// at the earlier check on *whose* request it is and never reach the
-            /// check on which kind it is. That is the measurement behind the
-            /// warning on the next one.
             #[test]
             fn an_update_naming_a_track_status_the_peer_asked_for_closes_the_session() {
                 let mut ep = asked();

@@ -33,54 +33,6 @@
 //! is about. `Endpoint` is public and role-agnostic, and the close code is on
 //! its public error type, so what a server built on it would put on the wire is
 //! exactly what these gates read.
-//!
-//! # Recorded failures
-//!
-//! Each was produced by making the change and running the tests.
-//!
-//! Dropping the guard:
-//!
-//! ```text
-//! a draft-07 server refuses a GOAWAY whatever it carries: ()
-//! ```
-//!
-//! Narrowing the guard to draft-08's rule - refusing only a GOAWAY that carries
-//! a URI:
-//!
-//! ```text
-//! this draft states the rule about the message, not about the URI: ()
-//! ```
-//!
-//! Widening the guard to both roles:
-//!
-//! ```text
-//! called `Result::unwrap()` on an `Err` value: GoAwayAtServer
-//! ```
-//!
-//! Refusing after the session has already been moved on rather than before:
-//!
-//! ```text
-//! assertion `left == right` failed: the refused URI was stored anyway
-//! ```
-//!
-//! Dropping `fail_session` from the guard - the state this draft shipped
-//! before the close was routed:
-//!
-//! ```text
-//! assertion `left == right` failed: the violation was reported and the
-//! session was left running
-//!   left: Active
-//!  right: Closed
-//! ```
-//!
-//! Deleting the close-table arm, leaving the state move in place:
-//!
-//! ```text
-//! assertion `left == right` failed: a session this endpoint ended has no
-//! code for the transport to close with
-//!   left: None
-//!  right: Some(ProtocolViolation)
-//! ```
 
 #![cfg(feature = "draft07")]
 

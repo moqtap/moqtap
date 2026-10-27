@@ -41,17 +41,6 @@
 //! PROTOCOL_VIOLATION for most of its neighbours. A gate that observed only
 //! that the connection ended would pass with either, and which rule was broken
 //! is the whole of what the peer is being told.
-//!
-//! # Ablations, measured
-//!
-//! Recorded on the gate below. A third, deleting the check in
-//! `receive_subscribe_ok`, is recorded in the in-process file and reddens this
-//! one too:
-//!
-//! ```text
-//! the second answer reused a live track's alias and was accepted:
-//! SubscribeOk(SubscribeOk { request_id: VarInt(2), track_alias: VarInt(7), parameters: [] })
-//! ```
 
 mod common;
 

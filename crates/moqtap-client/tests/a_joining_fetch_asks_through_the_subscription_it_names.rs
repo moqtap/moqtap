@@ -88,20 +88,6 @@
 //! that checks the handle and the wire agree about it is what makes the rest of
 //! the assertion mean anything.
 //!
-//! # Ablations, measured
-//!
-//! Three cuts, run and reverted:
-//!
-//! * Mapping `JoiningStart::Group` to the relative call on drafts 11 through 19
-//!   — **9 redden and 8 stay green**, and every one of the nine would have
-//!   stayed green too had its gate sent the relative form alone. That is the
-//!   half a one-form gate misses, and the reason each gate sends both.
-//! * Sending `JoiningStart::GroupsBefore` as the absolute form — the mirror,
-//!   **9 redden**.
-//! * Letting drafts 08 through 10 answer `JoiningStart::Group` with the relative
-//!   call instead of refusing — **3 redden**, and they are the three that say a
-//!   well-formed wrong question is worse than a refusal.
-//!
 //! # Why the shared items below carry `allow` and not `cfg`
 //!
 //! Four of the gates here — draft-07, draft-20, draft-21 and draft-22 — are

@@ -2465,18 +2465,6 @@ macro_rules! uni_control_plane_gates {
             /// which is the state a request stream is in for as long as the
             /// peer takes to reply. Section 3.3.1 and its equivalents put the
             /// cancel from the moment the stream is open.
-            ///
-            /// # Ablation, run
-            ///
-            /// Leaving `Connection::cancel_request_stream` on draft-17 with
-            /// nothing but the `RequestStream::cancel` it wraps, so the stream
-            /// is reset and the endpoint hears nothing. The reset half of this
-            /// gate still passes; the second half is what fails:
-            ///
-            /// ```text
-            /// draft-17: a SUBSCRIBE_OK answering a cancelled request must be
-            /// refused, got Ok(())
-            /// ```
             #[tokio::test]
             async fn cancelling_a_request_records_it_at_the_endpoint() {
                 let (mut conn, peer, mut seen) = connected().await;
@@ -2571,17 +2559,6 @@ macro_rules! uni_control_plane_gates {
             /// it. The read fails with the peer's own code — the caller has to
             /// see that rather than a state error — and the response this
             /// endpoint owed is refused afterwards.
-            ///
-            /// # Ablation, run
-            ///
-            /// Dropping the `StreamReset` arm from draft-18's
-            /// `recv_on_request_stream`, so the read still reports the peer's
-            /// code and the endpoint still believes the request is live:
-            ///
-            /// ```text
-            /// draft-18: the answer owed on a request the peer withdrew must
-            /// be refused, got Ok(())
-            /// ```
             #[tokio::test]
             async fn a_peers_reset_records_the_cancel() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -2646,18 +2623,6 @@ macro_rules! uni_control_plane_gates {
             /// so the read path above never runs for it. Without this the
             /// request would end on the wire and stay open in the endpoint for
             /// as long as the backpressure lasted.
-            ///
-            /// # Ablation, run
-            ///
-            /// Dropping the record from draft-19's
-            /// `peer_cancelled_on_request_stream`, so it becomes the handle's
-            /// own wait under a longer name. The code it reports is still
-            /// right, and only the record is missing:
-            ///
-            /// ```text
-            /// draft-19: the answer owed on a request the peer withdrew must
-            /// be refused, got Ok(())
-            /// ```
             #[tokio::test]
             async fn waiting_for_the_peers_cancel_records_it() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;

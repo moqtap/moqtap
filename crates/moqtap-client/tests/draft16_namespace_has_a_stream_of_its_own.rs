@@ -26,12 +26,6 @@
 //! subscription carries, so on the control stream those two messages name
 //! nothing at all — which is why the control stream refuses them rather than
 //! ignoring them.
-//!
-//! # Ablations
-//!
-//! Each is a single edit to `draft16/endpoint.rs` or `draft16/namespace.rs`,
-//! run and reverted, with the message it produced recorded on the test that
-//! caught it.
 
 use moqtap_client::draft16::endpoint::{Endpoint, EndpointError};
 use moqtap_client::draft16::namespace::SubscribeNamespaceState;

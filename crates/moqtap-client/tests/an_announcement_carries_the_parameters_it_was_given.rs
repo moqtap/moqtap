@@ -14,16 +14,6 @@
 //! Drafts 12 and 13 call it ANNOUNCE. Draft-14 renamed the message
 //! PUBLISH_NAMESPACE and the builder with it; nothing else about the field
 //! changed.
-//!
-//! # Ablations, measured
-//!
-//! One cut, run against the two crates a change to `moqtap-client` can reach
-//! and then reverted: the builder sends an empty list whatever it was given.
-//! It reddens three tests of the 3,458 in those crates - the first gate on
-//! each draft here -
-//! and leaves the other 164 test binaries green. The second gate on each draft
-//! is the control, and it stays green under the cut, which is the point of
-//! it.
 
 #![allow(clippy::items_after_test_module)]
 

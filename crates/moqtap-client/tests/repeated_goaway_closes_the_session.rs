@@ -44,22 +44,6 @@
 //! migration of two separate requests, something the same section permits in
 //! the sentence above. So they also assert that one GOAWAY on each of two
 //! request streams is accepted, and that the second on one of them is not.
-//!
-//! # Ablations, measured
-//!
-//! Four cuts, each made in every draft that carries the check, and each
-//! recorded on the test that caught it. The first two are made in all thirteen
-//! at once and fail in opposite directions: deleting the table arm leaves the
-//! endpoint refusing the second GOAWAY and ending its own session with no code
-//! for the connection layer to close with, so the thirteen wire gates fail and
-//! the thirteen in-process gates pass; dropping the state move is the other way
-//! round.
-//!
-//! The other two are drafts 18 and 19 only. Counting per session rather than
-//! per stream fails at the *second request's first* GOAWAY, which is the
-//! acceptance half rather than the refusal. Removing the GOAWAY arm from the
-//! peer-opened dispatcher fails one draft's own shipped behaviour and one that
-//! was already right, in the same place.
 
 mod common;
 

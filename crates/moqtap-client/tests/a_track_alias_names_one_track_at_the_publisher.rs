@@ -63,14 +63,6 @@
 //! transport would carry, and the loopback gate in
 //! `duplicate_track_alias_at_the_publisher_on_the_wire.rs` reads it off the
 //! CONNECTION_CLOSE.
-//!
-//! # Ablations, measured
-//!
-//! Nine cuts were made, run and reverted, each recorded on the gate it belongs
-//! to. The three halves of the rule come apart under them: cutting what judges
-//! an arriving SUBSCRIBE leaves both retry gates green, cutting the retry
-//! judge leaves the arriving one green, and cutting the refusal this endpoint
-//! makes of its own SUBSCRIBE leaves both.
 
 #![allow(clippy::items_after_test_module)]
 

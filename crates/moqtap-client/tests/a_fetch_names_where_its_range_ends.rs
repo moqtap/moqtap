@@ -42,14 +42,6 @@
 //! is what they are about. It is the caller's on all three drafts and is gated
 //! in `a_fetch_carries_the_parameters_it_was_given_on_the_earlier_drafts.rs`,
 //! over this same range, with drafts 15 through 20 in the file beside it.
-//!
-//! # Ablations, measured
-//!
-//! Four cuts were made, one per field the caller names, run
-//! against the two crates a change to `moqtap-client` can reach, and
-//! reverted. Drafts 12 and 13 build a joining fetch beside the
-//! standalone one and draft-14 does not, so the two cuts that fall on
-//! a line both builders share land twice there and once here.
 
 #![allow(clippy::items_after_test_module)]
 

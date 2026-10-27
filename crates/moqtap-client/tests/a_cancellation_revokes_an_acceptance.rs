@@ -43,14 +43,6 @@
 //! The sentence describes what a subscriber does, not what either end does
 //! about a wrong one. A cancellation with nothing to revoke is refused where it
 //! is asked for, and every gate below checks the session is still running.
-//!
-//! # Ablations, measured
-//!
-//! Four cuts are recorded here, each run and reverted, each on the gate it
-//! reddens. One of them reaches only five drafts, which is the five whose
-//! cancellation names a namespace while the announcement that opened it carried
-//! a Request ID: there and nowhere else can a namespace stand for an
-//! announcement that has ended.
 
 #![allow(clippy::items_after_test_module)]
 

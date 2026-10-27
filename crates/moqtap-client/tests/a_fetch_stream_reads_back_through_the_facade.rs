@@ -83,52 +83,6 @@
 //! That a relay serves a fetch. Nothing here dials one — the peer is a fixture
 //! that writes one fixed byte string per draft. What this settles is that the facade
 //! can read the answer.
-//!
-//! # Ablations, measured
-//!
-//! Three cuts, each made, run and reverted. Every one of them splits the suite
-//! along a boundary the drafts drew, which is what makes each normalisation
-//! load-bearing rather than incidental.
-//!
-//! `accept_fetch` ignoring its Group Order and starting every reader Ascending.
-//! **Three redden, twenty-two stay green** — exactly the drafts that delta-encode
-//! a Group ID, and only on the gate that reads a stream twice:
-//!
-//! ```text
-//! test result: FAILED. 22 passed; 3 failed
-//!
-//! under Descending the same delta subtracts, and the same bytes are a different answer
-//!   left: "group=5 … | group=6 subgroup=0 object=0 payload=bb status=none eor=none"
-//!  right: "group=5 … | group=4 subgroup=0 object=0 payload=bb status=none eor=none"
-//! ```
-//!
-//! The draft-16 arm reading the header's own fields instead of resolving them
-//! through `FetchObjectReader`. **Two redden, twenty-three stay green** — both of
-//! draft-16's, and no other draft's, because draft-16 is the only stream the
-//! facade resolves for:
-//!
-//! ```text
-//! test result: FAILED. 23 passed; 2 failed
-//!
-//!   left: "group=0 subgroup=none object=0 … | group=0 subgroup=none object=0 payload=cafe …"
-//!  right: "group=0 subgroup=0 object=0 … | group=0 subgroup=0 object=1 payload=cafe …"
-//! ```
-//!
-//! Note what the elision cost there: not a parse failure, but a **second object
-//! reported under the first one's Object ID**. A caller counting distinct objects
-//! would have seen one.
-//!
-//! `read_object` reporting `Some(status)` for every object on drafts 07 through
-//! 13 rather than only for the ones the wire carried a status for. **Seven
-//! redden** — exactly the drafts whose fetch object holds a status
-//! unconditionally, the same split the subgroup reader's own ablation produces:
-//!
-//! ```text
-//! test result: FAILED. 18 passed; 7 failed
-//!
-//!   left: "group=0 subgroup=0 object=0 payload=deadbeef status=0x0 eor=none | …"
-//!  right: "group=0 subgroup=0 object=0 payload=deadbeef status=none eor=none | …"
-//! ```
 
 mod common;
 

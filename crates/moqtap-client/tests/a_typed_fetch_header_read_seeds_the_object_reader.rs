@@ -60,25 +60,6 @@
 //! method is ever reached — is the call that needs the refill. It is public on
 //! drafts 15 through 20 and no caller in this workspace has one, so these gates
 //! are its only readers.
-//!
-//! # Ablations, measured
-//!
-//! Removing the `fetch_io` seeding from draft-15's `read_fetch_stream_header`,
-//! under `--features draft15`:
-//!
-//! ```text
-//! the typed header read must leave the stream able to read objects, and it did not: DataStreamState("fetch header not read yet")
-//! ```
-//!
-//! Dropping the `ensure(1)` and the `VarInt` arm, the refill half:
-//!
-//! ```text
-//! the typed accessor must read the header the writer wrote: Codec(VarInt(UnexpectedEnd))
-//! ```
-//!
-//! Two cuts because they fail in different places: the first gets a header and
-//! cannot read an object, the second never gets a header at all. A gate that
-//! only asserted the object read would report the same failure for both.
 
 mod common;
 

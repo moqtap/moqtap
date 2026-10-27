@@ -252,9 +252,9 @@ pub enum EndpointError {
     /// SUBSCRIBE_UPDATE named a Request ID this session has never carried a
     /// request under.
     ///
-    /// Section 9.2.1.7: "If the length of the Subscription Filter does not match
-    /// the parameter length, the publisher MUST close the session with
-    /// PROTOCOL_VIOLATION."
+    /// Section 9.11: "This MUST match an existing Request ID." The publisher
+    /// MUST close the session with PROTOCOL_VIOLATION "if the subscriber
+    /// specifies an invalid Subscription Request ID."
     ///
     /// A request that has **ended** is not this: it existed. That is why the
     /// record of an inbound SUBSCRIBE outlives the subscription, and why an
@@ -648,16 +648,6 @@ pub struct Endpoint {
     /// against the subscription it names, and that name is nowhere else.
     inbound_fetches: HashMap<u64, InboundFetch>,
     goaway_uri: Option<Vec<u8>>,
-    /// What Full Track Name the peer has attached each Track Alias to, per
-    /// Request ID.
-    ///
-    /// Sections 9.10 and 9.13 forbid one alias naming two tracks at once, and the
-    /// "at once" is what makes this a table rather than a set: an alias the
-    /// peer used for a track whose subscription has ended is free again. The
-    /// table therefore records the binding and reads liveness back off the
-    /// subscription's own state machine, rather than keeping a second copy of
-    /// it that every path ending a subscription would have to remember to
-    /// prune.
     /// What each track's objects have been framed as, so far.
     ///
     /// Behind a lock because this is the one endpoint fact a *data* stream
@@ -676,6 +666,16 @@ pub struct Endpoint {
     /// Behind an `Arc` because the stream that reads a track's objects holds a
     /// handle onto it and the endpoint cannot be reached from there.
     locations: Arc<Mutex<TrackLocations>>,
+    /// What Full Track Name the peer has attached each Track Alias to, per
+    /// Request ID.
+    ///
+    /// Sections 9.10 and 9.13 forbid one alias naming two tracks at once, and the
+    /// "at once" is what makes this a table rather than a set: an alias the
+    /// peer used for a track whose subscription has ended is free again. The
+    /// table therefore records the binding and reads liveness back off the
+    /// subscription's own state machine, rather than keeping a second copy of
+    /// it that every path ending a subscription would have to remember to
+    /// prune.
     track_bindings: HashMap<u64, TrackBinding>,
 }
 

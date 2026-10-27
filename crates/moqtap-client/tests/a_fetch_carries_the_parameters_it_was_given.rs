@@ -57,20 +57,6 @@
 //! builds a FETCH, which is where a caller's parameters can now be lost or
 //! misordered. Filing draft-20 under a range that stops at 19 would have said
 //! nothing about either.
-//!
-//! # Ablations, measured
-//!
-//! One cut was made, run against the two crates a change to
-//! `moqtap-client` can reach, and reverted. There is one claim here
-//! and one way to break it, so there is one cut; the second gate is
-//! the control that keeps the first from being satisfied by a field
-//! that is always full.
-//!
-//! ## And one more when the claim reached the other kind of FETCH
-//!
-//! The joining call has a builder of its own on each draft, so emptying the
-//! standalone one leaves the joining gate green and the other way round. The
-//! cut recorded on the third gate is the joining builder's.
 
 #![allow(clippy::items_after_test_module)]
 
@@ -332,34 +318,6 @@ fetch_parameter_gates!(draft19, "draft19", options);
 /// encoder refuses a descending pair rather than emitting one. So the assertion
 /// is that both parameters arrive *and* that they arrive in order, and the
 /// second half is the half that is new here.
-///
-/// # Ablations, measured
-///
-/// Two cuts, one per entry point, each run and reverted.
-///
-/// `fetch_range` stopped inserting its filter, keeping the `range.parameter()`
-/// call so the cut is the insertion and not the construction:
-///
-/// ```text
-/// assertion `left == right` failed: the filter is added to the caller's list,
-/// not put in place of it; got [34]
-/// ```
-///
-/// 17 passed, 1 failed — only the third gate, which is what says the third gate
-/// is not a restatement of the first.
-///
-/// Then `fetch` itself sending an empty list whatever it was given, which is
-/// the cut the five drafts above record:
-///
-/// ```text
-/// assertion `left == right` failed: the parameter the caller attached must
-/// reach the peer
-/// ```
-///
-/// 16 passed, 2 failed — the first and third gates, because `fetch_range`
-/// builds its message through `fetch`. The second gate stays green under both
-/// cuts, which is the control working: it asserts an empty list stays empty,
-/// and a call that empties everything satisfies it.
 #[cfg(feature = "draft20")]
 mod draft20 {
     use moqtap_client::draft20::endpoint::Endpoint;
@@ -513,34 +471,6 @@ mod draft20 {
 /// encoder refuses a descending pair rather than emitting one. So the assertion
 /// is that both parameters arrive *and* that they arrive in order, and the
 /// second half is the half that is new here.
-///
-/// # Ablations, measured
-///
-/// Two cuts, one per entry point, each run and reverted.
-///
-/// `fetch_range` stopped inserting its filter, keeping the `range.parameter()`
-/// call so the cut is the insertion and not the construction:
-///
-/// ```text
-/// assertion `left == right` failed: the filter is added to the caller's list,
-/// not put in place of it; got [34]
-/// ```
-///
-/// 17 passed, 1 failed — only the third gate, which is what says the third gate
-/// is not a restatement of the first.
-///
-/// Then `fetch` itself sending an empty list whatever it was given, which is
-/// the cut the five drafts above record:
-///
-/// ```text
-/// assertion `left == right` failed: the parameter the caller attached must
-/// reach the peer
-/// ```
-///
-/// 16 passed, 2 failed — the first and third gates, because `fetch_range`
-/// builds its message through `fetch`. The second gate stays green under both
-/// cuts, which is the control working: it asserts an empty list stays empty,
-/// and a call that empties everything satisfies it.
 #[cfg(feature = "draft21")]
 mod draft21 {
     use moqtap_client::draft21::endpoint::Endpoint;

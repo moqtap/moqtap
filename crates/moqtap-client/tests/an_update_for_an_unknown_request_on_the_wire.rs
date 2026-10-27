@@ -22,13 +22,6 @@
 //! Invalid Request ID for the parity ones. A gate that observed only that the
 //! connection ended would pass with any of them, and which rule was broken is
 //! the whole of what the peer is being told.
-//!
-//! # Ablations, measured
-//!
-//! Two cuts were made, run and reverted, and both are this file's alone. From
-//! inside the process the session ends whichever code the table names, so only
-//! a peer can tell an arm that is missing from one that carries the wrong
-//! number.
 
 mod common;
 

@@ -22,14 +22,6 @@
 //! three. In process the endpoint's own record moves whether or not what it
 //! built is written, so a `Connection` method that built the message and
 //! dropped it would pass every gate in the other two files.
-//!
-//! # Ablations, measured
-//!
-//! Two cuts were made, run and reverted, and both are this file's alone. Each
-//! reaches every one of the ten `Connection`s and is visible on the five drafts
-//! that have a loopback here: in process the endpoint's own record moves
-//! whether or not the message it built is written, so only a peer can tell a
-//! route to the wire from the absence of one.
 
 mod common;
 

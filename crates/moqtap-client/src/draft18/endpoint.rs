@@ -2678,35 +2678,6 @@ impl Endpoint {
             .count()
     }
 
-    /// Drive the state machine for a message this endpoint is about to write
-    /// on a request stream the peer opened.
-    ///
-    /// The mirror of [`receive_response_on_stream`](Self::receive_response_on_stream),
-    /// and the reason the transitions are named `*_sent` rather than reusing
-    /// the received-side ones: the state edges coincide, so a mis-dispatch
-    /// would otherwise succeed silently instead of naming the wrong event in
-    /// an `InvalidTransition`.
-    ///
-    /// # More than the five responses
-    ///
-    /// Draft-18's Table 5 marks NAMESPACE (0x8), NAMESPACE_DONE (0xE) and
-    /// PUBLISH_BLOCKED (0xF) "Request", and each is written by the *responder*
-    /// on the stream of the request that asked for it: Section 10.16 says
-    /// NAMESPACE "is sent on the response stream of a SUBSCRIBE_NAMESPACE
-    /// request", Section 10.17 says the same of NAMESPACE_DONE, and Section
-    /// 10.20 says "All PUBLISH_BLOCKED messages are in response to a
-    /// SUBSCRIBE_TRACKS". None of the three ends its request, so each is a
-    /// self-transition on an Active namespace subscription; sending one before
-    /// the REQUEST_OK that made it Active is refused.
-    ///
-    /// Draft-18 folded PUBLISH_OK into REQUEST_OK (Section 10.5), so REQUEST_OK
-    /// is also what answers a peer's PUBLISH here, where draft-17 had a message
-    /// of its own for it.
-    ///
-    /// The caller writes `msg` only after this returns `Ok`. What it cannot
-    /// undo is the opposite order: a write that fails afterwards leaves the
-    /// state machine one step ahead of the wire, the same asymmetry the
-    /// outbound request path already carries.
     /// Whether this response answers a REQUEST_UPDATE rather than the request
     /// that opened the stream.
     ///
@@ -2851,11 +2822,35 @@ impl Endpoint {
         }
     }
 
-    /// Drive the state machines for a response this endpoint is about to write
+    /// Drive the state machine for a message this endpoint is about to write
     /// on a request stream the peer opened.
     ///
-    /// The caller writes the message only after this returns `Ok`, so a
-    /// response the endpoint refuses never reaches the wire.
+    /// The mirror of [`receive_response_on_stream`](Self::receive_response_on_stream),
+    /// and the reason the transitions are named `*_sent` rather than reusing
+    /// the received-side ones: the state edges coincide, so a mis-dispatch
+    /// would otherwise succeed silently instead of naming the wrong event in
+    /// an `InvalidTransition`.
+    ///
+    /// # More than the five responses
+    ///
+    /// Draft-18's Table 5 marks NAMESPACE (0x8), NAMESPACE_DONE (0xE) and
+    /// PUBLISH_BLOCKED (0xF) "Request", and each is written by the *responder*
+    /// on the stream of the request that asked for it: Section 10.16 says
+    /// NAMESPACE "is sent on the response stream of a SUBSCRIBE_NAMESPACE
+    /// request", Section 10.17 says the same of NAMESPACE_DONE, and Section
+    /// 10.20 says "All PUBLISH_BLOCKED messages are in response to a
+    /// SUBSCRIBE_TRACKS". None of the three ends its request, so each is a
+    /// self-transition on an Active namespace subscription; sending one before
+    /// the REQUEST_OK that made it Active is refused.
+    ///
+    /// Draft-18 folded PUBLISH_OK into REQUEST_OK (Section 10.5), so REQUEST_OK
+    /// is also what answers a peer's PUBLISH here, where draft-17 had a message
+    /// of its own for it.
+    ///
+    /// The caller writes `msg` only after this returns `Ok`. What it cannot
+    /// undo is the opposite order: a write that fails afterwards leaves the
+    /// state machine one step ahead of the wire, the same asymmetry the
+    /// outbound request path already carries.
     ///
     /// # Errors
     ///

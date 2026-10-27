@@ -1807,7 +1807,7 @@ impl Connection {
     /// GOAWAY, which is the one message the table gives the Stream value
     /// "Control, Request" and which belongs here when it drains the session.
     ///
-    /// # Four messages that this still accepts and should not
+    /// # Four messages that this refuses
     ///
     /// Table 5 gives NAMESPACE (0x8), NAMESPACE_DONE (0xE), PUBLISH_SKIPPED
     /// (0xF) and REQUEST_UPDATE (0x2) the Stream value **Request**, not
@@ -1825,9 +1825,9 @@ impl Connection {
     /// [`namespace_on`](Self::namespace_on) and
     /// [`namespace_done_on`](Self::namespace_done_on); PUBLISH_SKIPPED goes on
     /// a peer's SUBSCRIBE_TRACKS stream, with
-    /// [`publish_skipped_on`](Self::publish_skipped_on). This method still
-    /// takes those three rather than refusing them, so that an existing
-    /// outbound route keeps working; refusing them here is a separate change.
+    /// [`publish_skipped_on`](Self::publish_skipped_on). This method refuses
+    /// all four with [`ConnectionError::RequestStreamMessageOnControlStream`]
+    /// and writes nothing.
     ///
     /// [`Endpoint::receive_message`]: crate::draft20::endpoint::Endpoint::receive_message
     ///

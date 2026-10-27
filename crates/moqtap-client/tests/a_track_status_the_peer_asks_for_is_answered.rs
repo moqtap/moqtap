@@ -41,20 +41,6 @@
 //! this endpoint's job is not to send a second one. No draft names a close code
 //! for a second answer arriving, so a second answer is refused where it is
 //! asked for and the session goes on running. Every gate below checks that.
-//!
-//! # Ablations, measured
-//!
-//! Nine cuts are recorded here, each run and reverted, each on the gate it
-//! reddens. The first of them reaches every gate in all three files, and the
-//! direction is always the same: a request that cannot be kept or cannot be
-//! found is one nothing downstream can answer, so the other two files go with
-//! it. Nothing here reaches the other way.
-//!
-//! Two gates carry no cut: one says a track status is absent from the
-//! subscriptions the peer opened, and the record it would have to appear in
-//! holds a message of another type entirely, so nothing short of a new
-//! conversion could put it there. The other refuses a second answer, which the
-//! cut on the first answer already reddens.
 
 #![allow(clippy::items_after_test_module)]
 

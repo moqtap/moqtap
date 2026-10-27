@@ -41,14 +41,6 @@
 //! endpoint's job is not to send the second one, so a second answer is refused
 //! where it is asked for and the session goes on running. Every gate below
 //! checks that.
-//!
-//! # Ablations, measured
-//!
-//! Eight cuts were made, run and reverted, each recorded on the gate it
-//! belongs to. Two reach a long way past this file and the direction is
-//! always the same: a fetch the peer opened that cannot be recorded or cannot
-//! be found is one nothing downstream can act on, so both joining files go
-//! with it. Nothing here reaches the other way.
 
 #![allow(clippy::items_after_test_module)]
 

@@ -44,18 +44,6 @@
 //! through [`common::render`] from the draft's own field table. The gate
 //! renders what it asked for the same way from literals, so the two agree only
 //! if the facade reached the right per-draft helper with the right arguments.
-//!
-//! # Ablations, measured
-//!
-//! Two cuts, each run and reverted.
-//!
-//! * The `finish` after draft-17's and draft-18's PUBLISH_DONE removed. Both
-//!   drafts' accepting gates redden on the FIN assertion — "draft-17 finishes
-//!   the offer's stream after PUBLISH_DONE" — because the handle is dropped
-//!   next and its reset is what the peer reads instead.
-//! * Draft-16's arm made to pass the FORWARD parameter where the track
-//!   extensions go. The draft-16 accepting and rejecting gates redden, the
-//!   offer rendering `forward=absent` where the gate asked for `forward=0`.
 
 mod common;
 

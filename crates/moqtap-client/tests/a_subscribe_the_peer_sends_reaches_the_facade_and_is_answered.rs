@@ -63,21 +63,6 @@
 //! silently dropped what it was not looking for would swallow a SUBSCRIBE_OK
 //! somebody was waiting on.
 //!
-//! # Ablations, measured
-//!
-//! Two cuts, each run and reverted.
-//!
-//! * `accept_subscribe` made to answer with a constant alias instead of the one
-//!   it was given. **Nine gates redden and draft-11 stays green** — which is
-//!   the two-sided claim this file is for: the alias reaches the wire on drafts
-//!   12 through 20, and draft-11 really does ignore the argument rather than
-//!   happening to be asserted loosely.
-//! * `recv_inbound`'s control-stream arm made to tag nothing, so every message
-//!   comes back as [`AnyArrival::Other`]. The six control-stream gates redden
-//!   on "a SUBSCRIBE came back untagged" and the four request-stream gates stay
-//!   green, which is the two halves of that method being separately load
-//!   bearing.
-//!
 //! # Why drafts 07 through 10 are absent, and why the arms for them stay
 //!
 //! Not because the facade cannot answer them — it can, and

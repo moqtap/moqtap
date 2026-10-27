@@ -45,27 +45,6 @@
 //! instead, so it conforms by construction, and only the ID field is
 //! overwritten — from the same message each time, so two SUBSCRIBEs sent one
 //! after the other differ in exactly the field under test.
-//!
-//! # Ablations, measured
-//!
-//! Each cut is made in all six drafts at once, because six copies of one rule
-//! need six measurements and a single `--no-fail-fast` run produces all of
-//! them. They fail in three different places.
-//!
-//! Deleting the `InvalidRequestId` arm from each
-//! `EndpointError::session_error_code` leaves the endpoint refusing the
-//! request and ending its own session, and leaves the connection layer with
-//! no code to close with: all twelve loopback gates fail and all twelve
-//! in-process gates pass. Changing that arm's code to
-//! PROTOCOL_VIOLATION instead leaves the close going out with the wrong number
-//! on it, which is the failure only a peer can see.
-//!
-//! Reducing either `fail_session` call in `validate_peer_request_id` to a
-//! plain `?` is the other way round, and each cut reaches one
-//! of the two conditions: the close still goes out, because the connection
-//! layer reads the same table, and the endpoint's own session is left running.
-//!
-//! The messages all four cuts produce are recorded on the gates below.
 
 mod common;
 

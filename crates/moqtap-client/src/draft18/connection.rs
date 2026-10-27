@@ -1685,10 +1685,10 @@ impl Connection {
     /// Send a control message on the control stream.
     ///
     /// Wraps the draft-18 message in `AnyControlMessage::Draft18` for
-    /// framing. This is the route for the messages that belong to the session
-    /// rather than to one request: GOAWAY, NAMESPACE, NAMESPACE_DONE,
-    /// PUBLISH_BLOCKED and REQUEST_UPDATE, the last of which carries its own
-    /// request id and is handled on the control stream by the peer's endpoint.
+    /// framing. This is the route for the message that belongs to the session
+    /// rather than to one request: GOAWAY. NAMESPACE, NAMESPACE_DONE,
+    /// PUBLISH_BLOCKED and REQUEST_UPDATE belong on a request stream, and this
+    /// returns [`ConnectionError::RequestStreamMessageOnControlStream`] for them.
     /// SETUP is written by [`connect`](Self::connect) and is the control
     /// stream's own type varint.
     ///
@@ -1725,8 +1725,8 @@ impl Connection {
     /// [`publish_done`](Self::publish_done) does not come through here either:
     /// it takes the request stream its PUBLISH opened.
     ///
-    /// NAMESPACE, NAMESPACE_DONE and PUBLISH_BLOCKED are permitted here too and
-    /// likewise should not be: draft-18's Table 5 marks all three "Request",
+    /// NAMESPACE, NAMESPACE_DONE and PUBLISH_BLOCKED are refused here too:
+    /// draft-18's Table 5 marks all three "Request",
     /// and Sections 10.16, 10.17 and 10.20 put each on the stream of the
     /// request that asked for it. [`namespace_on`](Self::namespace_on),
     /// [`namespace_done_on`](Self::namespace_done_on) and

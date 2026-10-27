@@ -3178,27 +3178,6 @@ impl Endpoint {
         Ok(())
     }
 
-    /// Drive the state machine for a message this endpoint is about to write
-    /// on a request stream the peer opened.
-    ///
-    /// The mirror of [`receive_response_on_stream`](Self::receive_response_on_stream),
-    /// and the reason the transitions are named `*_sent` rather than reusing
-    /// the received-side ones: the state edges coincide, so a mis-dispatch
-    /// would otherwise succeed silently instead of naming the wrong event in
-    /// an `InvalidTransition`.
-    ///
-    /// Beyond the four responses this also takes the three messages draft-19
-    /// Table 5 places on a request stream that a responder writes after its
-    /// response: NAMESPACE and NAMESPACE_DONE on a SUBSCRIBE_NAMESPACE stream
-    /// (Sections 10.16 and 10.17) and PUBLISH_SKIPPED on a SUBSCRIBE_TRACKS
-    /// stream (Section 10.20). All three require the request to have been
-    /// accepted first, because each machine only leaves Pending on its
-    /// REQUEST_OK.
-    ///
-    /// The caller writes `msg` only after this returns `Ok`. What it cannot
-    /// undo is the opposite order: a write that fails afterwards leaves the
-    /// state machine one step ahead of the wire, the same asymmetry the
-    /// outbound request path already carries.
     /// The identifier an arriving Joining Fetch names, when this session has
     /// no subscription it may join.
     ///
@@ -3228,11 +3207,27 @@ impl Endpoint {
         }
     }
 
-    /// Drive the state machines for a response this endpoint is about to write
+    /// Drive the state machine for a message this endpoint is about to write
     /// on a request stream the peer opened.
     ///
-    /// The caller writes the message only after this returns `Ok`, so a
-    /// response the endpoint refuses never reaches the wire.
+    /// The mirror of [`receive_response_on_stream`](Self::receive_response_on_stream),
+    /// and the reason the transitions are named `*_sent` rather than reusing
+    /// the received-side ones: the state edges coincide, so a mis-dispatch
+    /// would otherwise succeed silently instead of naming the wrong event in
+    /// an `InvalidTransition`.
+    ///
+    /// Beyond the four responses this also takes the three messages draft-19
+    /// Table 5 places on a request stream that a responder writes after its
+    /// response: NAMESPACE and NAMESPACE_DONE on a SUBSCRIBE_NAMESPACE stream
+    /// (Sections 10.16 and 10.17) and PUBLISH_SKIPPED on a SUBSCRIBE_TRACKS
+    /// stream (Section 10.20). All three require the request to have been
+    /// accepted first, because each machine only leaves Pending on its
+    /// REQUEST_OK.
+    ///
+    /// The caller writes `msg` only after this returns `Ok`. What it cannot
+    /// undo is the opposite order: a write that fails afterwards leaves the
+    /// state machine one step ahead of the wire, the same asymmetry the
+    /// outbound request path already carries.
     ///
     /// # Errors
     ///

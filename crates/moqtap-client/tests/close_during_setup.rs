@@ -55,33 +55,6 @@ macro_rules! close_during_setup_gates {
             /// `Closed` afterwards is what says so: it is reachable from
             /// nowhere else in this test, so a close that had been refused
             /// would leave the machine in `SetupExchange`.
-            ///
-            /// # Ablation
-            ///
-            /// `SetupExchange` removed from `on_close`, measured on
-            /// draft-19:
-            ///
-            /// ```text
-            /// thread 'draft19::a_session_closes_before_it_is_established'
-            /// panicked at crates\moqtap-client\tests\close_during_setup.rs:
-            /// a session may be terminated at any point: InvalidTransition { from: SetupExchange, to: Closed }
-            /// ```
-            ///
-            /// The endpoint gate below fails with it, on the same line and
-            /// wrapped in its own error:
-            ///
-            /// ```text
-            /// thread 'draft19::an_endpoint_closes_before_it_is_established'
-            /// panicked at crates\moqtap-client\tests\close_during_setup.rs:
-            /// an endpoint may terminate at any point: Session(InvalidTransition { from: SetupExchange, to: Closed })
-            /// ```
-            ///
-            /// The same cut in draft-20's `on_close` establishes that the
-            /// draft-20 arm can fail too. It
-            /// reddens these two gates on draft-20 and nothing else in the
-            /// file — 40 passed, 2 failed — which is the count that says the
-            /// third gate below is a control and not a copy: it asserts the
-            /// `Connecting` refusal, which the cut does not touch.
             #[test]
             fn a_session_closes_before_it_is_established() {
                 let mut sm = SessionStateMachine::new();

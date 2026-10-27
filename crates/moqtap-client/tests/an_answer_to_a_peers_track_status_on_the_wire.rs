@@ -16,13 +16,6 @@
 //! Drafts 07 through 11 have no loopback harness here, so the ten `Connection`s
 //! are covered by five gates. A cut in the write reaches all ten and is visible
 //! on these five, which is what the recorded ablation measures.
-//!
-//! # Ablations, measured
-//!
-//! One cut was made, run and reverted, and it is this file's alone. In process
-//! the endpoint's own record moves whether or not the message it built is
-//! written, so a `Connection` method that built the answer and dropped it would
-//! pass every gate in the other file.
 
 mod common;
 

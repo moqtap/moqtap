@@ -656,16 +656,6 @@ fn endpoint_fetch_stream_reset() {
 /// can come at any time relative to object delivery." Driven at the endpoint
 /// rather than at the state machine, because the endpoint is what a caller
 /// holds and what returned an error for this sequence.
-///
-/// # Ablation, run
-///
-/// Deleting the `FetchState::Pending` arm of `on_stream_fin` in
-/// `src/draft14/fetch.rs`:
-///
-/// ```text
-/// a stream ending before the answer should succeed: Fetch(InvalidTransition {
-/// from: Pending, event: "on_stream_fin" })
-/// ```
 #[test]
 fn endpoint_fetch_stream_fin_before_the_answer() {
     let mut ep = make_active_client_with_max_id(10);

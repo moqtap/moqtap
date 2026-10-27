@@ -39,15 +39,6 @@
 //! where it is asked for and the session goes on running. Every gate below
 //! checks that, because a refusal that also tore down the session would be a
 //! worse bug than the one it was fixing.
-//!
-//! # Ablations, measured
-//!
-//! Seven cuts were made, run and reverted, each recorded on the gate it
-//! belongs to. Two of them reach past this file: taking the dispatch arm out
-//! reddens the loopback gate as well, and answering without moving the record
-//! on reddens `an_alias_is_free_once_its_subscription_ends` in the alias file,
-//! which is the point of the ordering. An alias whose subscription can never
-//! reach Active can never be freed either.
 
 #![allow(clippy::items_after_test_module)]
 

@@ -35,23 +35,6 @@ macro_rules! update_before_the_answer_gates {
             /// transition out of `Subscribing` and succeeds only from there, so
             /// an update that had moved the subscription — or been refused —
             /// would fail on the line after it rather than on its own.
-            ///
-            /// # Ablation
-            ///
-            /// The `Subscribing` arm removed from `on_subscribe_update`, which
-            /// is what thirteen of the fourteen shipped, measured on draft-19:
-            ///
-            /// ```text
-            /// thread 'draft19::an_update_may_precede_the_subscriptions_own_answer'
-            /// panicked at crates\moqtap-client\tests\update_before_the_answer.rs:
-            /// a REQUEST_UPDATE may precede the subscription's own answer: InvalidTransition { from: Subscribing, event: "on_subscribe_update" }
-            /// ```
-            ///
-            /// The same cut was made again in draft-20's `on_subscribe_update`
-            /// when this file gained its arm. It reddens this gate on draft-20
-            /// and nothing else — 41 passed, 1 failed — the two gates below
-            /// staying green because `Idle` and `Done` refuse an update either
-            /// way, which is what makes them controls rather than repetitions.
             #[test]
             fn an_update_may_precede_the_subscriptions_own_answer() {
                 let mut sm = SubscriptionStateMachine::new();

@@ -21,13 +21,6 @@
 //! about naming the range through a subscription rather than outright that
 //! changes what may be attached. So the claim covers both, and the third gate
 //! on each draft is the joining one.
-//!
-//! # Ablations, measured
-//!
-//! Two cuts, run against the two crates a change to `moqtap-client` can reach,
-//! and reverted. The second gate on each draft is the control: without it a
-//! change that filled the field with something of its own would satisfy the
-//! first.
 
 #![allow(clippy::items_after_test_module)]
 

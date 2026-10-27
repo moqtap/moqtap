@@ -21,13 +21,6 @@
 //! measure. What they cannot see is whether the right one is written at all:
 //! a `Connection` method that built the message and dropped it would pass
 //! every one of them.
-//!
-//! # Ablations, measured
-//!
-//! Two cuts were made, run and reverted, and both are this file's alone. In
-//! process the endpoint's own record moves whether or not the message it built
-//! is written, so only a peer can tell a route to the wire from the absence of
-//! one.
 
 mod common;
 

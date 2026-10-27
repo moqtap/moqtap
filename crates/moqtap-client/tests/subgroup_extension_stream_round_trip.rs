@@ -30,35 +30,6 @@
 //! extension block and drafts 08 through 10 give every object one
 //! unconditionally. Drafts 14 and later thread the framing through a reader
 //! object on the write path, so the framing is never guessed there.
-//!
-//! # Recorded failures
-//!
-//! Writing the header with `header.encode_checked(&mut buf)?` in place of
-//! `encode_checked_with_extensions`, while the codec keeps its guard, on
-//! draft-11. The object does not reach the wire at all:
-//!
-//! ```text
-//! write first object: Codec(InvalidField)
-//! ```
-//!
-//! The same substitution *and* dropping the codec's guard. Nothing fails at
-//! the writer, nothing fails at the reader, and the
-//! object comes back with the payload sitting in its extension headers:
-//!
-//! ```text
-//! assertion `left == right` failed: the extension bytes must survive the
-//! stream
-//!   left: [222, 173]
-//!  right: [170, 187, 204]
-//! ```
-//!
-//! and, from the same run, the stream that carries no block accepting an
-//! object that has one:
-//!
-//! ```text
-//! a stream with no extension block has nowhere to put these bytes, so the
-//! object must be refused rather than written without them: Ok(())
-//! ```
 
 mod common;
 
@@ -236,16 +207,6 @@ extension_stream_round_trip!(draft13, "draft13", draft13, Draft13, Draft13);
 /// `None` under a type that carries the field is written as zero, which names
 /// subgroup 0 rather than no subgroup — so that is what is driven here, through
 /// the same `write_subgroup_header` every draft uses.
-///
-/// # Recorded failure
-///
-/// Produced by writing the header with `header.encode_stream(&mut buf);` in
-/// place of `encode_stream_checked` in `write_subgroup_header`:
-///
-/// ```text
-/// a header whose Subgroup ID disagrees with its own type must not open a
-/// stream: Ok(())
-/// ```
 #[cfg(feature = "draft14")]
 #[tokio::test]
 async fn a_header_that_disagrees_with_its_type_does_not_open_a_stream() {

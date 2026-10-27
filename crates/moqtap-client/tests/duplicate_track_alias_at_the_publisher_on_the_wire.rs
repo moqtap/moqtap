@@ -27,14 +27,6 @@
 //! Violation for most of its neighbours. A gate that observed only that the
 //! connection ended would pass with either, and which rule was broken is the
 //! whole of what the peer is being told.
-//!
-//! # Ablations, measured
-//!
-//! Three cuts are recorded below. Two are this file's alone — taking the code
-//! out of the close table, and putting the wrong code in it — because from
-//! inside the process the session ends either way and only a peer can see
-//! which number the close carried. The third is one the in-process file
-//! records too, seen here from the other side of a real connection.
 
 mod common;
 

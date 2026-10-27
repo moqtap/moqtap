@@ -28,18 +28,6 @@
 //! implementation that reached for the subgroup event would be typed out of
 //! it, but one that emitted both would be describing a fetch stream as a
 //! subgroup one.
-//!
-//! # Ablation, measured
-//!
-//! Dropping the `FetchStreamHeader` emission from
-//! `draft14::connection::accept_fetch_stream` — the state this crate was in
-//! before this file existed — and running under `--features draft14`:
-//!
-//! ```text
-//! a fetch stream must report the header it decoded, and no FetchStreamHeader was emitted; the observer saw ["ControlMessage", "ControlMessage", "SetupComplete", "StreamOpened"]
-//! ```
-//!
-//! The file was restored byte for byte afterwards and the gate is green again.
 
 mod common;
 

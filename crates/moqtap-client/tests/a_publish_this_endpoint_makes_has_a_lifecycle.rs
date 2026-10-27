@@ -95,36 +95,6 @@
 //! holds publishes in either direction, and kept apart from `publishes`
 //! outright on drafts 12 and 13.
 
-//! # Ablations, measured
-//!
-//! Twelve cuts were made, run against the two crates a change to
-//! `moqtap-client` can reach, and reverted. Each gate records the ones
-//! that redden it.
-//!
-//! Four of them are the four the read-back gate covers — the delivery order,
-//! the parameters, the largest location, and the Content Exists flag derived
-//! from that location — and each is cut on all three drafts at once, because
-//! all three build the message with the same call. The rest were cut on
-//! drafts 12 and 13 only, which is where the code they cut lives: draft-14
-//! reaches those same claims through code of its own, and the reach sentences
-//! say which drafts each cut was applied to rather than which drafts the claim
-//! covers.
-//!
-//! Four of them reach past this file, into
-//! `an_endpoint_gives_one_alias_to_one_track.rs`, and that is the honest
-//! picture: the alias half of what an outbound PUBLISH does belongs there and
-//! is measured there. One of the four, the offer never being weighed against
-//! the aliases already spoken for, reaches every draft that can build an offer
-//! rather than only these two.
-//!
-//! One gate here is shaped by what the cuts showed. A SUBSCRIBE_DONE is refused
-//! with a publish-flow error from a refused offer and from one still waiting for
-//! an answer alike, so a gate asking only that question cannot tell the two
-//! states apart and stays green under the cut that throws the peer's refusal
-//! away. `a_refused_offer_opened_no_subscription` asks for a second refusal and
-//! a late acceptance as well, which the two states answer differently, and that
-//! cut reddens it.
-
 #![allow(clippy::items_after_test_module)]
 
 use moqtap_codec::types::TrackNamespace;

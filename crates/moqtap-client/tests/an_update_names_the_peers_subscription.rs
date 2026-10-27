@@ -25,14 +25,6 @@
 //! refused, the identifier is named, and the session goes on running. From
 //! draft-12 the same sentence says MUST and the session ends;
 //! `an_update_for_an_unknown_request_ends_the_session.rs` is that half.
-//!
-//! # Ablations, measured
-//!
-//! Four cuts were made, run and reverted, each recorded on the gate it belongs
-//! to. Three of them are shared with the drafts 12 through 16 file, because the
-//! probe, the record's lifetime and the outbound builder are one claim each
-//! across all ten drafts; what is not shared is the answer, and the two cuts
-//! that measure that live in the other file.
 
 #![allow(clippy::items_after_test_module)]
 

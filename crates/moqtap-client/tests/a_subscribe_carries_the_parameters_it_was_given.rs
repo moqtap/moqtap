@@ -30,13 +30,6 @@
 //! DELIVERY TIMEOUT is what these gates attach. It is an even key, so its
 //! value is a varint, and it is registered on all three drafts, which makes it
 //! the one choice that needs no per-draft spelling.
-//!
-//! # Ablations, measured
-//!
-//! One cut, run against the two crates a change to `moqtap-client` can reach,
-//! and reverted. The second gate in each draft is the control: without it, a
-//! change that filled the field with something of its own would satisfy the
-//! first.
 
 #![allow(clippy::items_after_test_module)]
 

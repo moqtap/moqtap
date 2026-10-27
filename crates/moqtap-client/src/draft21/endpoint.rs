@@ -3498,11 +3498,6 @@ impl Endpoint {
     /// undo is the opposite order: a write that fails afterwards leaves the
     /// state machine one step ahead of the wire, the same asymmetry the
     /// outbound request path already carries.
-    /// Drive the state machines for a response this endpoint is about to write
-    /// on a request stream the peer opened.
-    ///
-    /// The caller writes the message only after this returns `Ok`, so a
-    /// response the endpoint refuses never reaches the wire.
     ///
     /// # Errors
     ///

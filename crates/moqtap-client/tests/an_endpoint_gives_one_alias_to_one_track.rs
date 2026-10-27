@@ -51,12 +51,6 @@
 //! Drafts 07 through 11 are outside the range because there the alias is
 //! chosen in SUBSCRIBE - that half is in
 //! `a_track_alias_names_one_track_at_the_publisher.rs`.
-//!
-//! # Ablations, measured
-//!
-//! Four cuts were made, run and reverted, each recorded on the gate it belongs
-//! to. None of them reddens anything in the receiving half's files, which is
-//! what says the two halves of the sentence are two rules.
 
 #![allow(clippy::items_after_test_module)]
 

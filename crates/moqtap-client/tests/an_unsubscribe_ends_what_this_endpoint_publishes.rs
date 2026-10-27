@@ -60,13 +60,6 @@
 //! swapped and the states kept, so the subscriber ends it on the stream
 //! instead: there is no message for this rule to arrive as and no handler for
 //! one.
-//!
-//! # Ablations, measured
-//!
-//! Six cuts were made, run against the two crates a change to
-//! `moqtap-client` can reach, and reverted. Each of the five drafts
-//! carries the change in one of two shapes, so each claim is cut twice
-//! rather than once: one shared check needs one ablation per caller.
 
 #![allow(clippy::items_after_test_module)]
 

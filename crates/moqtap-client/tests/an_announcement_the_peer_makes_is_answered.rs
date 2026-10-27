@@ -50,14 +50,6 @@
 //! to the publisher, which this endpoint is not for an announcement that
 //! arrives. So a second answer is refused where it is asked for and the session
 //! goes on running, and every gate below checks that.
-//!
-//! # Ablations, measured
-//!
-//! Seven cuts are recorded here, each run and reverted, each on the gate it
-//! reddens. Two of them reach a long way past this file and the direction is
-//! always the same: an announcement that cannot be kept or cannot be found is
-//! one nothing downstream can act on, so the cancellation file and the
-//! loopback file go with it. Nothing here reaches the other way.
 
 #![allow(clippy::items_after_test_module)]
 

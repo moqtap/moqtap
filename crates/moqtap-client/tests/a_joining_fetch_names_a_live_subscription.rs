@@ -46,14 +46,6 @@
 //! the FETCH arriving and its answer going out does not turn a fetch that
 //! could be joined into one that could not, and the last gate below is the one
 //! that says so.
-//!
-//! # Ablations, measured
-//!
-//! Seven cuts were made, run and reverted, each recorded on the gate it
-//! belongs to. Every one of them also reaches
-//! `a_joining_fetch_on_a_request_stream.rs`, because the rule is one rule
-//! stated on twelve drafts and the two files split it only by how the request
-//! arrives.
 
 #![allow(clippy::items_after_test_module)]
 

@@ -382,8 +382,8 @@ pub enum AnyTransportType {
 /// is constructed internally by [`AnyConnection::connect`] based on `draft`.
 ///
 /// Fields that aren't meaningful for the selected draft are ignored:
-/// `additional_versions` is not carried by drafts 15–17 (single-version
-/// setup) and drafts 07–13 always offer their own draft first.
+/// `additional_versions` is not carried by drafts 15–22 (single-version
+/// setup) and drafts 07–14 always offer their own draft first.
 #[derive(Debug, Clone)]
 pub struct AnyClientConfig {
     /// Primary draft version for the connection.
@@ -948,7 +948,7 @@ pub enum JoiningStart {
 pub enum SubscribeEnd {
     /// No end at all — the AbsoluteStart filter. Every draft has it.
     ///
-    /// On draft-20 alone this is not expressible from the start location
+    /// On drafts 20 and 21 this is not expressible from the start location
     /// `{0, 0}`; see [`SubscribeRange::location_filter_draft20`] for the collision and
     /// for the two ways round it.
     Open,
@@ -1017,7 +1017,7 @@ impl SubscribeRange {
 
     /// From this Location through `end_object` of `end_group`, **inclusive**.
     ///
-    /// Drafts 07 and 20 only. See [`SubscribeEnd::ThroughObject`].
+    /// Drafts 07 and 20 through 22 only. See [`SubscribeEnd::ThroughObject`].
     pub fn through_object(
         start_group: u64,
         start_object: u64,

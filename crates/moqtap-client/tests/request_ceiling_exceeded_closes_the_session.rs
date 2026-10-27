@@ -45,25 +45,6 @@
 //! instead, so it conforms by construction, and only the ID field is
 //! overwritten - once with a legal value and once with the illegal one, from
 //! the same message, so the two differ in exactly the field under test.
-//!
-//! # Ablations, measured
-//!
-//! Both cuts are made in all ten drafts at once, because ten copies of one
-//! rule need ten measurements and a single `--no-fail-fast` run produces all
-//! of them. They fail in opposite directions.
-//!
-//! Deleting the `ExceedsMax` arm from each `EndpointError::session_error_code`
-//! leaves the endpoint refusing the request and ending its own session, and
-//! leaves the connection layer with no code to close with: all ten loopback
-//! gates fail and all ten in-process gates pass.
-//!
-//! Dropping the `fail_session` call from each `validate_peer_*` - the shape
-//! all ten shipped with - is the other way round. The close still goes out,
-//! because the connection layer reads the same table, and the endpoint's own
-//! session is left running: all ten in-process gates fail and all ten loopback
-//! gates pass.
-//!
-//! The messages both cuts produce are recorded on the two tests below.
 
 mod common;
 

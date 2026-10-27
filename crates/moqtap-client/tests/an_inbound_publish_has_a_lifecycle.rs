@@ -54,24 +54,6 @@
 //! is asked for and the session goes on running. Every gate below checks that,
 //! because a refusal that also tore down the session would be a worse bug than
 //! the one it was fixing.
-//!
-//! # Ablations, measured
-//!
-//! Six cuts were made and run, five of them recorded on the gate they belong
-//! to. The sixth is recorded here because it is the one that spans files:
-//! letting the acceptance build its PUBLISH_OK without moving the record on
-//! reddens thirty-five tests. Four of the eleven gates here, on all five
-//! drafts, and in the alias files the accepted offer's alias stops being held,
-//! in process and over QUIC:
-//!
-//! ```text
-//! a second PUBLISH_OK was sent for one PUBLISH: ()
-//! ```
-//!
-//! Three of the gates it leaves green are worth naming, because they are what
-//! the cut does not reach: the offer still arrives and is still looked up by
-//! the id it names, and an offer stuck at "arrived" still cannot be
-//! unsubscribed.
 
 #![allow(clippy::items_after_test_module)]
 

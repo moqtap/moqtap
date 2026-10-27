@@ -158,7 +158,7 @@ pub struct ClientConfig {
 
 impl ClientConfig {
     /// Returns the MoQT version varints for the CLIENT_SETUP message.
-    /// Draft-12 first, then any additional versions.
+    /// Draft-13 first, then any additional versions.
     pub fn supported_versions(&self) -> Vec<VarInt> {
         let mut versions = vec![DraftVersion::Draft13.version_varint()];
         for v in &self.additional_versions {
@@ -473,7 +473,7 @@ impl FramedRecvStream {
         let mut cursor = &self.buf[..type_len];
         let _type_id = VarInt::decode(&mut cursor)?;
 
-        // Draft-12 uses a fixed 16-bit length after the type id.
+        // Draft-13 uses a fixed 16-bit length after the type id.
         let len_field_size = 2;
         self.ensure(type_len + len_field_size).await?;
         let payload_len = u16::from_be_bytes([self.buf[type_len], self.buf[type_len + 1]]) as usize;

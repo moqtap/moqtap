@@ -25,28 +25,6 @@
 //! against, so it builds an equivalent server locally. That is fifteen lines
 //! duplicated in exchange for leaving a harness used by a hundred other files
 //! alone.
-//!
-//! # Ablation, measured
-//!
-//! Changing the downcast target in `transport::quic::peer_certificates` to
-//! `Vec<Vec<u8>>` — the shape a plausible upstream change would produce, and
-//! one that still compiles and still passes clippy:
-//!
-//! ```text
-//! the_chain_a_relay_presented_is_what_the_caller_reads
-//!   the server was configured with exactly one certificate, so the chain
-//!   length is a fact about the peer and not about this client
-//!     left: 0
-//!
-//! a_chain_is_returned_whole_and_leaf_first
-//!   the chain must arrive whole and leaf first: a caller counting
-//!   certificates to spot a missing intermediate is reading this length
-//!     left: []
-//! ```
-//!
-//! Both fail as an empty chain, which is exactly the shape of the silent
-//! break: no error anywhere, every relay in the fleet suddenly presenting
-//! nothing. `transport/quic.rs` was restored byte for byte afterwards.
 
 mod common;
 

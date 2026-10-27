@@ -22,11 +22,6 @@
 //! Draft-17 is here for the refusal. It asks the same question through
 //! SUBSCRIBE_NAMESPACE's Subscribe Options, so the facade has nothing to send
 //! under this name and says so.
-//!
-//! # Ablation, measured
-//!
-//! The draft-22 arm made to pass an empty parameter list. Its gate reddens with
-//! the request rendering `forward=absent` where the gate asked for `forward=0`.
 
 mod common;
 

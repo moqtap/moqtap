@@ -34,17 +34,6 @@ fn ns(parts: &[&[u8]]) -> TrackNamespace {
 /// be Closed, the close code must be PROTOCOL_VIOLATION, and `goaway_uri()` must
 /// still be empty — an application that could read the URI back would reconnect
 /// to somewhere a client chose.
-///
-/// # Observed with the fix reverted
-///
-/// Deleting the `role == Role::Server` guard from draft-17's `receive_goaway`:
-///
-/// ```text
-/// ---- a_goaway_uri_at_a_server_closes_the_session stdout ----
-///
-/// thread 'a_goaway_uri_at_a_server_closes_the_session' (6868) panicked at crates\moqtap-client\tests\draft17_18_session_rules.rs:
-/// draft-17 accepted a client-supplied migration URI at a server: ()
-/// ```
 #[test]
 fn a_goaway_uri_at_a_server_closes_the_session() {
     {
@@ -122,17 +111,6 @@ fn a_goaway_uri_at_a_server_closes_the_session() {
 /// anything. And the session must still be Active afterwards — routing it to the
 /// session-wide handler instead would take the whole session to Draining over
 /// something the draft scopes to one request.
-///
-/// # Observed with the fix reverted
-///
-/// Removing the GOAWAY arm from draft-18's `receive_response_on_stream`:
-///
-/// ```text
-/// ---- a_goaway_on_a_request_stream_migrates_only_that_request stdout ----
-///
-/// thread 'a_goaway_on_a_request_stream_migrates_only_that_request' (46112) panicked at crates\moqtap-client\tests\draft17_18_session_rules.rs:
-/// a per-request GOAWAY was refused: ResponseOnControlStream
-/// ```
 #[test]
 fn a_goaway_on_a_request_stream_migrates_only_that_request() {
     use moqtap_client::draft18::endpoint::Endpoint;

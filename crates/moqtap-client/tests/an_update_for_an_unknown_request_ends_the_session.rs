@@ -31,14 +31,6 @@
 //! SUBSCRIBE outlives the subscription it holds. And an identifier this
 //! session carried for some other request existed too, whatever kind of
 //! request it was, so that one is accepted and nothing moves.
-//!
-//! # Ablations, measured
-//!
-//! Five cuts were made, run and reverted, each recorded on the gate it belongs
-//! to. Two of them are this half's alone: raising the error without failing the
-//! session is what drafts 07 through 11 do and are right to do, and closing
-//! over every identifier that is not the peer's subscription is the
-//! over-reading the sentence rules out.
 
 #![allow(clippy::items_after_test_module)]
 

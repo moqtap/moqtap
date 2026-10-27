@@ -36,15 +36,6 @@
 //! and this endpoint is that publisher: the message is refused where it is
 //! asked for and nothing goes out. Every gate below checks the session is still
 //! running.
-//!
-//! # Ablations, measured
-//!
-//! Four cuts are recorded here, each run and reverted, each on the gate it
-//! reddens. One gate needed two of them to be measured at all: cutting the
-//! cancellation's dispatch arm does not redden the gate that says the
-//! cancellation is accepted, because a message that reaches the fall-through
-//! is accepted. What that cut reddens is the gate after it, which reads the
-//! state the dispatch was supposed to move.
 
 #![allow(clippy::items_after_test_module)]
 

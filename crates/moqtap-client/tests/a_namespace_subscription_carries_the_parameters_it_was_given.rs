@@ -38,15 +38,6 @@
 //! second gate on each draft is the control: an empty list still means an
 //! empty list, which is what the cut below leaves behind, so the pair can only
 //! both pass when the argument is actually carried.
-//!
-//! # Ablations, measured
-//!
-//! One cut, run against the two crates a change to `moqtap-client` can reach
-//! and then reverted: the builder sends an empty list whatever it was given.
-//! It reddens three tests of the 3,464 in those crates - the first gate on
-//! each draft here -
-//! and leaves the other 165 test binaries green. The control on each draft
-//! stays green under the cut, which is what a control is for.
 
 #![allow(clippy::items_after_test_module)]
 

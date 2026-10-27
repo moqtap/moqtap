@@ -71,20 +71,6 @@
 //! themselves are still pinned, because they arrive at the assertion from the
 //! literals at each invocation.
 //!
-//! # Ablations, measured
-//!
-//! Two cuts, each run and reverted, each on the gate it reddens.
-//!
-//! * Draft-16's arm made to withdraw `request_id = 0` rather than the one the
-//!   handle carries. The first withdrawal still passes — the first
-//!   announcement's ID *is* zero — and the second fails inside the endpoint
-//!   rather than at the assertion: "invalid transition from Done on event
-//!   on_publish_namespace_done", because the constant had already ended the
-//!   announcement it named. Which is the two-announcement design paying for
-//!   itself; with one in flight the cut is invisible.
-//! * The drafts 17 through 20 arm made to return `Ok(())` instead of refusing.
-//!   All four request-stream gates redden, on the `expect_err`.
-//!
 //! # Drafts 07 through 10 are absent, and not for want of a gate
 //!
 //! Their ANNOUNCE carries no Request ID — the answer is matched by namespace —

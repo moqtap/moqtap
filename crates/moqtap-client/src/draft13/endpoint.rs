@@ -706,16 +706,6 @@ pub struct Endpoint {
     /// The most recent `maximum_request_id` reported by the peer via a
     /// `REQUESTS_BLOCKED` message.
     peer_reported_max_request_id: Option<VarInt>,
-    /// What Full Track Name the peer has attached each Track Alias to, per
-    /// Request ID.
-    ///
-    /// Sections 8.8 and 8.13 forbid one alias naming two tracks at once, and the
-    /// "at once" is what makes this a table rather than a set: an alias the
-    /// peer used for a track whose subscription has ended is free again. The
-    /// table therefore records the binding and reads liveness back off the
-    /// subscription's own state machine, rather than keeping a second copy of
-    /// it that every path ending a subscription would have to remember to
-    /// prune.
     /// What each track's objects have been framed as, so far.
     ///
     /// Behind a lock because this is the one endpoint fact a *data* stream
@@ -735,6 +725,16 @@ pub struct Endpoint {
     /// at a time, with no way back to the endpoint. Each such stream is handed a
     /// clone of the handle, and every clone measures against this one record.
     locations: Arc<Mutex<TrackLocations>>,
+    /// What Full Track Name the peer has attached each Track Alias to, per
+    /// Request ID.
+    ///
+    /// Sections 8.8 and 8.13 forbid one alias naming two tracks at once, and the
+    /// "at once" is what makes this a table rather than a set: an alias the
+    /// peer used for a track whose subscription has ended is free again. The
+    /// table therefore records the binding and reads liveness back off the
+    /// subscription's own state machine, rather than keeping a second copy of
+    /// it that every path ending a subscription would have to remember to
+    /// prune.
     track_bindings: HashMap<u64, TrackBinding>,
 }
 

@@ -667,16 +667,6 @@ pub struct Endpoint {
     negotiated_version: Option<VarInt>,
     offered_versions: Vec<VarInt>,
     goaway_uri: Option<Vec<u8>>,
-    /// What Full Track Name the peer has attached each Track Alias to, per
-    /// Request ID.
-    ///
-    /// Sections 9.8 and 9.13 forbid one alias naming two tracks at once, and the
-    /// "at once" is what makes this a table rather than a set: an alias the
-    /// peer used for a track whose subscription has ended is free again. The
-    /// table therefore records the binding and reads liveness back off the
-    /// subscription's own state machine, rather than keeping a second copy of
-    /// it that every path ending a subscription would have to remember to
-    /// prune.
     /// What each track's objects have been framed as, so far.
     ///
     /// Behind a lock because this is the one endpoint fact a *data* stream
@@ -695,6 +685,16 @@ pub struct Endpoint {
     /// Behind an `Arc` because the stream that reads a track's objects holds a
     /// handle onto it and the endpoint cannot be reached from there.
     locations: Arc<Mutex<TrackLocations>>,
+    /// What Full Track Name the peer has attached each Track Alias to, per
+    /// Request ID.
+    ///
+    /// Sections 9.8 and 9.13 forbid one alias naming two tracks at once, and the
+    /// "at once" is what makes this a table rather than a set: an alias the
+    /// peer used for a track whose subscription has ended is free again. The
+    /// table therefore records the binding and reads liveness back off the
+    /// subscription's own state machine, rather than keeping a second copy of
+    /// it that every path ending a subscription would have to remember to
+    /// prune.
     track_bindings: HashMap<u64, TrackBinding>,
 }
 

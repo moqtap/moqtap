@@ -14,11 +14,6 @@
 //! for the answer, whose builder takes the caller's parameters. Drafts
 //! 13 and 14 name the request `track_status` and word it like a SUBSCRIBE,
 //! with a priority, a group order, a forward flag and a filter of its own.
-//!
-//! # Ablations, measured
-//!
-//! One cut, run against the two crates a change to `moqtap-client` can reach,
-//! and reverted. The second gate on each draft is the control.
 
 #![allow(clippy::items_after_test_module)]
 

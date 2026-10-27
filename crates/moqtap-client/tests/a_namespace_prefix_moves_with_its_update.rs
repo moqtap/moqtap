@@ -77,13 +77,6 @@
 //! endpoint made needs the same judgement -- the same way drafts 18 and 19
 //! settle the subscriber's half of the arrival rule, which is by not stating
 //! it.
-//!
-//! # Ablations, measured
-//!
-//! Eleven cuts were made, run against the two crates a change to
-//! `moqtap-client` can reach, and reverted. Each gate records the ones that
-//! redden it under `# What it catches`, with the failure the run actually
-//! produced.
 
 #![allow(clippy::items_after_test_module)]
 

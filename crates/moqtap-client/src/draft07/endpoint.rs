@@ -570,13 +570,6 @@ pub struct Endpoint {
     /// because the identifiers do not separate themselves: both ends allocate
     /// from zero, so one number can name a fetch at each end at once.
     inbound_fetches: HashMap<u64, InboundFetch>,
-    /// Every Track Alias in use in this session, and the track each one names.
-    ///
-    /// "Already being used" is what makes this a table rather than a set: an
-    /// alias whose subscription has ended is free again. The table records the
-    /// binding and reads liveness back off the subscription's own state
-    /// machine, rather than keeping a second copy of it that every path ending
-    /// a subscription would have to remember to prune.
     /// What each track's objects have been framed as, so far.
     ///
     /// Behind a lock because this is the one endpoint fact a *data* stream
@@ -584,6 +577,13 @@ pub struct Endpoint {
     /// a caller may hold one across tasks while it reads streams and datagrams,
     /// so there is no `&mut` to reach the rest of this struct with.
     forwarding_preferences: Mutex<TrackForwardingPreferences>,
+    /// Every Track Alias in use in this session, and the track each one names.
+    ///
+    /// "Already being used" is what makes this a table rather than a set: an
+    /// alias whose subscription has ended is free again. The table records the
+    /// binding and reads liveness back off the subscription's own state
+    /// machine, rather than keeping a second copy of it that every path ending
+    /// a subscription would have to remember to prune.
     track_bindings: HashMap<(SubscribeSide, u64), TrackBinding>,
     fetches: HashMap<u64, FetchStateMachine>,
     subscribe_announces: HashMap<NamespaceKey, SubscribeAnnouncesStateMachine>,

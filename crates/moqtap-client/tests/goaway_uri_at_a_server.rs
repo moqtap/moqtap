@@ -42,29 +42,6 @@
 //! endpoint tries, because that is what an application would notice. And
 //! whether the URI is retrievable afterwards, because an endpoint that stored
 //! it would leave an application free to reconnect to somewhere a client chose.
-//!
-//! # Ablations, measured
-//!
-//! Two cuts, each made in all nine drafts at once and then reverted.
-//!
-//! Dropping `fail_session` from the guard, which leaves the behaviour drafts
-//! 08 through 16 had without it:
-//!
-//! ```text
-//! assertion `left == right` failed: the violation was reported and the
-//! session was left running
-//!   left: Active
-//!  right: Closed
-//! ```
-//!
-//! Deleting the close-table arm, leaving the state move in place:
-//!
-//! ```text
-//! assertion `left == right` failed: a session this endpoint ended has no
-//! code for the transport to close with
-//!   left: None
-//!  right: Some(ProtocolViolation)
-//! ```
 
 use moqtap_codec::types::TrackNamespace;
 

@@ -77,21 +77,6 @@
 //! already accepted rather than judging one arriving. That half is gated in
 //! `a_namespace_prefix_moves_with_its_update.rs`; nothing in this file reaches
 //! it.
-//!
-//! # Ablations, measured
-//!
-//! Seventeen cuts, each made, run against the two crates a change to
-//! `moqtap-client` can reach, recorded on the gate it reddens and reverted.
-//! Four of them cut the relation itself and partition it cleanly: never
-//! overlapping reddens eighty tests, equality alone sixty-seven, comparing the first
-//! element alone thirteen and excluding equality thirteen. Two cut the guard rather
-//! than the relation, one per half of the range: removing the refusal on
-//! arrival reddens twenty on drafts 07 through 10, and removing it from the
-//! answer forty-four on drafts 11 through 19. The rest sit on one gate each and are
-//! recorded there.
-//!
-//! Every gate here carries at least one, and the loopback gate in
-//! `draft16_namespace_stream_on_the_wire.rs` is reddened by three of them.
 
 #![allow(clippy::items_after_test_module)]
 

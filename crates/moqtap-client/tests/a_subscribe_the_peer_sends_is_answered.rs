@@ -36,14 +36,6 @@
 //! endpoint's job is not to send the second one, so a second answer is refused
 //! where it is asked for and the session goes on running. Every gate below
 //! checks that.
-//!
-//! # Ablations, measured
-//!
-//! Ten cuts were made, run and reverted, each recorded on the gate it belongs
-//! to. Several reach past this file, and the direction is always the same: a
-//! subscription the peer opened that cannot be recorded, answered or ended is
-//! one nothing downstream can act on, so the update files go with it. Nothing
-//! here reaches the other way.
 
 #![allow(clippy::items_after_test_module)]
 

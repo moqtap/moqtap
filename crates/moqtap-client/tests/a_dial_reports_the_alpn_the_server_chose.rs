@@ -32,24 +32,6 @@
 //! draft the caller guessed. The first test below is what separates the two
 //! readings of `None`: it names a protocol the server really did select, so
 //! `None` there cannot be explained as an honest silence.
-//!
-//! # Ablation, measured
-//!
-//! Replacing the body of `transport::quic::negotiated_alpn` with `None` — the
-//! shape a quinn release that renamed `HandshakeData` would produce silently:
-//!
-//! ```text
-//! the_dial_reports_the_protocol_the_server_selected
-//!   the server selected a protocol, so the dial must report one rather than None
-//!
-//! a_dialled_transport_completes_the_handshake_through_adopt
-//!   the dial must name a draft, which is the whole reason to dial this way
-//! ```
-//!
-//! `a_server_sharing_no_protocol_refuses_the_dial` stays green under that cut,
-//! which is correct and is why it is a third test rather than another
-//! assertion in the first: it is about the dial failing, not about the value a
-//! successful dial reports. The file was restored byte for byte afterwards.
 
 mod common;
 

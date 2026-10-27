@@ -2289,19 +2289,6 @@ impl Endpoint {
             .count()
     }
 
-    /// Drive the state machine for a response this endpoint is about to write
-    /// on a request stream the peer opened.
-    ///
-    /// The mirror of [`receive_response_on_stream`](Self::receive_response_on_stream),
-    /// and the reason the transitions are named `*_sent` rather than reusing
-    /// the received-side ones: the state edges coincide, so a mis-dispatch
-    /// would otherwise succeed silently instead of naming the wrong event in
-    /// an `InvalidTransition`.
-    ///
-    /// The caller writes `msg` only after this returns `Ok`. What it cannot
-    /// undo is the opposite order: a write that fails afterwards leaves the
-    /// state machine one step ahead of the wire, the same asymmetry the
-    /// outbound request path already carries.
     /// Whether this response answers a REQUEST_UPDATE rather than the request
     /// that opened the stream.
     ///
@@ -2395,11 +2382,19 @@ impl Endpoint {
         }
     }
 
-    /// Drive the state machines for a response this endpoint is about to write
+    /// Drive the state machine for a response this endpoint is about to write
     /// on a request stream the peer opened.
     ///
-    /// The caller writes the message only after this returns `Ok`, so a
-    /// response the endpoint refuses never reaches the wire.
+    /// The mirror of [`receive_response_on_stream`](Self::receive_response_on_stream),
+    /// and the reason the transitions are named `*_sent` rather than reusing
+    /// the received-side ones: the state edges coincide, so a mis-dispatch
+    /// would otherwise succeed silently instead of naming the wrong event in
+    /// an `InvalidTransition`.
+    ///
+    /// The caller writes `msg` only after this returns `Ok`. What it cannot
+    /// undo is the opposite order: a write that fails afterwards leaves the
+    /// state machine one step ahead of the wire, the same asymmetry the
+    /// outbound request path already carries.
     ///
     /// # Errors
     ///

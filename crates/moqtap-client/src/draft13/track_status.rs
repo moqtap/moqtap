@@ -28,7 +28,7 @@ pub enum TrackStatusError {
     },
 }
 
-/// Pure state machine for a MoQT track status request (draft-12).
+/// Pure state machine for a MoQT track status request (draft-13).
 /// Transitions: Idle → Pending → Done.
 pub struct TrackStatusStateMachine {
     state: TrackStatusState,

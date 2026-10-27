@@ -34,38 +34,6 @@
 //! the draft answers by ignoring it, so the last gate here sends GROUP_ORDER
 //! in an update to a namespace subscription and requires the session to
 //! survive.
-//!
-//! # Ablations, measured
-//!
-//! Three cuts, each made against the two crates a change to `moqtap-client`
-//! can reach and then reverted. They partition the five gates here: two, two
-//! and one, with nothing outside this file reddened by any of them, and each
-//! run left the other 166 binaries green.
-//!
-//! Removing the check, which leaves the behaviour draft-16 had without it:
-//!
-//! ```text
-//! SUBSCRIPTION_FILTER is for a subscription and this is not one: ()
-//! a namespace request is neither a subscription nor a FETCH: ()
-//! ```
-//!
-//! Reading the qualifier table as a whitelist, so an unrecognised parameter is
-//! refused instead of ignored:
-//!
-//! ```text
-//! DELIVERY TIMEOUT names REQUEST_UPDATE with no qualifier:
-//! UpdateParameterNotForKind { request_id: 0, key: 2 }
-//! GROUP_ORDER does not name REQUEST_UPDATE, so it is ignored:
-//! UpdateParameterNotForKind { request_id: 0, key: 34 }
-//! ```
-//!
-//! Dropping the second half of SUBSCRIBER_PRIORITY's qualifier, so it reads
-//! "for a subscription" rather than "for a subscription or FETCH":
-//!
-//! ```text
-//! SUBSCRIBER_PRIORITY names a FETCH as well as a subscription:
-//! UpdateParameterNotForKind { request_id: 0, key: 32 }
-//! ```
 
 use moqtap_client::draft16::endpoint::{Endpoint, EndpointError};
 use moqtap_client::draft16::session::request_id::Role;

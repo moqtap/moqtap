@@ -1652,10 +1652,10 @@ impl Connection {
     /// Send a control message on the control stream.
     ///
     /// Wraps the draft-17 message in `AnyControlMessage::Draft17` for
-    /// framing. This is the route for the messages that belong to the session
-    /// rather than to one request: GOAWAY, NAMESPACE, NAMESPACE_DONE,
-    /// PUBLISH_BLOCKED and REQUEST_UPDATE, the last of which carries its own
-    /// request id and is handled on the control stream by the peer's endpoint.
+    /// framing. This is the route for the message that belongs to the session
+    /// rather than to one request: GOAWAY. NAMESPACE, NAMESPACE_DONE,
+    /// PUBLISH_BLOCKED and REQUEST_UPDATE belong on a request stream, and this
+    /// returns [`ConnectionError::RequestStreamMessageOnControlStream`] for them.
     /// SETUP is written by [`connect`](Self::connect) and is the control
     /// stream's own type varint.
     ///
@@ -1683,12 +1683,16 @@ impl Connection {
     ///
     /// Response types are still permitted. A response written here will be
     /// refused by a conforming peer, whose endpoint answers a response on the
-    /// control stream with an error — but this is currently the only route
-    /// for them at all, since nothing yet accepts a request stream the peer
-    /// opened, and refusing them would remove capability rather than fix a
-    /// misdirected write. [`publish_done`](Self::publish_done), the one
-    /// response with a helper, does not come through here: it takes the
-    /// request stream its PUBLISH opened.
+    /// control stream with an error. Answer a peer's request on the stream it
+    /// opened, with the helpers
+    /// [`accept_request_stream`](Self::accept_request_stream) hands a handle
+    /// for — [`respond_ok`](Self::respond_ok),
+    /// [`respond_subscribe_ok`](Self::respond_subscribe_ok),
+    /// [`respond_fetch_ok`](Self::respond_fetch_ok),
+    /// [`respond_publish_ok`](Self::respond_publish_ok) and
+    /// [`respond_error`](Self::respond_error).
+    /// [`publish_done`](Self::publish_done) does not come through here either:
+    /// it takes the request stream its PUBLISH opened.
     pub async fn send_control(&mut self, msg: &ControlMessage) -> Result<(), ConnectionError> {
         let ty = msg.message_type();
         if starts_a_request_stream(ty) {

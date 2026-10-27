@@ -51,35 +51,6 @@
 //! the value it counts from and words it "{Joining Location.Group - Joining
 //! Start, 0}", which drafts 18 and 19 keep. The absolute reading is the one
 //! sentence that survives the range unchanged.
-//!
-//! # Ablations, measured
-//!
-//! Five cuts, run against the two crates a change to `moqtap-client` can
-//! reach, and reverted. Two of them are the same mistake in opposite
-//! directions — sending the relative type from the absolute call and the
-//! absolute type from the relative one — because a gate that checked only one
-//! would be passed by an endpoint that had stopped telling them apart. The
-//! second of that pair reddens draft-19's own unit test as well, which is the
-//! one draft where something already watched the difference.
-//!
-//! ## Two of the five reddened nothing, and that is the finding
-//!
-//! Both were the same cut in a connection helper: `absolute_joining_fetch`
-//! left calling the endpoint's relative builder, so the helper compiles, opens
-//! its stream, writes a FETCH, and asks for the wrong one. Made on draft-16,
-//! which no test drives that helper on, nothing failed. Made on draft-17,
-//! whose helper `uni_control_plane.rs` does drive, nothing failed either — the
-//! peer there reads the message's leading type varint, and both Fetch Types
-//! are the same message.
-//!
-//! So the helpers were covered for opening a stream and writing a FETCH, and
-//! not for which FETCH — a gap in the tests rather than in the crate, and the
-//! same on all five drafts.
-//!
-//! It is closed. The peer in `uni_control_plane.rs` decodes the request it is
-//! handed and reports the whole of it, and drafts 15 and 16 have a connection
-//! gate of their own in `a_request_helper_asks_for_what_it_was_told.rs`. Both
-//! cuts above were made again afterwards and both fail now.
 
 #![allow(clippy::items_after_test_module)]
 

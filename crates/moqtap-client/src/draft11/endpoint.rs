@@ -601,13 +601,6 @@ pub struct Endpoint {
     /// answer is built out of the request: a Joining Fetch has to be judged
     /// against the subscription it names, and that name is nowhere else.
     inbound_fetches: HashMap<u64, InboundFetch>,
-    /// Every Track Alias in use in this session, and the track each one names.
-    ///
-    /// "Already being used" is what makes this a table rather than a set: an
-    /// alias whose subscription has ended is free again. The table records the
-    /// binding and reads liveness back off the subscription's own state
-    /// machine, rather than keeping a second copy of it that every path ending
-    /// a subscription would have to remember to prune.
     /// What each track's objects have been framed as, so far.
     ///
     /// Behind a lock because this is the one endpoint fact a *data* stream
@@ -622,6 +615,13 @@ pub struct Endpoint {
     /// at a time, with no way back to the endpoint. Each such stream is handed a
     /// clone of the handle, and every clone measures against this one record.
     locations: Arc<Mutex<TrackLocations>>,
+    /// Every Track Alias in use in this session, and the track each one names.
+    ///
+    /// "Already being used" is what makes this a table rather than a set: an
+    /// alias whose subscription has ended is free again. The table records the
+    /// binding and reads liveness back off the subscription's own state
+    /// machine, rather than keeping a second copy of it that every path ending
+    /// a subscription would have to remember to prune.
     track_bindings: HashMap<u64, TrackBinding>,
     fetches: HashMap<u64, FetchStateMachine>,
     subscribe_announces: HashMap<u64, SubscribeAnnouncesStateMachine>,

@@ -31,13 +31,6 @@
 //! "If a publisher **receives** a Joining Fetch ..." names the moment. A
 //! subscription that ends between the FETCH arriving and its answer going out
 //! does not turn a fetch that could be joined into one that could not.
-//!
-//! # Ablations, measured
-//!
-//! Six cuts reach this file, each recorded on the gate it belongs to. They are
-//! the same cuts `a_joining_fetch_names_a_live_subscription.rs` records,
-//! because the rule is one rule. The fifth gate here is the exception and says
-//! so: nothing on these three drafts can be cut to redden it.
 
 #![allow(clippy::items_after_test_module)]
 

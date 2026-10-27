@@ -36,25 +36,6 @@
 //! ceiling, increase or not. The peer here raises the ceiling to 100 and has
 //! that accepted, then repeats it. Only the second one is the violation, and
 //! the first is what proves the refusal is about the rule.
-//!
-//! # Ablations, measured
-//!
-//! Both cuts are made in all ten drafts at once, because ten separate copies of
-//! the same routing need ten separate measurements and one run with
-//! `--no-fail-fast` produces all of them.
-//!
-//! Reducing each `Connection::recv_and_dispatch` to
-//! `self.endpoint.receive_message(msg.clone())?`
-//! leaves the endpoint refusing the frame and the connection open, and
-//! fails the loopback gate on every one of the ten, each on its own draft's
-//! line and none of the in-process ten.
-//!
-//! Reducing each `Endpoint::fail_session` to `err`, so the violation is
-//! reported without the session ending, is the other way round: all ten
-//! in-process gates fail and all ten loopback gates pass, because the close
-//! still goes out. Two cuts, twenty failures, no overlap.
-//!
-//! The messages both cuts produce are recorded on the two tests below.
 
 mod common;
 
