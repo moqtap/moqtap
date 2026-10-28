@@ -260,22 +260,20 @@ impl Transport {
 
     /// A future resolving when the session ends, carrying the peer's close.
     ///
-    /// Borrows nothing and outlives this transport, so a caller can take it
-    /// *before* handing the transport to a handshake and still be holding it
-    /// when the peer's answer lands. That ordering is the whole point: a peer
-    /// refusing a setup often finishes the control stream first and closes the
-    /// session a round trip later, by which time the handshake has already
-    /// returned end-of-stream and dropped everything it had.
+    /// Take it before handing the transport to a handshake: a peer refusing a
+    /// setup often closes the session after the handshake has already seen
+    /// end-of-stream.
     ///
-    /// `None` over WebTransport. The session close there is `wtransport`'s and
-    /// its code is in a private field with no accessor — the first of the
-    /// README's known gaps, not a decision made here.
+    /// `Some` on every transport this crate dials. Over WebTransport only an
+    /// application or session close carries a code; a QUIC transport close
+    /// arrives as text, because `wtransport` keeps that code private.
     pub fn closed(&self) -> Option<impl Future<Output = TransportError> + Send + 'static> {
-        match self {
-            Transport::Quic(t) => Some(t.closed()),
+        let closed: std::pin::Pin<Box<dyn Future<Output = TransportError> + Send>> = match self {
+            Transport::Quic(t) => Box::pin(t.closed()),
             #[cfg(feature = "webtransport")]
-            Transport::WebTransport(_) => None,
-        }
+            Transport::WebTransport(t) => Box::pin(t.closed()),
+        };
+        Some(closed)
     }
 
     /// The certificate chain the peer presented, DER-encoded, leaf first.

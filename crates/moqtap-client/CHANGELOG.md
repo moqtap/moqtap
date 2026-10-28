@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-28
+
+### Fixed
+
+- `Transport::closed` returns `Some` over WebTransport, reporting the session close and its code.
+
 ## [0.8.2] - 2026-10-27
 
 ### Added

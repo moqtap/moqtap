@@ -2,6 +2,8 @@
 
 use bytes::Bytes;
 
+use std::future::Future;
+
 use super::{RecvStream, SendStream, TransportError};
 
 /// WebTransport send stream wrapping `wtransport::SendStream`.
@@ -172,6 +174,19 @@ fn handshake_failure(e: &wtransport::error::ConnectingError) -> super::Handshake
     }
 }
 
+/// A lost session, keeping the peer's close code where `wtransport` exposes one.
+///
+/// A `CLOSE_WEBTRANSPORT_SESSION` capsule arrives as `ApplicationClosed`, as
+/// does a QUIC application close; the other arms hold their codes privately.
+fn session_lost(e: wtransport::error::ConnectionError) -> TransportError {
+    match &e {
+        wtransport::error::ConnectionError::ApplicationClosed(close) => {
+            TransportError::SessionClosed { code: close.code().into_inner(), reason: e.to_string() }
+        }
+        _ => TransportError::Connection(e.to_string()),
+    }
+}
+
 /// The number in `wtransport::error::QuicProtoError`'s `" (code: {code})"`.
 fn code_in_display(rendered: &str) -> Option<u64> {
     let rest = rendered.rsplit_once("(code: ")?.1;
@@ -241,6 +256,16 @@ impl WebTransportTransport {
     /// Close the connection.
     pub fn close(&self, code: u32, reason: &[u8]) {
         self.0.close(wtransport::VarInt::from_u32(code), reason);
+    }
+
+    /// A future resolving when the session ends, carrying the peer's close.
+    ///
+    /// As [`QuicTransport::closed`](super::quic::QuicTransport::closed): take it
+    /// before the transport is handed to a handshake. Holding the future keeps
+    /// the connection alive.
+    pub fn closed(&self) -> impl Future<Output = TransportError> + Send + 'static {
+        let conn = self.0.clone();
+        async move { session_lost(conn.closed().await) }
     }
 
     /// Get the remote address of the peer.
@@ -707,6 +732,48 @@ mod tests {
         );
 
         transport.close(0, b"done");
+        accepting.abort();
+    }
+
+    /// A peer's session close reaches `closed()` with its code.
+    #[tokio::test]
+    async fn a_session_close_reports_its_code() {
+        use std::net::{Ipv4Addr, SocketAddr};
+
+        let identity =
+            wtransport::Identity::self_signed(["localhost"]).expect("localhost is a valid SAN");
+        let server = wtransport::Endpoint::server(
+            wtransport::ServerConfig::builder()
+                .with_bind_default(0)
+                .with_identity(identity)
+                .build(),
+        )
+        .expect("a loopback server binds");
+        let port = server.local_addr().expect("a bound endpoint has an address").port();
+        let (go_tx, go_rx) = tokio::sync::oneshot::channel::<()>();
+        let accepting = tokio::spawn(async move {
+            let request = server.accept().await.await.expect("the session request arrives");
+            let connection = request.accept().await.expect("the session is accepted");
+            let _ = go_rx.await;
+            connection.close(wtransport::VarInt::from_u32(0x15), b"version");
+            connection.closed().await;
+        });
+
+        let target = super::super::QuicTarget {
+            addr: SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+            server_name: "localhost".to_string(),
+        };
+        let options = super::super::QuicDialOptions::new(vec![b"h3".to_vec()]).insecure(true);
+        let transport = dial_webtransport_to(&target, "/", &options)
+            .await
+            .expect("the loopback session establishes");
+        let closed = transport.closed().expect("WebTransport reports its close");
+        let _ = go_tx.send(());
+
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(5), closed)
+            .await
+            .expect("the close arrives");
+        assert!(matches!(ended, TransportError::SessionClosed { code: 0x15, .. }), "got {ended:?}");
         accepting.abort();
     }
 
