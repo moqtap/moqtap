@@ -474,7 +474,7 @@ impl EndpointError {
                 RequestIdError::Decreased(..) => Fault::Peer(Rule::MaxRequestIdDecreased),
                 RequestIdError::ExceedsMax(..) => Fault::Peer(Rule::RequestIdCeiling),
                 RequestIdError::WrongParity(..) => Fault::Peer(Rule::RequestIdParity),
-                RequestIdError::OutOfSequence { .. } => Fault::Peer(Rule::RequestIdOutOfSequence),
+                RequestIdError::Duplicate(..) => Fault::Peer(Rule::RequestIdOutOfSequence),
                 // This endpoint has spent the budget the peer granted it.
                 RequestIdError::Blocked => Fault::ThisEndpoint,
             },
@@ -510,8 +510,7 @@ impl EndpointError {
             // spend with a close, and names INVALID_REQUEST_ID for it. Both
             // halves of that sentence arrive here: "not valid for the peer"
             // is an ID out of this endpoint's own half of the space, and "not
-            // the next in sequence" is a new request carrying an ID other than
-            // the next one the peer's sequence calls for.
+            // the next in sequence" is enforced as reuse only (#1459).
             //
             // The sentence names a third condition too, an ID that "exceeds
             // the received MAX_REQUEST_ID", and answers it with the same code.
@@ -519,7 +518,7 @@ impl EndpointError {
             // names instead, for the reason written at
             // `validate_peer_request_id`.
             EndpointError::RequestId(
-                RequestIdError::WrongParity(..) | RequestIdError::OutOfSequence { .. },
+                RequestIdError::WrongParity(..) | RequestIdError::Duplicate(..),
             ) => Some(SessionErrorCode::InvalidRequestId),
             // Section 9.4 answers a GOAWAY that repeats one already
             // received, and names this code in the same sentence.
@@ -1339,18 +1338,17 @@ impl Endpoint {
     /// and not the peer's grant to it, so the two numbers are different and
     /// only one of them answers this question.
     ///
-    /// The third is the sequence. Draft-15 rewrote "not expected" as "not the
-    /// next in sequence", which says the same thing in a way that cannot be
-    /// read as advisory: each endpoint starts at 0 or 1 by role and steps by 2
-    /// per request, so the next value is a number. A repeat and a skip are both
-    /// refused, and neither is caught by parity or by the ceiling - a repeat has
-    /// the right parity and sits below the ceiling by construction, having been
-    /// accepted once already.
+    /// The third is reuse. Section 9.1 also asks for "the next in sequence",
+    /// which is not enforced: SUBSCRIBE_NAMESPACE has a stream of its own, so
+    /// requests can arrive out of order, and the editors' guidance for this
+    /// draft (moq-wg/moq-transport#1459) is to check only parity, the ceiling
+    /// and duplicates. A skipped ID is accepted when it arrives later; a repeat
+    /// is refused.
     ///
-    /// Taking the ID is what advances the sequence, so this is for a **new**
-    /// request only. A response, a cancellation or an update that names the
-    /// request it modifies all carry an ID that has already been spent, and
-    /// passing one here would refuse it.
+    /// Taking the ID marks it used, so this is for a **new** request only. A
+    /// response, a cancellation or an update that names the request it
+    /// modifies all carry an ID that has already been spent, and passing one
+    /// here would refuse it.
     ///
     /// # The ceiling is a session rule, not a request rule
     ///
@@ -1381,8 +1379,8 @@ impl Endpoint {
     ///
     /// [`RequestIdError::WrongParity`] if the ID belongs to this endpoint's
     /// half of the space, [`RequestIdError::ExceedsMax`] if it is not
-    /// below the advertised ceiling, or [`RequestIdError::OutOfSequence`] if it
-    /// is not the one the peer's sequence called for. A ceiling that was never
+    /// below the advertised ceiling, or [`RequestIdError::Duplicate`] if the
+    /// peer has already used it. A ceiling that was never
     /// raised is 0, which refuses every ID, matching a default that reads "the
     /// peer MUST NOT send requests".
     ///
@@ -3286,17 +3284,15 @@ impl Endpoint {
     /// # The list below is the rule, not a convenience
     ///
     /// Every message named here spends one of the peer's Request IDs, and
-    /// nothing else does. That makes the list load-bearing in a way it was not
-    /// before the sequence was tracked: a request left out of it spends an ID
-    /// this endpoint never counts, so the peer's **next** request looks like a
-    /// skip and a conforming session is closed over it. Section 9.1 names
-    /// the set, and REQUEST_UPDATE is in it - it carries a Request ID of its own,
-    /// alongside the separate field naming the request it modifies.
+    /// nothing else does. A request left out of it would go unchecked for
+    /// parity, the ceiling and reuse. Section 9.1 names the set, and
+    /// REQUEST_UPDATE is in it - it carries a Request ID of its own, alongside
+    /// the separate field naming the request it modifies.
     ///
     /// # Errors
     ///
     /// The request-id errors, for a wrong parity, an id at or above the
-    /// advertised ceiling, or one that is not the next in the peer's sequence.
+    /// advertised ceiling, or one the peer has already used.
     pub fn receive_request(&mut self, msg: &ControlMessage) -> Result<(), EndpointError> {
         let request_id = match msg {
             ControlMessage::Subscribe(m) => m.request_id,

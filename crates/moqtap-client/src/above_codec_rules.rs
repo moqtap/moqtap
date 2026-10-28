@@ -236,8 +236,11 @@ pub enum AboveCodecRule {
     ///
     /// A repeat and a skip alike. Drafts 11 through 16 state it as "a new
     /// request with a Request ID that is not expected" and drafts 17 through 20
-    /// as "a duplicate Request ID"; drafts 07 through 10 require the shared
-    /// Subscribe ID to be "unique and monotonically increasing". Three
+    /// as "a duplicate Request ID". On draft-16 only a repeat is refused:
+    /// requests arrive on more than one stream, and moq-wg/moq-transport#1459
+    /// says to check duplicates rather than the sequence. Drafts 07 through 10
+    /// require the shared Subscribe ID to be "unique and monotonically
+    /// increasing". Three
     /// phrasings of one requirement — that an id identifies exactly one request
     /// for the life of a session.
     RequestIdOutOfSequence,
@@ -1052,7 +1055,14 @@ impl AboveCodecRule {
                     code_name: Some("INVALID_REQUEST_ID"),
                 },
                 RuleCitation {
-                    drafts: (15, 16),
+                    drafts: (15, 15),
+                    section: "9.1",
+                    sentence: REQUEST_ID_15,
+                    code_name: Some("INVALID_REQUEST_ID"),
+                },
+                // Enforced as duplicates only, per moq-wg/moq-transport#1459.
+                RuleCitation {
+                    drafts: (16, 16),
                     section: "9.1",
                     sentence: REQUEST_ID_15,
                     code_name: Some("INVALID_REQUEST_ID"),

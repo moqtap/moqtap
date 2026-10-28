@@ -1685,9 +1685,8 @@ impl Connection {
     /// The endpoint is told about the request last, after every step that can
     /// fail or be cancelled, and building the handle afterwards cannot fail.
     /// Registering earlier would let a cancelled accept leave a state machine
-    /// keyed to a stream nobody holds, and the peer's next Request ID would
-    /// then look out of sequence — a session close, over an id the peer used
-    /// exactly once.
+    /// keyed to a stream nobody holds, with the peer's Request ID spent on a
+    /// request nobody answers.
     ///
     /// # Errors
     ///

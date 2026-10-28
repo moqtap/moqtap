@@ -1669,14 +1669,8 @@ mod draft16 {
         );
     }
 
-    /// The boundary on the other side, walked rather than sampled.
-    ///
-    /// A single id cannot show this any more: taking one advances the peer's
-    /// sequence, so 7 on its own is now a skip and would be refused for a
-    /// reason that has nothing to do with the ceiling. Every id the peer may
-    /// spend under a ceiling of 8 is spent here, in the order the sequence
-    /// fixes, which is the only way the boundary and the sequence can both be
-    /// read off one run.
+    /// The boundary on the other side: every id the peer may spend under a
+    /// ceiling of 8.
     #[test]
     fn a_peer_id_below_the_advertised_ceiling_is_accepted() {
         let mut endpoint = advertising(8);
@@ -1756,13 +1750,8 @@ mod draft16 {
 
     /// A Request ID the peer has already spent is refused.
     ///
-    /// Section 9.1 closes the session on "a new request with a Request ID that is not the next in sequence", and a repeat is the
-    /// case the other two halves both miss: it has the parity of the peer's
-    /// space, and it sat below the ceiling when it was accepted the first time,
-    /// so it sits below it still. Only a record of what has been spent answers
-    /// it, and until that record existed a peer could open a second request
-    /// under the id of one already open and take its place in every map keyed
-    /// by Request ID.
+    /// A repeat has the peer's parity and sits below the ceiling, so only a
+    /// record of what has been spent catches it.
     ///
     /// Ablation: dropping the `record_peer_id` call from
     /// `validate_peer_request_id` fails with
@@ -1773,40 +1762,42 @@ mod draft16 {
     #[test]
     fn an_id_the_peer_already_spent_is_refused() {
         let mut endpoint = advertising(8);
-        endpoint.receive_message(peer_request(1)).expect("the peer's first request is in sequence");
+        endpoint.receive_message(peer_request(1)).expect("the peer's first request");
 
         let result = endpoint.receive_message(peer_request(1));
         assert!(
-            matches!(
-                result,
-                Err(EndpointError::RequestId(RequestIdError::OutOfSequence {
-                    got: 1,
-                    expected: 3
-                }))
-            ),
+            matches!(result, Err(EndpointError::RequestId(RequestIdError::Duplicate(1)))),
             "an id the peer has already opened a request under must be refused: {result:?}",
         );
     }
 
-    /// A Request ID the peer skipped ahead to is refused on the same rule.
-    ///
-    /// The other direction, and the one that shows the check is about the
-    /// sequence rather than about repeats. Section 9.1 starts the peer's
-    /// half at 1 here and steps it by 2, so its first request has one legal id
-    /// and 3 is not it.
+    /// Requests on different streams can arrive out of order, so a skipped id
+    /// is accepted, and so is the earlier one when it arrives
+    /// (moq-wg/moq-transport#1459).
     #[test]
-    fn an_id_the_peer_skipped_ahead_to_is_refused() {
+    fn a_skipped_id_then_the_earlier_one_is_accepted() {
         let mut endpoint = advertising(8);
-        let result = endpoint.receive_message(peer_request(3));
+        endpoint.receive_message(peer_request(3)).expect("3 skips 1, which may still arrive");
+        endpoint.receive_message(peer_request(1)).expect("1 was skipped, not used");
+        endpoint.receive_message(peer_request(5)).expect("5 is the next unused id");
+    }
+
+    /// A skipped id that has since arrived is used like any other.
+    #[test]
+    fn a_skipped_id_cannot_be_used_twice() {
+        let mut endpoint = advertising(8);
+        endpoint.receive_message(peer_request(5)).expect("a skip ahead");
+        endpoint.receive_message(peer_request(1)).expect("the skipped id, once");
+
+        let result = endpoint.receive_message(peer_request(1));
         assert!(
-            matches!(
-                result,
-                Err(EndpointError::RequestId(RequestIdError::OutOfSequence {
-                    got: 3,
-                    expected: 1
-                }))
-            ),
-            "the peer's first request has one legal id and 3 is not it: {result:?}",
+            matches!(result, Err(EndpointError::RequestId(RequestIdError::Duplicate(1)))),
+            "a skipped id that has arrived is spent: {result:?}",
+        );
+        let result = endpoint.receive_message(peer_request(5));
+        assert!(
+            matches!(result, Err(EndpointError::RequestId(RequestIdError::Duplicate(5)))),
+            "the id skipped to is spent: {result:?}",
         );
     }
 
@@ -1823,30 +1814,21 @@ mod draft16 {
     /// Ablation: removing the arm from `receive_request` fails with
     ///
     /// ```text
-    /// the update's own Request ID must be held to the peer's sequence:
+    /// the update's own Request ID must be held to the peer's parity:
     /// Err(UnknownRequest(99))
     /// ```
     #[test]
     fn the_update_messages_own_id_is_checked() {
         let mut endpoint = advertising(8);
-        let result = endpoint.receive_message(peer_update(3, 99));
+        let result = endpoint.receive_message(peer_update(2, 99));
         assert!(
-            matches!(
-                result,
-                Err(EndpointError::RequestId(RequestIdError::OutOfSequence {
-                    got: 3,
-                    expected: 1
-                }))
-            ),
-            "the update's own Request ID must be held to the peer's sequence: {result:?}",
+            matches!(result, Err(EndpointError::RequestId(RequestIdError::WrongParity(2, _)))),
+            "the update's own Request ID must be held to the peer's parity: {result:?}",
         );
     }
 
-    /// And spending it moves the sequence on for everything after.
-    ///
-    /// The consequence of the arm above, seen from the next request rather than
-    /// from the update itself: an update that took id 1 leaves 3 as the next,
-    /// and a request that reuses 1 is a repeat.
+    /// And spending it marks the id used: a request that reuses 1 after an
+    /// update took it is a repeat.
     #[test]
     fn the_update_message_advances_the_peers_sequence() {
         let mut endpoint = advertising(8);
@@ -1856,13 +1838,7 @@ mod draft16 {
 
         let result = endpoint.receive_message(peer_request(1));
         assert!(
-            matches!(
-                result,
-                Err(EndpointError::RequestId(RequestIdError::OutOfSequence {
-                    got: 1,
-                    expected: 3
-                }))
-            ),
+            matches!(result, Err(EndpointError::RequestId(RequestIdError::Duplicate(1)))),
             "the update spent the peer's first id, so 1 is no longer available: {result:?}",
         );
     }

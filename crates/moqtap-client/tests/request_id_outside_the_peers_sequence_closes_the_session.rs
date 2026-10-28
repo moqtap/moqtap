@@ -55,9 +55,11 @@ mod common;
 /// `additional_versions` at 15, `ServerSetup` dropped its Selected Version at
 /// 15, `send_client_setup` lost its version list in the same place, and
 /// `Endpoint::subscribe` has four different signatures across the six.
+/// `$repeat_reason` is what the close reason says for a repeated ID: draft-16
+/// enforces duplicates rather than the sequence (moq-wg/moq-transport#1459).
 macro_rules! wrong_request_id_gates {
     ($draft:ident, $feat:literal, $version:ident, $cfg:tt, $setup:tt, $sub:tt,
-     $code_name:literal, $section:literal, $role:path) => {
+     $code_name:literal, $section:literal, $role:path, $repeat_reason:literal) => {
         #[cfg(feature = $feat)]
         mod $draft {
             use std::time::Duration;
@@ -320,7 +322,7 @@ macro_rules! wrong_request_id_gates {
                 let repeat = peer_subscribe(PEERS_FIRST);
 
                 let peer = tokio::spawn(async move {
-                    expect_close(server, vec![first, repeat], "next in sequence").await
+                    expect_close(server, vec![first, repeat], $repeat_reason).await
                 });
 
                 let mut conn = Connection::connect(&addr.to_string(), client_config())
@@ -337,7 +339,7 @@ macro_rules! wrong_request_id_gates {
                     .expect_err("a second request under an ID already spent must be refused");
                 let text = err.to_string();
                 assert!(
-                    text.contains("next in sequence"),
+                    text.contains($repeat_reason),
                     "the error should name the rule; got {text:?}"
                 );
 
@@ -490,7 +492,8 @@ wrong_request_id_gates!(
     alias_varint,
     "Invalid Request ID",
     "8.1",
-    moqtap_client::draft11::session::request_id::Role
+    moqtap_client::draft11::session::request_id::Role,
+    "next in sequence"
 );
 wrong_request_id_gates!(
     draft12,
@@ -501,7 +504,8 @@ wrong_request_id_gates!(
     varint,
     "Invalid Request ID",
     "8.1",
-    moqtap_client::draft12::session::request_id::Role
+    moqtap_client::draft12::session::request_id::Role,
+    "next in sequence"
 );
 wrong_request_id_gates!(
     draft13,
@@ -512,7 +516,8 @@ wrong_request_id_gates!(
     filter,
     "Invalid Request ID",
     "8.1",
-    moqtap_client::draft13::session::request_id::Role
+    moqtap_client::draft13::session::request_id::Role,
+    "next in sequence"
 );
 wrong_request_id_gates!(
     draft14,
@@ -523,7 +528,8 @@ wrong_request_id_gates!(
     filter,
     "INVALID_REQUEST_ID",
     "9.1",
-    moqtap_client::draft14::session::request_id::Role
+    moqtap_client::draft14::session::request_id::Role,
+    "next in sequence"
 );
 wrong_request_id_gates!(
     draft15,
@@ -534,7 +540,8 @@ wrong_request_id_gates!(
     params,
     "INVALID_REQUEST_ID",
     "9.1",
-    moqtap_client::draft15::session::request_id::Role
+    moqtap_client::draft15::session::request_id::Role,
+    "next in sequence"
 );
 wrong_request_id_gates!(
     draft16,
@@ -545,5 +552,6 @@ wrong_request_id_gates!(
     params,
     "INVALID_REQUEST_ID",
     "9.1",
-    moqtap_client::draft16::session::request_id::Role
+    moqtap_client::draft16::session::request_id::Role,
+    "already used"
 );

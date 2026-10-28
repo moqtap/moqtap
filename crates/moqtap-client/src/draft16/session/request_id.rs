@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use moqtap_codec::varint::VarInt;
 
 /// Which end of the session this endpoint is, which fixes the parity of the
@@ -25,16 +27,14 @@ pub enum RequestIdError {
     /// No request IDs are available (max is 0 or exhausted).
     #[error("no request IDs available (blocked)")]
     Blocked,
-    /// A new request carried an ID other than the next one in the peer's own
-    /// sequence.
-    #[error("request ID {got} is not the peer's next in sequence, which is {expected}")]
-    OutOfSequence {
-        /// The ID the request carried.
-        got: u64,
-        /// The ID the peer's next new request had to carry.
-        expected: u64,
-    },
+    /// A new request carried an ID the peer has already used.
+    #[error("request ID {0} was already used by the peer")]
+    Duplicate(u64),
 }
+
+/// How many skipped peer IDs are remembered as still unused. A skipped ID that
+/// falls out of this window is treated as used.
+const MAX_SKIPPED_PEER_IDS: usize = 1024;
 
 /// Allocates this endpoint's request IDs and checks the parity of the peer's.
 ///
@@ -59,6 +59,7 @@ pub struct RequestIdAllocator {
     next_id: u64,
     max_id: u64,
     peer_next_id: u64,
+    peer_skipped: BTreeSet<u64>,
 }
 
 impl RequestIdAllocator {
@@ -75,7 +76,7 @@ impl RequestIdAllocator {
             Role::Client => 1,
             Role::Server => 0,
         };
-        Self { role, next_id, max_id: 0, peer_next_id }
+        Self { role, next_id, max_id: 0, peer_next_id, peer_skipped: BTreeSet::new() }
     }
 
     /// The role this allocator allocates for.
@@ -123,7 +124,7 @@ impl RequestIdAllocator {
     /// is the budget the peer granted us, a different number that may be
     /// larger or smaller. The endpoint owns that check.
     ///
-    /// Parity is the half that needs no history. The sequence half is
+    /// Parity is the half that needs no history. The duplicate half is
     /// [`Self::record_peer_id`], which does.
     ///
     /// # Errors
@@ -151,47 +152,69 @@ impl RequestIdAllocator {
         self.next_id >= self.max_id
     }
 
-    /// The Request ID the peer's next **new** request must carry.
-    ///
-    /// Section 9.1 starts each endpoint's sequence at 0 or 1 by role and
-    /// steps it by 2 per request, so the whole sequence is fixed from the
-    /// outset and the next value is a number rather than a guess.
+    /// The ID after the highest one the peer has used: its first ID until it
+    /// sends a request, then the highest seen plus 2.
     pub fn peer_next_id(&self) -> u64 {
         self.peer_next_id
     }
 
-    /// Take the Request ID of a new request the peer sent, holding it to the
-    /// sequence Section 9.1 fixes.
+    /// Take the Request ID of a new request the peer sent, refusing one it has
+    /// already used.
     ///
-    /// "If an endpoint receives a Request ID that is not valid for the peer,
-    /// or a new request with a Request ID that is not the next in sequence
-    /// or exceeds the received MAX_REQUEST_ID, it MUST close the session
-    /// with INVALID_REQUEST_ID."
+    /// The sequence is not enforced. Draft-16 opens SUBSCRIBE_NAMESPACE on its
+    /// own stream, so requests can arrive out of order across streams; the
+    /// editors' guidance for draft-16 (moq-wg/moq-transport#1459) is to check
+    /// parity, the ceiling and duplicates only. IDs jumped over are remembered
+    /// as unused, up to a fixed number of the highest.
     ///
-    /// One counter answers both halves of that. A repeat is below the next
-    /// value and a skip is above it, and neither is the value the peer's own
-    /// step of two produces, so nothing further has to be remembered: the set
-    /// of IDs already spent is every value of this parity below the counter.
-    ///
-    /// Only a **new** request advances this. A message that names a request
-    /// already open - a response, a cancellation, an update that carries the
-    /// original's ID rather than one of its own - reuses an ID on purpose, and
-    /// passing one here would refuse it.
+    /// Only a **new** request is passed here. A message that names a request
+    /// already open reuses its ID on purpose.
     ///
     /// # Errors
     ///
-    /// [`RequestIdError::OutOfSequence`] carrying the ID that arrived and the
-    /// one the sequence called for.
+    /// [`RequestIdError::WrongParity`] for an ID from this endpoint's half,
+    /// [`RequestIdError::Duplicate`] for one already used or no longer
+    /// remembered as skipped.
     pub fn record_peer_id(&mut self, id: u64) -> Result<(), RequestIdError> {
-        if id != self.peer_next_id {
-            return Err(RequestIdError::OutOfSequence { got: id, expected: self.peer_next_id });
+        self.validate_peer_id(id)?;
+        if id < self.peer_next_id {
+            return if self.peer_skipped.remove(&id) {
+                Ok(())
+            } else {
+                Err(RequestIdError::Duplicate(id))
+            };
         }
-        self.peer_next_id += 2;
+        let window = 2 * MAX_SKIPPED_PEER_IDS as u64;
+        let mut skipped = id.saturating_sub(window).max(self.peer_next_id);
+        while skipped < id {
+            self.peer_skipped.insert(skipped);
+            skipped += 2;
+        }
+        while self.peer_skipped.len() > MAX_SKIPPED_PEER_IDS {
+            self.peer_skipped.pop_first();
+        }
+        self.peer_next_id = id.saturating_add(2);
         Ok(())
     }
 
     /// Get the current maximum request ID.
     pub fn max_id(&self) -> u64 {
         self.max_id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_skip_past_the_window_forgets_the_oldest_skipped_ids() {
+        let mut ids = RequestIdAllocator::new(Role::Server);
+        let far = 2 * (MAX_SKIPPED_PEER_IDS as u64 + 10);
+        ids.record_peer_id(far).unwrap();
+        assert_eq!(ids.peer_skipped.len(), MAX_SKIPPED_PEER_IDS);
+        assert_eq!(ids.record_peer_id(0), Err(RequestIdError::Duplicate(0)));
+        ids.record_peer_id(far - 2).unwrap();
+        assert_eq!(ids.peer_next_id(), far + 2);
     }
 }
