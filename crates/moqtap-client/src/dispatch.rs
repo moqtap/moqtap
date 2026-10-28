@@ -1683,10 +1683,10 @@ pub enum AnyArrival {
     /// correct whether the caller reads it or not.
     ///
     /// From draft-17 it is a request of a kind this facade has no entry point
-    /// for, and **its stream has already been reset** — there is no handle in
-    /// this variant to hold it open with, and a stream nobody holds is one the
-    /// peer is owed an answer on forever. That asymmetry is real: on the older
-    /// drafts this variant is passive, and on the newer ones producing it
+    /// for, and **it has already been refused**: REQUEST_ERROR with
+    /// NOT_SUPPORTED and a retry interval of 0, then FIN. There is no handle in
+    /// this variant to answer it otherwise. That asymmetry is real: on the
+    /// older drafts this variant is passive, and on the newer ones producing it
     /// refuses something.
     Other(moqtap_codec::dispatch::AnyControlMessage),
 }
@@ -5470,22 +5470,37 @@ impl AnyConnection {
             }};
         }
 
-        // The request-stream drafts. A request this facade cannot answer has
-        // its stream dropped, which resets it — see [`AnyArrival::Other`].
+        // The request-stream drafts. A request this facade cannot answer is
+        // refused with REQUEST_ERROR NOT_SUPPORTED and its stream finished —
+        // see [`AnyArrival::Other`]. `$extra` fills the fields REQUEST_ERROR
+        // gained after draft-17.
         #[allow(unused_macros)]
         macro_rules! request_stream {
-            ($conn:ident, $version:ident, $module:ident) => {{
-                let (message, stream) =
+            ($conn:ident, $version:ident, $module:ident $(, $extra:ident: $value:expr)*) => {{
+                let (message, mut stream) =
                     $conn.accept_request_stream().await.map_err(AnyConnectionError::from)?;
                 let subscribe =
                     matches!(message, moqtap_codec::$module::message::ControlMessage::Subscribe(_));
                 let message = AnyControlMessage::$version(message);
-                Ok(if subscribe {
-                    AnyArrival::Subscribe { message, request: AnyInboundRequest::$version(stream) }
-                } else {
-                    drop(stream);
-                    AnyArrival::Other(message)
-                })
+                if subscribe {
+                    return Ok(AnyArrival::Subscribe {
+                        message,
+                        request: AnyInboundRequest::$version(stream),
+                    });
+                }
+                let refusal = moqtap_codec::$module::message::RequestError {
+                    error_code: moqtap_codec::varint::VarInt::from_u64(
+                        moqtap_codec::$module::error_codes::RequestErrorCode::NotSupported as u64,
+                    )
+                    .expect("a request error code fits a varint"),
+                    retry_interval: moqtap_codec::varint::VarInt::from_u64(0).expect("zero fits a varint"),
+                    reason_phrase: Vec::new(),
+                    $($extra: $value,)*
+                };
+                // A failed answer falls back to the reset the handle's drop
+                // sends, so it is not this call's error.
+                let _ = $conn.respond_error(&mut stream, refusal).await;
+                Ok(AnyArrival::Other(message))
             }};
         }
 
@@ -5516,15 +5531,15 @@ impl AnyConnection {
             #[cfg(feature = "draft17")]
             Self::Draft17(c) => request_stream!(c, Draft17, draft17),
             #[cfg(feature = "draft18")]
-            Self::Draft18(c) => request_stream!(c, Draft18, draft18),
+            Self::Draft18(c) => request_stream!(c, Draft18, draft18, redirect: None),
             #[cfg(feature = "draft19")]
-            Self::Draft19(c) => request_stream!(c, Draft19, draft19),
+            Self::Draft19(c) => request_stream!(c, Draft19, draft19, redirect: None),
             #[cfg(feature = "draft20")]
-            Self::Draft20(c) => request_stream!(c, Draft20, draft20),
+            Self::Draft20(c) => request_stream!(c, Draft20, draft20, redirect: None),
             #[cfg(feature = "draft21")]
-            Self::Draft21(c) => request_stream!(c, Draft21, draft21),
+            Self::Draft21(c) => request_stream!(c, Draft21, draft21, redirect: None),
             #[cfg(feature = "draft22")]
-            Self::Draft22(c) => request_stream!(c, Draft22, draft22),
+            Self::Draft22(c) => request_stream!(c, Draft22, draft22, redirect: None),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
                 "recv_inbound: not yet wired up for draft {:?} via AnyConnection",

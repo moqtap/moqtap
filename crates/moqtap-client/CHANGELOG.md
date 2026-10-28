@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - On draft 16, a peer request whose Request ID skips ahead no longer ends the session; only a reused Request ID does.
+- On drafts 17 through 22, `AnyConnection::recv_inbound` answers a peer request it has no handle for with REQUEST_ERROR NOT_SUPPORTED (retry interval 0) and finishes the stream, instead of resetting it.
 
 ## [0.8.3] - 2026-10-28
 
