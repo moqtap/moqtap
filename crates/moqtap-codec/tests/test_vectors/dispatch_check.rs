@@ -115,6 +115,12 @@ pub fn check_subgroup_objects(
                 "[{vector_id}] extension_count mismatch"
             );
         }
+        super::properties::assert_properties(
+            vector_id,
+            header.draft(),
+            &object.extension_headers,
+            expected,
+        );
         if let Some(s) = js_str_opt(expected, "extension_headers_length") {
             assert_eq!(
                 object.extension_headers.len().to_string(),

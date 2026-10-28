@@ -1738,6 +1738,7 @@ impl Connection {
             // not assign — so an object carrying a payload it may not is refused
             // and the session stays open.
             | CodecError::PayloadNotPermitted { .. }
+            | CodecError::MalformedObjectProperties { .. }
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(
                 KvpError::MissingLength | KvpError::UnexpectedEnd | KvpError::VarInt(_),

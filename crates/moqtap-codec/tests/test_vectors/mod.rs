@@ -2,6 +2,8 @@
 pub mod dispatch_check;
 #[allow(dead_code)]
 pub mod fields_json;
+#[allow(dead_code)]
+pub mod properties;
 
 use moqtap_codec::error::CodecError;
 use moqtap_codec::varint::VarIntError;

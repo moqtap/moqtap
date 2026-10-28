@@ -442,6 +442,10 @@ impl SubgroupObjectReader {
             extension_headers.len() as u64,
         )?;
 
+        crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft14,
+            &extension_headers,
+        )?;
         Ok(SubgroupObject { object_id, extension_headers, status, payload })
     }
 
@@ -1320,7 +1324,7 @@ mod tests {
             .write_object(
                 &SubgroupObject {
                     object_id: vi(0),
-                    extension_headers: vec![0x01, 0x02, 0x03],
+                    extension_headers: vec![0x3c, 0x02],
                     status: None,
                     payload: vec![0xFF],
                 },
@@ -1329,7 +1333,7 @@ mod tests {
             .unwrap();
         let mut read = SubgroupObjectReader::new(&header);
         let o = read.read_object(&mut &buf[..]).unwrap();
-        assert_eq!(o.extension_headers, vec![0x01, 0x02, 0x03]);
+        assert_eq!(o.extension_headers, vec![0x3c, 0x02]);
         assert_eq!(o.payload, vec![0xFF]);
     }
 

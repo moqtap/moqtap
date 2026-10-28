@@ -297,6 +297,12 @@ fn run_datagram_vectors(relative_path: &str) {
                     vector.id
                 );
             }
+            test_vectors::properties::assert_properties(
+                &vector.id,
+                moqtap_codec::version::DraftVersion::Draft14,
+                &obj.extension_headers,
+                expected,
+            );
             if let Some(expected_hex) = js_str_opt(expected, "payload_hex") {
                 assert_eq!(
                     hex::encode(&obj.payload),

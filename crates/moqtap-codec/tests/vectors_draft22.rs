@@ -368,6 +368,12 @@ fn run_datagram_vectors(relative_path: &str) -> usize {
                 let st = hdr.object_status.expect("expected object_status");
                 assert_eq!((st as u64).to_string(), s, "[{}] object_status mismatch", vector.id);
             }
+            test_vectors::properties::assert_properties(
+                &vector.id,
+                moqtap_codec::version::DraftVersion::Draft22,
+                &hdr.properties,
+                expected,
+            );
             if let Some(expected_hex) = js_str_opt(expected, "payload_hex") {
                 assert_eq!(
                     hex::encode(&payload),
@@ -578,6 +584,12 @@ fn run_fetch_vectors(relative_path: &str) -> usize {
                     "[{}] object_properties presence mismatch",
                     vector.id
                 );
+                test_vectors::properties::assert_properties(
+                    &vector.id,
+                    moqtap_codec::version::DraftVersion::Draft22,
+                    object.properties.as_deref().unwrap_or_default(),
+                    eo,
+                );
 
                 if let Some(expected_hex) = js_str_opt(eo, "payload_hex") {
                     if payload_length > 0 {
@@ -756,8 +768,8 @@ fn d22_every_committed_vector_is_run() {
     );
     assert_eq!(
         on_disk_count,
-        342,
-        "the committed draft-22 corpus is 342 vectors across 25 files; it now has \
+        347,
+        "the committed draft-22 corpus is 347 vectors across 25 files; it now has \
          {on_disk_count} across {}",
         on_disk.len()
     );

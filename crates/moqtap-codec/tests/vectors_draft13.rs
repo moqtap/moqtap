@@ -278,6 +278,12 @@ fn run_datagram_vectors(relative_path: &str) {
                     let mut header = DatagramHeader::decode_with_extensions(has_ext, &mut cursor)
                         .unwrap_or_else(|e| panic!("[{}] datagram decode failed: {e}", vector.id));
                     header.end_of_group = dt.is_end_of_group();
+                    test_vectors::properties::assert_properties(
+                        &vector.id,
+                        moqtap_codec::version::DraftVersion::Draft13,
+                        &header.extensions,
+                        expected,
+                    );
 
                     assert_eq!(
                         header.track_alias.into_inner().to_string(),
@@ -331,6 +337,12 @@ fn run_datagram_vectors(relative_path: &str) {
                         .unwrap_or_else(|e| {
                             panic!("[{}] datagram-status decode failed: {e}", vector.id)
                         });
+                    test_vectors::properties::assert_properties(
+                        &vector.id,
+                        moqtap_codec::version::DraftVersion::Draft13,
+                        &header.extensions,
+                        expected,
+                    );
 
                     assert_eq!(
                         header.track_alias.into_inner().to_string(),
@@ -464,6 +476,13 @@ fn run_fetch_vectors(relative_path: &str) {
                         vector.id
                     );
                 }
+
+                test_vectors::properties::assert_properties(
+                    &vector.id,
+                    moqtap_codec::version::DraftVersion::Draft13,
+                    &obj.extensions,
+                    eo,
+                );
 
                 let plen = obj.payload_length.into_inner() as usize;
                 assert!(cursor.remaining() >= plen, "[{}] fetch payload underrun", vector.id);

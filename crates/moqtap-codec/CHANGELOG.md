@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `object_properties::parse_object_properties(draft, block)` reads an object's property block (Extension Headers before draft-17) as a list in wire order, by that draft's rules: absolute or delta-encoded Types, the 2^16-1 limit on an odd value, and Immutable Properties at 0xB.
+
+### Changed
+
+- **Breaking.** `CodecError` gains `MalformedObjectProperties`, for a property that runs past the end of its block and for Immutable Properties nested inside Immutable Properties.
+- The readers that return a whole object refuse a property block that does not parse: `SubgroupObjectReader::read_object` on drafts 14-22, `DatagramHeader::decode_object` on drafts 17-22, `AnySubgroupObjectReader::read_object` and `AnyFetchObjectReader::read_object`. The framing readers a relay uses (`read_object_meta`, `read_object_frame`, `DatagramHeader::decode`) do not read inside the block and are unchanged.
+
 ## [0.8.2] - 2026-10-27
 
 ### Changed

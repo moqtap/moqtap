@@ -704,6 +704,10 @@ impl SubgroupObjectReader {
             let payload = crate::types::read_bytes(buf, payload_length_val)?;
             (None, payload)
         };
+        crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft16,
+            &extension_headers,
+        )?;
         Ok(SubgroupObject {
             object_id,
             extension_headers,

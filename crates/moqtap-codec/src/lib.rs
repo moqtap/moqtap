@@ -90,6 +90,7 @@ pub mod fields;
 /// Key-value parameter pair encoding and decoding.
 pub mod kvp;
 pub mod message_names;
+pub mod object_properties;
 pub mod setup_option_names;
 /// Core protocol types shared across drafts.
 pub mod types;

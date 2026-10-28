@@ -312,6 +312,12 @@ fn run_datagram_vectors(relative_path: &str) {
                     vector.id
                 );
             }
+            test_vectors::properties::assert_properties(
+                &vector.id,
+                moqtap_codec::version::DraftVersion::Draft15,
+                &hdr.extension_headers,
+                expected,
+            );
             if let Some(expected_hex) = js_str_opt(expected, "payload_hex") {
                 // Remaining bytes are payload
                 let payload = cursor;
@@ -451,10 +457,14 @@ fn run_fetch_vectors(relative_path: &str) {
                 };
 
                 // Extensions (byte-length-prefixed blob) when flag 0x20 is set
-                if flags & 0x20 != 0 {
+                let extensions: &[u8] = if flags & 0x20 != 0 {
                     let ext_len = VarInt::decode(&mut cursor).unwrap().into_inner() as usize;
-                    cursor.advance(ext_len);
-                }
+                    let (extensions, rest) = cursor.split_at(ext_len);
+                    cursor = rest;
+                    extensions
+                } else {
+                    &[]
+                };
 
                 let payload_length = VarInt::decode(&mut cursor).unwrap().into_inner() as usize;
 
@@ -486,6 +496,13 @@ fn run_fetch_vectors(relative_path: &str) {
                     js_str(eo, "publisher_priority"),
                     "[{}] publisher_priority mismatch",
                     vector.id
+                );
+
+                test_vectors::properties::assert_properties(
+                    &vector.id,
+                    moqtap_codec::version::DraftVersion::Draft15,
+                    extensions,
+                    eo,
                 );
 
                 if let Some(expected_hex) = js_str_opt(eo, "payload_hex") {

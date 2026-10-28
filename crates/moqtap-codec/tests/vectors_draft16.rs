@@ -289,6 +289,12 @@ fn run_datagram_vectors(relative_path: &str) {
                     vector.id
                 );
             }
+            test_vectors::properties::assert_properties(
+                &vector.id,
+                moqtap_codec::version::DraftVersion::Draft16,
+                &hdr.extension_headers,
+                expected,
+            );
             if let Some(expected_hex) = js_str_opt(expected, "payload_hex") {
                 assert_eq!(
                     hex::encode(cursor),
@@ -431,6 +437,12 @@ fn run_fetch_vectors(relative_path: &str) {
                     eo.get("extension_headers").is_some(),
                     "[{}] extensions block presence mismatch",
                     vector.id
+                );
+                test_vectors::properties::assert_properties(
+                    &vector.id,
+                    moqtap_codec::version::DraftVersion::Draft16,
+                    object.extensions.as_deref().unwrap_or_default(),
+                    eo,
                 );
 
                 object

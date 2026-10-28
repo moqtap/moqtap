@@ -3509,6 +3509,9 @@ impl Connection {
             // a payload." Still a MUST on the sender with no receiver action
             // named, so the answer is the one every draft before it gets.
             | CodecError::PayloadNotPermitted { .. }
+            // A property block that does not parse makes the Track malformed,
+            // Section 12.7.
+            | CodecError::MalformedObjectProperties { .. }
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(
                 KvpError::MissingLength | KvpError::UnexpectedEnd | KvpError::VarInt(_),

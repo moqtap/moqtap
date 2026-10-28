@@ -529,6 +529,23 @@ pub enum CodecError {
     /// do not ask to be closed.
     #[error("object with status 'object does not exist' carries {0} bytes of extension headers")]
     ExtensionsOnNonExistentObject(usize),
+    /// An object's property block (Extension Headers before draft-17) cannot be
+    /// read as Key-Value-Pairs: a property runs past the end of the block, or
+    /// Immutable Properties hold another Immutable Properties.
+    ///
+    /// Either one makes the Track malformed: draft-14 and draft-16 Section
+    /// 11.2, draft-15 Section 11.1, draft-17 Section 11.6, drafts 18-20 Section
+    /// 12.7, drafts 21-22 Section 10.7. No draft closes the session over it.
+    ///
+    /// Raised by the readers that hand back a whole object. The framing readers
+    /// a relay uses delimit the block by its length and never read inside it.
+    #[error("malformed property block at byte {offset}: {detail}")]
+    MalformedObjectProperties {
+        /// Where in the block the property that cannot be read begins.
+        offset: usize,
+        /// What is wrong with it.
+        detail: String,
+    },
     /// An object arrived carrying a payload the draft gives it no room for.
     ///
     /// All the drafts state the rule, in two phrasings. Drafts 07 through

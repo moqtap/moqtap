@@ -577,6 +577,10 @@ impl SubgroupObjectReader {
             (None, payload)
         };
 
+        crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft19,
+            &extension_headers,
+        )?;
         Ok(SubgroupObject {
             object_id,
             extension_headers,
@@ -996,11 +1000,18 @@ impl DatagramHeader {
     /// [`Self::properties_permitted`] report the two for a caller that wants
     /// the header without the judgement, and [`Self::encode_checked`] refuses
     /// to write either shape.
+    ///
+    /// A property block that does not parse is refused by
+    /// [`crate::object_properties::parse_object_properties`].
     pub fn decode_object(buf: &mut impl Buf) -> Result<(Self, Vec<u8>), CodecError> {
         let header = Self::decode(buf)?;
         if !header.properties_block_well_formed() || !header.properties_permitted() {
             return Err(CodecError::InvalidField);
         }
+        crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft19,
+            &header.properties,
+        )?;
         let payload = crate::types::read_bytes(buf, buf.remaining())?;
         if !payload.is_empty() && !header.permits_payload() {
             return Err(CodecError::PayloadNotPermitted {

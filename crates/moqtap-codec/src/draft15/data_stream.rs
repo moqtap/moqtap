@@ -551,6 +551,10 @@ impl SubgroupObjectReader {
             (None, payload)
         };
 
+        crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft15,
+            &extension_headers,
+        )?;
         Ok(SubgroupObject {
             object_id,
             extension_headers,

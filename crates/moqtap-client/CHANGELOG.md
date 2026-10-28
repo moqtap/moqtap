@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Drafts 14-22: `read_subgroup_object` refuses an object whose property block does not parse, returning `ConnectionError::Codec`. A property that runs past the block, or Immutable Properties nested in Immutable Properties, is `CodecError::MalformedObjectProperties` and leaves the session open: the drafts mark the Track malformed and do not require a close.
+
 ## [0.8.3] - 2026-10-28
 
 ### Fixed

@@ -285,6 +285,12 @@ fn run_datagram_vectors(relative_path: &str) {
                 let st = hdr.object_status.expect("expected object_status");
                 assert_eq!((st as u64).to_string(), s, "[{}] object_status mismatch", vector.id);
             }
+            test_vectors::properties::assert_properties(
+                &vector.id,
+                moqtap_codec::version::DraftVersion::Draft19,
+                &hdr.properties,
+                expected,
+            );
             if let Some(expected_hex) = js_str_opt(expected, "payload_hex") {
                 assert_eq!(
                     hex::encode(&payload),
@@ -560,6 +566,12 @@ fn run_fetch_vectors(relative_path: &str) {
                     eo.get("object_properties").is_some(),
                     "[{}] object_properties presence mismatch",
                     vector.id
+                );
+                test_vectors::properties::assert_properties(
+                    &vector.id,
+                    moqtap_codec::version::DraftVersion::Draft19,
+                    object.properties.as_deref().unwrap_or_default(),
+                    eo,
                 );
 
                 if let Some(expected_hex) = js_str_opt(eo, "payload_hex") {

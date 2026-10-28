@@ -58,10 +58,10 @@ pub struct AnySubgroupObject {
     /// extension block, when the enclosing header's extensions bit is clear,
     /// or when the block is present but zero-length.
     ///
-    /// Opaque and never re-parsed by this crate, and a verbatim copy of the
-    /// wire bytes on every draft except draft-08. Draft-08's block is
-    /// count-prefixed with no byte length, so its contents can only be
-    /// delimited by parsing each extension; the blob is therefore
+    /// [`crate::object_properties::parse_object_properties`] reads it as a
+    /// list. A verbatim copy of the wire bytes on every draft except draft-08.
+    /// Draft-08's block is count-prefixed with no byte length, so its contents
+    /// can only be delimited by parsing each extension; the blob is therefore
     /// re-serialized from that parsed form, which re-encodes every varint
     /// minimally. A draft-08 extension whose value arrived as a legal
     /// non-minimal varint is semantically but not byte-identically preserved.
@@ -489,7 +489,7 @@ macro_rules! legacy_subgroup_glue {
         }
     };
 
-    (length_extensions $name:ident, $feat:literal, $draft:ident) => {
+    (length_extensions $name:ident, $feat:literal, $draft:ident, $version:ident) => {
         #[cfg(feature = $feat)]
         mod $name {
             use super::conv;
@@ -507,6 +507,10 @@ macro_rules! legacy_subgroup_glue {
                 } else {
                     (None, conv::take(buf, payload_length)?)
                 };
+                crate::object_properties::parse_object_properties(
+                    crate::version::DraftVersion::$version,
+                    &header.extensions,
+                )?;
                 Ok(AnySubgroupObject {
                     object_id: header.object_id.into_inner(),
                     extension_headers: header.extensions,
@@ -559,7 +563,7 @@ macro_rules! legacy_subgroup_glue {
         }
     };
 
-    (gated_extensions $name:ident, $feat:literal, $draft:ident) => {
+    (gated_extensions $name:ident, $feat:literal, $draft:ident, $version:ident) => {
         #[cfg(feature = $feat)]
         mod $name {
             use super::conv;
@@ -580,6 +584,10 @@ macro_rules! legacy_subgroup_glue {
                 } else {
                     (None, conv::take(buf, payload_length)?)
                 };
+                crate::object_properties::parse_object_properties(
+                    crate::version::DraftVersion::$version,
+                    &header.extensions,
+                )?;
                 Ok(AnySubgroupObject {
                     object_id: header.object_id.into_inner(),
                     extension_headers: header.extensions,
@@ -640,11 +648,11 @@ macro_rules! legacy_subgroup_glue {
 
 legacy_subgroup_glue!(no_extensions sg07, "draft07", draft07);
 legacy_subgroup_glue!(count_extensions sg08, "draft08", draft08);
-legacy_subgroup_glue!(length_extensions sg09, "draft09", draft09);
-legacy_subgroup_glue!(length_extensions sg10, "draft10", draft10);
-legacy_subgroup_glue!(gated_extensions sg11, "draft11", draft11);
-legacy_subgroup_glue!(gated_extensions sg12, "draft12", draft12);
-legacy_subgroup_glue!(gated_extensions sg13, "draft13", draft13);
+legacy_subgroup_glue!(length_extensions sg09, "draft09", draft09, Draft09);
+legacy_subgroup_glue!(length_extensions sg10, "draft10", draft10, Draft10);
+legacy_subgroup_glue!(gated_extensions sg11, "draft11", draft11, Draft11);
+legacy_subgroup_glue!(gated_extensions sg12, "draft12", draft12, Draft12);
+legacy_subgroup_glue!(gated_extensions sg13, "draft13", draft13, Draft13);
 
 /// Generates the conversion glue between one draft's stateful
 /// `SubgroupObjectReader` and the draft-neutral object types.
@@ -1796,6 +1804,10 @@ impl AnySubgroupObjectReader {
     /// Returns [`CodecError::UnexpectedEnd`] when `buf` holds only part of an
     /// object; the reader's state is unspecified after such an error, so
     /// callers that may be fed partial buffers must probe against a clone.
+    ///
+    /// Refuses a property block that does not parse, as
+    /// [`crate::object_properties::parse_object_properties`] does;
+    /// [`read_object_meta`](Self::read_object_meta) does not read inside it.
     #[allow(unused_variables, unreachable_code)]
     pub fn read_object(&mut self, buf: &mut impl Buf) -> Result<AnySubgroupObject, CodecError> {
         match &mut self.state {
@@ -2652,9 +2664,13 @@ impl AnyFetchObjectReader {
     /// of a stream doing so is a protocol violation on every one of those
     /// drafts — and when a resolved Group ID, Subgroup ID or Object ID would
     /// leave the 64-bit range.
+    ///
+    /// Refuses a property block that does not parse, as
+    /// [`crate::object_properties::parse_object_properties`] does;
+    /// [`read_object_frame`](Self::read_object_frame) does not read inside it.
     #[allow(unused_variables, unreachable_code)]
     pub fn read_object(&mut self, buf: &mut impl Buf) -> Result<AnyFetchObject, CodecError> {
-        match &mut self.state {
+        let read: Result<AnyFetchObject, CodecError> = match &mut self.state {
             #[cfg(feature = "draft07")]
             FetchReaderState::Draft07 => fo07::read_object(buf),
             #[cfg(feature = "draft08")]
@@ -2689,7 +2705,10 @@ impl AnyFetchObjectReader {
             FetchReaderState::Draft22(inner) => fo22::read_object(inner, buf),
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnyFetchObjectReader has no enabled variants"),
-        }
+        };
+        let object = read?;
+        crate::object_properties::parse_object_properties(self.draft(), &object.extension_headers)?;
+        Ok(object)
     }
 
     /// Decode the next fetch frame, keeping what re-encoding it later takes.
