@@ -140,13 +140,21 @@ impl BucketState {
         let cap = u128::from(burst_bytes) * NANO;
         u64::try_from(cap.saturating_sub(self.deficit) / NANO).unwrap_or(u64::MAX)
     }
+
+    /// Take `bytes` for a datagram scheduled at a [`RateGrant::Later`] tick,
+    /// so the next datagram waits for its own tokens behind it.
+    pub fn reserve(&mut self, bytes: u32) {
+        self.deficit += u128::from(bytes) * NANO;
+    }
 }
 
 /// Charge `bytes` against the bucket at `now`.
 ///
 /// **Pure with respect to the clock** — `now` is a parameter and no clock is
 /// read. The state is refilled to `now` before the decision and debited only
-/// on [`RateGrant::Now`]; a `Later` or `Never` answer costs nothing.
+/// on [`RateGrant::Now`]; a `Later` or `Never` answer costs nothing. A caller
+/// that commits to sending at the `Later` tick takes the tokens with
+/// [`BucketState::reserve`].
 ///
 /// The bound this function upholds, exactly: over any interval, the bytes it
 /// grants never exceed `rate_bps * elapsed + burst_bytes`. That is provable
@@ -203,7 +211,8 @@ pub fn charge(
         return RateGrant::Never;
     }
 
-    let shortfall = need - held;
+    // The deficit may already be past the cap after `BucketState::reserve`.
+    let shortfall = state.deficit - (cap - need);
     let wait_ns = u64::try_from(shortfall.div_ceil(u128::from(rate_bps))).unwrap_or(u64::MAX);
     RateGrant::Later(state.last.saturating_add_ns(wait_ns))
 }

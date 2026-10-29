@@ -302,7 +302,10 @@ impl Impairer {
             // rule out for a datagram above the assumed path size.
             match charge(bucket, bytes_per_second, rate.burst_bytes, wire_bytes, now) {
                 RateGrant::Now => {}
-                RateGrant::Later(at) => release = at,
+                RateGrant::Later(at) => {
+                    bucket.reserve(wire_bytes);
+                    release = at;
+                }
                 RateGrant::Never => {
                     // The queue admitted it a moment ago and it is not going
                     // to leave, so the occupancy comes back off before the
@@ -973,5 +976,23 @@ mod tests {
         for i in 0..6 {
             assert_eq!(up[i], down[i] + 8, "model {i}");
         }
+    }
+
+    /// A burst offered at one tick leaves at the configured rate: each deferred
+    /// datagram holds its tokens, so the next waits behind it.
+    #[test]
+    fn a_burst_leaves_at_the_configured_rate() {
+        use crate::model::RateModel;
+        // 1 byte per microsecond.
+        let profile = DirectionProfile {
+            rate: Some(RateModel { bps: 8_000_000, burst_bytes: 1_500, queue_bytes: 100_000 }),
+            ..DirectionProfile::default()
+        };
+        let mut engine = Impairer::new(profile, 1, Direction::Downlink).expect("valid");
+        let releases: Vec<u64> =
+            (0..5).map(|seq| engine.decide(seq, 1_228, Tick(0)).release.0).collect();
+        // The first fits the full bucket; the second waits for 1228 - 272 bytes;
+        // each after that for a whole datagram more.
+        assert_eq!(releases, vec![0, 956_000, 2_184_000, 3_412_000, 4_640_000]);
     }
 }
