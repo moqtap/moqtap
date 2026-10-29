@@ -867,4 +867,36 @@ mod tests {
         assert_eq!(session.upstream_transport_profile, Some(marker_profile(1400)));
         assert!(session.upstream_transport_config.is_none());
     }
+
+    /// Records every profile it is asked to build.
+    #[derive(Default)]
+    struct RecordingInstaller(std::sync::Mutex<Vec<TransportProfile>>);
+
+    impl TransportInstaller for RecordingInstaller {
+        fn build(
+            &self,
+            profile: &TransportProfile,
+        ) -> Result<quinn::TransportConfig, TransportProfileError> {
+            self.0.lock().expect("uncontended").push(profile.clone());
+            profile.into_config()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_live_client_leg_profile_gets_the_default_keep_alive() {
+        let installer = Arc::new(RecordingInstaller::default());
+        let mut template = distinctive_config(abstract_socket());
+        template.listener.installer = Some(installer.clone());
+        let proxy = proxy(template);
+
+        let profile = TransportProfile {
+            max_idle_timeout: Some(Duration::from_secs(4)),
+            ..Default::default()
+        };
+        proxy.control().set_transport(crate::types::Leg::Client, profile).expect("valid");
+
+        let seen = installer.0.lock().expect("uncontended");
+        let built = seen.last().expect("the installer built the profile");
+        assert_eq!(built.keep_alive_interval, Some(Duration::from_secs(2)));
+    }
 }

@@ -159,9 +159,7 @@ use crate::error::ProxyError;
 use crate::event::SessionId;
 use crate::listener::Listener;
 use crate::shape::{ProxyRecorder, ProxyStats, ShapeError, ShapeProfile, StreamKey};
-use crate::transport::{
-    DefaultInstaller, TransportInstaller, TransportProfile, TransportProfileError,
-};
+use crate::transport::{TransportInstaller, TransportProfile, TransportProfileError};
 use crate::types::Leg;
 
 /// How many commands a session's inbox holds before a sender has to wait.
@@ -1398,12 +1396,9 @@ impl ControlPlane {
             Leg::Client => &self.legs.client_installer,
             Leg::Upstream => &self.legs.upstream_installer,
         };
-        match installer {
-            Some(installer) => installer.build(profile),
-            None => DefaultInstaller.build(profile),
-        }
-        .map(Arc::new)
-        .map_err(ControlError::Profile)
+        crate::transport::build_profile(installer.as_ref(), profile)
+            .map(Arc::new)
+            .map_err(ControlError::Profile)
     }
 
     /// Which slot of the per-leg arrays `leg` owns.

@@ -1011,6 +1011,19 @@ fn with_keep_alive(profile: &TransportProfile) -> TransportProfile {
     profile
 }
 
+/// Build `profile` through `installer`, or [`DefaultInstaller`], with the
+/// default keep-alive filled in.
+pub(crate) fn build_profile(
+    installer: Option<&Arc<dyn TransportInstaller>>,
+    profile: &TransportProfile,
+) -> Result<quinn::TransportConfig, TransportProfileError> {
+    let profile = with_keep_alive(profile);
+    match installer {
+        Some(installer) => installer.build(&profile),
+        None => DefaultInstaller.build(&profile),
+    }
+}
+
 /// What a leg installs, from the fields a caller may have set and the
 /// installer it may have supplied.
 ///
@@ -1084,13 +1097,9 @@ pub(crate) fn resolve(
             // One build, whether or not a capture was asked for. The
             // installer is the leg's single source of a base config, so a
             // spec cannot quietly move the leg onto a different one.
-            let profile = with_keep_alive(profile);
             #[cfg_attr(not(feature = "qlog"), allow(unused_mut))]
-            let mut config = match installer {
-                Some(installer) => installer.build(&profile),
-                None => DefaultInstaller.build(&profile),
-            }
-            .map_err(|source| ProxyError::TransportProfile { leg, source })?;
+            let mut config = build_profile(installer, profile)
+                .map_err(|source| ProxyError::TransportProfile { leg, source })?;
             #[cfg(feature = "qlog")]
             if let Some(spec) = qlog {
                 spec.attach_to(&mut config).map_err(|source| ProxyError::Qlog { leg, source })?;
