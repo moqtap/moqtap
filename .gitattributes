@@ -23,3 +23,6 @@
 # this file, or a developer who overrode it, still cannot turn the acceptance
 # criterion into a platform-dependent coin flip.
 crates/quinn-netem/tests/fixtures/*.log -text
+
+# Golden bodies, compared byte for byte.
+crates/moqtap-monitor/tests/fixtures/** -text

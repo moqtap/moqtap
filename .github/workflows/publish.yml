@@ -20,6 +20,7 @@ on:
       - "client-v*"
       - "proxy-v*"
       - "netem-v*"
+      - "monitor-v*"
 
 env:
   CARGO_TERM_COLOR: always
@@ -66,6 +67,7 @@ jobs:
             client) CRATE="moqtap-client" ;;
             proxy)  CRATE="moqtap-proxy"  ;;
             netem)  CRATE="quinn-netem"   ;;
+            monitor) CRATE="moqtap-monitor" ;;
             *)
               echo "::error::tag prefix '${SHORT}' maps to no crate. Add it to the case in publish.yml and to the tag list above — both, or the tag fires nothing."
               exit 1 ;;

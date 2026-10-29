@@ -6,6 +6,7 @@ members = [
     "crates/moqtap-client",
     "crates/moqtap-proxy",
     "crates/quinn-netem",
+    "crates/moqtap-monitor",
 ]
 
 [workspace.package]

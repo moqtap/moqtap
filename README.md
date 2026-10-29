@@ -13,6 +13,7 @@ moqtap provides a modular crate ecosystem for building MoQT debugging and tracin
 | [`moqtap-proxy`](crates/moqtap-proxy) | Transparent intercepting proxy — inline MoQT frame parsing, observer/hook traits, self-signed cert generation |
 | [`moqtap-trace`](crates/moqtap-trace) | Trace file I/O — `.moqtrace` binary format reader/writer for integration into relays, clients, and debugging tools |
 | [`quinn-netem`](crates/quinn-netem) | Deterministic UDP datagram impairment — loss, delay, reorder, duplication, corruption and rate shaping beneath a quinn endpoint |
+| [`moqtap-monitor`](crates/moqtap-monitor) | Producer monitoring — publishers report the objects they send to moqtap Insight, for end-to-end latency against viewer sessions |
 
 ## Using as a library
 
@@ -124,6 +125,9 @@ moqtap-codec          Pure codec, no I/O. Foundation for everything.
 
 quinn-netem           Standalone UDP impairment engine, no MoQT dependency.
                       Used by moqtap-proxy behind its `impair` feature.
+
+moqtap-monitor        Producer monitor: an API the publisher calls, and the
+                      uploader. No MoQT dependency.
 ```
 
 Three crates span every draft and they do it three different ways —
@@ -146,4 +150,4 @@ connection default, an advertised-preferred version or an auto-selected draft.
 
 ## License
 
-MIT
+MIT, except `moqtap-monitor`, which is [FSL-1.1-MIT](crates/moqtap-monitor/LICENSE).

@@ -1,0 +1,32 @@
+[package]
+name = "moqtap-monitor"
+description = "Producer monitor for moqtap Insight: reports the objects a MoQT publisher sends"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "FSL-1.1-MIT"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+exclude = ["tests/"]
+
+[dependencies]
+bytes = { workspace = true }
+flate2 = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "tls12", "ring", "webpki-tokio"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+ring = "0.17"
+rustls = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+url = "2"
+
+[dev-dependencies]
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["server", "tokio"] }
+tokio = { workspace = true }

@@ -18,6 +18,8 @@ allow = [
     # — the trust-anchor bundles used by rustls.
     "CDLA-Permissive-2.0",
 ]
+# The producer monitor is source-available; it is this workspace's own crate.
+exceptions = [{ crate = "moqtap-monitor", allow = ["FSL-1.1-MIT"] }]
 
 [bans]
 multiple-versions = "warn"

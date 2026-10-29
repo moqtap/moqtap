@@ -532,6 +532,7 @@ publish-dry-all:
     cargo publish -p quinn-netem --dry-run
     cargo publish -p moqtap-client --dry-run
     cargo publish -p moqtap-proxy --dry-run
+    cargo publish -p moqtap-monitor --dry-run
 
 # Tag and release a crate: just release moqtap-codec 0.2.0
 release crate version:
@@ -555,18 +556,18 @@ release crate version:
     # Create and push tag.
     #
     # The prefix, not the crate name. `publish.yml` triggers on `codec-v*`,
-    # `trace-v*`, `client-v*`, `proxy-v*` and `netem-v*`, so a tag shaped
+    # `trace-v*`, `client-v*`, `proxy-v*`, `netem-v*` and `monitor-v*`, so a tag shaped
     # `moqtap-codec/v0.4.1` matches nothing: the push succeeds, this recipe
-    # prints that CI will publish, and no workflow ever starts. Every tag in the
-    # repository is already the prefix form; only this recipe disagreed. Keep
-    # the case below and `publish.yml`'s in step, and refuse an unmapped crate
-    # here rather than pushing a tag that fires nothing.
+    # prints that CI will publish, and no workflow ever starts. Keep the case
+    # below and `publish.yml`'s in step, and refuse an unmapped crate here
+    # rather than pushing a tag that fires nothing.
     case "{{crate}}" in
         moqtap-codec)  PREFIX=codec  ;;
         moqtap-trace)  PREFIX=trace  ;;
         moqtap-client) PREFIX=client ;;
         moqtap-proxy)  PREFIX=proxy  ;;
         quinn-netem)   PREFIX=netem  ;;
+        moqtap-monitor) PREFIX=monitor ;;
         *)
             echo "Error: no tag prefix for '{{crate}}'. Add it here and to publish.yml — both, or the tag fires nothing."
             exit 1 ;;

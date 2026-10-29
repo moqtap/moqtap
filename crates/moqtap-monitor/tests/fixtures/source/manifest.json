@@ -1,0 +1,453 @@
+{
+  "fixtures": [
+    {
+      "name": "group-one-relay",
+      "file": "group-one-relay.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 2507,
+      "frameBytes": 2499,
+      "frameCount": 5,
+      "expect": {
+        "ok": true,
+        "sealExceeded": false
+      },
+      "read": {
+        "relays": [
+          "https://relay-a.example.net"
+        ],
+        "tracks": 2,
+        "groups": 60,
+        "badSample": 0,
+        "objects": 0,
+        "events": 0,
+        "end": null
+      }
+    },
+    {
+      "name": "group-two-relays",
+      "file": "group-two-relays.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": true,
+      "bodyBytes": 738,
+      "frameBytes": 4430,
+      "frameCount": 7,
+      "expect": {
+        "ok": true,
+        "sealExceeded": false
+      },
+      "read": {
+        "relays": [
+          "https://relay-a.example.net",
+          "https://relay-b.example.net"
+        ],
+        "tracks": 2,
+        "groups": 120,
+        "badSample": 0,
+        "objects": 0,
+        "events": 1,
+        "end": null
+      }
+    },
+    {
+      "name": "group-decimal-ids",
+      "file": "group-decimal-ids.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": true,
+      "bodyBytes": 577,
+      "frameBytes": 1217,
+      "frameCount": 6,
+      "expect": {
+        "ok": true,
+        "sealExceeded": false
+      },
+      "read": {
+        "relays": [
+          "https://relay-a.example.net"
+        ],
+        "tracks": 2,
+        "groups": 12,
+        "badSample": 0,
+        "objects": 0,
+        "events": 0,
+        "end": null
+      }
+    },
+    {
+      "name": "group-first-object",
+      "file": "group-first-object.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 903,
+      "frameBytes": 895,
+      "frameCount": 5,
+      "expect": {
+        "ok": true,
+        "sealExceeded": false
+      },
+      "read": {
+        "relays": [
+          "https://relay-a.example.net"
+        ],
+        "tracks": 2,
+        "groups": 6,
+        "badSample": 0,
+        "objects": 0,
+        "events": 0,
+        "end": null
+      }
+    },
+    {
+      "name": "group-final",
+      "file": "group-final.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 863,
+      "frameBytes": 855,
+      "frameCount": 6,
+      "expect": {
+        "ok": true,
+        "sealExceeded": false
+      },
+      "read": {
+        "relays": [
+          "https://relay-a.example.net"
+        ],
+        "tracks": 2,
+        "groups": 4,
+        "badSample": 0,
+        "objects": 0,
+        "events": 0,
+        "end": "shutdown"
+      }
+    },
+    {
+      "name": "group-bad-sample",
+      "file": "group-bad-sample.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 689,
+      "frameBytes": 681,
+      "frameCount": 4,
+      "expect": {
+        "ok": true,
+        "sealExceeded": false
+      },
+      "read": {
+        "relays": [
+          "https://relay-a.example.net"
+        ],
+        "tracks": 1,
+        "groups": 2,
+        "badSample": 1,
+        "objects": 0,
+        "events": 0,
+        "end": null
+      }
+    },
+    {
+      "name": "object-sealed",
+      "file": "object-sealed.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 11,
+      "gzipped": true,
+      "bodyBytes": 31725,
+      "frameBytes": 116056,
+      "frameCount": 15,
+      "expect": {
+        "ok": true,
+        "sealExceeded": false
+      },
+      "read": {
+        "relays": [
+          "https://relay-a.example.net"
+        ],
+        "tracks": 1,
+        "groups": 94,
+        "badSample": 0,
+        "objects": 5632,
+        "events": 0,
+        "end": null
+      }
+    },
+    {
+      "name": "object-seal-exceeded",
+      "file": "object-seal-exceeded.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 14,
+      "gzipped": true,
+      "bodyBytes": 40017,
+      "frameBytes": 147567,
+      "frameCount": 18,
+      "expect": {
+        "ok": true,
+        "sealExceeded": true
+      },
+      "read": {
+        "relays": [
+          "https://relay-a.example.net"
+        ],
+        "tracks": 1,
+        "groups": 120,
+        "badSample": 0,
+        "objects": 7168,
+        "events": 0,
+        "end": null
+      }
+    },
+    {
+      "name": "refuse-viewer-body",
+      "file": "refuse-viewer-body.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 221,
+      "frameBytes": 213,
+      "frameCount": 1,
+      "expect": {
+        "ok": false,
+        "reason": "wrong-path"
+      }
+    },
+    {
+      "name": "refuse-source-on-ingest",
+      "file": "refuse-source-on-ingest.bin",
+      "path": "ingest",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 382,
+      "frameBytes": 374,
+      "frameCount": 1,
+      "expect": {
+        "ok": false,
+        "reason": "wrong-path"
+      }
+    },
+    {
+      "name": "refuse-no-batch-record",
+      "file": "refuse-no-batch-record.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 80,
+      "frameBytes": 72,
+      "frameCount": 1,
+      "expect": {
+        "ok": false,
+        "reason": "no-batch-record"
+      }
+    },
+    {
+      "name": "refuse-source-mismatch",
+      "file": "refuse-source-mismatch.bin",
+      "path": "source",
+      "sourceId": "enc-fra-2",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 382,
+      "frameBytes": 374,
+      "frameCount": 1,
+      "expect": {
+        "ok": false,
+        "reason": "source-mismatch"
+      }
+    },
+    {
+      "name": "refuse-bad-instance-id",
+      "file": "refuse-bad-instance-id.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 382,
+      "frameBytes": 374,
+      "frameCount": 1,
+      "expect": {
+        "ok": false,
+        "reason": "bad-instance-id"
+      }
+    },
+    {
+      "name": "refuse-bad-idempotency-key",
+      "file": "refuse-bad-idempotency-key.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 382,
+      "frameBytes": 374,
+      "frameCount": 1,
+      "expect": {
+        "ok": false,
+        "reason": "bad-idempotency-key"
+      }
+    },
+    {
+      "name": "refuse-too-many-group-rows",
+      "file": "refuse-too-many-group-rows.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": true,
+      "bodyBytes": 6677,
+      "frameBytes": 710509,
+      "frameCount": 101,
+      "expect": {
+        "ok": false,
+        "reason": "too-many-rows"
+      }
+    },
+    {
+      "name": "refuse-too-many-tracks",
+      "file": "refuse-too-many-tracks.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": true,
+      "bodyBytes": 1797,
+      "frameBytes": 18658,
+      "frameCount": 258,
+      "expect": {
+        "ok": false,
+        "reason": "too-many-rows"
+      }
+    },
+    {
+      "name": "refuse-record-too-long",
+      "file": "refuse-record-too-long.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": true,
+      "bodyBytes": 509,
+      "frameBytes": 7803,
+      "frameCount": 4,
+      "expect": {
+        "ok": false,
+        "reason": "too-many-rows"
+      }
+    },
+    {
+      "name": "refuse-too-many-relays",
+      "file": "refuse-too-many-relays.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": true,
+      "bodyBytes": 520,
+      "frameBytes": 2796,
+      "frameCount": 34,
+      "expect": {
+        "ok": false,
+        "reason": "too-many-relays"
+      }
+    },
+    {
+      "name": "refuse-undeclared-track",
+      "file": "refuse-undeclared-track.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 690,
+      "frameBytes": 682,
+      "frameCount": 4,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-undeclared-relay",
+      "file": "refuse-undeclared-relay.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 766,
+      "frameBytes": 758,
+      "frameCount": 5,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-group-twice",
+      "file": "refuse-group-twice.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 925,
+      "frameBytes": 917,
+      "frameCount": 6,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-raw-frame",
+      "file": "refuse-raw-frame.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 461,
+      "frameBytes": 453,
+      "frameCount": 3,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-object-at-baseline",
+      "file": "refuse-object-at-baseline.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 699,
+      "frameBytes": 691,
+      "frameCount": 4,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-end-not-final",
+      "file": "refuse-end-not-final.bin",
+      "path": "source",
+      "sourceId": "enc-fra-1",
+      "param": 0,
+      "gzipped": false,
+      "bodyBytes": 417,
+      "frameBytes": 409,
+      "frameCount": 2,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    }
+  ]
+}
