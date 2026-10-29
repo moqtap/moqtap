@@ -860,9 +860,12 @@ mod tests {
         handle.set_peer_idle_timeout(Duration::from_millis(60));
         let p = addr(1);
         handle.disarm_peer(p);
-        for _ in 0..4 {
-            std::thread::sleep(Duration::from_millis(20));
-            assert!(handle.begin(p).is_none(), "still left untouched");
+        // Clocked by hand: a late wake from a sleep would read as idleness.
+        let mut core = lock(&handle.shared.core);
+        let start = core.overrides[&p].1;
+        for ms in [20, 40, 60, 80] {
+            let now = start + Duration::from_millis(ms);
+            assert!(core.link(p, now).is_none(), "still left untouched");
         }
     }
 

@@ -141,7 +141,8 @@ fn two_peers_at_once_each_get_the_full_rate() {
         );
     }
 
-    // The wire: both peers' datagrams all arrive in about a lone sender's time.
+    // The wire: every datagram arrives, none before the rate allows. The
+    // upper bound is the log's: a wall-clock one fails on a slow runner.
     settle(Duration::from_secs(10), || {
         inner.to(a).len() == usize::from(N) && inner.to(b).len() == usize::from(N)
     });
@@ -150,7 +151,7 @@ fn two_peers_at_once_each_get_the_full_rate() {
         let got = inner.to(peer);
         assert_eq!(got.len(), usize::from(N), "{peer}: every datagram arrives");
         let took = got.last().expect("non-empty").1 - start;
-        assert!(took < solo + solo / 2, "{peer}: took {took:?}, a lone sender takes {solo:?}");
+        assert!(took >= solo, "{peer}: took {took:?}, the rate allows no less than {solo:?}");
     }
 }
 
