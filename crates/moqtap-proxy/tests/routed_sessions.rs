@@ -449,23 +449,25 @@ async fn a_relay_that_does_not_match_its_pin_is_refused() {
 
 const IDLE: Duration = Duration::from_secs(2);
 
-/// Every endpoint times out after [`IDLE`] and neither the client nor the
-/// relay sends keep-alives; the proxy's defaults on both legs keep the
-/// session up across three idle timeouts. `keep_alive` overrides both legs.
-async fn idle_session(keep_alive: Option<Duration>) -> bool {
+/// Whether a session left silent for `quiet` still carries a stream from the
+/// relay to the client. Neither the client nor the relay sends keep-alives;
+/// `relay_idle` and `client_idle` are their idle timeouts, and `profile` is
+/// set on both proxy legs.
+async fn survives_idle(
+    relay_idle: Option<Duration>,
+    client_idle: Option<Duration>,
+    profile: Option<TransportProfile>,
+    quiet: Duration,
+) -> bool {
     let (chain, key) = common::self_signed_localhost();
-    let mut relay = relay(identity(chain, key), None, Some(IDLE));
-    let mut profile = TransportProfile::default();
-    profile.max_idle_timeout = Some(IDLE);
-    profile.keep_alive_interval = keep_alive;
+    let mut relay = relay(identity(chain, key), None, relay_idle);
     let mut template = session_template();
-    template.upstream_transport_profile = Some(profile.clone());
+    template.upstream_transport_profile = profile.clone();
     let proxy =
-        start_proxy(template, Some(profile), Arc::new(route_by_path), Arc::new(NoOpProxyObserver))
-            .await;
+        start_proxy(template, profile, Arc::new(route_by_path), Arc::new(NoOpProxyObserver)).await;
 
     let conn = connect(
-        &client(Some(IDLE)),
+        &client(client_idle),
         format!("https://{}/to/{}", proxy.addr, relay.addr.port()),
         None,
     )
@@ -473,7 +475,7 @@ async fn idle_session(keep_alive: Option<Duration>) -> bool {
     .expect("accepted");
     let upstream = next_session(&mut relay).await;
 
-    tokio::time::sleep(IDLE * 3).await;
+    tokio::time::sleep(quiet).await;
 
     let Ok(send) = upstream.open_uni().await else { return false };
     let Ok(mut send) = send.await else { return false };
@@ -488,6 +490,25 @@ async fn idle_session(keep_alive: Option<Duration>) -> bool {
         got.extend_from_slice(&buf[..n]);
     }
     got == PAYLOAD
+}
+
+/// Every endpoint times out after [`IDLE`]; the session stays up across three
+/// idle timeouts. `keep_alive` overrides both proxy legs.
+async fn idle_session(keep_alive: Option<Duration>) -> bool {
+    let mut profile = TransportProfile::default();
+    profile.max_idle_timeout = Some(IDLE);
+    profile.keep_alive_interval = keep_alive;
+    survives_idle(Some(IDLE), Some(IDLE), Some(profile), IDLE * 3).await
+}
+
+/// No transport profile on either leg, and a relay that times out after 8 s.
+#[tokio::test]
+async fn a_minute_long_silence_survives_on_unconfigured_legs() {
+    let quiet = Duration::from_secs(60);
+    assert!(
+        survives_idle(Some(Duration::from_secs(8)), None, None, quiet).await,
+        "the session died while idle"
+    );
 }
 
 #[tokio::test]

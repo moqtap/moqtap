@@ -991,6 +991,10 @@ impl TransportInstaller for DefaultInstaller {
 
 /// How often a leg sends a keep-alive when nothing it was given names an
 /// interval.
+///
+/// It is shortened to half the leg's own idle timeout, never to the peer's.
+/// A peer that advertises an idle timeout of this interval or less still
+/// closes a silent connection; set `keep_alive_interval` below it.
 pub const DEFAULT_KEEP_ALIVE: Duration = Duration::from_secs(5);
 
 /// The keep-alive for a leg whose profile names none: the default, or half
