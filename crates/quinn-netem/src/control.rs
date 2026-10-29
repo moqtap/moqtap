@@ -1,283 +1,453 @@
 //! The live control surface: arm, disarm, reseed, read.
 //!
 //! [`ImpairHandle`] is the only way to change what a running socket is doing.
-//! It is a cheap clone of one piece of shared state — two engines, a set of
-//! counters, a decision log and a flag — so a caller and a spawned task can
-//! hold one each and both talk about the same link.
+//! It is a cheap clone of one piece of shared state, so a caller and a spawned
+//! task can hold one each and both talk about the same socket.
 //!
-//! # What arming resets, and what it deliberately does not
+//! # One link per peer
 //!
-//! Arming builds two fresh engines, zeroes both directions' datagram counters
-//! and sets the tick origin to the moment of the call, so tick 0 means "armed".
-//! It does not clear the statistics: a caller that arms twice would otherwise
-//! lose the first phase's totals with nothing to say they had been discarded.
+//! Each peer address gets its own link: two engines, its own datagram
+//! numbering, its own tick origin and its own counters. The socket's armed
+//! profile applies to every peer the filter admits, each on its own link, so
+//! peers never share a rate budget or a queue and one peer's traffic never
+//! moves another peer's random draws. A peer can be given a profile of its own
+//! with [`ImpairHandle::arm_peer`], or left untouched with
+//! [`ImpairHandle::disarm_peer`].
+//!
+//! A peer's link is built when its first datagram is seen and dropped after it
+//! has been idle for [`ImpairHandle::set_peer_idle_timeout`].
+//!
+//! # Determinism per peer
+//!
+//! A peer inheriting the socket profile is seeded with
+//! [`peer_seed`]`(seed, ordinal)`, where `ordinal` counts the peers this handle
+//! has built a link for, from 0. The first peer therefore runs exactly the
+//! profile's own seed, and a peer's decisions depend only on the profile, the
+//! seed, its ordinal and its own datagrams. The address never reaches an engine
+//! or a log. A peer armed with [`ImpairHandle::arm_peer`] uses that profile's
+//! seed as written.
+//!
+//! # What arming resets
+//!
+//! Arming rebuilds every inheriting peer's link: fresh engines, numbering from
+//! 0, tick 0 at the moment of the call. The statistics are not cleared.
 //!
 //! # A refused profile changes nothing
 //!
-//! The whole profile is validated and both engines are built before anything is
-//! swapped in, so a profile refused for a mistake in its uplink half leaves the
-//! previous one running rather than half-replacing it — which would leave a
-//! caller impairing traffic with one direction from each profile.
+//! The whole profile is validated before anything is swapped in.
 //!
 //! # Recording is off by default
 //!
-//! A hundred-thousand-record log is a hundred thousand allocations on a path
-//! that otherwise allocates nothing, so nothing is recorded until it is asked
-//! for. The log-capture path has its own gate for that reason: a
-//! `record_decisions` that did nothing would leave an empty log behind, which
-//! is exactly what the default already produces.
+//! Turn it on with [`ImpairHandle::record_decisions`]; each peer's records are
+//! kept apart and taken with [`ImpairHandle::take_log`].
 
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::consts::DEFAULT_QUEUE_BYTES;
+use crate::consts::{DEFAULT_PEER_IDLE_TIMEOUT, DEFAULT_QUEUE_BYTES};
 use crate::engine::{Decision, Impairer};
 use crate::log::DecisionLog;
-use crate::profile::{ImpairProfile, PeerFilter, ProfileError};
+use crate::profile::{DirectionProfile, ImpairProfile, PeerFilter, ProfileError};
 use crate::stats::{Stats, StatsSnapshot};
 use crate::{Direction, Tick};
 
-/// Live control. Cloneable, `Send + Sync`.
-///
-/// Cloning shares the state rather than copying it: two handles to one socket
-/// arm the same engines and read the same counters. That is what lets a
-/// caller keep a handle while the socket it decorates is owned by a runtime
-/// it cannot reach into.
+/// Live control. Cloneable, `Send + Sync`; clones share one state.
 #[derive(Debug, Clone)]
 pub struct ImpairHandle {
-    /// Shared with every clone of this handle and with the socket that made it.
     shared: Arc<Shared>,
 }
 
-/// Everything a handle and the socket it controls both need.
-///
-/// The armed engines sit behind a mutex and the counters do not. That split is
-/// the whole performance argument for this design: reading statistics is the
-/// frequent, latency-sensitive-for-nobody operation and it takes no lock at
-/// all, while deciding about a datagram needs the engines' mutable state and
-/// takes a short one.
 #[derive(Debug, Default)]
 struct Shared {
-    /// `None` while disarmed, which is the state a socket starts in.
-    armed: Mutex<Option<Armed>>,
-    /// Atomic counters, readable without touching the mutex above.
+    core: Mutex<Core>,
+    /// Every peer's decisions, folded together. Read without a lock.
     stats: Stats,
-    /// Whether decisions are being recorded. Off until asked for.
     recording: AtomicBool,
-    /// The recorded decisions, empty unless `recording` is set.
-    log: Mutex<DecisionLog>,
 }
 
-/// The state that exists only while a profile is armed.
 #[derive(Debug)]
-struct Armed {
-    /// Proxy to client.
-    downlink: Impairer,
-    /// Client to proxy.
-    uplink: Impairer,
-    /// Each direction's own monotone datagram counter, indexed by the
-    /// direction's discriminant. Zeroed by arming, because a sequence number is
-    /// what a loss pattern and a reorder gap are expressed in — carrying one
-    /// over from a previous profile would silently offset both.
-    seq: [u64; 2],
-    /// The instant tick 0 refers to.
-    origin: Instant,
-    /// Which peers the socket applies this profile to. Kept here rather than in
-    /// an engine on purpose: an ephemeral port differs on every run and a
-    /// dual-stack listener renders the same peer differently on different
-    /// platforms, so a peer address must not reach a decision log that is meant
-    /// to be byte-identical across machines.
-    peers: PeerFilter,
-    /// Each direction's bound on held bytes, indexed by the direction's
-    /// discriminant. Taken from the rate model's tail-drop threshold when there
-    /// is one, so the shim and the engine agree about how deep the queue is,
-    /// and from the crate's default otherwise. There is no "unbounded" option:
-    /// a shim that accepts a datagram it has not sent and never bounds what it
-    /// is holding is a memory leak that presents as a latency bug.
-    queue_bytes: [u64; 2],
+struct Core {
+    /// The socket-wide profile, validated. `None` while disarmed.
+    profile: Option<ImpairProfile>,
+    /// Per-peer profiles that replace the socket-wide one.
+    overrides: HashMap<SocketAddr, Override>,
+    /// Peers with a live link.
+    peers: HashMap<SocketAddr, Peer>,
+    /// Kept apart from `peers` so a disarm or an idle drop keeps the records.
+    logs: HashMap<SocketAddr, DecisionLog>,
+    next_ordinal: u64,
+    idle_timeout: Duration,
+    last_sweep: Option<Instant>,
+    /// Every peer's backlog added together, per direction, for the aggregate
+    /// gauge.
+    backlog: [u64; 2],
 }
 
-impl ImpairHandle {
-    /// Arm with a validated profile. Resets both directions' `seq` to 0 and the
-    /// tick origin to the arm instant, so `Tick(0)` means "armed".
-    ///
-    /// The profile is validated and both engines are built before either is
-    /// installed, so a refusal leaves whatever was armed before still running.
-    pub fn arm(&self, profile: ImpairProfile) -> Result<(), ProfileError> {
-        // Validates both directions and the peer filter. Doing it here as well
-        // as inside each engine is what makes the uplink's mistakes visible
-        // before the downlink's engine has been built, so nothing is half-built
-        // when the error is returned.
-        profile.validate()?;
+impl Default for Core {
+    fn default() -> Self {
+        Core {
+            profile: None,
+            overrides: HashMap::new(),
+            peers: HashMap::new(),
+            logs: HashMap::new(),
+            next_ordinal: 0,
+            idle_timeout: DEFAULT_PEER_IDLE_TIMEOUT,
+            last_sweep: None,
+            backlog: [0, 0],
+        }
+    }
+}
 
-        let ImpairProfile { downlink, uplink, peers, seed } = profile;
-        let queue_bytes = [queue_bound(&downlink), queue_bound(&uplink)];
-        let downlink = Impairer::new(downlink, seed, Direction::Downlink)?;
-        let uplink = Impairer::new(uplink, seed, Direction::Uplink)?;
+#[derive(Debug, Clone)]
+enum Override {
+    Armed(Box<ImpairProfile>),
+    Disarmed,
+}
 
-        *lock(&self.shared.armed) = Some(Armed {
+#[derive(Debug)]
+struct Peer {
+    ordinal: u64,
+    link: Link,
+    last_seen: Instant,
+    stats: Stats,
+    /// This peer's share of `Core::backlog`.
+    backlog: [u64; 2],
+}
+
+#[derive(Debug)]
+struct Link {
+    downlink: Impairer,
+    uplink: Impairer,
+    /// Per-direction datagram numbering, indexed by the direction's
+    /// discriminant.
+    seq: [u64; 2],
+    origin: Instant,
+    queue_bytes: [u64; 2],
+    /// Whether this link was built from an override rather than inherited.
+    own: bool,
+}
+
+impl Link {
+    fn build(profile: &ImpairProfile, seed: u64, own: bool) -> Result<Link, ProfileError> {
+        let downlink = Impairer::new(profile.downlink.clone(), seed, Direction::Downlink)?;
+        let uplink = Impairer::new(profile.uplink.clone(), seed, Direction::Uplink)?;
+        Ok(Link {
             downlink,
             uplink,
             seq: [0, 0],
             origin: Instant::now(),
-            peers,
-            queue_bytes,
-        });
-        Ok(())
+            queue_bytes: [queue_bound(&profile.downlink), queue_bound(&profile.uplink)],
+            own,
+        })
     }
+}
 
-    /// Every datagram passes untouched and `max_transmit_segments()` reverts to
-    /// the inner socket's value.
-    ///
-    /// The counters and any recorded decisions survive: disarming stops the
-    /// impairment, it does not discard the evidence of what the impairment did.
-    pub fn disarm(&self) {
-        *lock(&self.shared.armed) = None;
+/// The seed a peer inheriting the socket profile runs with: `seed` itself for
+/// the first peer (`ordinal` 0), and a fixed integer mix of the two after it.
+pub fn peer_seed(seed: u64, ordinal: u64) -> u64 {
+    if ordinal == 0 {
+        return seed;
     }
+    // splitmix64's finaliser.
+    let mut z = ordinal.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    seed ^ z ^ (z >> 31)
+}
 
-    /// Whether a profile is currently armed.
-    pub fn is_armed(&self) -> bool {
-        lock(&self.shared.armed).is_some()
-    }
-
-    /// Re-seed every stream of both directions.
-    ///
-    /// Which random sequence the models read changes; nothing else does. The
-    /// token buckets, the byte queues, the burst-loss chains, the datagram
-    /// counters and every statistic are left alone, because this is a re-seed
-    /// and not a re-arm — silently emptying a queue here would make a call that
-    /// says "draw different numbers" also mean "forget what you were holding".
-    ///
-    /// A no-op while disarmed. Arming installs the profile's own seed, so a
-    /// seed set before arming could not survive the call that would use it, and
-    /// storing one that the next `arm` then overwrites would be a setting that
-    /// silently does nothing.
-    pub fn reseed(&self, seed: u64) {
-        if let Some(armed) = lock(&self.shared.armed).as_mut() {
-            armed.downlink.reseed(seed);
-            armed.uplink.reseed(seed);
+impl Core {
+    /// The profile and seed this peer runs with, or `None` when it is left
+    /// untouched.
+    fn profile_for(&self, peer: SocketAddr, ordinal: u64) -> Option<(&ImpairProfile, u64, bool)> {
+        match self.overrides.get(&peer) {
+            Some(Override::Armed(p)) => Some((p, p.seed, true)),
+            Some(Override::Disarmed) => None,
+            None => {
+                let p = self.profile.as_ref()?;
+                let admitted = match &p.peers {
+                    PeerFilter::All => true,
+                    PeerFilter::Only(addrs) => addrs.contains(&peer),
+                };
+                admitted.then(|| (p, peer_seed(p.seed, ordinal), false))
+            }
         }
     }
 
-    /// A snapshot of both directions' counters.
+    fn remove_peer(&mut self, peer: SocketAddr) {
+        if let Some(p) = self.peers.remove(&peer) {
+            for i in 0..2 {
+                self.backlog[i] = self.backlog[i].saturating_sub(p.backlog[i]);
+            }
+        }
+    }
+
+    /// The peer's link, built if it has none. `None` when the peer is left
+    /// untouched.
+    fn link(&mut self, peer: SocketAddr, now: Instant) -> Option<&mut Peer> {
+        self.sweep(now);
+        if !self.peers.contains_key(&peer) {
+            let ordinal = self.next_ordinal;
+            let (profile, seed, own) = self.profile_for(peer, ordinal)?;
+            // Validated when it was stored, so this cannot fail.
+            let link = Link::build(profile, seed, own).ok()?;
+            self.next_ordinal += 1;
+            self.peers.insert(
+                peer,
+                Peer { ordinal, link, last_seen: now, stats: Stats::default(), backlog: [0, 0] },
+            );
+        }
+        let p = self.peers.get_mut(&peer)?;
+        p.last_seen = now;
+        Some(p)
+    }
+
+    /// Drop links idle for longer than the timeout, at most a few times per
+    /// timeout.
+    fn sweep(&mut self, now: Instant) {
+        let every = self.idle_timeout / 4;
+        if self.last_sweep.is_some_and(|at| now.saturating_duration_since(at) < every) {
+            return;
+        }
+        self.last_sweep = Some(now);
+        let timeout = self.idle_timeout;
+        let idle: Vec<SocketAddr> = self
+            .peers
+            .iter()
+            .filter(|(_, p)| now.saturating_duration_since(p.last_seen) >= timeout)
+            .map(|(a, _)| *a)
+            .collect();
+        for a in idle {
+            self.remove_peer(a);
+        }
+    }
+}
+
+impl ImpairHandle {
+    /// Arm the socket with a validated profile. Every peer the filter admits
+    /// gets its own link running it, from sequence 0 and tick 0.
     ///
-    /// Takes no lock, so it can be called from anywhere at any rate without
-    /// slowing a send down. The cost is that a snapshot taken while datagrams
-    /// are in flight is not a consistent cut of the counters.
+    /// A refusal leaves whatever was armed before still running. Peers armed or
+    /// disarmed individually keep their own setting.
+    pub fn arm(&self, profile: ImpairProfile) -> Result<(), ProfileError> {
+        profile.validate()?;
+        let mut core = lock(&self.shared.core);
+        let mut rebuilt = Vec::new();
+        for (addr, peer) in &core.peers {
+            if peer.link.own {
+                continue;
+            }
+            let admitted = match &profile.peers {
+                PeerFilter::All => true,
+                PeerFilter::Only(addrs) => addrs.contains(addr),
+            };
+            let link = if admitted {
+                Some(Link::build(&profile, peer_seed(profile.seed, peer.ordinal), false)?)
+            } else {
+                None
+            };
+            rebuilt.push((*addr, link));
+        }
+        for (addr, link) in rebuilt {
+            match link {
+                Some(link) => {
+                    if let Some(p) = core.peers.get_mut(&addr) {
+                        p.link = link;
+                    }
+                }
+                None => core.remove_peer(addr),
+            }
+        }
+        core.profile = Some(profile);
+        Ok(())
+    }
+
+    /// Stop impairing every peer that inherits the socket profile. Peers armed
+    /// with [`ImpairHandle::arm_peer`] keep their profile.
+    ///
+    /// The counters and the recorded decisions survive.
+    pub fn disarm(&self) {
+        let mut core = lock(&self.shared.core);
+        core.profile = None;
+        let inherited: Vec<SocketAddr> =
+            core.peers.iter().filter(|(_, p)| !p.link.own).map(|(a, _)| *a).collect();
+        for a in inherited {
+            core.remove_peer(a);
+        }
+    }
+
+    /// Whether the socket-wide profile is armed.
+    pub fn is_armed(&self) -> bool {
+        lock(&self.shared.core).profile.is_some()
+    }
+
+    /// Give one peer its own profile, replacing the socket-wide one for it.
+    /// The peer's link restarts at sequence 0 and tick 0, seeded with the
+    /// profile's own seed. The profile's peer filter is not consulted.
+    pub fn arm_peer(&self, peer: SocketAddr, profile: ImpairProfile) -> Result<(), ProfileError> {
+        profile.validate()?;
+        let link = Link::build(&profile, profile.seed, true)?;
+        let mut core = lock(&self.shared.core);
+        core.overrides.insert(peer, Override::Armed(Box::new(profile)));
+        match core.peers.get_mut(&peer) {
+            Some(p) => p.link = link,
+            None => {
+                let ordinal = core.next_ordinal;
+                core.next_ordinal += 1;
+                core.peers.insert(
+                    peer,
+                    Peer {
+                        ordinal,
+                        link,
+                        last_seen: Instant::now(),
+                        stats: Stats::default(),
+                        backlog: [0, 0],
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Leave one peer untouched, whatever the socket-wide profile says.
+    pub fn disarm_peer(&self, peer: SocketAddr) {
+        let mut core = lock(&self.shared.core);
+        core.overrides.insert(peer, Override::Disarmed);
+        core.remove_peer(peer);
+    }
+
+    /// Return one peer to the socket-wide profile and forget its link. Its
+    /// next datagram builds a fresh one.
+    pub fn clear_peer(&self, peer: SocketAddr) {
+        let mut core = lock(&self.shared.core);
+        core.overrides.remove(&peer);
+        core.remove_peer(peer);
+    }
+
+    /// How long a peer may send and receive nothing before its link is
+    /// dropped. Default [`DEFAULT_PEER_IDLE_TIMEOUT`].
+    pub fn set_peer_idle_timeout(&self, timeout: Duration) {
+        lock(&self.shared.core).idle_timeout = timeout;
+    }
+
+    /// The peers with a live link right now.
+    pub fn peers(&self) -> Vec<SocketAddr> {
+        lock(&self.shared.core).peers.keys().copied().collect()
+    }
+
+    /// Re-seed every peer that inherits the socket profile, and the profile
+    /// itself so later peers use the new seed. Queues, buckets, numbering and
+    /// statistics are left alone. A no-op while disarmed.
+    pub fn reseed(&self, seed: u64) {
+        let mut core = lock(&self.shared.core);
+        let Some(profile) = core.profile.as_mut() else {
+            return;
+        };
+        profile.seed = seed;
+        for peer in core.peers.values_mut().filter(|p| !p.link.own) {
+            let s = peer_seed(seed, peer.ordinal);
+            peer.link.downlink.reseed(s);
+            peer.link.uplink.reseed(s);
+        }
+    }
+
+    /// Every peer's counters, folded together. Takes no lock.
+    ///
+    /// A snapshot taken while datagrams are in flight is not a consistent cut.
     pub fn stats(&self) -> StatsSnapshot {
         self.shared.stats.snapshot()
     }
 
-    /// OFF by default: a 100k-record log is 100k allocations a production shim
-    /// must not make.
-    ///
-    /// Turning recording off does not discard what has already been recorded;
-    /// [`ImpairHandle::take_log`] is what empties the log.
+    /// One peer's decision counters, while it has a live link. The release
+    /// counters are kept only socket-wide and read zero here.
+    pub fn peer_stats(&self, peer: SocketAddr) -> Option<StatsSnapshot> {
+        lock(&self.shared.core).peers.get(&peer).map(|p| p.stats.snapshot())
+    }
+
+    /// Record every decision. Off by default.
     pub fn record_decisions(&self, on: bool) {
         self.shared.recording.store(on, Relaxed);
     }
 
-    /// Take the recorded log, leaving an empty one behind.
-    ///
-    /// Taking rather than borrowing, so a caller that captures a phase, reads
-    /// it, and captures another does not have to remember to subtract the first
-    /// phase from the second.
-    pub fn take_log(&self) -> DecisionLog {
-        std::mem::take(&mut *lock(&self.shared.log))
+    /// Take one peer's recorded decisions, leaving an empty log behind.
+    pub fn take_log(&self, peer: SocketAddr) -> DecisionLog {
+        lock(&self.shared.core).logs.remove(&peer).unwrap_or_default()
+    }
+
+    /// Take every peer's recorded decisions, ordered by address.
+    pub fn take_logs(&self) -> Vec<(SocketAddr, DecisionLog)> {
+        let mut logs: Vec<_> =
+            std::mem::take(&mut lock(&self.shared.core).logs).into_iter().collect();
+        logs.sort_by_key(|(a, _)| *a);
+        logs
     }
 }
 
 /// The seam the socket decorator drives this state through.
-///
-/// Every item here is crate-private and its only caller is the socket module,
-/// which is compiled only when the optional QUIC dependency is enabled. A build
-/// without it therefore has no caller for any of them, and the dead-code lint is
-/// right to say so — the `allow` is the point rather than an oversight. Deleting
-/// them to silence it would leave the socket unable to reach the engines at all,
-/// since the state they reach into is private to this module.
-///
-/// The seam is deliberately narrow. In particular the per-datagram entry point
-/// below does the counting and the recording itself instead of handing the
-/// engines out, so there is exactly one place a decision can be folded into the
-/// counters and exactly one place it can be appended to the log. That is what
-/// makes "every decision is counted once" a property of this file rather than of
-/// every call site remembering to do both.
 #[allow(dead_code)]
 impl ImpairHandle {
-    /// A handle with nothing armed, which is the state a socket starts in.
+    /// A handle with nothing armed.
     pub(crate) fn detached() -> Self {
         ImpairHandle { shared: Arc::new(Shared::default()) }
     }
 
-    /// Nanoseconds since the profile was armed, or `None` while disarmed.
-    ///
-    /// Read once per send and reused for every datagram of a batch, so that a
-    /// segmented transmit is decided about at one instant rather than smeared
-    /// across the time it took to walk the segments.
-    ///
-    /// Saturating: the conversion clamps rather than wrapping, and the clamp is
-    /// 584 years after arming.
-    pub(crate) fn tick(&self) -> Option<Tick> {
-        let armed = lock(&self.shared.armed);
-        let elapsed = armed.as_ref()?.origin.elapsed().as_nanos();
+    /// Whether any peer can be impaired: the socket is armed or some peer has
+    /// a profile of its own.
+    pub(crate) fn is_impairing(&self) -> bool {
+        let core = lock(&self.shared.core);
+        core.profile.is_some() || core.overrides.values().any(|o| matches!(o, Override::Armed(_)))
+    }
+
+    /// The peer's tick, building its link if it has none. `None` means the
+    /// peer is left untouched.
+    pub(crate) fn begin(&self, peer: SocketAddr) -> Option<Tick> {
+        let now = Instant::now();
+        let mut core = lock(&self.shared.core);
+        let p = core.link(peer, now)?;
+        let elapsed = now.saturating_duration_since(p.link.origin).as_nanos();
         Some(Tick(u64::try_from(elapsed).unwrap_or(u64::MAX)))
     }
 
-    /// Decide about one datagram, fold the decision into the counters, and
-    /// append it to the log when recording is on. `None` while disarmed.
-    ///
-    /// The direction's sequence number is allocated inside the same critical
-    /// section as the decision, so two threads sending at once cannot hand the
-    /// same sequence number to the engine twice — which would make a loss
-    /// pattern drop the wrong datagram and a reorder gap fire twice in a row.
-    ///
-    /// The counters and the log are updated after the engine's lock is
-    /// released, because neither needs it and holding a lock across an
-    /// allocation on the send path is how a shim starts adding latency of its
-    /// own.
-    pub(crate) fn decide(&self, dir: Direction, wire_bytes: u32, now: Tick) -> Option<Decision> {
-        let decision;
-        let seq;
-        {
-            let mut armed = lock(&self.shared.armed);
-            let armed = armed.as_mut()?;
-            let i = dir as usize;
-            seq = armed.seq[i];
-            armed.seq[i] += 1;
-            let engine = match dir {
-                Direction::Downlink => &mut armed.downlink,
-                Direction::Uplink => &mut armed.uplink,
-            };
-            decision = engine.decide(seq, wire_bytes, now);
+    /// Decide about one datagram of this peer, count it and record it. `None`
+    /// when the peer is left untouched.
+    pub(crate) fn decide(
+        &self,
+        peer: SocketAddr,
+        dir: Direction,
+        wire_bytes: u32,
+        now: Tick,
+    ) -> Option<Decision> {
+        let recording = self.shared.recording.load(Relaxed);
+        let mut core = lock(&self.shared.core);
+        let p = core.link(peer, Instant::now())?;
+        let i = dir as usize;
+        let seq = p.link.seq[i];
+        p.link.seq[i] += 1;
+        let engine = match dir {
+            Direction::Downlink => &mut p.link.downlink,
+            Direction::Uplink => &mut p.link.uplink,
+        };
+        let decision = engine.decide(seq, wire_bytes, now);
+        p.stats.record(dir, wire_bytes, &decision);
+        let before = std::mem::replace(&mut p.backlog[i], decision.queue_backlog_bytes);
+        core.backlog[i] =
+            core.backlog[i].saturating_sub(before).saturating_add(decision.queue_backlog_bytes);
+        let total = Decision { queue_backlog_bytes: core.backlog[i], ..decision };
+        if recording {
+            core.logs.entry(peer).or_default().push(dir, seq, wire_bytes, now, &decision);
         }
-
-        self.shared.stats.record(dir, wire_bytes, &decision);
-        if self.shared.recording.load(Relaxed) {
-            lock(&self.shared.log).push(dir, seq, wire_bytes, now, &decision);
-        }
+        drop(core);
+        self.shared.stats.record(dir, wire_bytes, &total);
         Some(decision)
     }
 
-    /// Whether the armed profile applies to this peer. `false` while disarmed,
-    /// which is the same answer as "do not impair this datagram".
-    pub(crate) fn applies_to(&self, peer: std::net::SocketAddr) -> bool {
-        match lock(&self.shared.armed).as_ref() {
-            None => false,
-            Some(armed) => match &armed.peers {
-                PeerFilter::All => true,
-                PeerFilter::Only(addrs) => addrs.contains(&peer),
-            },
-        }
-    }
-
-    /// How many bytes of held datagrams this direction may accumulate before
-    /// the shim must drop. Falls back to the crate default while disarmed, so a
-    /// caller reading it never has to special-case an unbounded queue.
-    pub(crate) fn queue_bytes(&self, dir: Direction) -> u64 {
-        match lock(&self.shared.armed).as_ref() {
+    /// The bound on held bytes for this peer and direction.
+    pub(crate) fn queue_bytes(&self, peer: SocketAddr, dir: Direction) -> u64 {
+        match lock(&self.shared.core).peers.get(&peer) {
+            Some(p) => p.link.queue_bytes[dir as usize],
             None => DEFAULT_QUEUE_BYTES,
-            Some(armed) => armed.queue_bytes[dir as usize],
         }
     }
 
@@ -285,28 +455,28 @@ impl ImpairHandle {
     pub(crate) fn record_release(&self, batch: u32, scheduled: Tick, observed: Tick) {
         self.shared.stats.record_release(batch, scheduled, observed);
     }
+
+    /// Count a received datagram discarded because its peer's held queue was
+    /// full.
+    pub(crate) fn record_ingress_overflow(&self, peer: SocketAddr) {
+        self.shared.stats.record_ingress_overflow();
+        if let Some(p) = lock(&self.shared.core).peers.get(&peer) {
+            p.stats.record_ingress_overflow();
+        }
+    }
 }
 
-/// One direction's bound on held bytes.
-///
-/// The rate model's tail-drop threshold when there is one, so that the shim's
-/// queue and the engine's queue are the same size and a datagram cannot be
-/// accepted by one and refused by the other.
-fn queue_bound(profile: &crate::profile::DirectionProfile) -> u64 {
+/// One direction's bound on held bytes: the rate model's queue when there is
+/// one, so the shim and the engine agree on its depth.
+fn queue_bound(profile: &DirectionProfile) -> u64 {
     match profile.rate {
         Some(rate) => rate.queue_bytes,
         None => DEFAULT_QUEUE_BYTES,
     }
 }
 
-/// Lock, recovering from a previous panic rather than propagating it.
-///
-/// A mutex here is poisoned only if a thread panicked while holding it, and the
-/// state behind these two is a set of engines and a list of records — neither
-/// can be left half-written by a panic in a way that makes it unsafe to read.
-/// Propagating the poison instead would turn one panicked send into a socket
-/// where every later `is_armed` also panics, which converts a single lost
-/// datagram into a dead connection.
+/// Lock, recovering from a previous panic: nothing behind these locks can be
+/// left unsafe to read, and a poisoned lock would kill the socket.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -314,14 +484,14 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{DupModel, LossModel, Prob, RateModel, ReorderModel};
-    use crate::profile::DirectionProfile;
+    use crate::engine::Verdict;
+    use crate::model::{DelayModel, DupModel, LossModel, Prob, RateModel, ReorderModel};
 
-    /// A profile that drops every third datagram of both directions.
-    ///
-    /// Deterministic on purpose: a loss model expressed in sequence numbers is
-    /// what makes "arming restarts the numbering" an assertion about named
-    /// indices rather than about a count that a shifted run also satisfies.
+    fn addr(port: u16) -> SocketAddr {
+        SocketAddr::from(([127, 0, 0, 1], port))
+    }
+
+    /// Drops every third datagram of both directions.
     fn every_third() -> ImpairProfile {
         let third = || DirectionProfile {
             loss: Some(LossModel::EveryNth { n: 3 }),
@@ -330,27 +500,19 @@ mod tests {
         ImpairProfile { downlink: third(), uplink: third(), seed: 7, ..ImpairProfile::default() }
     }
 
-    /// The sequence numbers of the datagrams the engine dropped, over a run of
-    /// `n` from wherever this direction's counter currently stands.
-    ///
-    /// The indices rather than a count, because a count is the weaker claim: it
-    /// is satisfied by a run that is out of phase but the same length, and the
-    /// phase is what a sequence-number-driven loss model is.
-    fn dropped_indices(handle: &ImpairHandle, dir: Direction, n: u64) -> Vec<u64> {
+    fn dropped_indices(
+        handle: &ImpairHandle,
+        peer: SocketAddr,
+        dir: Direction,
+        n: u64,
+    ) -> Vec<u64> {
         (0..n)
             .filter(|_| {
-                handle.decide(dir, 1_200, Tick(0)).expect("armed").verdict
-                    == crate::engine::Verdict::Drop
+                handle.decide(peer, dir, 1_200, Tick(0)).expect("armed").verdict == Verdict::Drop
             })
             .collect()
     }
 
-    /// The documented `Send + Sync` bound, asserted by the compiler.
-    ///
-    /// Nothing else in the crate would notice a field losing it — the handle is
-    /// stored, cloned and read from one thread everywhere it is currently used,
-    /// so the first report would come from a downstream crate trying to move
-    /// one into a spawned task.
     #[test]
     fn the_handle_is_send_and_sync_and_clones_share_one_state() {
         fn assert_send_sync<T: Send + Sync>() {}
@@ -365,24 +527,13 @@ mod tests {
         assert!(!a.is_armed(), "and the original sees the disarm");
     }
 
-    /// A profile refused for a mistake in its uplink half leaves the downlink's
-    /// previously armed profile running.
-    ///
-    /// The failure this forbids is a partial swap: validate the downlink,
-    /// install it, then fail on the uplink and return an error a caller logs
-    /// and moves on from — after which the link is impaired by half of one
-    /// profile and half of another, and nothing anywhere says so.
-    ///
-    /// Asserted through the decisions rather than through `is_armed`, because a
-    /// partial swap leaves a profile armed either way. What distinguishes them
-    /// is *which* profile: the drops must still fall on the third datagram.
     #[test]
     fn a_refused_profile_leaves_the_previous_one_armed() {
         let handle = ImpairHandle::detached();
         handle.arm(every_third()).expect("a valid profile");
+        let p = addr(1);
+        handle.begin(p).expect("armed");
 
-        // A reorder model with no delay model on the same direction is inert by
-        // construction, so it is refused rather than accepted and ignored.
         let bad = ImpairProfile {
             uplink: DirectionProfile {
                 reorder: Some(ReorderModel { gap: 4, p: Prob::from_ppb(500_000_000) }),
@@ -392,80 +543,48 @@ mod tests {
         };
         assert_eq!(handle.arm(bad), Err(ProfileError::ReorderWithoutDelay));
 
-        assert_eq!(dropped_indices(&handle, Direction::Downlink, 15), vec![2, 5, 8, 11, 14]);
+        assert_eq!(dropped_indices(&handle, p, Direction::Downlink, 15), vec![2, 5, 8, 11, 14]);
         assert_eq!(handle.stats().dropped_loss, 5);
     }
 
-    /// Arming zeroes both directions' sequence numbers, and the sequence number
-    /// is what a deterministic loss model is expressed in.
-    ///
-    /// Asserted as the exact set of dropped indices rather than as a count. A
-    /// count is satisfied by a sequence number that carried over and happened to
-    /// stay in phase — every third of fifteen is five drops whether the counter
-    /// restarted at 0 or at 3 — and the phase is the whole claim.
     #[test]
-    fn arming_restarts_each_direction_at_sequence_zero() {
+    fn arming_restarts_each_peer_at_sequence_zero() {
         let handle = ImpairHandle::detached();
         handle.arm(every_third()).expect("a valid profile");
-
-        // Burn four datagrams on each direction, then re-arm.
+        let p = addr(1);
         for _ in 0..4 {
-            handle.decide(Direction::Downlink, 1_200, Tick(0));
-            handle.decide(Direction::Uplink, 1_200, Tick(0));
+            handle.decide(p, Direction::Downlink, 1_200, Tick(0));
+            handle.decide(p, Direction::Uplink, 1_200, Tick(0));
         }
         handle.arm(every_third()).expect("a valid profile");
 
         for dir in [Direction::Downlink, Direction::Uplink] {
-            assert_eq!(
-                dropped_indices(&handle, dir, 15),
-                vec![2, 5, 8, 11, 14],
-                "{dir:?} restarts in phase"
-            );
+            assert_eq!(dropped_indices(&handle, p, dir, 15), vec![2, 5, 8, 11, 14], "{dir:?}");
         }
     }
 
-    /// Disarming stops the impairment and keeps the counters.
-    ///
-    /// The second half is the one worth pinning: a caller reads the counters
-    /// *after* it has stopped the impairment, so a `disarm` that cleared them
-    /// would leave every such caller reading zeros and concluding that
-    /// nothing happened.
     #[test]
     fn disarming_stops_deciding_and_keeps_the_counters() {
         let handle = ImpairHandle::detached();
         handle.arm(every_third()).expect("a valid profile");
+        let p = addr(1);
         for _ in 0..9 {
-            handle.decide(Direction::Downlink, 1_200, Tick(0));
+            handle.decide(p, Direction::Downlink, 1_200, Tick(0));
         }
         let before = handle.stats();
         assert_eq!(before.datagrams_seen, 9);
         assert_eq!(before.dropped_loss, 3);
 
         handle.disarm();
-        assert!(handle.decide(Direction::Downlink, 1_200, Tick(0)).is_none());
-        assert_eq!(handle.stats(), before, "disarming decided nothing and discarded nothing");
+        assert!(handle.decide(p, Direction::Downlink, 1_200, Tick(0)).is_none());
+        assert!(handle.begin(p).is_none());
+        assert_eq!(handle.stats(), before);
     }
 
-    /// Re-seeding changes the next draw at a named index, and leaves the
-    /// counters and the datagram numbering alone.
-    ///
-    /// # Why this needs two handles rather than two runs of one
-    ///
-    /// The obvious shape — run a handle, re-seed it, run it again, and check
-    /// that the two runs differ — tests nothing. A generator advances as it is
-    /// drawn from, so the second run of one handle differs from the first
-    /// **whether or not the re-seed did anything**; measured, a `reseed` whose
-    /// body is `let _ = seed;` still produces a first difference, at index 0.
-    ///
-    /// So two handles are armed identically and given identical histories, and
-    /// only one of them is re-seeded. Everything else about them is the same, so
-    /// the first index at which their continuations differ is attributable to
-    /// the re-seed and to nothing else — and a `reseed` that does nothing makes
-    /// the two continuations byte-identical, which is `None`.
+    /// Two handles with identical histories, one re-seeded: the first index at
+    /// which they differ is attributable to the re-seed alone.
     #[test]
     fn reseeding_changes_the_next_draw_at_a_named_index() {
-        // A duplication model at one in two, so a changed stream shows up
-        // within a handful of datagrams.
         let coin = || ImpairProfile {
             downlink: DirectionProfile {
                 dup: Some(DupModel { p: Prob::from_ppb(500_000_000) }),
@@ -474,11 +593,12 @@ mod tests {
             seed: 11,
             ..ImpairProfile::default()
         };
+        let p = addr(1);
         let run = |handle: &ImpairHandle, n: usize| -> Vec<bool> {
             (0..n)
                 .map(|_| {
                     handle
-                        .decide(Direction::Downlink, 1_200, Tick(0))
+                        .decide(p, Direction::Downlink, 1_200, Tick(0))
                         .expect("armed")
                         .duplicate
                         .is_some()
@@ -490,25 +610,16 @@ mod tests {
         let reseeded = ImpairHandle::detached();
         untouched.arm(coin()).expect("a valid profile");
         reseeded.arm(coin()).expect("a valid profile");
-        assert_eq!(run(&untouched, 24), run(&reseeded, 24), "identical seeds, identical history");
+        assert_eq!(run(&untouched, 24), run(&reseeded, 24));
 
         reseeded.reseed(12);
 
         let first_diff =
             run(&untouched, 24).iter().zip(run(&reseeded, 24).iter()).position(|(a, b)| a != b);
-        assert_eq!(first_diff, Some(0), "the re-seeded stream must diverge here");
-        assert_eq!(
-            reseeded.stats().datagrams_seen,
-            48,
-            "a re-seed is not a re-arm: the datagram count carries on"
-        );
+        assert_eq!(first_diff, Some(0));
+        assert_eq!(reseeded.stats().datagrams_seen, 48, "a re-seed is not a re-arm");
     }
 
-    /// Re-seeding while disarmed is a no-op rather than a stored setting.
-    ///
-    /// A stored seed would be overwritten by the next `arm`, which installs the
-    /// profile's own — so it would be a call that appears to configure
-    /// something and cannot.
     #[test]
     fn reseeding_while_disarmed_changes_nothing() {
         let handle = ImpairHandle::detached();
@@ -517,37 +628,29 @@ mod tests {
         assert_eq!(handle.stats(), StatsSnapshot::default());
     }
 
-    /// The peer filter answers from the armed profile, and answers `false`
-    /// while disarmed.
     #[test]
     fn the_peer_filter_answers_from_the_armed_profile() {
-        let one: std::net::SocketAddr = "127.0.0.1:4433".parse().expect("a literal address");
-        let other: std::net::SocketAddr = "127.0.0.1:4434".parse().expect("a literal address");
+        let one = addr(4433);
+        let other = addr(4434);
 
         let handle = ImpairHandle::detached();
-        assert!(!handle.applies_to(one), "a disarmed socket impairs nobody");
+        assert!(handle.begin(one).is_none(), "a disarmed socket impairs nobody");
 
         handle.arm(every_third()).expect("a valid profile");
-        assert!(handle.applies_to(one), "the default filter is every peer");
+        assert!(handle.begin(one).is_some(), "the default filter is every peer");
 
         handle
             .arm(ImpairProfile { peers: PeerFilter::Only(vec![one]), ..every_third() })
             .expect("a valid profile");
-        assert!(handle.applies_to(one));
-        assert!(!handle.applies_to(other));
+        assert!(handle.begin(one).is_some());
+        assert!(handle.begin(other).is_none());
     }
 
-    /// The held-byte bound comes from the rate model when there is one and from
-    /// the crate default otherwise, per direction.
-    ///
-    /// The two directions are asserted separately because the tempting
-    /// implementation reads one direction's rate model and uses it for both,
-    /// which silently gives an unshaped uplink the downlink's much smaller
-    /// queue.
     #[test]
     fn the_queue_bound_follows_each_directions_rate_model() {
         let handle = ImpairHandle::detached();
-        assert_eq!(handle.queue_bytes(Direction::Downlink), DEFAULT_QUEUE_BYTES);
+        let p = addr(1);
+        assert_eq!(handle.queue_bytes(p, Direction::Downlink), DEFAULT_QUEUE_BYTES);
 
         handle
             .arm(ImpairProfile {
@@ -562,45 +665,166 @@ mod tests {
                 ..ImpairProfile::default()
             })
             .expect("a valid profile");
+        handle.begin(p).expect("armed");
 
-        assert_eq!(handle.queue_bytes(Direction::Downlink), 24_000);
+        assert_eq!(handle.queue_bytes(p, Direction::Downlink), 24_000);
+        assert_eq!(handle.queue_bytes(p, Direction::Uplink), DEFAULT_QUEUE_BYTES);
+    }
+
+    #[test]
+    fn the_tick_origin_is_when_the_peers_link_was_built() {
+        let handle = ImpairHandle::detached();
+        let p = addr(1);
+        assert_eq!(handle.begin(p), None);
+
+        handle.arm(every_third()).expect("a valid profile");
+        let tick = handle.begin(p).expect("armed");
+        assert!(tick.0 < 1_000_000_000, "{tick:?}");
+    }
+
+    #[test]
+    fn recording_is_off_by_default_and_kept_per_peer() {
+        let handle = ImpairHandle::detached();
+        handle.arm(every_third()).expect("a valid profile");
+        let (a, b) = (addr(1), addr(2));
+        for _ in 0..8 {
+            handle.decide(a, Direction::Downlink, 1_200, Tick(0));
+        }
+        assert_eq!(handle.take_log(a), DecisionLog::default());
+
+        handle.record_decisions(true);
+        for _ in 0..3 {
+            handle.decide(a, Direction::Downlink, 1_200, Tick(0));
+        }
+        handle.decide(b, Direction::Downlink, 1_200, Tick(0));
+        handle.disarm();
+        assert_eq!(handle.take_log(a).records().len(), 3, "a disarm keeps the records");
+        assert_eq!(handle.take_log(b).records().len(), 1);
+        assert!(handle.take_log(a).records().is_empty(), "taking empties it");
+    }
+
+    /// The first peer runs the profile's own seed; the second runs a
+    /// different, reproducible one.
+    #[test]
+    fn each_peer_draws_from_its_own_stream() {
+        let coin = ImpairProfile {
+            downlink: DirectionProfile {
+                loss: Some(LossModel::Bernoulli { p: Prob::from_ppb(500_000_000) }),
+                ..DirectionProfile::default()
+            },
+            seed: 5,
+            ..ImpairProfile::default()
+        };
+        let draws = |handle: &ImpairHandle, p: SocketAddr| -> Vec<bool> {
+            (0..64)
+                .map(|_| {
+                    handle.decide(p, Direction::Downlink, 1_200, Tick(0)).expect("armed").verdict
+                        == Verdict::Drop
+                })
+                .collect()
+        };
+        let solo = |seed: u64| -> Vec<bool> {
+            let mut e =
+                Impairer::new(coin.downlink.clone(), seed, Direction::Downlink).expect("valid");
+            (0..64).map(|seq| e.decide(seq, 1_200, Tick(0)).verdict == Verdict::Drop).collect()
+        };
+
+        let handle = ImpairHandle::detached();
+        handle.arm(coin.clone()).expect("a valid profile");
+        let (a, b) = (addr(1), addr(2));
+        handle.begin(a);
+        handle.begin(b);
+        let (da, db) = (draws(&handle, a), draws(&handle, b));
+        assert_eq!(da, solo(5), "the first peer is the profile's own run");
+        assert_eq!(db, solo(peer_seed(5, 1)), "the second is reproducible from its ordinal");
+        assert_ne!(da, db);
+    }
+
+    /// A peer's own profile leaves every other peer's link as it was.
+    #[test]
+    fn a_peer_profile_leaves_the_other_peers_alone() {
+        let handle = ImpairHandle::detached();
+        handle.arm(every_third()).expect("a valid profile");
+        let (a, b) = (addr(1), addr(2));
+        for _ in 0..4 {
+            handle.decide(a, Direction::Downlink, 1_200, Tick(0));
+            handle.decide(b, Direction::Downlink, 1_200, Tick(0));
+        }
+
+        let slow = ImpairProfile {
+            downlink: DirectionProfile {
+                delay: Some(DelayModel::Fixed { mean_ns: 50_000_000 }),
+                ..DirectionProfile::default()
+            },
+            seed: 1,
+            ..ImpairProfile::default()
+        };
+        handle.arm_peer(a, slow).expect("a valid profile");
+
+        let d = handle.decide(a, Direction::Downlink, 1_200, Tick(0)).expect("armed");
+        assert_eq!(d.release, Tick(50_000_000), "the override is in force");
+        // b continues its own numbering: datagrams 4.. of every-third drop at 5, 8.
+        assert_eq!(dropped_indices(&handle, b, Direction::Downlink, 6), vec![1, 4]);
+
+        handle.disarm_peer(a);
+        assert!(handle.begin(a).is_none());
+        assert!(handle.begin(b).is_some());
+        handle.disarm();
+        handle.clear_peer(a);
+        assert!(handle.begin(a).is_none(), "cleared and the socket is disarmed");
+    }
+
+    #[test]
+    fn an_armed_peer_is_impaired_on_a_disarmed_socket() {
+        let handle = ImpairHandle::detached();
+        let a = addr(1);
+        assert!(!handle.is_impairing());
+        handle.arm_peer(a, every_third()).expect("a valid profile");
+        assert!(handle.is_impairing());
+        assert!(!handle.is_armed());
+        assert!(handle.begin(a).is_some());
+        assert!(handle.begin(addr(2)).is_none());
+    }
+
+    #[test]
+    fn an_idle_link_is_dropped_and_rebuilt() {
+        let handle = ImpairHandle::detached();
+        handle.arm(every_third()).expect("a valid profile");
+        handle.set_peer_idle_timeout(Duration::from_millis(20));
+        let (a, b) = (addr(1), addr(2));
+        for _ in 0..2 {
+            handle.decide(a, Direction::Downlink, 1_200, Tick(0));
+        }
+        std::thread::sleep(Duration::from_millis(40));
+        handle.begin(b);
+        assert_eq!(handle.peers(), vec![b], "the idle peer's link is gone");
         assert_eq!(
-            handle.queue_bytes(Direction::Uplink),
-            DEFAULT_QUEUE_BYTES,
-            "the unshaped direction keeps the default bound"
+            dropped_indices(&handle, a, Direction::Downlink, 3),
+            vec![2],
+            "and restarts at 0"
         );
     }
 
-    /// The tick origin is the arm instant, so a disarmed handle has no tick at
-    /// all and an armed one starts near zero.
-    ///
-    /// No duration is asserted beyond an upper bound generous enough that only
-    /// a wrong origin — a fixed epoch, or the process start — could exceed it.
     #[test]
-    fn the_tick_origin_is_the_arm_instant() {
+    fn the_aggregate_backlog_adds_every_peers() {
+        let shaped = ImpairProfile {
+            downlink: DirectionProfile {
+                rate: Some(RateModel { bps: 8_000, burst_bytes: 1_500, queue_bytes: 100_000 }),
+                ..DirectionProfile::default()
+            },
+            ..ImpairProfile::default()
+        };
         let handle = ImpairHandle::detached();
-        assert_eq!(handle.tick(), None, "a disarmed handle has no origin");
-
-        handle.arm(every_third()).expect("a valid profile");
-        let tick = handle.tick().expect("armed");
-        assert!(tick.0 < 1_000_000_000, "arming was the origin, not some earlier epoch: {tick:?}");
-    }
-
-    /// Recording is off by default, and the default log is empty.
-    ///
-    /// Only the off half is asserted here, which is a weaker claim than it
-    /// looks: an empty log is what a `record_decisions` that does nothing also
-    /// produces. The claim that gives it teeth — recording on yields exactly
-    /// one record per datagram — is exercised by the gates in `tests/socket.rs`
-    /// that turn recording on.
-    #[test]
-    fn recording_is_off_by_default() {
-        let handle = ImpairHandle::detached();
-        handle.arm(every_third()).expect("a valid profile");
-        for _ in 0..8 {
-            handle.decide(Direction::Downlink, 1_200, Tick(0));
+        handle.arm(shaped).expect("a valid profile");
+        let (a, b) = (addr(1), addr(2));
+        for _ in 0..3 {
+            handle.decide(a, Direction::Downlink, 1_200, Tick(0));
+            handle.decide(b, Direction::Downlink, 1_200, Tick(0));
         }
-        assert_eq!(handle.take_log(), DecisionLog::default());
-        assert_eq!(handle.stats().datagrams_seen, 8, "the datagrams were decided about");
+        let pa = handle.peer_stats(a).expect("live").queue_backlog_bytes;
+        let pb = handle.peer_stats(b).expect("live").queue_backlog_bytes;
+        assert!(pa > 0);
+        assert_eq!(pa, pb, "same profile, same traffic, separate queues");
+        assert_eq!(handle.stats().queue_backlog_bytes, pa + pb);
     }
 }

@@ -594,6 +594,10 @@ fn a_full_queue_is_refused_before_the_datagram_is_counted() {
     assert_eq!(inner.sends(), 0, "all three are parked");
     assert_eq!(handle.stats().datagrams_seen, 3);
 
+    // quinn polls the connection's poller, then sends on the same thread.
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut poller = Arc::clone(&socket).create_io_poller();
+    assert!(poller.as_mut().poll_writable(&mut cx).is_ready());
     let refused = send(&socket, &payload(3, 1200)).expect_err("over the bound");
     assert_eq!(refused.kind(), io::ErrorKind::WouldBlock, "the retryable refusal");
     assert_eq!(
@@ -604,8 +608,6 @@ fn a_full_queue_is_refused_before_the_datagram_is_counted() {
 
     // And the write poller says so, which is what makes the refusal recoverable
     // instead of a spin: quinn parks on it rather than retrying immediately.
-    let mut cx = Context::from_waker(Waker::noop());
-    let mut poller = Arc::clone(&socket).create_io_poller();
     assert!(poller.as_mut().poll_writable(&mut cx).is_pending(), "full means not writable");
 
     settle(Duration::from_secs(5), || inner.sends() == 3);
@@ -848,7 +850,7 @@ fn gate_corruption_flips_the_recorded_bit(wrap: Wrap) {
         send(&socket, &payload(seq, LEN)).expect("accepted");
     }
 
-    let log = handle.take_log();
+    let log = handle.take_log(peer());
     let records = log.records();
     assert_eq!(records.len(), N as usize, "one record per datagram");
     assert_eq!(inner.sends(), N as usize, "corruption does not drop");
@@ -953,7 +955,7 @@ fn gate_send_order_matches_the_records(wrap: Wrap) {
     }
     settle(Duration::from_secs(5), || inner.sends() == N as usize);
 
-    let log = handle.take_log();
+    let log = handle.take_log(peer());
     let mut predicted: Vec<(u64, u64)> =
         log.records().iter().map(|r| (r.release_ns, r.seq)).collect();
     predicted.sort_unstable();

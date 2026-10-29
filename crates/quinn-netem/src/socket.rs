@@ -25,8 +25,18 @@
 //! datagrams would need bookkeeping whose bugs duplicate traffic.
 //!
 //! `WouldBlock` is returned for one thing only — a transmit arriving when the
-//! queue is at its bound — and refused before any decision is taken, so the
-//! retry re-decides nothing and no sequence number is consumed.
+//! destination peer's queue is at its bound — and refused before any decision
+//! is taken, so the retry re-decides nothing and no sequence number is consumed.
+//!
+//! # Every peer has its own queues
+//!
+//! Held datagrams are queued per peer, each bounded by that peer's profile, so a
+//! full queue for one peer never holds back another. On the way in a datagram
+//! from a peer whose queue is full is discarded before any decision and counted
+//! in `ingress_overflow`. On the way out the connection sending to that peer
+//! waits: quinn polls a connection's own poller and then calls `try_send` on the
+//! same thread, so the poller that last answered ready on this thread is the one
+//! a refusal is charged to, and it stays pending until that peer's queue drains.
 //!
 //! # The release path arrives in clumps, by design
 //!
@@ -50,7 +60,8 @@
 //! ids and detaches when they match. The stop flag is set and the condition
 //! variable notified before that branch, so a detached thread still exits.
 
-use std::collections::VecDeque;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, IoSliceMut};
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
@@ -77,6 +88,16 @@ use crate::{Direction, Tick};
 /// the pacing comes from each datagram's own deadline.
 const SLICE: Duration = Duration::from_nanos(RELEASE_SLICE_NS);
 
+thread_local! {
+    /// The poller that last answered ready on this thread. A `try_send` refused
+    /// for a full peer queue is charged to it; see the module docs.
+    static READY: RefCell<Option<Arc<Blocked>>> = const { RefCell::new(None) };
+}
+
+/// The peer whose full queue a poller is waiting on.
+#[derive(Debug, Default)]
+struct Blocked(Mutex<Option<SocketAddr>>);
+
 /// An `AsyncUdpSocket` decorator. Behind the non-default `quinn-socket`
 /// feature; nothing else in the crate depends on quinn.
 ///
@@ -90,10 +111,6 @@ pub struct ImpairedUdpSocket {
     /// droppable while its thread is running.
     shared: Arc<Shared>,
     /// The release thread, spawned the first time a datagram is held.
-    ///
-    /// Lazy rather than eager because a decorator that is never armed — the
-    /// state every one of them starts in, and the state a socket installed
-    /// "just in case" stays in — would otherwise cost an OS thread for nothing.
     releaser: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -102,7 +119,7 @@ pub struct ImpairedUdpSocket {
 struct Shared {
     /// The socket being decorated.
     inner: Arc<dyn AsyncUdpSocket>,
-    /// The engines, the counters and the decision log.
+    /// The links, the counters and the decision logs.
     handle: ImpairHandle,
     /// The held datagrams and the parked wakers.
     state: Mutex<State>,
@@ -113,46 +130,83 @@ struct Shared {
 
 /// Held datagrams and parked wakers.
 ///
-/// One mutex for both directions. They are touched once per held datagram and
-/// once per wake-up, never per byte, and splitting them would buy nothing but
-/// a second lock ordering to get wrong.
+/// Lock order: this before the handle's own lock, never the reverse.
 #[derive(Debug, Default)]
 struct State {
     /// Set by `Drop`. The release thread returns at its next look.
     stopping: bool,
-    /// Datagrams waiting to be handed to the inner socket, earliest first.
+    /// Each peer's queues. An entry is removed once it holds nothing.
+    peers: HashMap<SocketAddr, Queues>,
+    /// The task blocked in `poll_recv`, if any.
+    recv_waker: Option<Waker>,
+    /// When the release thread last woke `recv_waker` for a due datagram.
+    ///
+    /// Rate-limits that wake to once per slice, so a receive buffer too small
+    /// for the head of the queue retries at slice granularity instead of
+    /// spinning a core.
+    last_recv_wake: Option<Instant>,
+}
+
+/// One peer's held datagrams.
+#[derive(Debug, Default)]
+struct Queues {
+    /// Waiting to be handed to the inner socket, earliest first.
     egress: VecDeque<Held>,
-    /// Datagrams waiting to be handed up to quinn, earliest first.
+    /// Waiting to be handed up to quinn, earliest first.
     ingress: VecDeque<Held>,
     /// On-wire bytes in `egress`.
     egress_bytes: u64,
     /// On-wire bytes in `ingress`.
     ingress_bytes: u64,
-    /// The task blocked in `poll_recv`, if any.
-    recv_waker: Option<Waker>,
-    /// Tasks blocked in `poll_writable` because the egress queue is full.
+    /// Pollers waiting for `egress` to drop below its bound.
     write_wakers: Vec<Waker>,
-    /// When the release thread last woke `recv_waker` for a due datagram.
-    ///
-    /// Rate-limits that wake to once per slice. Without it, a receive buffer
-    /// too small for the head of the queue is an unbounded hot loop: the
-    /// datagram stays due, the thread wakes the task, the task makes no
-    /// progress and re-parks, and the pair spins a core between them. With it,
-    /// the same situation retries at slice granularity and makes progress as
-    /// soon as quinn offers a buffer that fits.
-    last_recv_wake: Option<Instant>,
+}
+
+impl Queues {
+    fn is_empty(&self) -> bool {
+        self.egress.is_empty() && self.ingress.is_empty() && self.write_wakers.is_empty()
+    }
+}
+
+impl State {
+    fn queues(&mut self, peer: SocketAddr) -> &mut Queues {
+        self.peers.entry(peer).or_default()
+    }
+
+    fn egress_bytes(&self, peer: SocketAddr) -> u64 {
+        self.peers.get(&peer).map_or(0, |q| q.egress_bytes)
+    }
+
+    fn ingress_bytes(&self, peer: SocketAddr) -> u64 {
+        self.peers.get(&peer).map_or(0, |q| q.ingress_bytes)
+    }
+
+    fn holds_ingress(&self) -> bool {
+        self.peers.values().any(|q| !q.ingress.is_empty())
+    }
+
+    /// The peer whose ingress head is due first, if any is due.
+    fn first_due_ingress(&self, now: Instant) -> Option<SocketAddr> {
+        self.peers
+            .iter()
+            .filter_map(|(a, q)| q.ingress.front().map(|h| (h.deadline, *a)))
+            .filter(|(d, _)| *d <= now)
+            .min_by_key(|(d, _)| *d)
+            .map(|(_, a)| a)
+    }
+
+    fn prune(&mut self) {
+        self.peers.retain(|_, q| !q.is_empty());
+    }
 }
 
 /// One datagram this socket is holding.
 #[derive(Debug)]
 struct Held {
-    /// When it may go out. A real instant, not a tick, so that datagrams held
-    /// across a `disarm` still leave: after a disarm there is no tick origin to
-    /// convert against, and a queue that can only be drained while armed is a
-    /// queue that strands whatever was in it.
+    /// When it may go out. A real instant rather than a tick, so datagrams
+    /// held across a disarm still leave.
     deadline: Instant,
-    /// The tick the decision named. Kept only so the release path can report
-    /// its own lateness.
+    /// The tick the decision named, for reporting the release path's lateness.
     scheduled: Tick,
     /// Destination on the way out, source on the way in.
     peer: SocketAddr,
@@ -188,20 +242,11 @@ impl ImpairedUdpSocket {
     ///
     /// # An IPv6 bind here is not dual-stack
     ///
-    /// `quinn::Endpoint::client` asks for a dual-stack socket when the bind
-    /// address is IPv6, so that a client bound to `[::]:0` can still reach an
-    /// IPv4 peer. Doing the same needs the `IPV6_V6ONLY` socket option, which
-    /// the standard library does not expose and which this crate cannot reach
-    /// without taking a dependency it deliberately does not have. So the
-    /// option is left at the platform default — and the platform defaults
-    /// disagree: a wildcard IPv6 bind is dual-stack on a stock Linux and
-    /// IPv6-only on Windows.
-    ///
-    /// This is stated rather than papered over because the failure is silent:
-    /// nothing errors, the endpoint comes up, and IPv4 peers simply never
-    /// answer. A caller that needs dual-stack builds the socket itself, hands
-    /// it to `quinn::Runtime::wrap_udp_socket`, and passes the result to
-    /// [`ImpairedUdpSocket::wrap`], which is what that constructor is for.
+    /// The `IPV6_V6ONLY` option is left at the platform default, which is
+    /// dual-stack on a stock Linux and IPv6-only on Windows. A caller that needs
+    /// dual-stack builds the socket itself, hands it to
+    /// `quinn::Runtime::wrap_udp_socket`, and passes the result to
+    /// [`ImpairedUdpSocket::wrap`].
     pub fn bind(addr: SocketAddr) -> io::Result<(Arc<Self>, ImpairHandle)> {
         let socket = std::net::UdpSocket::bind(addr)?;
         let runtime =
@@ -210,9 +255,6 @@ impl ImpairedUdpSocket {
     }
 
     /// Hand one datagram to the inner socket, as its own transmit.
-    ///
-    /// `segment_size` is always `None`: a datagram this shim emits is one
-    /// datagram, whatever the transmit it came out of claimed.
     fn forward(
         &self,
         payload: &[u8],
@@ -239,28 +281,22 @@ impl ImpairedUdpSocket {
         now: Tick,
     ) -> io::Result<()> {
         let wire = wire_bytes(payload.len(), peer);
-        let Some(d) = self.shared.handle.decide(Direction::Downlink, wire, now) else {
-            // Disarmed between reading the tick and here. Forwarding is the
-            // disarmed behaviour and the datagram was never counted.
+        let Some(d) = self.shared.handle.decide(peer, Direction::Downlink, wire, now) else {
+            // The peer stopped being impaired between `begin` and here; the
+            // datagram was never counted.
             return self.forward(payload, peer, ecn, ip);
         };
         if d.verdict == Verdict::Drop {
             return Ok(());
         }
 
-        // Built once and reused for the copy, so the duplicate is byte-identical
-        // to the original. Re-deciding for the copy would draw from the
-        // generators again — a second, different corruption site — and netem's
-        // duplicate is a copy of the packet, not a second packet.
+        // Built once and reused for the copy, so a duplicate is byte-identical.
         let outgoing = match d.corrupt {
             None => payload.to_vec(),
             Some(site) => {
                 let mut v = payload.to_vec();
-                // The engine bounds the offset by the smallest payload an
-                // on-wire size of this many bytes can correspond to over any
-                // address family, so it is inside this payload. An index panic
-                // here would mean the log named a byte that was not flipped,
-                // which is the one outcome worth crashing over.
+                // The engine bounds the offset by the smallest payload this
+                // on-wire size can carry, so it is inside this payload.
                 v[site.byte_offset as usize] ^= 1u8 << site.bit;
                 v
             }
@@ -278,11 +314,8 @@ impl ImpairedUdpSocket {
             match self.forward(&outgoing, peer, ecn, ip) {
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    // The datagram has already been decided about and counted,
-                    // so returning `WouldBlock` now would have quinn resend it
-                    // and this shim decide about it a second time. Holding it
-                    // instead keeps every counter matched to exactly one
-                    // datagram; the release thread retries it a slice later.
+                    // Already decided and counted, so it is held and retried
+                    // rather than handed back to quinn to resend.
                     self.hold_egress(&outgoing, peer, ecn, ip, now, now, wire);
                 }
                 Err(e) => return Err(e),
@@ -291,8 +324,8 @@ impl ImpairedUdpSocket {
         Ok(())
     }
 
-    /// Copy a datagram into the egress queue and make sure something will drain
-    /// it.
+    /// Copy a datagram into its peer's egress queue and make sure something
+    /// will drain it.
     #[allow(clippy::too_many_arguments)]
     fn hold_egress(
         &self,
@@ -315,19 +348,16 @@ impl ImpairedUdpSocket {
         };
         {
             let mut st = lock(&self.shared.state);
-            st.egress_bytes += u64::from(wire);
-            insert_by_deadline(&mut st.egress, held);
+            let q = st.queues(peer);
+            q.egress_bytes += u64::from(wire);
+            insert_by_deadline(&mut q.egress, held);
         }
         self.start_releaser();
         self.shared.wake.notify_all();
     }
 
-    /// Copy datagrams into the ingress queue, ahead of whatever is already
-    /// there.
-    ///
-    /// `front` is what makes it correct to call this with datagrams that came
-    /// out of one `RecvMeta` and did not fit the buffers quinn supplied: they
-    /// arrived before everything still queued, so they go back in front of it.
+    /// Put datagrams back at the front of their peers' ingress queues: they
+    /// arrived before everything still queued.
     fn hold_ingress_front(&self, datagrams: Vec<Held>) {
         if datagrams.is_empty() {
             return;
@@ -335,15 +365,16 @@ impl ImpairedUdpSocket {
         {
             let mut st = lock(&self.shared.state);
             for held in datagrams.into_iter().rev() {
-                st.ingress_bytes += u64::from(held.wire_bytes);
-                st.ingress.push_front(held);
+                let q = st.queues(held.peer);
+                q.ingress_bytes += u64::from(held.wire_bytes);
+                q.ingress.push_front(held);
             }
         }
         self.start_releaser();
         self.shared.wake.notify_all();
     }
 
-    /// Copy datagrams into the ingress queue in deadline order.
+    /// Copy datagrams into their peers' ingress queues in deadline order.
     fn hold_ingress(&self, datagrams: Vec<Held>) {
         if datagrams.is_empty() {
             return;
@@ -351,8 +382,9 @@ impl ImpairedUdpSocket {
         {
             let mut st = lock(&self.shared.state);
             for held in datagrams {
-                st.ingress_bytes += u64::from(held.wire_bytes);
-                insert_by_deadline(&mut st.ingress, held);
+                let q = st.queues(held.peer);
+                q.ingress_bytes += u64::from(held.wire_bytes);
+                insert_by_deadline(&mut q.ingress, held);
             }
         }
         self.start_releaser();
@@ -372,11 +404,9 @@ impl ImpairedUdpSocket {
             .ok();
     }
 
-    /// Move every due ingress datagram that fits into `bufs`, and report the
-    /// batch.
-    ///
-    /// Stops at the first datagram that is not due yet or does not fit, so the
-    /// queue stays in order. Returns how many buffers were filled.
+    /// Move due ingress datagrams that fit into `bufs`, earliest first across
+    /// peers, and report the batch. Stops at the first due datagram that does
+    /// not fit. Returns how many buffers were filled.
     fn drain_ingress(&self, bufs: &mut [IoSliceMut<'_>], meta: &mut [RecvMeta]) -> usize {
         let capacity = bufs.len().min(meta.len());
         if capacity == 0 {
@@ -387,19 +417,22 @@ impl ImpairedUdpSocket {
         {
             let mut st = lock(&self.shared.state);
             while taken.len() < capacity {
-                let fits = match st.ingress.front() {
-                    Some(h) => h.deadline <= now && h.payload.len() <= bufs[taken.len()].len(),
-                    None => false,
+                let Some(peer) = st.first_due_ingress(now) else {
+                    break;
                 };
+                let q = st.queues(peer);
+                let fits =
+                    q.ingress.front().is_some_and(|h| h.payload.len() <= bufs[taken.len()].len());
                 if !fits {
                     break;
                 }
-                let h = st.ingress.pop_front().expect("front was just inspected");
-                st.ingress_bytes = st.ingress_bytes.saturating_sub(u64::from(h.wire_bytes));
+                let h = q.ingress.pop_front().expect("front was just inspected");
+                q.ingress_bytes = q.ingress_bytes.saturating_sub(u64::from(h.wire_bytes));
                 taken.push(h);
             }
             if !taken.is_empty() {
                 st.last_recv_wake = None;
+                st.prune();
             }
         }
         if taken.is_empty() {
@@ -413,10 +446,8 @@ impl ImpairedUdpSocket {
             meta[i] = RecvMeta {
                 addr: h.peer,
                 len: h.payload.len(),
-                // Never zero while `len` is non-zero: quinn's endpoint driver
-                // advances its read cursor by `stride`, so a zero there is an
-                // infinite loop in the driver rather than a malformed packet.
-                // One datagram per meta, so the two are equal by construction.
+                // Never zero while `len` is non-zero: quinn advances its read
+                // cursor by `stride`.
                 stride: h.payload.len(),
                 ecn: h.ecn,
                 dst_ip: h.ip,
@@ -445,29 +476,43 @@ impl ImpairedUdpSocket {
         bufs: &[IoSliceMut<'_>],
         meta: &[RecvMeta],
         n: usize,
-        now: Tick,
     ) -> (Vec<Held>, Vec<Held>) {
         let mut ready = Vec::new();
         let mut held = Vec::new();
+        // One tick per peer per batch, so a batch is decided at one instant.
+        let mut ticks: Vec<(SocketAddr, Option<Tick>)> = Vec::new();
         for i in 0..n {
             let m = meta[i];
             let filled = &bufs[i][..m.len.min(bufs[i].len())];
-            // A `RecvMeta` describes one datagram when `stride == len`, and
-            // several packed back to back when it is smaller. A zero stride is
-            // not a valid description of a non-empty buffer, so it is read as
-            // "one datagram" rather than propagated.
+            // A zero or oversized stride is read as "one datagram".
             let stride =
                 if m.stride == 0 || m.stride > filled.len() { filled.len() } else { m.stride };
             let datagrams: Vec<&[u8]> =
                 if stride == 0 { vec![&filled[..0]] } else { filled.chunks(stride).collect() };
 
+            let now = match ticks.iter().find(|(a, _)| *a == m.addr) {
+                Some((_, t)) => *t,
+                None => {
+                    let t = self.shared.handle.begin(m.addr);
+                    ticks.push((m.addr, t));
+                    t
+                }
+            };
+
             for dg in datagrams {
-                if !self.shared.handle.applies_to(m.addr) {
-                    ready.push(received(dg.to_vec(), &m, now, wire_bytes(dg.len(), m.addr)));
+                let wire = wire_bytes(dg.len(), m.addr);
+                let Some(now) = now else {
+                    ready.push(received(dg.to_vec(), &m, Tick(0), wire));
+                    continue;
+                };
+                let bound = self.shared.handle.queue_bytes(m.addr, Direction::Uplink);
+                let queued = lock(&self.shared.state).ingress_bytes(m.addr);
+                if queued > 0 && queued >= bound {
+                    self.shared.handle.record_ingress_overflow(m.addr);
                     continue;
                 }
-                let wire = wire_bytes(dg.len(), m.addr);
-                let Some(d) = self.shared.handle.decide(Direction::Uplink, wire, now) else {
+                let Some(d) = self.shared.handle.decide(m.addr, Direction::Uplink, wire, now)
+                else {
                     ready.push(received(dg.to_vec(), &m, now, wire));
                     continue;
                 };
@@ -505,11 +550,6 @@ impl ImpairedUdpSocket {
         let mut st = lock(&self.shared.state);
         st.recv_waker = Some(cx.waker().clone());
     }
-
-    /// On-wire bytes this direction is allowed to be holding.
-    fn bound(&self, dir: Direction) -> u64 {
-        self.shared.handle.queue_bytes(dir)
-    }
 }
 
 /// One received datagram, as a queue entry due immediately.
@@ -528,35 +568,34 @@ fn received(payload: Vec<u8>, m: &RecvMeta, scheduled: Tick, wire: u32) -> Held 
 impl AsyncUdpSocket for ImpairedUdpSocket {
     fn create_io_poller(self: Arc<Self>) -> Pin<Box<dyn UdpPoller>> {
         let inner = Arc::clone(&self.shared.inner).create_io_poller();
-        Box::pin(ImpairedPoller { shared: Arc::clone(&self.shared), inner })
+        Box::pin(ImpairedPoller {
+            shared: Arc::clone(&self.shared),
+            inner,
+            blocked: Arc::new(Blocked::default()),
+        })
     }
 
-    // The transmit type here is `quinn::udp::Transmit`, which carries the bytes.
-    // `quinn::Transmit` is a different type with a `size` field and no
-    // `contents`, and a decorator written against it compiles nowhere near this
-    // trait.
+    // `quinn::udp::Transmit`, which carries the bytes, not `quinn::Transmit`.
     fn try_send(&self, transmit: &Transmit) -> io::Result<()> {
         let peer = transmit.destination;
-        let Some(now) = self.shared.handle.tick() else {
+        let ready = READY.with(|r| r.borrow_mut().take());
+        let Some(now) = self.shared.handle.begin(peer) else {
             return self.shared.inner.try_send(transmit);
         };
-        if !self.shared.handle.applies_to(peer) {
-            return self.shared.inner.try_send(transmit);
-        }
 
         // Refused before anything is decided or counted, so quinn's retry of
-        // the whole transmit costs no sequence number and no counter
-        // increments for a datagram that was never accepted.
-        let queued = lock(&self.shared.state).egress_bytes;
-        if queued > 0 && queued >= self.bound(Direction::Downlink) {
+        // the whole transmit costs no sequence number.
+        let bound = self.shared.handle.queue_bytes(peer, Direction::Downlink);
+        let queued = lock(&self.shared.state).egress_bytes(peer);
+        if queued > 0 && queued >= bound {
+            if let Some(blocked) = ready {
+                *lock(&blocked.0) = Some(peer);
+            }
             return Err(io::ErrorKind::WouldBlock.into());
         }
 
-        // While armed `max_transmit_segments` reports 1, so quinn does not
-        // build segmented transmits — but it re-reads that value once per
-        // `drive_transmit` rather than per datagram, so a profile armed in the
-        // middle of one still sees a segmented transmit arrive. Splitting it is
-        // what makes each datagram of it decidable on its own.
+        // quinn re-reads `max_transmit_segments` once per drive rather than per
+        // datagram, so a segmented transmit can still arrive just after arming.
         match transmit.segment_size {
             Some(n) if n > 0 && n < transmit.contents.len() => {
                 for chunk in transmit.contents.chunks(n) {
@@ -575,33 +614,18 @@ impl AsyncUdpSocket for ImpairedUdpSocket {
         meta: &mut [RecvMeta],
     ) -> Poll<io::Result<usize>> {
         loop {
-            // Anything this socket is holding goes up before anything new is
-            // read, which is what keeps a held datagram ahead of the datagrams
-            // that arrived after it.
+            // Held datagrams go up before anything new is read.
             let delivered = self.drain_ingress(bufs, meta);
             if delivered > 0 {
                 return Poll::Ready(Ok(delivered));
             }
 
-            let Some(now) = self.shared.handle.tick() else {
-                let held = lock(&self.shared.state).ingress.is_empty();
-                if held {
+            if !self.shared.handle.is_impairing() {
+                if !lock(&self.shared.state).holds_ingress() {
                     return self.shared.inner.poll_recv(cx, bufs, meta);
                 }
-                // Disarmed with datagrams still held: they are drained above and
-                // the thread that owns their deadlines wakes this task.
-                self.park_recv(cx);
-                return Poll::Pending;
-            };
-
-            // At the bound the inner socket is deliberately left unread. The
-            // datagrams stay in the kernel's receive buffer and the kernel drops
-            // them if it must, which is what a congested link does — and which
-            // is honest in a way that accepting them and dropping them here
-            // would not be, because a drop this shim performs is a drop it must
-            // account for.
-            let queued = lock(&self.shared.state).ingress_bytes;
-            if queued > 0 && queued >= self.bound(Direction::Uplink) {
+                // Disarmed with datagrams still held: the release thread wakes
+                // this task when they are due.
                 self.park_recv(cx);
                 return Poll::Pending;
             }
@@ -610,8 +634,8 @@ impl AsyncUdpSocket for ImpairedUdpSocket {
                 Poll::Ready(Ok(n)) => n,
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Pending => {
-                    // The inner socket registered `cx`; this registers it a
-                    // second time so a release deadline can wake the same task.
+                    // Registered a second time so a release deadline can wake
+                    // the same task.
                     self.park_recv(cx);
                     return Poll::Pending;
                 }
@@ -620,17 +644,14 @@ impl AsyncUdpSocket for ImpairedUdpSocket {
                 return Poll::Ready(Ok(0));
             }
 
-            let (ready, held) = self.decide_received(bufs, meta, n, now);
+            let (ready, held) = self.decide_received(bufs, meta, n);
             self.hold_ingress(held);
             if ready.is_empty() {
-                // Every datagram of this batch was dropped or held back. There
-                // is nothing to hand up and no progress to report, so the inner
-                // socket is polled again rather than returning a count of zero.
                 continue;
             }
 
             // Whatever does not fit the buffers quinn supplied goes to the front
-            // of the queue, due immediately, and comes up on the next poll.
+            // of its queue, due immediately.
             let capacity = bufs.len().min(meta.len());
             let mut out = 0;
             let mut overflow = Vec::new();
@@ -661,35 +682,24 @@ impl AsyncUdpSocket for ImpairedUdpSocket {
         self.shared.inner.local_addr()
     }
 
-    /// `1` while armed, so quinn never builds a segmented transmit and every
-    /// datagram arrives here as its own transmit; the inner socket's value
-    /// otherwise.
-    ///
-    /// Not the trait default, which is also `1` — that coincidence is why this
-    /// override has to be tested on both legs. A decorator that inherits the
-    /// default is correct while armed and silently caps a disarmed socket's
-    /// throughput at one datagram per syscall.
+    /// `1` while any peer can be impaired, so every datagram arrives as its own
+    /// transmit; the inner socket's value otherwise. Not the trait default,
+    /// which would cap a disarmed socket at one datagram per syscall.
     fn max_transmit_segments(&self) -> usize {
-        if self.shared.handle.is_armed() {
+        if self.shared.handle.is_impairing() {
             1
         } else {
             self.shared.inner.max_transmit_segments()
         }
     }
 
-    /// Always the inner socket's value: it sizes the receive buffers quinn
-    /// allocates, and this shim splits whatever it is given rather than
-    /// constraining what may arrive.
+    /// Always the inner socket's value.
     fn max_receive_segments(&self) -> usize {
         self.shared.inner.max_receive_segments()
     }
 
-    /// Always the inner socket's value.
-    ///
-    /// The trait default is `true`, and quinn reads this as
-    /// `let allow_mtud = !socket.may_fragment();`. So a decorator that inherits
-    /// the default turns path-MTU discovery off for every endpoint built over
-    /// it, with no compile error, no warning, and no counter that moves.
+    /// Always the inner socket's value. The trait default `true` would turn
+    /// path-MTU discovery off.
     fn may_fragment(&self) -> bool {
         self.shared.inner.may_fragment()
     }
@@ -705,64 +715,61 @@ impl Drop for ImpairedUdpSocket {
         let Some(handle) = lock(&self.releaser).take() else {
             return;
         };
-        // Joining the release thread from the release thread is an unbounded
-        // deadlock, not a slow path: the thread is inside this call and can
-        // never return to observe the stop flag. It is reachable because the
-        // thread wakes the task blocked in `poll_recv`, and that waker can hold
-        // the last reference to this socket. Detaching converts the hang into a
-        // bounded leak — the flag is set and the notification already sent
-        // above, so the detached thread exits within one slice on its own.
+        // A waker run on the release thread can hold the last reference, and
+        // joining from there would deadlock; the stop flag is already set, so a
+        // detached thread exits within a slice.
         if handle.thread().id() != std::thread::current().id() {
             let _ = handle.join();
         }
     }
 }
 
-/// A `UdpPoller` over the inner socket's, with the shim's own queue in front.
+/// A `UdpPoller` over the inner socket's, pending while the peer it was last
+/// refused for has a full queue.
 #[derive(Debug)]
 struct ImpairedPoller {
-    /// The queue whose fullness this poller reports on.
     shared: Arc<Shared>,
-    /// The inner socket's poller.
-    ///
-    /// `Pin<Box<dyn UdpPoller>>` is `Unpin`, so forwarding needs neither
-    /// `unsafe` nor a pin projection.
     inner: Pin<Box<dyn UdpPoller>>,
+    blocked: Arc<Blocked>,
 }
 
 impl UdpPoller for ImpairedPoller {
     fn poll_writable(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        {
+        let blocked = *lock(&this.blocked.0);
+        if let Some(peer) = blocked {
             let mut st = lock(&this.shared.state);
-            let bound = this.shared.handle.queue_bytes(Direction::Downlink);
-            if st.egress_bytes > 0 && st.egress_bytes >= bound {
-                st.write_wakers.push(cx.waker().clone());
-                return Poll::Pending;
+            let bound = this.shared.handle.queue_bytes(peer, Direction::Downlink);
+            if let Some(q) = st.peers.get_mut(&peer) {
+                if q.egress_bytes > 0 && q.egress_bytes >= bound {
+                    q.write_wakers.push(cx.waker().clone());
+                    return Poll::Pending;
+                }
             }
+            drop(st);
+            *lock(&this.blocked.0) = None;
         }
-        this.inner.as_mut().poll_writable(cx)
+        match this.inner.as_mut().poll_writable(cx) {
+            Poll::Ready(Ok(())) => {
+                let blocked = Arc::clone(&this.blocked);
+                READY.with(|r| *r.borrow_mut() = Some(blocked));
+                Poll::Ready(Ok(()))
+            }
+            other => other,
+        }
     }
 }
 
 /// Insert keeping the queue ordered by deadline, and stable within one
-/// deadline.
-///
-/// Stability is what makes the order the socket emits predictable from the
-/// decisions alone: entries are appended in sequence-number order, so the
-/// result is the decisions sorted by release tick and then by sequence number.
-/// An unstable insert would put two datagrams released at the same tick in
-/// whichever order the sort felt like, and the ordering assertion at the socket
-/// would then be asserting a property of the sort.
+/// deadline, so the emitted order is the decisions sorted by release tick and
+/// then by sequence number.
 fn insert_by_deadline(queue: &mut VecDeque<Held>, held: Held) {
     let at = queue.iter().position(|q| q.deadline > held.deadline).unwrap_or(queue.len());
     queue.insert(at, held);
 }
 
-/// The release thread's body.
-///
-/// Owns nothing but `Shared`, so the socket it serves stays droppable, and
-/// touches the inner socket only outside the state lock.
+/// The release thread's body. Touches the inner socket only outside the state
+/// lock.
 fn release_loop(shared: &Arc<Shared>) {
     loop {
         let Some(mut st) = wait_for_work(shared) else {
@@ -771,16 +778,25 @@ fn release_loop(shared: &Arc<Shared>) {
 
         let now = Instant::now();
         let mut due: Vec<Held> = Vec::new();
-        while st.egress.front().is_some_and(|h| h.deadline <= now) {
-            let h = st.egress.pop_front().expect("front was just inspected");
-            st.egress_bytes = st.egress_bytes.saturating_sub(u64::from(h.wire_bytes));
-            due.push(h);
+        let mut write_wakers = Vec::new();
+        for (peer, q) in st.peers.iter_mut() {
+            while q.egress.front().is_some_and(|h| h.deadline <= now) {
+                let h = q.egress.pop_front().expect("front was just inspected");
+                q.egress_bytes = q.egress_bytes.saturating_sub(u64::from(h.wire_bytes));
+                due.push(h);
+            }
+            if !q.write_wakers.is_empty()
+                && q.egress_bytes < shared.handle.queue_bytes(*peer, Direction::Downlink)
+            {
+                write_wakers.append(&mut q.write_wakers);
+            }
         }
+        // Stable, so each peer's own order is kept.
+        due.sort_by_key(|h| h.deadline);
 
-        // A due ingress datagram is not moved here — only the task inside
-        // `poll_recv` has buffers to put one in. It is woken, at most once per
-        // slice, and it does the moving.
-        let wake_recv = st.ingress.front().is_some_and(|h| h.deadline <= now)
+        // A due ingress datagram is not moved here; only the task inside
+        // `poll_recv` has buffers. It is woken, at most once per slice.
+        let wake_recv = st.first_due_ingress(now).is_some()
             && st.last_recv_wake.is_none_or(|w| now.duration_since(w) >= SLICE);
         let recv_waker = if wake_recv {
             st.last_recv_wake = Some(now);
@@ -788,15 +804,9 @@ fn release_loop(shared: &Arc<Shared>) {
         } else {
             None
         };
-        let write_wakers = if st.egress_bytes < shared.handle.queue_bytes(Direction::Downlink) {
-            std::mem::take(&mut st.write_wakers)
-        } else {
-            Vec::new()
-        };
+        st.prune();
         drop(st);
 
-        // Outside the lock: `wake` may run arbitrary executor code, and
-        // `try_send` may block on a syscall.
         if let Some(w) = recv_waker {
             w.wake();
         }
@@ -810,7 +820,6 @@ fn release_loop(shared: &Arc<Shared>) {
 }
 
 /// Block until there is something to release or the socket is going away.
-///
 /// `None` means the socket is going away.
 fn wait_for_work(shared: &Arc<Shared>) -> Option<MutexGuard<'_, State>> {
     let mut st = lock(&shared.state);
@@ -837,36 +846,33 @@ fn wait_for_work(shared: &Arc<Shared>) -> Option<MutexGuard<'_, State>> {
 
 /// When the release thread next has something to do.
 fn next_deadline(st: &State) -> Option<Instant> {
-    let egress = st.egress.front().map(|h| h.deadline);
-    let ingress = st.ingress.front().map(|h| match st.last_recv_wake {
-        // The receiving task has been woken for this datagram already and has
-        // not taken it, so the next look is a slice away rather than now.
-        Some(w) => h.deadline.max(w + SLICE),
-        None => h.deadline,
-    });
-    match (egress, ingress) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
+    let mut next: Option<Instant> = None;
+    for q in st.peers.values() {
+        let egress = q.egress.front().map(|h| h.deadline);
+        let ingress = q.ingress.front().map(|h| match st.last_recv_wake {
+            // Already woken for and not taken: look again a slice later.
+            Some(w) => h.deadline.max(w + SLICE),
+            None => h.deadline,
+        });
+        for at in [egress, ingress].into_iter().flatten() {
+            next = Some(next.map_or(at, |n| n.min(at)));
+        }
     }
+    next
 }
 
 /// Hand one wake-up's worth of datagrams to the inner socket and report the
-/// batch.
-///
-/// Everything due goes out in one pass — that is the clumping the release
-/// counters exist to make visible. The batch reported is what actually reached
-/// the inner socket, so a datagram the inner socket refused is not counted as
-/// released.
+/// batch. A datagram the inner socket refused is not counted as released.
 fn forward_due(shared: &Arc<Shared>, due: Vec<Held>) {
     let scheduled = due.iter().map(|h| h.scheduled).min().expect("non-empty");
     let deadline = due.iter().map(|h| h.deadline).min().expect("non-empty");
     let mut sent = 0usize;
     let mut refused: Vec<Held> = Vec::new();
 
-    for (i, h) in due.into_iter().enumerate() {
+    for h in due {
         if !refused.is_empty() {
-            // The inner socket refused an earlier datagram of this batch.
-            // Sending the rest now would put them on the wire ahead of it.
+            // Sending the rest now would put them on the wire ahead of the
+            // refused one.
             refused.push(h);
             continue;
         }
@@ -880,12 +886,9 @@ fn forward_due(shared: &Arc<Shared>, due: Vec<Held>) {
         match result {
             Ok(()) => sent += 1,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => refused.push(h),
-            Err(_) => {
-                // A hard error is the socket telling us this datagram will
-                // never go. Dropping it here is the only option left; retrying
-                // it forever would wedge everything behind it.
-                let _ = i;
-            }
+            // A hard error means this datagram will never go; retrying it
+            // would wedge everything behind it.
+            Err(_) => {}
         }
     }
 
@@ -894,8 +897,9 @@ fn forward_due(shared: &Arc<Shared>, due: Vec<Held>) {
         let mut st = lock(&shared.state);
         for mut h in refused.into_iter().rev() {
             h.deadline = retry_at;
-            st.egress_bytes += u64::from(h.wire_bytes);
-            st.egress.push_front(h);
+            let q = st.queues(h.peer);
+            q.egress_bytes += u64::from(h.wire_bytes);
+            q.egress.push_front(h);
         }
     }
 
@@ -908,13 +912,8 @@ fn forward_due(shared: &Arc<Shared>, due: Vec<Held>) {
     }
 }
 
-/// Lock, recovering from a previous panic rather than propagating it.
-///
-/// The state behind these mutexes is a queue of byte vectors and a list of
-/// wakers; a panic cannot leave either in a shape that is unsafe to read.
-/// Propagating the poison would turn one panicked send into a socket whose
-/// every later poll also panics, which converts a lost datagram into a dead
-/// connection.
+/// Lock, recovering from a previous panic: a poisoned queue would turn one
+/// lost datagram into a dead connection.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }

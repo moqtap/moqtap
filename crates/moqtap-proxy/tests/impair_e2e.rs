@@ -283,6 +283,13 @@ async fn recv_stream(conn: &quinn::Connection) -> Vec<u8> {
     recv.read_to_end(64 * 1024).await.expect("read_to_end")
 }
 
+/// The one peer's decisions; every test here drives a single peer per socket.
+fn only_log(handle: &ImpairHandle) -> DecisionLog {
+    let mut logs = handle.take_logs();
+    assert!(logs.len() <= 1, "one peer per socket, got {}", logs.len());
+    logs.pop().map(|(_, log)| log).unwrap_or_default()
+}
+
 fn records_for(log: &DecisionLog, dir: Direction) -> Vec<Record> {
     log.records().iter().copied().filter(|r| r.direction == dir as u8).collect()
 }
@@ -320,7 +327,7 @@ async fn bind_with_socket_serves_a_client_over_the_supplied_socket() {
         "a profile with no models armed dropped something"
     );
 
-    let log = ingress.handle.take_log();
+    let log = only_log(&ingress.handle);
     let downlink = records_for(&log, Direction::Downlink);
     let uplink = records_for(&log, Direction::Uplink);
 
@@ -364,7 +371,7 @@ async fn loss_armed_on_the_supplied_socket_reaches_the_client() {
 
     // Arming resets both directions' counters and the tick origin, so the
     // log taken below describes this phase alone.
-    let _ = ingress.handle.take_log();
+    let _ = only_log(&ingress.handle);
     ingress.handle.arm(downlink_blackhole()).expect("arm");
 
     // The unimpaired direction still works. The server can complete this
@@ -386,7 +393,7 @@ async fn loss_armed_on_the_supplied_socket_reaches_the_client() {
          decorator is reporting impairments it does not apply"
     );
 
-    let log = ingress.handle.take_log();
+    let log = only_log(&ingress.handle);
     let downlink = records_for(&log, Direction::Downlink);
     let uplink = records_for(&log, Direction::Uplink);
 
@@ -595,7 +602,7 @@ async fn upstream_socket_carries_the_relay_leg() {
         "the stream the proxy forwarded over the supplied socket did not arrive intact"
     );
 
-    let log = leg.handle.take_log();
+    let log = only_log(&leg.handle);
     let stats = leg.handle.stats();
     let downlink = records_for(&log, Direction::Downlink);
     let uplink = records_for(&log, Direction::Uplink);
@@ -670,7 +677,7 @@ async fn loss_armed_on_the_upstream_socket_stops_the_relay_leg() {
          the impairment was reported and not applied"
     );
 
-    let log = leg.handle.take_log();
+    let log = only_log(&leg.handle);
     let stats = leg.handle.stats();
     let downlink = records_for(&log, Direction::Downlink);
     let uplink = records_for(&log, Direction::Uplink);
@@ -940,7 +947,7 @@ async fn five_percent_downlink_loss_still_delivers_every_object() {
     deliver_every_object(&ingress).await;
 
     let stats = quiesce(&ingress.handle).await;
-    let log = ingress.handle.take_log();
+    let log = only_log(&ingress.handle);
     let left_the_socket = ingress.wire.sends();
 
     let downlink = records_for(&log, Direction::Downlink);
@@ -1135,7 +1142,7 @@ async fn calibration_a_corrupt_datagram_is_rejected_by_the_aead() {
     // Arming resets the counters and the tick origin, so what is read
     // below describes the corrupted phase alone. The wire counter is
     // cumulative, hence the baseline.
-    let _ = ingress.handle.take_log();
+    let _ = only_log(&ingress.handle);
     let sent_before = ingress.wire.sends();
     ingress.handle.arm(total_downlink_corruption()).expect("arm");
 
@@ -1144,7 +1151,7 @@ async fn calibration_a_corrupt_datagram_is_rejected_by_the_aead() {
 
     // The log is taken before the wire count, so every decision counted
     // on the right of the comparison below had its chance to be sent.
-    let log = ingress.handle.take_log();
+    let log = only_log(&ingress.handle);
     let sent = ingress.wire.sends() - sent_before;
     let stats = ingress.handle.stats();
     let downlink = records_for(&log, Direction::Downlink);
@@ -1314,7 +1321,7 @@ mod webtransport_ingress {
             "a profile with no models armed dropped something"
         );
 
-        let log = ingress.handle.take_log();
+        let log = only_log(&ingress.handle);
         assert!(
             !records_for(&log, Direction::Downlink).is_empty(),
             "nothing the listener sent to the WebTransport client went through the supplied \
@@ -1356,7 +1363,7 @@ mod webtransport_ingress {
              sent was decided Drop: the impairment was reported and not applied"
         );
 
-        let log = ingress.handle.take_log();
+        let log = only_log(&ingress.handle);
         let downlink = records_for(&log, Direction::Downlink);
         assert!(
             !downlink.is_empty(),

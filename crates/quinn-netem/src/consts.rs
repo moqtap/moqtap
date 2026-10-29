@@ -32,6 +32,10 @@ pub const RELEASE_SLICE_NS: u64 = 500_000;
 /// answers `Ok(())` is a memory leak that presents as a latency bug.
 pub const DEFAULT_QUEUE_BYTES: u64 = 4 * 1024 * 1024;
 
+/// How long a peer may send and receive nothing before the socket drops its
+/// link. See [`crate::control::ImpairHandle::set_peer_idle_timeout`].
+pub const DEFAULT_PEER_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Fields per non-header line of [`crate::log::DecisionLog::render`].
 ///
 /// The render gate asserts against this rather than against a literal, so

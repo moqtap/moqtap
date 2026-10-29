@@ -79,9 +79,10 @@ pub mod stats;
 pub mod wire;
 
 pub use crate::consts::{
-    DEFAULT_QUEUE_BYTES, RECORD_FIELDS, RECORD_HEADER, RELEASE_FLOOR_NS, RELEASE_SLICE_NS,
+    DEFAULT_PEER_IDLE_TIMEOUT, DEFAULT_QUEUE_BYTES, RECORD_FIELDS, RECORD_HEADER, RELEASE_FLOOR_NS,
+    RELEASE_SLICE_NS,
 };
-pub use crate::control::ImpairHandle;
+pub use crate::control::{peer_seed, ImpairHandle};
 pub use crate::dist::{
     crandom, tabledist, CorrState, DistTable, NORMAL, PARETO, PARETONORMAL, TABLE_LEN, TABLE_SCALE,
 };

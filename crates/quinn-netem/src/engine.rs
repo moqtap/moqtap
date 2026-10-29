@@ -440,6 +440,7 @@ impl Impairer {
             released_from_queue: 0,
             release_batch_max: 0,
             release_error_ns: 0,
+            ingress_overflow: 0,
         }
     }
 }

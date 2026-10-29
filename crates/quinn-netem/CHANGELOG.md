@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
+### Added
+
+- Every peer of an `ImpairedUdpSocket` has its own link: engines, numbering,
+  tick origin, held-datagram queues and counters. Peers no longer share a rate
+  budget or a queue.
+- `ImpairHandle::arm_peer`, `disarm_peer` and `clear_peer` set or remove one
+  peer's own profile. `peers`, `peer_stats`, `take_logs` and
+  `set_peer_idle_timeout`; idle links are dropped after
+  `DEFAULT_PEER_IDLE_TIMEOUT`.
+- `peer_seed`: the seed a peer inheriting the socket profile runs with. The
+  first peer runs the profile's own seed.
+- `StatsSnapshot::ingress_overflow`: received datagrams discarded because the
+  peer's queue was full.
+
+### Changed
+
+- `ImpairHandle::take_log` takes the peer address.
+- `try_send` refuses with `WouldBlock` only when the destination peer's queue
+  is full, and only that connection's poller waits.
+
+### Fixed
+
+- A datagram the rate model deferred did not hold its tokens, so a burst left
+  well above the configured rate.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added

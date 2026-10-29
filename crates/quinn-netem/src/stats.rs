@@ -88,6 +88,8 @@ pub struct Stats {
     release_batch_max: AtomicU32,
     /// Accumulated lateness of the release path, nanoseconds.
     release_error_ns: AtomicU64,
+    /// Received datagrams discarded before any decision.
+    ingress_overflow: AtomicU64,
 }
 
 impl Stats {
@@ -119,6 +121,7 @@ impl Stats {
             released_from_queue: self.released_from_queue.load(Relaxed),
             release_batch_max: self.release_batch_max.load(Relaxed),
             release_error_ns: self.release_error_ns.load(Relaxed),
+            ingress_overflow: self.ingress_overflow.load(Relaxed),
         }
     }
 
@@ -215,6 +218,12 @@ impl Stats {
         self.release_error_ns.fetch_add(observed.since(scheduled), Relaxed);
     }
 
+    /// Count one received datagram discarded before any decision because its
+    /// peer's held queue was full. Outside the conservation identity.
+    pub fn record_ingress_overflow(&self) {
+        self.ingress_overflow.fetch_add(1, Relaxed);
+    }
+
     /// Both directions' backlogs added together, saturating.
     ///
     /// Two loads rather than one cell, so that the two directions cannot
@@ -302,6 +311,9 @@ pub struct StatsSnapshot {
     /// Accumulated lateness of the release path, nanoseconds — **saturating, so
     /// an early release contributes 0 rather than about 1.8e19**.
     pub release_error_ns: u64,
+    /// Received datagrams discarded before any decision because the peer's
+    /// held queue was at its bound. Not part of the conservation identity.
+    pub ingress_overflow: u64,
 }
 
 #[cfg(test)]

@@ -23,6 +23,10 @@ network.
 - **Seven presets**: LTE, consumer Wi-Fi, a geostationary satellite hop, a lossy
   access edge, a 3G cellular link, a bufferbloated access link, and a clean
   datacentre path as the control.
+- **A link per peer.** Every peer address of a socket gets its own engines,
+  queues, delay line and random draws, so peers never share a rate budget or
+  affect each other. A peer can run a profile of its own, or none, beside the
+  socket's.
 - **A decision log** of integers and enum discriminants only, renderable to a
   line-per-decision text format and comparable against a committed fixture.
 
