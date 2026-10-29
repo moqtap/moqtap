@@ -279,6 +279,32 @@ async fn a_router_picks_the_upstream_from_the_path_and_refuses_the_rest() {
 }
 
 #[tokio::test]
+async fn a_client_refused_at_its_first_packet_leaves_the_proxy_accepting() {
+    let (chain, key) = common::self_signed_localhost();
+    let mut relay = relay(identity(chain, key), None, None);
+    let proxy =
+        start_proxy(session_template(), None, Arc::new(route_by_path), Arc::new(NoOpProxyObserver))
+            .await;
+
+    let stray = common::client_endpoint(&[b"not-a-protocol"]);
+    let refused = tokio::time::timeout(
+        TIMEOUT,
+        stray.connect(proxy.addr, "localhost").expect("connect starts"),
+    )
+    .await
+    .expect("the stray client finished");
+    assert!(refused.is_err(), "an unknown ALPN is refused");
+
+    let conn =
+        connect(&client(None), format!("https://{}/to/{}", proxy.addr, relay.addr.port()), None)
+            .await
+            .expect("the next client is served");
+    let upstream = next_session(&mut relay).await;
+    send_uni(&conn, PAYLOAD).await;
+    assert_eq!(read_uni(&upstream).await, PAYLOAD);
+}
+
+#[tokio::test]
 async fn an_unreachable_relay_refuses_the_client_with_404() {
     let closed = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind");
     let port = closed.local_addr().expect("addr").port();

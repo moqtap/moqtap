@@ -497,14 +497,21 @@ impl Listener {
 
     /// Accept the next incoming connection without waiting for its
     /// handshake, so one slow client does not hold up the next.
+    ///
+    /// A client refused before its handshake starts, such as one offering an
+    /// ALPN this listener does not advertise, is skipped. Errors only when the
+    /// endpoint is closed.
     pub async fn accept_handshake(&self) -> Result<Handshake, ProxyError> {
-        let incoming = self
-            .endpoint
-            .accept()
-            .await
-            .ok_or_else(|| ProxyError::Listener("endpoint closed".to_string()))?;
-        let connecting = incoming.accept().map_err(|e| ProxyError::Listener(e.to_string()))?;
-        Ok(Handshake { connecting })
+        loop {
+            let incoming = self
+                .endpoint
+                .accept()
+                .await
+                .ok_or_else(|| ProxyError::Listener("endpoint closed".to_string()))?;
+            if let Ok(connecting) = incoming.accept() {
+                return Ok(Handshake { connecting });
+            }
+        }
     }
 
     /// Get the local address this listener is bound to.
