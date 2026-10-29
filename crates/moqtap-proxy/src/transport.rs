@@ -1683,7 +1683,7 @@ mod tests {
         let seen = installer.seen.lock().expect("uncontended");
         assert_eq!(
             seen.as_slice(),
-            &[profile],
+            &[with_keep_alive(&profile)],
             "a spec must not bypass the caller's installer: a leg that built its own config here \
              would run on a base nobody supplied and report success"
         );
