@@ -560,7 +560,8 @@ async fn a_relay_that_does_not_match_its_pin_is_refused() {
 
 // ── keep-alive ─────────────────────────────────────────────────────────
 
-const IDLE: Duration = Duration::from_secs(2);
+/// The default keep-alive is half of this: 3 s of slack for a loaded runner.
+const IDLE: Duration = Duration::from_secs(6);
 
 /// Whether a session left silent for `quiet` still carries a stream from the
 /// relay to the client. Neither the client nor the relay sends keep-alives;
