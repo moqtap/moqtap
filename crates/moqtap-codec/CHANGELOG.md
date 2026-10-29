@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-29
+
 ### Added
 
 - `object_properties::parse_object_properties(draft, block)` reads an object's property block (Extension Headers before draft-17) as a list in wire order, by that draft's rules: absolute or delta-encoded Types, the 2^16-1 limit on an odd value, and Immutable Properties at 0xB.
