@@ -107,6 +107,10 @@ optional-features:
     echo "=== moqtap-proxy: webtransport ==="
     cargo clippy -p moqtap-proxy --features webtransport --all-targets -- -D warnings
     cargo test -p moqtap-proxy --features webtransport
+    # Needs the `[patch]` in the root manifest, like the client's row above.
+    echo "=== moqtap-proxy: wt-protocol ==="
+    cargo clippy -p moqtap-proxy --features wt-protocol --all-targets -- -D warnings
+    cargo test -p moqtap-proxy --features wt-protocol
     echo "=== moqtap-proxy: cert-gen ==="
     cargo clippy -p moqtap-proxy --features cert-gen --all-targets -- -D warnings
     cargo test -p moqtap-proxy --features cert-gen

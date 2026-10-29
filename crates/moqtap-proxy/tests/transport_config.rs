@@ -326,6 +326,7 @@ async fn upstream_sees_datagrams(
                 upstream_socket: None,
                 egress: Default::default(),
                 shape: None,
+                upstream_server_certificate_hashes: Vec::new(),
                 upstream_transport_profile: None,
                 upstream_installer: None,
                 #[cfg(feature = "qlog")]

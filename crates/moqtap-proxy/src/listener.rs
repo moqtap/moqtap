@@ -148,6 +148,153 @@ pub enum AcceptedConn {
     WebTransport(wtransport::Connection),
 }
 
+/// A client connection whose handshake has not finished. Produced by
+/// [`Listener::accept_handshake`].
+pub struct Handshake {
+    connecting: quinn::Connecting,
+}
+
+impl Handshake {
+    /// The client's address.
+    pub fn remote_address(&self) -> SocketAddr {
+        self.connecting.remote_address()
+    }
+
+    /// Finish the handshake. For an `h3` client this runs the HTTP/3
+    /// handshake up to the WebTransport request and returns it unanswered.
+    pub async fn complete(self) -> Result<ClientRequest, ProxyError> {
+        let mut connecting = self.connecting;
+        // Resolves once the ClientHello is processed, so the ALPN is known
+        // while the connection is still connecting.
+        let hs_data = connecting
+            .handshake_data()
+            .await
+            .map_err(|e| ProxyError::Listener(format!("handshake data: {e}")))?;
+
+        let alpn = hs_data
+            .downcast::<quinn::crypto::rustls::HandshakeData>()
+            .ok()
+            .and_then(|hd| hd.protocol)
+            .map(|p| p.to_vec())
+            .unwrap_or_default();
+
+        if alpn == H3_ALPN {
+            #[cfg(feature = "webtransport")]
+            {
+                let session_fut =
+                    wtransport::endpoint::IncomingSessionFuture::with_quic_connecting(connecting);
+                let inner = session_fut
+                    .await
+                    .map_err(|e| ProxyError::Listener(format!("webtransport handshake: {e}")))?;
+                Ok(ClientRequest::WebTransport(WebTransportRequest { inner: Box::new(inner) }))
+            }
+            #[cfg(not(feature = "webtransport"))]
+            {
+                drop(connecting);
+                Err(ProxyError::Listener(
+                    "client negotiated h3 but webtransport feature is not enabled".to_string(),
+                ))
+            }
+        } else {
+            let conn = connecting.await.map_err(|e| ProxyError::Listener(e.to_string()))?;
+            Ok(ClientRequest::Quic { conn, alpn })
+        }
+    }
+}
+
+/// A client whose handshake has finished. A WebTransport request is still
+/// waiting for its answer.
+pub enum ClientRequest {
+    /// Raw QUIC connection speaking MoQT directly, with the ALPN it
+    /// negotiated.
+    Quic {
+        /// The accepted QUIC connection.
+        conn: quinn::Connection,
+        /// The ALPN negotiated with the client.
+        alpn: Vec<u8>,
+    },
+    /// A WebTransport session request, not yet answered.
+    #[cfg(feature = "webtransport")]
+    WebTransport(WebTransportRequest),
+}
+
+/// How a request is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rejection {
+    /// `403`.
+    Forbidden,
+    /// `404`.
+    NotFound,
+    /// `429`.
+    TooManyRequests,
+}
+
+impl Rejection {
+    /// The HTTP status this sends.
+    pub fn status(self) -> u16 {
+        match self {
+            Rejection::Forbidden => 403,
+            Rejection::NotFound => 404,
+            Rejection::TooManyRequests => 429,
+        }
+    }
+}
+
+/// A WebTransport session request the listener has not answered.
+#[cfg(feature = "webtransport")]
+pub struct WebTransportRequest {
+    inner: Box<wtransport::endpoint::SessionRequest>,
+}
+
+#[cfg(feature = "webtransport")]
+impl WebTransportRequest {
+    /// The client's address.
+    pub fn remote_address(&self) -> SocketAddr {
+        self.inner.remote_address()
+    }
+
+    /// The request's `:authority`.
+    pub fn authority(&self) -> &str {
+        self.inner.authority()
+    }
+
+    /// The request's `:path`.
+    pub fn path(&self) -> &str {
+        self.inner.path()
+    }
+
+    /// Every header field of the request.
+    pub fn headers(&self) -> &std::collections::HashMap<String, String> {
+        self.inner.headers()
+    }
+
+    /// The `WT-Available-Protocols` field as the client sent it, if it sent
+    /// one. HTTP/3 field names are lower case.
+    pub fn available_protocols(&self) -> Option<&str> {
+        self.inner.headers().get("wt-available-protocols").map(String::as_str)
+    }
+
+    /// Accept the session, sending `headers` in the response.
+    pub async fn accept(
+        self,
+        headers: Vec<(String, String)>,
+    ) -> Result<wtransport::Connection, ProxyError> {
+        self.inner
+            .accept_with_headers(headers)
+            .await
+            .map_err(|e| ProxyError::Listener(format!("webtransport accept: {e}")))
+    }
+
+    /// Refuse the session.
+    pub async fn reject(self, rejection: Rejection) {
+        match rejection {
+            Rejection::Forbidden => self.inner.forbidden().await,
+            Rejection::NotFound => self.inner.not_found().await,
+            Rejection::TooManyRequests => self.inner.too_many_requests().await,
+        }
+    }
+}
+
 /// Build the ALPN list the server advertises to clients — every MoQT
 /// QUIC ALPN we support, plus `h3` when the WebTransport feature is on.
 ///
@@ -328,59 +475,36 @@ impl Listener {
     /// Accept the next incoming connection and dispatch based on the
     /// ALPN negotiated during the TLS handshake.
     ///
-    /// Raw-QUIC connections are returned immediately with the negotiated
-    /// ALPN so the caller can pick the MoQT draft. For `h3` clients the
-    /// listener drives the HTTP/3 + extended-CONNECT handshake to
-    /// completion before returning a ready `wtransport::Connection`.
+    /// Raw-QUIC connections are returned with the negotiated ALPN so the
+    /// caller can pick the MoQT draft. An `h3` client's WebTransport request
+    /// is accepted with no response headers before this returns; use
+    /// [`Listener::accept_request`] to see the request and answer it yourself.
     pub async fn accept(&self) -> Result<AcceptedConn, ProxyError> {
+        match self.accept_request().await? {
+            ClientRequest::Quic { conn, alpn } => Ok(AcceptedConn::Quic { conn, alpn }),
+            #[cfg(feature = "webtransport")]
+            ClientRequest::WebTransport(request) => {
+                Ok(AcceptedConn::WebTransport(request.accept(Vec::new()).await?))
+            }
+        }
+    }
+
+    /// Accept the next incoming connection and run its handshake, leaving a
+    /// WebTransport request unanswered.
+    pub async fn accept_request(&self) -> Result<ClientRequest, ProxyError> {
+        self.accept_handshake().await?.complete().await
+    }
+
+    /// Accept the next incoming connection without waiting for its
+    /// handshake, so one slow client does not hold up the next.
+    pub async fn accept_handshake(&self) -> Result<Handshake, ProxyError> {
         let incoming = self
             .endpoint
             .accept()
             .await
             .ok_or_else(|| ProxyError::Listener("endpoint closed".to_string()))?;
-
-        let mut connecting = incoming.accept().map_err(|e| ProxyError::Listener(e.to_string()))?;
-
-        // Peeking at handshake_data resolves as soon as the server has
-        // processed the ClientHello, so the ALPN is known before the
-        // full handshake completes — and the Connecting is still live.
-        let hs_data = connecting
-            .handshake_data()
-            .await
-            .map_err(|e| ProxyError::Listener(format!("handshake data: {e}")))?;
-
-        let alpn = hs_data
-            .downcast::<quinn::crypto::rustls::HandshakeData>()
-            .ok()
-            .and_then(|hd| hd.protocol)
-            .map(|p| p.to_vec())
-            .unwrap_or_default();
-
-        if alpn == H3_ALPN {
-            #[cfg(feature = "webtransport")]
-            {
-                let session_fut =
-                    wtransport::endpoint::IncomingSessionFuture::with_quic_connecting(connecting);
-                let session_request = session_fut
-                    .await
-                    .map_err(|e| ProxyError::Listener(format!("webtransport handshake: {e}")))?;
-                let conn = session_request
-                    .accept()
-                    .await
-                    .map_err(|e| ProxyError::Listener(format!("webtransport accept: {e}")))?;
-                Ok(AcceptedConn::WebTransport(conn))
-            }
-            #[cfg(not(feature = "webtransport"))]
-            {
-                drop(connecting);
-                Err(ProxyError::Listener(
-                    "client negotiated h3 but webtransport feature is not enabled".to_string(),
-                ))
-            }
-        } else {
-            let conn = connecting.await.map_err(|e| ProxyError::Listener(e.to_string()))?;
-            Ok(AcceptedConn::Quic { conn, alpn })
-        }
+        let connecting = incoming.accept().map_err(|e| ProxyError::Listener(e.to_string()))?;
+        Ok(Handshake { connecting })
     }
 
     /// Get the local address this listener is bound to.

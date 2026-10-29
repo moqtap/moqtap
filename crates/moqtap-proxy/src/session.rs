@@ -236,6 +236,12 @@ pub struct ProxySessionConfig {
     ///
     /// Control streams are never shaped, on any path.
     pub shape: Option<ShapeProfile>,
+    /// SHA-256 hashes of the certificates a WebTransport upstream may
+    /// present, as a browser's `serverCertificateHashes`. When set, the relay
+    /// is checked against these instead of the system's trust store.
+    /// Ignored when [`ProxySessionConfig::skip_upstream_cert_verify`] is set
+    /// and for a QUIC upstream.
+    pub upstream_server_certificate_hashes: Vec<[u8; 32]>,
 }
 
 impl ProxySessionConfig {
@@ -276,6 +282,7 @@ impl Default for ProxySessionConfig {
             upstream_socket: None,
             egress: EgressConfig::default(),
             shape: None,
+            upstream_server_certificate_hashes: Vec::new(),
         }
     }
 }
@@ -457,6 +464,22 @@ impl ProxySession {
         self.run_with_transport(client).await
     }
 
+    /// Run the proxy session for a WebTransport request the listener has not
+    /// answered: dial the relay first, then accept the client, or refuse it
+    /// with `404` when the relay cannot be reached.
+    ///
+    /// With the `wt-protocol` feature the client's `WT-Available-Protocols`
+    /// is offered to a WebTransport relay unchanged, the relay's
+    /// `WT-Protocol` is returned to the client, and the session's draft
+    /// follows the protocol the relay chose.
+    #[cfg(feature = "webtransport")]
+    pub async fn run_webtransport_request(
+        &self,
+        request: crate::listener::WebTransportRequest,
+    ) -> Result<(), ProxyError> {
+        self.run_client(ClientConn::Pending(request)).await
+    }
+
     /// The draft this session starts on. Drafts 15+ resolve unambiguously
     /// from the client ALPN (`moqt-15` through `moqt-19`); otherwise we fall
     /// back to `config.draft`, which the control stream refines once it
@@ -466,14 +489,14 @@ impl ProxySession {
     /// It is the *starting* draft and not the session's draft. That lives in
     /// [`SessionDraft`], which every forwarding task reads and the control
     /// stream writes.
-    fn initial_draft(&self) -> DraftVersion {
-        DraftVersion::from_alpn(&self.client_alpn).unwrap_or(self.config.draft)
+    fn initial_draft(&self, client_alpn: &[u8]) -> DraftVersion {
+        DraftVersion::from_alpn(client_alpn).unwrap_or(self.config.draft)
     }
 
     /// Whether the starting draft is fixed (ALPN-derived) or is still open
     /// to being named by a CLIENT_SETUP / SERVER_SETUP peek.
-    fn draft_is_fixed(&self) -> bool {
-        DraftVersion::from_alpn(&self.client_alpn).is_some()
+    fn draft_is_fixed(client_alpn: &[u8]) -> bool {
+        DraftVersion::from_alpn(client_alpn).is_some()
     }
 
     /// Run the proxy session with an already-wrapped transport.
@@ -482,6 +505,10 @@ impl ProxySession {
     /// datagrams bidirectionally between the client and relay. Parses
     /// MoQT frames inline and emits events via the observer.
     async fn run_with_transport(&self, client: Transport) -> Result<(), ProxyError> {
+        self.run_client(ClientConn::Ready(client)).await
+    }
+
+    async fn run_client(&self, client: ClientConn) -> Result<(), ProxyError> {
         // Registered before the relay is dialled, and released by this
         // function's scope rather than by a call at each of the several
         // places the session can end. The guard covers the `?` below on a
@@ -514,7 +541,9 @@ impl ProxySession {
         // judged *against* a draft, and asking whether a rule suits a draft
         // this build cannot frame answers with a matcher key when what is
         // wrong is the build.
-        let draft = self.initial_draft();
+        #[cfg_attr(not(feature = "webtransport"), allow(unused_mut))]
+        let mut client_alpn = self.client_alpn.clone();
+        let draft = self.initial_draft(&client_alpn);
         if !crate::capability::draft_is_compiled(draft) {
             return Err(ProxyError::DraftNotCompiled { draft });
         }
@@ -561,16 +590,70 @@ impl ProxySession {
             )
         });
 
-        // Connect to upstream relay
-        let relay = self.connect_upstream().await?;
+        let (client, relay) = match client {
+            ClientConn::Ready(client) => match self.connect_upstream(&client_alpn, None).await {
+                Ok(upstream) => (client, upstream.transport),
+                Err(e) => return Err(self.upstream_failed(e)),
+            },
+            #[cfg(feature = "webtransport")]
+            ClientConn::Pending(request) => {
+                use moqtap_client::transport::webtransport::WebTransportTransport;
+                // Offered upstream only where the answer can be read back.
+                let offer = if cfg!(feature = "wt-protocol") {
+                    request.available_protocols().map(str::to_owned)
+                } else {
+                    None
+                };
+                let upstream = match self.connect_upstream(&client_alpn, offer.as_deref()).await {
+                    Ok(upstream) => upstream,
+                    Err(e) => {
+                        request.reject(crate::listener::Rejection::NotFound).await;
+                        return Err(self.upstream_failed(e));
+                    }
+                };
+                let headers = match &upstream.protocol {
+                    Some(p) => vec![("wt-protocol".to_string(), p.raw.clone())],
+                    None => Vec::new(),
+                };
+                let conn = match request.accept(headers).await {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        upstream.transport.close(0, b"client went away");
+                        return Err(self.upstream_failed(e));
+                    }
+                };
+                if let Some(name) = upstream.protocol.and_then(|p| p.name) {
+                    client_alpn = name.into_bytes();
+                }
+                (Transport::WebTransport(WebTransportTransport::new(conn)), upstream.transport)
+            }
+        };
 
         let client = Arc::new(client);
         let relay = Arc::new(relay);
 
         let mut tasks: JoinSet<Result<(), ProxyError>> = JoinSet::new();
 
-        let initial_draft = self.initial_draft();
-        let draft_is_fixed = self.draft_is_fixed();
+        let initial_draft = self.initial_draft(&client_alpn);
+        let draft_is_fixed = Self::draft_is_fixed(&client_alpn);
+        // The negotiated protocol can name a different draft from the one
+        // admitted before the dial.
+        if initial_draft != draft {
+            let admitted = if !crate::capability::draft_is_compiled(initial_draft) {
+                Err(ProxyError::DraftNotCompiled { draft: initial_draft })
+            } else if let Some(profile) = self.config.shape.as_ref() {
+                Capabilities::for_draft(initial_draft)
+                    .admit_profile(profile)
+                    .map_err(|source| ProxyError::ShapeRuleUnsupported { source })
+            } else {
+                Ok(())
+            };
+            if let Err(e) = admitted {
+                client.close(0, b"");
+                relay.close(0, b"");
+                return Err(self.upstream_failed(e));
+            }
+        }
         // One cell, shared by every task below. Built here because this is
         // where the tasks are: the control stream learns the draft and the
         // data, datagram and request tasks have to agree with it, and they
@@ -867,24 +950,44 @@ impl ProxySession {
         }
     }
 
+    /// Report a session that ended before it forwarded anything, and hand
+    /// the error back.
+    fn upstream_failed(&self, e: ProxyError) -> ProxyError {
+        if self.observer.wants_events() {
+            self.observer.on_event(&ProxyEvent::SessionEnded {
+                session_id: self.session_id,
+                reason: format!("{e}"),
+            });
+        }
+        e
+    }
+
     /// Connect to the upstream relay (with optional timeout).
-    async fn connect_upstream(&self) -> Result<Transport, ProxyError> {
+    async fn connect_upstream(
+        &self,
+        client_alpn: &[u8],
+        offer: Option<&str>,
+    ) -> Result<Upstream, ProxyError> {
         let timeout_secs = self.config.upstream_connect_timeout_secs;
         if timeout_secs > 0 {
             tokio::time::timeout(
                 std::time::Duration::from_secs(timeout_secs),
-                self.connect_upstream_inner(),
+                self.connect_upstream_inner(client_alpn, offer),
             )
             .await
             .map_err(|_| {
                 ProxyError::UpstreamConnect(format!("connection timed out after {timeout_secs}s"))
             })?
         } else {
-            self.connect_upstream_inner().await
+            self.connect_upstream_inner(client_alpn, offer).await
         }
     }
 
-    async fn connect_upstream_inner(&self) -> Result<Transport, ProxyError> {
+    async fn connect_upstream_inner(
+        &self,
+        client_alpn: &[u8],
+        #[cfg_attr(not(feature = "webtransport"), allow(unused_variables))] offer: Option<&str>,
+    ) -> Result<Upstream, ProxyError> {
         // Resolved out here rather than inside the QUIC arm, and ahead of
         // every other refusal below, because naming both a raw config and a
         // profile is a contradiction in what the caller wrote — it is not a
@@ -921,7 +1024,10 @@ impl ProxySession {
         )?;
 
         match &self.config.upstream_transport {
-            UpstreamTransportType::Quic => self.connect_upstream_quic(transport_config).await,
+            UpstreamTransportType::Quic => Ok(Upstream {
+                transport: self.connect_upstream_quic(transport_config, client_alpn).await?,
+                protocol: None,
+            }),
             // Ahead of both `webtransport` arms on purpose: whether the
             // feature is compiled in changes which *other* error a
             // WebTransport upstream produces, and this refusal is about
@@ -934,7 +1040,7 @@ impl ProxySession {
             #[cfg(feature = "webtransport")]
             UpstreamTransportType::WebTransport { url } => {
                 let url = url.clone();
-                self.connect_upstream_webtransport(&url).await
+                self.connect_upstream_webtransport(&url, offer).await
             }
             #[cfg(not(feature = "webtransport"))]
             UpstreamTransportType::WebTransport { .. } => {
@@ -954,6 +1060,7 @@ impl ProxySession {
     async fn connect_upstream_quic(
         &self,
         transport_config: Option<Arc<quinn::TransportConfig>>,
+        client_alpn: &[u8],
     ) -> Result<Transport, ProxyError> {
         let server_addr =
             self.config.upstream_addr.parse().map_err(|e: std::net::AddrParseError| {
@@ -961,7 +1068,7 @@ impl ProxySession {
             })?;
 
         let mut tls_config = self.build_upstream_tls_config()?;
-        tls_config.alpn_protocols = self.config.upstream_alpn(&self.client_alpn);
+        tls_config.alpn_protocols = self.config.upstream_alpn(client_alpn);
 
         let quic_config: quinn::crypto::rustls::QuicClientConfig =
             tls_config.try_into().map_err(|e| ProxyError::TlsConfig(format!("{e}")))?;
@@ -1004,27 +1111,64 @@ impl ProxySession {
         Ok(Transport::Quic(QuicTransport::new(conn)))
     }
 
-    /// Connect to the upstream relay via WebTransport.
+    /// Connect to the upstream relay via WebTransport, offering `offer` as
+    /// `WT-Available-Protocols` when there is one.
     #[cfg(feature = "webtransport")]
-    async fn connect_upstream_webtransport(&self, url: &str) -> Result<Transport, ProxyError> {
+    async fn connect_upstream_webtransport(
+        &self,
+        url: &str,
+        offer: Option<&str>,
+    ) -> Result<Upstream, ProxyError> {
         use moqtap_client::transport::webtransport::WebTransportTransport;
 
-        let wt_config = if self.config.skip_upstream_cert_verify {
-            wtransport::ClientConfig::builder()
-                .with_bind_default()
-                .with_no_cert_validation()
-                .build()
+        let builder = wtransport::ClientConfig::builder().with_bind_default();
+        let hashes = &self.config.upstream_server_certificate_hashes;
+        let builder = if self.config.skip_upstream_cert_verify {
+            builder.with_no_cert_validation()
+        } else if !hashes.is_empty() {
+            builder.with_server_certificate_hashes(
+                hashes.iter().map(|h| wtransport::tls::Sha256Digest::new(*h)),
+            )
         } else {
-            wtransport::ClientConfig::builder().with_bind_default().with_native_certs().build()
+            builder.with_native_certs()
         };
-
-        let endpoint = wtransport::Endpoint::client(wt_config)
+        let profile = self.config.upstream_transport_profile.as_ref();
+        let idle = profile.and_then(|p| p.max_idle_timeout);
+        let keep_alive = profile
+            .and_then(|p| p.keep_alive_interval)
+            .unwrap_or_else(|| transport::default_keep_alive(idle));
+        let mut builder =
+            builder.keep_alive_interval((!keep_alive.is_zero()).then_some(keep_alive));
+        if idle.is_some() {
+            builder = builder
+                .max_idle_timeout(idle)
+                .map_err(|e| ProxyError::UpstreamConnect(e.to_string()))?;
+        }
+        let endpoint = wtransport::Endpoint::client(builder.build())
             .map_err(|e| ProxyError::UpstreamConnect(e.to_string()))?;
 
-        let connection =
-            endpoint.connect(url).await.map_err(|e| ProxyError::UpstreamConnect(e.to_string()))?;
+        let request = wtransport::endpoint::ConnectOptions::builder(url);
+        let request = match offer {
+            Some(offer) => request.add_header("wt-available-protocols", offer),
+            None => request,
+        };
+        let connection = endpoint
+            .connect(request.build())
+            .await
+            .map_err(|e| ProxyError::UpstreamConnect(e.to_string()))?;
 
-        Ok(Transport::WebTransport(WebTransportTransport::new(connection)))
+        #[cfg(feature = "wt-protocol")]
+        let protocol = connection
+            .connect_response()
+            .and_then(|r| r.get("wt-protocol"))
+            .map(|raw| NegotiatedProtocol { raw: raw.to_string(), name: unquote_sf_string(raw) });
+        #[cfg(not(feature = "wt-protocol"))]
+        let protocol = None;
+
+        Ok(Upstream {
+            transport: Transport::WebTransport(WebTransportTransport::new(connection)),
+            protocol,
+        })
     }
 
     /// Build a rustls `ClientConfig` for the upstream connection.
@@ -1045,6 +1189,52 @@ impl ProxySession {
             Ok(rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth())
         }
     }
+}
+
+/// Where a session's client comes from.
+enum ClientConn {
+    /// Connected and answered.
+    Ready(Transport),
+    /// A WebTransport request answered once the relay is dialled.
+    #[cfg(feature = "webtransport")]
+    Pending(crate::listener::WebTransportRequest),
+}
+
+/// A dialled relay, with the WebTransport protocol it chose.
+struct Upstream {
+    transport: Transport,
+    #[cfg_attr(not(feature = "webtransport"), allow(dead_code))]
+    protocol: Option<NegotiatedProtocol>,
+}
+
+/// The relay's `WT-Protocol`: as sent, and the identifier inside it when it
+/// is a well-formed sf-string.
+#[cfg_attr(not(feature = "webtransport"), allow(dead_code))]
+struct NegotiatedProtocol {
+    raw: String,
+    name: Option<String>,
+}
+
+/// The contents of an RFC 8941 sf-string, or `None` when the value is not
+/// one.
+#[cfg(feature = "wt-protocol")]
+fn unquote_sf_string(raw: &str) -> Option<String> {
+    const BACKSLASH: char = '\\';
+    let inner = raw.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            BACKSLASH => match chars.next()? {
+                next @ ('"' | BACKSLASH) => out.push(next),
+                _ => return None,
+            },
+            '"' => return None,
+            ' '..='~' => out.push(c),
+            _ => return None,
+        }
+    }
+    Some(out)
 }
 
 // ── Forwarding helpers ──────────────────────────────────────────
@@ -6991,7 +7181,7 @@ mod tests {
         config.upstream_transport_profile = Some(TransportProfile::default());
 
         let err = unroutable_session(config)
-            .connect_upstream()
+            .connect_upstream(&[], None)
             .await
             .err()
             .expect("a contradiction is not a connection");
@@ -7016,7 +7206,7 @@ mod tests {
         config.upstream_transport_profile = Some(TransportProfile::default());
 
         let err = unroutable_session(config)
-            .connect_upstream()
+            .connect_upstream(&[], None)
             .await
             .err()
             .expect("a contradiction is not a connection");
@@ -7033,7 +7223,7 @@ mod tests {
             Some(TransportProfile { initial_mtu: Some(900), ..Default::default() });
 
         let err = unroutable_session(config)
-            .connect_upstream()
+            .connect_upstream(&[], None)
             .await
             .err()
             .expect("an unhonourable profile is not a connection");
@@ -7058,7 +7248,7 @@ mod tests {
         config.upstream_installer = Some(Arc::new(CountingInstaller(Arc::clone(&builds))));
 
         let err = unroutable_session(config)
-            .connect_upstream()
+            .connect_upstream(&[], None)
             .await
             .err()
             .expect("the address is deliberately unparseable");
@@ -7071,5 +7261,15 @@ mod tests {
             1,
             "the leg builds its config through the installer, once, before the endpoint exists"
         );
+    }
+
+    #[cfg(feature = "wt-protocol")]
+    #[test]
+    fn only_a_well_formed_sf_string_names_a_protocol() {
+        assert_eq!(unquote_sf_string(r#""moqt-16""#).as_deref(), Some("moqt-16"));
+        assert_eq!(unquote_sf_string(r#""a\"b""#).as_deref(), Some(r#"a"b"#));
+        for bad in ["moqt-16", r#""moqt-16"#, r#""a"b""#, r#""a\xb""#, "\"\u{e9}\""] {
+            assert_eq!(unquote_sf_string(bad), None, "{bad}");
+        }
     }
 }

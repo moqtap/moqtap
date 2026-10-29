@@ -504,6 +504,7 @@ pub fn session_config(draft: DraftVersion, upstream_addr: SocketAddr) -> ProxySe
         upstream_socket: None,
         egress: Default::default(),
         shape: None,
+        upstream_server_certificate_hashes: Vec::new(),
         upstream_transport_profile: None,
         upstream_installer: None,
         // No capture on the relay leg, for the same reason the listener

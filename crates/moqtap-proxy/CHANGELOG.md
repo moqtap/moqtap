@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-29
+
+### Added
+
+- `Listener::accept_request` and `Listener::accept_handshake` hand over a WebTransport request unanswered as `WebTransportRequest` (authority, path, headers), to accept with response headers or reject with `Rejection`.
+- `Router` and `TransparentProxy::set_router`: pick each client's session configuration from its request, or refuse it.
+- `ProxySession::run_webtransport_request` dials the relay before accepting the client, and refuses the client with `404` when the relay cannot be reached.
+- `wt-protocol` feature: the client's `WT-Available-Protocols` is offered to a WebTransport relay unchanged, the relay's `WT-Protocol` is returned to the client, and the session's draft follows it.
+- `ProxySessionConfig::upstream_server_certificate_hashes` checks a WebTransport relay against SHA-256 certificate hashes.
+
+### Changed
+
+- **Breaking.** `ProxySessionConfig` has a new public field.
+- Both legs send QUIC keep-alives every `DEFAULT_KEEP_ALIVE` (5 s), or half the idle timeout when that is shorter, unless a transport profile sets `keep_alive_interval`; `Some(Duration::ZERO)` sends none.
+- `TransparentProxy` runs each client's handshake on its own task, with `HANDSHAKE_TIMEOUT`; a failed handshake no longer ends the accept loop.
+- A session whose relay cannot be reached reports `SessionEnded`.
+- Requires `quinn-netem` 0.3.0.
+
 ## [0.9.0] - 2026-10-27
 
 ### Changed

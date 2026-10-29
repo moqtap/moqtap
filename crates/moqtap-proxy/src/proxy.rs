@@ -5,8 +5,11 @@
 //! accepted connection is handed to a [`ProxySession`] that forwards
 //! traffic to the configured upstream relay.
 
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
@@ -14,7 +17,7 @@ use crate::control::{ControlPlane, LegSetup, ProxyControl};
 use crate::error::ProxyError;
 use crate::event::{ProxyEvent, SessionId};
 use crate::hook::{NoOpHook, ProxyHook};
-use crate::listener::{AcceptedConn, Listener, ListenerConfig};
+use crate::listener::{ClientRequest, Handshake, Listener, ListenerConfig, Rejection};
 use crate::observer::ProxyObserver;
 use crate::session::{ProxySession, ProxySessionConfig, UpstreamTransportType};
 
@@ -24,6 +27,69 @@ pub struct ProxyConfig {
     pub listener: ListenerConfig,
     /// Per-session configuration (upstream address, TLS, transport).
     pub session: ProxySessionConfig,
+}
+
+/// How long a client may take from its first packet to a finished handshake
+/// (for WebTransport, to its session request).
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Decides, for each client, where its session goes and how it runs.
+///
+/// Called once per client, after its handshake and before the relay is
+/// dialled. `config` is the proxy's own session configuration; return it,
+/// changed or not, or refuse the client.
+pub trait Router: Send + Sync {
+    /// Route one client.
+    fn route(
+        &self,
+        request: &RouteRequest<'_>,
+        config: ProxySessionConfig,
+    ) -> Result<ProxySessionConfig, Rejection>;
+}
+
+impl<F> Router for F
+where
+    F: Fn(&RouteRequest<'_>, ProxySessionConfig) -> Result<ProxySessionConfig, Rejection>
+        + Send
+        + Sync,
+{
+    fn route(
+        &self,
+        request: &RouteRequest<'_>,
+        config: ProxySessionConfig,
+    ) -> Result<ProxySessionConfig, Rejection> {
+        self(request, config)
+    }
+}
+
+/// One client, as a [`Router`] sees it.
+pub struct RouteRequest<'a> {
+    /// The id the session will run under.
+    pub session_id: SessionId,
+    /// The client's address.
+    pub remote_address: SocketAddr,
+    /// What the client asked for.
+    pub client: RouteClient<'a>,
+}
+
+/// What a client asked for.
+pub enum RouteClient<'a> {
+    /// A raw-QUIC client and the ALPN it negotiated. A refusal closes the
+    /// connection.
+    Quic {
+        /// The negotiated ALPN.
+        alpn: &'a [u8],
+    },
+    /// A WebTransport session request. A refusal answers it with the
+    /// rejection's status.
+    WebTransport {
+        /// The request's `:authority`.
+        authority: &'a str,
+        /// The request's `:path`.
+        path: &'a str,
+        /// Every header field of the request.
+        headers: &'a HashMap<String, String>,
+    },
 }
 
 /// A transparent MoQT proxy that accepts client connections and forwards
@@ -60,6 +126,9 @@ pub struct TransparentProxy {
     /// where the handle that arms it is recorded, so the socket and the
     /// thing that impairs it can only arrive together.
     client_socket: Option<Arc<dyn quinn::AsyncUdpSocket>>,
+    /// Picks each session's configuration; `None` gives every session the
+    /// template.
+    router: Option<Arc<dyn Router>>,
 }
 
 impl TransparentProxy {
@@ -74,6 +143,7 @@ impl TransparentProxy {
             next_session_id: AtomicU64::new(1),
             control,
             client_socket: None,
+            router: None,
         }
     }
 
@@ -92,6 +162,7 @@ impl TransparentProxy {
             next_session_id: AtomicU64::new(1),
             control,
             client_socket: None,
+            router: None,
         }
     }
 
@@ -147,6 +218,12 @@ impl TransparentProxy {
             crate::types::Leg::Upstream => self.config.session.upstream_socket = Some(socket),
         }
         self.control.set_impair_handle(leg, handle);
+    }
+
+    /// Route every client through `router`, which picks its session's
+    /// configuration or refuses it. Call before [`TransparentProxy::run`].
+    pub fn set_router(&mut self, router: Arc<dyn Router>) {
+        self.router = Some(router);
     }
 
     /// Returns a cancellation token that can be used to trigger shutdown.
@@ -213,8 +290,8 @@ impl TransparentProxy {
 
         loop {
             tokio::select! {
-                result = listener.accept() => {
-                    self.dispatch(result?);
+                handshake = listener.accept_handshake() => {
+                    self.dispatch(handshake?);
                 }
                 _ = self.cancel.cancelled() => {
                     listener.close();
@@ -224,71 +301,32 @@ impl TransparentProxy {
         }
     }
 
-    /// Spawn a session for an accepted connection, picking the right
-    /// entry point based on the negotiated transport.
-    fn dispatch(&self, accepted: AcceptedConn) {
-        match accepted {
-            AcceptedConn::Quic { conn, alpn } => {
-                let session_id = self.next_session_id();
-                let client_addr = conn.remote_address();
-                self.emit_session_started(session_id, client_addr, "QUIC");
-                let session = self.new_session(session_id, alpn);
-                tokio::spawn(async move {
-                    let _ = session.run(conn).await;
-                });
+    /// Finish one client's handshake, route it and run its session, on a
+    /// task of its own so a slow client holds up nobody.
+    fn dispatch(&self, handshake: Handshake) {
+        let spawner = Spawner {
+            session_id: self.next_session_id(),
+            template: self.session_config(),
+            router: self.router.clone(),
+            observer: Arc::clone(&self.observer),
+            hook: Arc::clone(&self.hook),
+            cancel: self.cancel.clone(),
+            control: Arc::clone(&self.control),
+        };
+        let cancel = self.cancel.clone();
+        tokio::spawn(async move {
+            let request = tokio::select! {
+                done = tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake.complete()) => done,
+                _ = cancel.cancelled() => return,
+            };
+            if let Ok(Ok(request)) = request {
+                spawner.run(request).await;
             }
-            #[cfg(feature = "webtransport")]
-            AcceptedConn::WebTransport(conn) => {
-                let session_id = self.next_session_id();
-                let client_addr = conn.remote_address();
-                self.emit_session_started(session_id, client_addr, "WebTransport");
-                // WebTransport carries no moqt-* ALPN (always h3) so the
-                // session falls back to config.draft and/or SETUP-peek.
-                let session = self.new_session(session_id, Vec::new());
-                tokio::spawn(async move {
-                    let _ = session.run_webtransport(conn).await;
-                });
-            }
-        }
+        });
     }
-
-    // ── Helpers ────────────────────────────────────────────────
 
     fn next_session_id(&self) -> SessionId {
         SessionId(self.next_session_id.fetch_add(1, Ordering::Relaxed))
-    }
-
-    fn emit_session_started(
-        &self,
-        session_id: SessionId,
-        client_addr: std::net::SocketAddr,
-        client_transport: &str,
-    ) {
-        if self.observer.wants_events() {
-            self.observer.on_event(&ProxyEvent::SessionStarted {
-                session_id,
-                client_addr,
-                client_transport: client_transport.to_string(),
-            });
-        }
-    }
-
-    fn new_session(&self, session_id: SessionId, client_alpn: Vec<u8>) -> ProxySession {
-        let mut session = ProxySession::new(
-            session_id,
-            self.session_config(),
-            client_alpn,
-            Arc::clone(&self.observer),
-            Arc::clone(&self.hook),
-            self.cancel.child_token(),
-        );
-        // Attached here rather than taken as a seventh constructor argument:
-        // a session built directly, which is how this crate's own tests
-        // drive one, belongs to no proxy and therefore to no control plane,
-        // and making the plane a parameter would force every such caller to
-        // conjure one that lists a session nobody can reach.
-        session.attach_control(Arc::clone(&self.control));
-        session
     }
 
     // ── The two hand-written copies ────────────────────────────────
@@ -406,6 +444,7 @@ impl TransparentProxy {
             upstream_socket,
             egress,
             shape,
+            upstream_server_certificate_hashes,
         } = &self.config.session;
 
         // As on the client leg, a live profile displaces both of the
@@ -459,7 +498,112 @@ impl TransparentProxy {
             // `set_shape` reach a proxy uniformly rather than only the
             // sessions that happened to be running when it was called.
             shape: self.control.shape().snapshot().1.or_else(|| shape.clone()),
+            upstream_server_certificate_hashes: upstream_server_certificate_hashes.clone(),
         }
+    }
+}
+
+/// What one client's task needs from its proxy.
+struct Spawner {
+    session_id: SessionId,
+    template: ProxySessionConfig,
+    router: Option<Arc<dyn Router>>,
+    observer: Arc<dyn ProxyObserver>,
+    hook: Arc<dyn ProxyHook>,
+    cancel: CancellationToken,
+    control: Arc<ControlPlane>,
+}
+
+impl Spawner {
+    async fn run(mut self, request: ClientRequest) {
+        match request {
+            ClientRequest::Quic { conn, alpn } => {
+                let remote_address = conn.remote_address();
+                let routed = self.route(remote_address, RouteClient::Quic { alpn: &alpn });
+                let config = match routed {
+                    Ok(config) => config,
+                    Err(rejection) => {
+                        conn.close(0u32.into(), rejection_reason(rejection));
+                        return;
+                    }
+                };
+                let session = self.session(config, alpn, remote_address, "QUIC");
+                let _ = session.run(conn).await;
+            }
+            #[cfg(feature = "webtransport")]
+            ClientRequest::WebTransport(request) => {
+                let remote_address = request.remote_address();
+                let routed = self.route(
+                    remote_address,
+                    RouteClient::WebTransport {
+                        authority: request.authority(),
+                        path: request.path(),
+                        headers: request.headers(),
+                    },
+                );
+                let config = match routed {
+                    Ok(config) => config,
+                    Err(rejection) => {
+                        request.reject(rejection).await;
+                        return;
+                    }
+                };
+                // `h3` names no draft; the session takes the relay's
+                // `WT-Protocol`, or the configured draft and the SETUP peek.
+                let session = self.session(config, Vec::new(), remote_address, "WebTransport");
+                let _ = session.run_webtransport_request(request).await;
+            }
+        }
+    }
+
+    fn route(
+        &mut self,
+        remote_address: SocketAddr,
+        client: RouteClient<'_>,
+    ) -> Result<ProxySessionConfig, Rejection> {
+        let template = std::mem::take(&mut self.template);
+        match &self.router {
+            None => Ok(template),
+            Some(router) => router.route(
+                &RouteRequest { session_id: self.session_id, remote_address, client },
+                template,
+            ),
+        }
+    }
+
+    fn session(
+        &self,
+        config: ProxySessionConfig,
+        client_alpn: Vec<u8>,
+        client_addr: SocketAddr,
+        client_transport: &str,
+    ) -> ProxySession {
+        if self.observer.wants_events() {
+            self.observer.on_event(&ProxyEvent::SessionStarted {
+                session_id: self.session_id,
+                client_addr,
+                client_transport: client_transport.to_string(),
+            });
+        }
+        let mut session = ProxySession::new(
+            self.session_id,
+            config,
+            client_alpn,
+            Arc::clone(&self.observer),
+            Arc::clone(&self.hook),
+            self.cancel.child_token(),
+        );
+        session.attach_control(Arc::clone(&self.control));
+        session
+    }
+}
+
+/// The close reason a refused raw-QUIC client is given.
+fn rejection_reason(rejection: Rejection) -> &'static [u8] {
+    match rejection {
+        Rejection::Forbidden => b"forbidden",
+        Rejection::NotFound => b"not found",
+        Rejection::TooManyRequests => b"too many requests",
     }
 }
 
@@ -605,6 +749,7 @@ mod tests {
                     )
                     .expect("one class naming its own bucket is a valid profile"),
                 ),
+                upstream_server_certificate_hashes: vec![[4u8; 32]],
             },
         }
     }
@@ -686,6 +831,10 @@ mod tests {
         );
         assert_eq!(copy.egress, template.egress);
         assert_eq!(copy.shape, template.shape);
+        assert_eq!(
+            copy.upstream_server_certificate_hashes,
+            template.upstream_server_certificate_hashes
+        );
     }
 
     /// The mutually exclusive halves of the two templates, swapped.

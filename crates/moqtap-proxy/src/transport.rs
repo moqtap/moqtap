@@ -220,6 +220,9 @@ pub struct TransportProfile {
     pub max_idle_timeout: Option<Duration>,
     /// How often to send a packet purely to keep the connection alive.
     ///
+    /// `None` runs [`DEFAULT_KEEP_ALIVE`], or half the idle timeout when that
+    /// is shorter. `Some(Duration::ZERO)` sends none.
+    ///
     /// Must be strictly below [`TransportProfile::max_idle_timeout`] when
     /// both are set — see
     /// [`TransportProfileError::KeepAliveNotBelowIdle`].
@@ -451,7 +454,7 @@ impl TransportProfile {
             tc.max_idle_timeout(Some(IdleTimeout::from(idle_timeout(idle)?)));
         }
         if let Some(interval) = self.keep_alive_interval {
-            tc.keep_alive_interval(Some(interval));
+            tc.keep_alive_interval((!interval.is_zero()).then_some(interval));
         }
         if let Some(threshold) = self.packet_threshold {
             tc.packet_threshold(threshold);
@@ -986,12 +989,34 @@ impl TransportInstaller for DefaultInstaller {
     }
 }
 
+/// How often a leg sends a keep-alive when nothing it was given names an
+/// interval.
+pub const DEFAULT_KEEP_ALIVE: Duration = Duration::from_secs(5);
+
+/// The keep-alive for a leg whose profile names none: the default, or half
+/// the idle timeout when that is shorter.
+pub(crate) fn default_keep_alive(idle: Option<Duration>) -> Duration {
+    match idle {
+        Some(idle) if !idle.is_zero() => DEFAULT_KEEP_ALIVE.min(idle / 2),
+        _ => DEFAULT_KEEP_ALIVE,
+    }
+}
+
+/// `profile` with the default keep-alive filled in when it names none.
+fn with_keep_alive(profile: &TransportProfile) -> TransportProfile {
+    let mut profile = profile.clone();
+    if profile.keep_alive_interval.is_none() {
+        profile.keep_alive_interval = Some(default_keep_alive(profile.max_idle_timeout));
+    }
+    profile
+}
+
 /// What a leg installs, from the fields a caller may have set and the
 /// installer it may have supplied.
 ///
-/// `None` back means the leg installs nothing and quinn's defaults apply,
-/// which is the answer a leg that names no config, no profile and no
-/// installer must keep getting.
+/// A leg that names no config and no profile gets quinn's defaults with
+/// [`DEFAULT_KEEP_ALIVE`]; a profile without a keep-alive gets one filled in.
+/// A raw config is installed as given.
 ///
 /// Called once per leg, **before** the endpoint is built, so every refusal
 /// below costs a caller no socket, no handshake and no connection to tear
@@ -1059,10 +1084,11 @@ pub(crate) fn resolve(
             // One build, whether or not a capture was asked for. The
             // installer is the leg's single source of a base config, so a
             // spec cannot quietly move the leg onto a different one.
+            let profile = with_keep_alive(profile);
             #[cfg_attr(not(feature = "qlog"), allow(unused_mut))]
             let mut config = match installer {
-                Some(installer) => installer.build(profile),
-                None => DefaultInstaller.build(profile),
+                Some(installer) => installer.build(&profile),
+                None => DefaultInstaller.build(&profile),
             }
             .map_err(|source| ProxyError::TransportProfile { leg, source })?;
             #[cfg(feature = "qlog")]
@@ -1072,18 +1098,13 @@ pub(crate) fn resolve(
             Ok(Some(Arc::new(config)))
         }
         (None, None) => {
+            let mut config = quinn::TransportConfig::default();
+            config.keep_alive_interval(Some(DEFAULT_KEEP_ALIVE));
             #[cfg(feature = "qlog")]
             if let Some(spec) = qlog {
-                // The one arm that installs a config out of nothing. A leg
-                // asking only for a capture is the commonest way to ask for
-                // one at all, and answering it with `None` would leave the
-                // sink attached to a config nobody installed — a file
-                // holding a preamble and never an event.
-                let mut config = quinn::TransportConfig::default();
                 spec.attach_to(&mut config).map_err(|source| ProxyError::Qlog { leg, source })?;
-                return Ok(Some(Arc::new(config)));
             }
-            Ok(None)
+            Ok(Some(Arc::new(config)))
         }
     }
 }
@@ -1441,13 +1462,30 @@ mod tests {
     }
 
     #[test]
-    fn a_leg_naming_neither_installs_nothing() {
+    fn a_leg_naming_neither_installs_the_default_keep_alive() {
         assert!(
             resolve_uncaptured(Leg::Client, None, None, None)
                 .expect("nothing named is nothing to refuse")
-                .is_none(),
-            "a leg with no opinion installs nothing, so quinn's own defaults apply"
+                .is_some(),
+            "a leg with no opinion still sends keep-alives"
         );
+    }
+
+    #[test]
+    fn a_profile_without_a_keep_alive_gets_one_below_its_idle_timeout() {
+        let none = TransportProfile::default();
+        assert_eq!(with_keep_alive(&none).keep_alive_interval, Some(DEFAULT_KEEP_ALIVE));
+
+        let short = TransportProfile {
+            max_idle_timeout: Some(Duration::from_secs(4)),
+            ..Default::default()
+        };
+        assert_eq!(with_keep_alive(&short).keep_alive_interval, Some(Duration::from_secs(2)));
+        with_keep_alive(&short).validate().expect("below the idle timeout");
+
+        let own =
+            TransportProfile { keep_alive_interval: Some(Duration::ZERO), ..Default::default() };
+        assert_eq!(with_keep_alive(&own).keep_alive_interval, Some(Duration::ZERO), "kept");
     }
 
     #[test]
@@ -1489,7 +1527,8 @@ mod tests {
         let seen = installer.seen.lock().expect("uncontended");
         assert_eq!(seen.len(), 1, "the installer is consulted exactly once per leg");
         assert_eq!(
-            seen[0], profile,
+            seen[0],
+            with_keep_alive(&profile),
             "the leg must hand the caller's own profile to the caller's own installer"
         );
     }

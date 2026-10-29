@@ -525,6 +525,8 @@ async fn an_upstream_profile_reaches_the_next_session_and_not_the_one_already_di
     // Long enough that the session is comfortably observable in the census
     // before it dies, short enough that the row finishes in a second.
     profile.max_idle_timeout = Some(Duration::from_millis(1_500));
+    // No keep-alive, so the idle timeout is what ends the leg.
+    profile.keep_alive_interval = Some(Duration::ZERO);
     control.set_transport(Leg::Upstream, profile).expect("a valid profile is installed");
 
     let (_late_ep, late) = common::connect_client(addr, ALPN).await;

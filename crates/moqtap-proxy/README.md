@@ -31,6 +31,8 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 | `ProxyConfig` | Top-level configuration (listener, session) |
 | `Listener` | Unified server endpoint — accepts both raw-QUIC MoQT and WebTransport on the same UDP port, dispatched by ALPN |
 | `AcceptedConn` | Enum returned by `Listener::accept`: `Quic { conn, alpn }` or `WebTransport(conn)` |
+| `ClientRequest` | Enum returned by `Listener::accept_request`: a WebTransport request is handed over unanswered, with its authority, path and headers |
+| `Router` | Picks each client's session configuration, or refuses the client, for `TransparentProxy::set_router` |
 | `UpstreamTransportType` | Upstream relay transport: `Quic` or `WebTransport { url }` |
 | `ProxyControl` | Handle on a running proxy — census, statistics, close a session, reset a stream, inject a control message, replace a leg's settings |
 | `ProxyObserver` | Trait for receiving structured events (implement for logging, tracing, or a UI) |
@@ -77,7 +79,9 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
 - Accepting inbound connections on a single UDP port (raw QUIC and WebTransport simultaneously, dispatched by negotiated ALPN)
 - Advertising ALPNs for every supported MoQT draft plus `h3` when `webtransport` is enabled
 - Self-signed certificate generation (behind `cert-gen` feature)
-- Connecting to upstream relays (QUIC or WebTransport)
+- Connecting to upstream relays (QUIC or WebTransport), answering a WebTransport client only once its relay is reached
+- Checking a WebTransport relay against certificate hashes, as a browser's `serverCertificateHashes` does
+- QUIC keep-alives on both legs, unless a transport profile sets its own
 - Stream-level forwarding (bidirectional, unidirectional, datagrams). On drafts
   17 through 22, where every request opens a bidirectional stream of its own,
   each direction has an accept loop and all of them are forwarded. On drafts 07
@@ -133,6 +137,7 @@ would otherwise parse, arm, report shaping and shape nothing.
 | `draft07` … `draft22` | no | One draft each, in both `moqtap-codec` and `moqtap-client` |
 | `cert-gen` | no | Self-signed certificate generation via `rcgen` |
 | `webtransport` | no | Enables the `h3` ALPN on the unified listener plus WebTransport upstream support via `wtransport` |
+| `wt-protocol` | no | Passes the client's `WT-Available-Protocols` to a WebTransport relay and the relay's `WT-Protocol` back; the session's draft follows it. Builds only with the patched `wtransport` in this repository's `vendor/` |
 | `impair` | no | Arm and clear a datagram impairment on a leg's socket at runtime, below QUIC, through `quinn-netem` |
 | `serde` | no | `Serialize` and `Deserialize` on the configuration types, so a caller can read a shaping or transport profile from a file. No parser and no format: those are the caller's |
 | `qlog` | no | A QUIC-level capture per connection, written by quinn. Each leg config carries its own `QlogSpec` |

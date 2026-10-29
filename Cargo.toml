@@ -35,7 +35,7 @@ moqtap-trace = { path = "crates/moqtap-trace", version = "0.3.1" }
 # `moqtap-proxy` build silently resolves all the drafts and CI's
 # single-draft rows pass by not checking anything.
 moqtap-client = { path = "crates/moqtap-client", version = "0.8.3", default-features = false }
-moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.9.0" }
+moqtap-proxy = { path = "crates/moqtap-proxy", version = "0.10.0" }
 # No `default-features = false`: this crate declares no `default` key at all, so
 # every feature it has is opt-in at the member manifest.
 quinn-netem = { path = "crates/quinn-netem", version = "0.3.0" }
@@ -66,9 +66,9 @@ criterion = { version = "0.5", features = ["html_reports"] }
 #
 # A `[patch]` section is not inherited through a path dependency either, so a
 # workspace depending on this one by path carries its own copy pointed here. The
-# `cli` repository does not and must not: its manifest names published versions
-# deliberately, and overrides them in a gitignored `.cargo/config.toml`, which
-# is where a `wtransport` line belongs there.
+# `cli` repository is `publish = false` and built only by CI, so it commits a
+# `[patch]` of its own to a copy of `vendor/wtransport`, byte-identical to this
+# one.
 [patch.crates-io]
 wtransport = { path = "vendor/wtransport" }
 

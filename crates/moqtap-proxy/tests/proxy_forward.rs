@@ -103,6 +103,7 @@ async fn passthrough_forwards_setup_and_subscribe_unchanged() {
                 upstream_socket: None,
                 egress: Default::default(),
                 shape: None,
+                upstream_server_certificate_hashes: Vec::new(),
                 upstream_transport_profile: None,
                 upstream_installer: None,
                 #[cfg(feature = "qlog")]
