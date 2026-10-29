@@ -15,13 +15,15 @@
 //! [`ImpairHandle::disarm_peer`].
 //!
 //! A peer's link is built when its first datagram is seen and dropped after it
-//! has been idle for [`ImpairHandle::set_peer_idle_timeout`].
+//! has been idle for [`ImpairHandle::set_peer_idle_timeout`]. A profile given
+//! with `arm_peer` or `disarm_peer` is dropped with it, or after the same idle
+//! time when the peer never sends.
 //!
 //! # Determinism per peer
 //!
 //! A peer inheriting the socket profile is seeded with
-//! [`peer_seed`]`(seed, ordinal)`, where `ordinal` counts the peers this handle
-//! has built a link for, from 0. The first peer therefore runs exactly the
+//! [`peer_seed`]`(seed, ordinal)`, where `ordinal` counts the inheriting links
+//! this handle has built, from 0. The first peer therefore runs exactly the
 //! profile's own seed, and a peer's decisions depend only on the profile, the
 //! seed, its ordinal and its own datagrams. The address never reaches an engine
 //! or a log. A peer armed with [`ImpairHandle::arm_peer`] uses that profile's
@@ -72,8 +74,9 @@ struct Shared {
 struct Core {
     /// The socket-wide profile, validated. `None` while disarmed.
     profile: Option<ImpairProfile>,
-    /// Per-peer profiles that replace the socket-wide one.
-    overrides: HashMap<SocketAddr, Override>,
+    /// Per-peer profiles that replace the socket-wide one, with when the peer
+    /// was last seen.
+    overrides: HashMap<SocketAddr, (Override, Instant)>,
     /// Peers with a live link.
     peers: HashMap<SocketAddr, Peer>,
     /// Kept apart from `peers` so a disarm or an idle drop keeps the records.
@@ -109,7 +112,8 @@ enum Override {
 
 #[derive(Debug)]
 struct Peer {
-    ordinal: u64,
+    /// `None` for a link built from an override.
+    ordinal: Option<u64>,
     link: Link,
     last_seen: Instant,
     stats: Stats,
@@ -146,7 +150,8 @@ impl Link {
 }
 
 /// The seed a peer inheriting the socket profile runs with: `seed` itself for
-/// the first peer (`ordinal` 0), and a fixed integer mix of the two after it.
+/// the first inheriting peer (`ordinal` 0), and a fixed integer mix of the two
+/// after it.
 pub fn peer_seed(seed: u64, ordinal: u64) -> u64 {
     if ordinal == 0 {
         return seed;
@@ -162,7 +167,7 @@ impl Core {
     /// The profile and seed this peer runs with, or `None` when it is left
     /// untouched.
     fn profile_for(&self, peer: SocketAddr, ordinal: u64) -> Option<(&ImpairProfile, u64, bool)> {
-        match self.overrides.get(&peer) {
+        match self.overrides.get(&peer).map(|(o, _)| o) {
             Some(Override::Armed(p)) => Some((p, p.seed, true)),
             Some(Override::Disarmed) => None,
             None => {
@@ -188,12 +193,17 @@ impl Core {
     /// untouched.
     fn link(&mut self, peer: SocketAddr, now: Instant) -> Option<&mut Peer> {
         self.sweep(now);
+        if let Some((_, seen)) = self.overrides.get_mut(&peer) {
+            *seen = now;
+        }
         if !self.peers.contains_key(&peer) {
-            let ordinal = self.next_ordinal;
-            let (profile, seed, own) = self.profile_for(peer, ordinal)?;
+            let (profile, seed, own) = self.profile_for(peer, self.next_ordinal)?;
             // Validated when it was stored, so this cannot fail.
             let link = Link::build(profile, seed, own).ok()?;
-            self.next_ordinal += 1;
+            let ordinal = (!own).then_some(self.next_ordinal);
+            if !own {
+                self.next_ordinal += 1;
+            }
             self.peers.insert(
                 peer,
                 Peer { ordinal, link, last_seen: now, stats: Stats::default(), backlog: [0, 0] },
@@ -204,8 +214,8 @@ impl Core {
         Some(p)
     }
 
-    /// Drop links idle for longer than the timeout, at most a few times per
-    /// timeout.
+    /// Drop links and per-peer profiles idle for longer than the timeout, at
+    /// most a few times per timeout.
     fn sweep(&mut self, now: Instant) {
         let every = self.idle_timeout / 4;
         if self.last_sweep.is_some_and(|at| now.saturating_duration_since(at) < every) {
@@ -222,6 +232,7 @@ impl Core {
         for a in idle {
             self.remove_peer(a);
         }
+        self.overrides.retain(|_, (_, seen)| now.saturating_duration_since(*seen) < timeout);
     }
 }
 
@@ -244,7 +255,8 @@ impl ImpairHandle {
                 PeerFilter::Only(addrs) => addrs.contains(addr),
             };
             let link = if admitted {
-                Some(Link::build(&profile, peer_seed(profile.seed, peer.ordinal), false)?)
+                let ordinal = peer.ordinal.unwrap_or_default();
+                Some(Link::build(&profile, peer_seed(profile.seed, ordinal), false)?)
             } else {
                 None
             };
@@ -286,22 +298,26 @@ impl ImpairHandle {
     /// Give one peer its own profile, replacing the socket-wide one for it.
     /// The peer's link restarts at sequence 0 and tick 0, seeded with the
     /// profile's own seed. The profile's peer filter is not consulted.
+    ///
+    /// Dropped once the peer has been idle for the peer idle timeout.
     pub fn arm_peer(&self, peer: SocketAddr, profile: ImpairProfile) -> Result<(), ProfileError> {
         profile.validate()?;
         let link = Link::build(&profile, profile.seed, true)?;
+        let now = Instant::now();
         let mut core = lock(&self.shared.core);
-        core.overrides.insert(peer, Override::Armed(Box::new(profile)));
+        core.overrides.insert(peer, (Override::Armed(Box::new(profile)), now));
         match core.peers.get_mut(&peer) {
-            Some(p) => p.link = link,
+            Some(p) => {
+                p.link = link;
+                p.last_seen = now;
+            }
             None => {
-                let ordinal = core.next_ordinal;
-                core.next_ordinal += 1;
                 core.peers.insert(
                     peer,
                     Peer {
-                        ordinal,
+                        ordinal: None,
                         link,
-                        last_seen: Instant::now(),
+                        last_seen: now,
                         stats: Stats::default(),
                         backlog: [0, 0],
                     },
@@ -312,9 +328,11 @@ impl ImpairHandle {
     }
 
     /// Leave one peer untouched, whatever the socket-wide profile says.
+    ///
+    /// Dropped once the peer has been idle for the peer idle timeout.
     pub fn disarm_peer(&self, peer: SocketAddr) {
         let mut core = lock(&self.shared.core);
-        core.overrides.insert(peer, Override::Disarmed);
+        core.overrides.insert(peer, (Override::Disarmed, Instant::now()));
         core.remove_peer(peer);
     }
 
@@ -347,7 +365,7 @@ impl ImpairHandle {
         };
         profile.seed = seed;
         for peer in core.peers.values_mut().filter(|p| !p.link.own) {
-            let s = peer_seed(seed, peer.ordinal);
+            let s = peer_seed(seed, peer.ordinal.unwrap_or_default());
             peer.link.downlink.reseed(s);
             peer.link.uplink.reseed(s);
         }
@@ -397,7 +415,8 @@ impl ImpairHandle {
     /// a profile of its own.
     pub(crate) fn is_impairing(&self) -> bool {
         let core = lock(&self.shared.core);
-        core.profile.is_some() || core.overrides.values().any(|o| matches!(o, Override::Armed(_)))
+        core.profile.is_some()
+            || core.overrides.values().any(|(o, _)| matches!(o, Override::Armed(_)))
     }
 
     /// The peer's tick, building its link if it has none. `None` means the
@@ -803,6 +822,74 @@ mod tests {
             vec![2],
             "and restarts at 0"
         );
+    }
+
+    #[test]
+    fn an_idle_peers_own_profile_is_dropped_with_its_link() {
+        let handle = ImpairHandle::detached();
+        handle.arm(every_third()).expect("a valid profile");
+        handle.set_peer_idle_timeout(Duration::from_millis(20));
+        let (armed, disarmed, other) = (addr(1), addr(2), addr(3));
+        let slow = ImpairProfile {
+            downlink: DirectionProfile {
+                delay: Some(DelayModel::Fixed { mean_ns: 50_000_000 }),
+                ..DirectionProfile::default()
+            },
+            ..ImpairProfile::default()
+        };
+        handle.arm_peer(armed, slow).expect("a valid profile");
+        handle.disarm_peer(disarmed);
+        assert!(handle.begin(disarmed).is_none());
+
+        std::thread::sleep(Duration::from_millis(40));
+        handle.begin(other);
+
+        for p in [armed, disarmed] {
+            assert_eq!(
+                dropped_indices(&handle, p, Direction::Downlink, 3),
+                vec![2],
+                "{p} inherits the socket profile"
+            );
+        }
+    }
+
+    #[test]
+    fn a_peer_seen_within_the_timeout_keeps_its_own_profile() {
+        let handle = ImpairHandle::detached();
+        handle.arm(every_third()).expect("a valid profile");
+        handle.set_peer_idle_timeout(Duration::from_millis(60));
+        let p = addr(1);
+        handle.disarm_peer(p);
+        for _ in 0..4 {
+            std::thread::sleep(Duration::from_millis(20));
+            assert!(handle.begin(p).is_none(), "still left untouched");
+        }
+    }
+
+    #[test]
+    fn a_peer_given_its_own_profile_takes_no_ordinal() {
+        let coin = ImpairProfile {
+            downlink: DirectionProfile {
+                loss: Some(LossModel::Bernoulli { p: Prob::from_ppb(500_000_000) }),
+                ..DirectionProfile::default()
+            },
+            seed: 5,
+            ..ImpairProfile::default()
+        };
+        let handle = ImpairHandle::detached();
+        handle.arm(coin.clone()).expect("a valid profile");
+        handle.arm_peer(addr(9), every_third()).expect("a valid profile");
+        let p = addr(1);
+        let got: Vec<bool> = (0..64)
+            .map(|_| {
+                handle.decide(p, Direction::Downlink, 1_200, Tick(0)).expect("armed").verdict
+                    == Verdict::Drop
+            })
+            .collect();
+        let mut e = Impairer::new(coin.downlink, 5, Direction::Downlink).expect("valid");
+        let solo: Vec<bool> =
+            (0..64).map(|seq| e.decide(seq, 1_200, Tick(0)).verdict == Verdict::Drop).collect();
+        assert_eq!(got, solo, "the first inheriting peer runs the profile's own seed");
     }
 
     #[test]

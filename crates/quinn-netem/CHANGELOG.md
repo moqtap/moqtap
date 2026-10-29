@@ -16,10 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budget or a queue.
 - `ImpairHandle::arm_peer`, `disarm_peer` and `clear_peer` set or remove one
   peer's own profile. `peers`, `peer_stats`, `take_logs` and
-  `set_peer_idle_timeout`; idle links are dropped after
-  `DEFAULT_PEER_IDLE_TIMEOUT`.
+  `set_peer_idle_timeout`; idle links, and the profile a peer was given, are
+  dropped after `DEFAULT_PEER_IDLE_TIMEOUT`.
 - `peer_seed`: the seed a peer inheriting the socket profile runs with. The
-  first peer runs the profile's own seed.
+  first inheriting peer runs the profile's own seed.
 - `StatsSnapshot::ingress_overflow`: received datagrams discarded because the
   peer's queue was full.
 
