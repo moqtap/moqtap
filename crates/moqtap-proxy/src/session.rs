@@ -465,8 +465,10 @@ impl ProxySession {
     }
 
     /// Run the proxy session for a WebTransport request the listener has not
-    /// answered: dial the relay first, then accept the client, or refuse it
-    /// with `404` when the relay cannot be reached.
+    /// answered: dial the relay first, then accept the client. The client is
+    /// refused with `404` when the relay cannot be reached, the session is
+    /// closed or cancelled during the dial, or the session's draft or shaping
+    /// profile is refused.
     ///
     /// With the `wt-protocol` feature the client's `WT-Available-Protocols`
     /// is offered to a WebTransport relay unchanged, the relay's
@@ -544,9 +546,6 @@ impl ProxySession {
         #[cfg_attr(not(feature = "webtransport"), allow(unused_mut))]
         let mut client_alpn = self.client_alpn.clone();
         let draft = self.initial_draft(&client_alpn);
-        if !crate::capability::draft_is_compiled(draft) {
-            return Err(ProxyError::DraftNotCompiled { draft });
-        }
 
         // The second is the shaping profile: a rule keyed on a field this
         // draft's units do not carry can never claim anything, so a session
@@ -562,10 +561,8 @@ impl ProxySession {
         // see an answer the `moq-00` cohort does not carry in its ALPN. A
         // rule this one refuses is dead on the draft the session was about
         // to use, whatever the peers go on to say.
-        if let Some(profile) = self.config.shape.as_ref() {
-            Capabilities::for_draft(draft)
-                .admit_profile(profile)
-                .map_err(|source| ProxyError::ShapeRuleUnsupported { source })?;
+        if let Err(e) = self.admit(draft) {
+            return Err(self.refuse(client, e).await);
         }
 
         let closer = SessionCloser::new(self.cancel.clone());
@@ -590,10 +587,17 @@ impl ProxySession {
             )
         });
 
+        // Taken before the dial so a close requested while it runs ends it.
+        let mut inbox = self.control.as_ref().and_then(|c| c.take_inbox());
+
         let (client, relay) = match client {
-            ClientConn::Ready(client) => match self.connect_upstream(&client_alpn, None).await {
-                Ok(upstream) => (client, upstream.transport),
-                Err(e) => return Err(self.upstream_failed(e)),
+            ClientConn::Ready(client) => match self.dial(&client_alpn, None, &mut inbox).await {
+                Some(Ok(upstream)) => (client, upstream.transport),
+                Some(Err(e)) => return Err(self.upstream_failed(e)),
+                None => {
+                    self.cancelled_while_dialling(ClientConn::Ready(client), &closer).await;
+                    return Ok(());
+                }
             },
             #[cfg(feature = "webtransport")]
             ClientConn::Pending(request) => {
@@ -604,13 +608,26 @@ impl ProxySession {
                 } else {
                     None
                 };
-                let upstream = match self.connect_upstream(&client_alpn, offer.as_deref()).await {
-                    Ok(upstream) => upstream,
-                    Err(e) => {
-                        request.reject(crate::listener::Rejection::NotFound).await;
-                        return Err(self.upstream_failed(e));
+                let upstream = match self.dial(&client_alpn, offer.as_deref(), &mut inbox).await {
+                    Some(Ok(upstream)) => upstream,
+                    Some(Err(e)) => return Err(self.refuse(ClientConn::Pending(request), e).await),
+                    None => {
+                        self.cancelled_while_dialling(ClientConn::Pending(request), &closer).await;
+                        return Ok(());
                     }
                 };
+                // The relay's protocol can name a different draft from the
+                // one admitted before the dial; the client is refused rather
+                // than answered and then closed.
+                if let Some(name) = upstream.protocol.as_ref().and_then(|p| p.name.as_ref()) {
+                    let negotiated = self.initial_draft(name.as_bytes());
+                    if negotiated != draft {
+                        if let Err(e) = self.admit(negotiated) {
+                            upstream.transport.close(0, b"");
+                            return Err(self.refuse(ClientConn::Pending(request), e).await);
+                        }
+                    }
+                }
                 let headers = match &upstream.protocol {
                     Some(p) => vec![("wt-protocol".to_string(), p.raw.clone())],
                     None => Vec::new(),
@@ -636,24 +653,6 @@ impl ProxySession {
 
         let initial_draft = self.initial_draft(&client_alpn);
         let draft_is_fixed = Self::draft_is_fixed(&client_alpn);
-        // The negotiated protocol can name a different draft from the one
-        // admitted before the dial.
-        if initial_draft != draft {
-            let admitted = if !crate::capability::draft_is_compiled(initial_draft) {
-                Err(ProxyError::DraftNotCompiled { draft: initial_draft })
-            } else if let Some(profile) = self.config.shape.as_ref() {
-                Capabilities::for_draft(initial_draft)
-                    .admit_profile(profile)
-                    .map_err(|source| ProxyError::ShapeRuleUnsupported { source })
-            } else {
-                Ok(())
-            };
-            if let Err(e) = admitted {
-                client.close(0, b"");
-                relay.close(0, b"");
-                return Err(self.upstream_failed(e));
-            }
-        }
         // One cell, shared by every task below. Built here because this is
         // where the tasks are: the control stream learns the draft and the
         // data, datagram and request tasks have to agree with it, and they
@@ -757,7 +756,7 @@ impl ProxySession {
         // request could want to touch is reachable from the context cloned
         // into it. `AbortOnDrop` ends it if this future is dropped without
         // the cancellation token ever firing.
-        let _commands = self.control.as_ref().and_then(|c| c.take_inbox()).map(|inbox| {
+        let _commands = inbox.map(|inbox| {
             let ctx = base_ctx.clone();
             AbortOnDrop::new(tokio::spawn(serve_session_commands(inbox, ctx)))
         });
@@ -908,22 +907,8 @@ impl ProxySession {
 
         // A hook that asked for a close is the reason, whatever the task
         // that noticed the cancellation reported.
-        let reason = match closer.requested() {
-            Some((code, why, origin)) => {
-                // Named, not assumed. A close reaches the same latch from a
-                // hook's `Action::CloseSession` and from
-                // `ProxyControl::close_session`, and reporting both as the
-                // hook's told an observer that the run under test ended
-                // the session when the operator outside it had.
-                let who = match origin {
-                    CloseOrigin::Hook => "hook",
-                    CloseOrigin::ControlPlane => "control plane",
-                };
-                format!(
-                    "{who} closed the session: code {code}, reason {:?}",
-                    String::from_utf8_lossy(&why)
-                )
-            }
+        let reason = match close_reason(&closer) {
+            Some(reason) => reason,
             None => match &first_result {
                 Some(Ok(Ok(()))) => "completed".to_string(),
                 Some(Ok(Err(e))) => format!("{e}"),
@@ -947,6 +932,63 @@ impl ProxySession {
             Some(Ok(Ok(()))) | None => Ok(()),
             Some(Ok(Err(e))) => Err(e),
             Some(Err(e)) => Err(ProxyError::SessionClosed(format!("task panic: {e}"))),
+        }
+    }
+
+    /// Whether this build can frame `draft`, and the shaping profile suits it.
+    fn admit(&self, draft: DraftVersion) -> Result<(), ProxyError> {
+        if !crate::capability::draft_is_compiled(draft) {
+            return Err(ProxyError::DraftNotCompiled { draft });
+        }
+        if let Some(profile) = self.config.shape.as_ref() {
+            Capabilities::for_draft(draft)
+                .admit_profile(profile)
+                .map_err(|source| ProxyError::ShapeRuleUnsupported { source })?;
+        }
+        Ok(())
+    }
+
+    /// Refuse a client the session will not run for: an unanswered request
+    /// gets `404`. Reports the end and hands the error back.
+    async fn refuse(&self, client: ClientConn, e: ProxyError) -> ProxyError {
+        reject_pending(client).await;
+        self.upstream_failed(e)
+    }
+
+    /// Dial the relay, or `None` when the session is cancelled or closed
+    /// first.
+    async fn dial(
+        &self,
+        client_alpn: &[u8],
+        offer: Option<&str>,
+        inbox: &mut Option<mpsc::Receiver<SessionCommand>>,
+    ) -> Option<Result<Upstream, ProxyError>> {
+        let closed = async {
+            // `None` from `recv` means every sender is gone; only a close ends
+            // the wait.
+            if let Some(inbox) = inbox.as_mut() {
+                if let Some(SessionCommand::Close { .. }) = inbox.recv().await {
+                    return;
+                }
+            }
+            std::future::pending::<()>().await
+        };
+        tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => None,
+            _ = closed => None,
+            dialled = self.connect_upstream(client_alpn, offer) => Some(dialled),
+        }
+    }
+
+    /// End a session cancelled or closed before its relay answered.
+    async fn cancelled_while_dialling(&self, client: ClientConn, closer: &SessionCloser) {
+        reject_pending(client).await;
+        if self.observer.wants_events() {
+            let reason = close_reason(closer)
+                .unwrap_or_else(|| "cancelled before the relay answered".to_string());
+            self.observer
+                .on_event(&ProxyEvent::SessionEnded { session_id: self.session_id, reason });
         }
     }
 
@@ -1198,6 +1240,34 @@ enum ClientConn {
     /// A WebTransport request answered once the relay is dialled.
     #[cfg(feature = "webtransport")]
     Pending(crate::listener::WebTransportRequest),
+}
+
+/// Who closed the session and with what, when a close was requested.
+fn close_reason(closer: &SessionCloser) -> Option<String> {
+    let (code, why, origin) = closer.requested()?;
+    // Named, not assumed. A close reaches the same latch from a
+    // hook's `Action::CloseSession` and from
+    // `ProxyControl::close_session`, and reporting both as the
+    // hook's told an observer that the run under test ended
+    // the session when the operator outside it had.
+    let who = match origin {
+        CloseOrigin::Hook => "hook",
+        CloseOrigin::ControlPlane => "control plane",
+    };
+    Some(format!(
+        "{who} closed the session: code {code}, reason {:?}",
+        String::from_utf8_lossy(&why)
+    ))
+}
+
+/// Answer an unanswered request with `404`; a connected client is left to its
+/// owner.
+async fn reject_pending(client: ClientConn) {
+    match client {
+        ClientConn::Ready(_) => {}
+        #[cfg(feature = "webtransport")]
+        ClientConn::Pending(request) => request.reject(crate::listener::Rejection::NotFound).await,
+    }
 }
 
 /// A dialled relay, with the WebTransport protocol it chose.

@@ -317,11 +317,124 @@ async fn an_unreachable_relay_refuses_the_client_with_404() {
     assert_eq!(rejected_with(refused), Some(404));
 }
 
+// ── refusals ───────────────────────────────────────────────────────────
+
+/// Waits for the observer to report both ends of one session.
+async fn started_and_ended(observer: &common::RecordingObserver) -> String {
+    use moqtap_proxy::event::ProxyEvent;
+    let start = tokio::time::Instant::now();
+    loop {
+        let events = observer.events();
+        let started = events.iter().any(|e| matches!(e, ProxyEvent::SessionStarted { .. }));
+        let ended = events.iter().find_map(|e| match e {
+            ProxyEvent::SessionEnded { reason, .. } => Some(reason.clone()),
+            _ => None,
+        });
+        if let (true, Some(reason)) = (started, ended) {
+            return reason;
+        }
+        assert!(start.elapsed() < TIMEOUT, "no start and end reported: {events:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// A rule no draft can match: fetch objects carry no track alias.
+fn dead_shaping_profile() -> moqtap_proxy::shape::ShapeProfile {
+    use moqtap_proxy::shape::{
+        BucketConfig, ClassRule, Discipline, MatchKind, Matcher, QueueConfig, RangeSet,
+        ShapeProfile,
+    };
+    let mut bucket = BucketConfig::default();
+    bucket.name = "b".to_string();
+    bucket.rate_bps = Some(64_000);
+    bucket.burst_bytes = 16_000;
+    let mut matcher = Matcher::default();
+    matcher.stream_kind = Some(MatchKind::Fetch);
+    matcher.track_alias = Some(RangeSet::single(1));
+    let mut class = ClassRule::default();
+    class.name = "video".to_string();
+    class.bucket = "b".to_string();
+    class.weight = 1;
+    class.matcher = matcher;
+    ShapeProfile::try_new(vec![bucket], vec![class], QueueConfig::default(), Discipline::Fifo)
+        .expect("valid without a draft")
+}
+
+#[tokio::test]
+async fn a_session_refused_before_the_dial_answers_the_client_with_404() {
+    let (chain, key) = common::self_signed_localhost();
+    let relay = relay(identity(chain, key), None, None);
+    let observer = Arc::new(common::RecordingObserver::new());
+    let mut template = session_template();
+    template.shape = Some(dead_shaping_profile());
+    let proxy = start_proxy(template, None, Arc::new(route_by_path), observer.clone()).await;
+
+    let refused =
+        connect(&client(None), format!("https://{}/to/{}", proxy.addr, relay.addr.port()), None)
+            .await;
+    assert_eq!(rejected_with(refused), Some(404));
+    assert!(relay.seen.lock().expect("uncontended").is_empty(), "the relay was not dialled");
+    let reason = started_and_ended(&observer).await;
+    assert!(reason.contains("track_alias"), "{reason}");
+}
+
+#[tokio::test]
+async fn a_session_closed_while_dialling_answers_the_client_with_404() {
+    let silent = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind");
+    let port = silent.local_addr().expect("addr").port();
+    let observer = Arc::new(common::RecordingObserver::new());
+    let mut template = session_template();
+    template.upstream_connect_timeout_secs = 0;
+    let proxy = start_proxy(template, None, Arc::new(route_by_path), observer.clone()).await;
+    let control = proxy.proxy.control();
+
+    let url = format!("https://{}/to/{port}", proxy.addr);
+    let pending = tokio::spawn(async move { connect(&client(None), url, None).await });
+    let start = tokio::time::Instant::now();
+    let id = loop {
+        if let Some(id) = control.sessions().first() {
+            break *id;
+        }
+        assert!(start.elapsed() < TIMEOUT, "the session never registered");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    control.close_session(id, 0, b"stop").expect("the session is live");
+
+    let refused = pending.await.expect("the client task");
+    assert_eq!(rejected_with(refused), Some(404));
+    let reason = started_and_ended(&observer).await;
+    assert!(reason.contains("control plane"), "{reason}");
+}
+
+/// The relay picks a draft this build cannot frame: the client is refused, not
+/// answered and then closed.
+#[cfg(all(feature = "wt-protocol", feature = "draft14", not(feature = "draft16")))]
+#[tokio::test]
+async fn a_relay_choosing_an_uncompiled_draft_answers_the_client_with_404() {
+    let (chain, key) = common::self_signed_localhost();
+    let relay = relay(identity(chain, key), Some("\"moqt-16\""), None);
+    let observer = Arc::new(common::RecordingObserver::new());
+    let proxy =
+        start_proxy(session_template(), None, Arc::new(route_by_path), observer.clone()).await;
+
+    let offer = "\"moqt-16\", \"moqt-14\"";
+    let refused = connect(
+        &client(None),
+        format!("https://{}/to/{}", proxy.addr, relay.addr.port()),
+        Some(offer),
+    )
+    .await;
+    assert_eq!(rejected_with(refused), Some(404));
+    assert_eq!(relay.seen.lock().expect("uncontended")[0].offer.as_deref(), Some(offer));
+    let reason = started_and_ended(&observer).await;
+    assert!(reason.contains("16"), "{reason}");
+}
+
 // ── protocols ──────────────────────────────────────────────────────────
 
 /// The client's offer reaches the relay byte for byte, the relay's answer
 /// reaches the client, and the session frames with the draft it names.
-#[cfg(feature = "wt-protocol")]
+#[cfg(all(feature = "wt-protocol", feature = "draft16"))]
 #[tokio::test]
 async fn protocols_are_copied_both_ways_and_name_the_draft() {
     use moqtap_proxy::event::ImpairmentKind;

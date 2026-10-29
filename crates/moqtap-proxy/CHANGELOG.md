@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Listener::accept_request` and `Listener::accept_handshake` hand over a WebTransport request unanswered as `WebTransportRequest` (authority, path, headers), to accept with response headers or reject with `Rejection`.
 - `Router` and `TransparentProxy::set_router`: pick each client's session configuration from its request, or refuse it.
-- `ProxySession::run_webtransport_request` dials the relay before accepting the client, and refuses the client with `404` when the relay cannot be reached.
+- `ProxySession::run_webtransport_request` dials the relay before accepting the client. It refuses the client with `404` when the relay cannot be reached, the session is closed or cancelled during the dial, or the draft the relay chose or the shaping profile is refused.
 - `wt-protocol` feature: the client's `WT-Available-Protocols` is offered to a WebTransport relay unchanged, the relay's `WT-Protocol` is returned to the client, and the session's draft follows it.
 - `ProxySessionConfig::upstream_server_certificate_hashes` checks a WebTransport relay against SHA-256 certificate hashes.
 
@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking.** `ProxySessionConfig` has a new public field.
 - Both legs send QUIC keep-alives every `DEFAULT_KEEP_ALIVE` (5 s), or half the idle timeout when that is shorter, unless a transport profile sets `keep_alive_interval`; `Some(Duration::ZERO)` sends none.
 - `TransparentProxy` runs each client's handshake on its own task, with `HANDSHAKE_TIMEOUT`. A failed handshake, or a client refused at its first packet, no longer ends the accept loop.
-- A session whose relay cannot be reached reports `SessionEnded`.
+- A session whose relay cannot be reached, or that is refused before it forwards anything, reports `SessionEnded`.
+- Closing or cancelling a session while its relay is being dialled ends the dial.
 - Requires `quinn-netem` 0.3.0 and `wtransport` 0.7.1.
 
 ## [0.9.0] - 2026-10-27
