@@ -26,7 +26,7 @@ categories = ["network-programming"]
 # noticing, because nothing consumed the pin.
 [workspace.dependencies]
 moqtap-codec = { path = "crates/moqtap-codec", version = "0.8.2", default-features = false }
-wtransport = { version = "0.7", features = ["dangerous-configuration", "quinn"] }
+wtransport = { version = "0.7.1", features = ["dangerous-configuration", "quinn"] }
 moqtap-trace = { path = "crates/moqtap-trace", version = "0.3.1" }
 # `default-features = false` is load-bearing: cargo IGNORES a member manifest's
 # `default-features = false` on a `workspace = true` dependency unless the

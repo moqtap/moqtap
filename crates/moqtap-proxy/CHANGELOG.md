@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Both legs send QUIC keep-alives every `DEFAULT_KEEP_ALIVE` (5 s), or half the idle timeout when that is shorter, unless a transport profile sets `keep_alive_interval`; `Some(Duration::ZERO)` sends none.
 - `TransparentProxy` runs each client's handshake on its own task, with `HANDSHAKE_TIMEOUT`; a failed handshake no longer ends the accept loop.
 - A session whose relay cannot be reached reports `SessionEnded`.
-- Requires `quinn-netem` 0.3.0.
+- Requires `quinn-netem` 0.3.0 and `wtransport` 0.7.1.
 
 ## [0.9.0] - 2026-10-27
 
