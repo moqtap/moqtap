@@ -834,17 +834,28 @@ impl ProxySession {
             }
             (Some(upstream_leg), Some(client_leg))
         } else {
-            // Draft-16 has request streams beside its bidirectional control
-            // stream, and either endpoint opens one. The relay's are taken
-            // here; the client's are taken inside `forward_control_stream`,
-            // after it has taken the control stream, because that is the same
-            // transport and only one accept may be outstanding on it.
-            if bidi_streams_carry_requests(initial_draft) {
+            // Bidirectional streams beside the control stream — draft-16's
+            // request streams, or streams 07-15 do not define — can come from
+            // either endpoint. The relay's are taken here; the client's are
+            // taken inside `forward_control_stream`, after it has taken the
+            // control stream, because that is the same transport and only one
+            // accept may be outstanding on it.
+            {
                 let source = Arc::clone(&relay);
                 let dest = Arc::clone(&client);
                 let ctx = base_ctx.clone();
                 tasks.spawn(async move {
-                    forward_request_streams(&source, &dest, ProxySide::RelayToProxy, &ctx).await
+                    if bidi_streams_carry_requests(ctx.draft.initial) {
+                        forward_request_streams(&source, &dest, ProxySide::RelayToProxy, &ctx).await
+                    } else {
+                        forward_undefined_bidi_streams(
+                            &source,
+                            &dest,
+                            ProxySide::RelayToProxy,
+                            &ctx,
+                        )
+                        .await
+                    }
                 });
             }
             let client = Arc::clone(&client);
@@ -2724,9 +2735,10 @@ async fn forward_control_stream(
     }
 }
 
-/// The client-to-relay request-stream loop, for a draft whose control stream
-/// is bidirectional and which has request streams as well — draft-16 alone.
-/// See [`bidi_streams_carry_requests`].
+/// The client-to-relay loop for bidirectional streams beside a bidirectional
+/// control stream: draft-16's request streams (see
+/// [`bidi_streams_carry_requests`]), or on 07-15 streams the draft does not
+/// define.
 ///
 /// # Why it is a branch of the control stream's `select!` and not a task
 ///
@@ -2743,18 +2755,58 @@ async fn forward_control_stream(
 /// accepts a relay-initiated bidirectional stream — so it is spawned as an
 /// ordinary loop beside this function's caller.
 ///
-/// On every other draft this never completes, which leaves the `select!`
-/// above decided by the two control pipes exactly as it was before draft-16
-/// had anywhere else to put a request.
+/// On drafts 07-15 the streams it takes are forwarded unread by
+/// [`forward_undefined_bidi_streams`].
 async fn request_streams_beside_the_control_stream(
     client: &Transport,
     relay: &Transport,
     ctx: &ForwardCtx,
 ) -> Result<(), ProxyError> {
     if !bidi_streams_carry_requests(ctx.draft.initial) {
-        std::future::pending::<()>().await;
+        return forward_undefined_bidi_streams(client, relay, ProxySide::ClientToProxy, ctx).await;
     }
     forward_request_streams(client, relay, ProxySide::ClientToProxy, ctx).await
+}
+
+/// Forward, unread, the bidirectional streams a draft does not define: every
+/// one after the control stream on drafts 07-15. The relay answers them as
+/// its draft says.
+async fn forward_undefined_bidi_streams(
+    source: &Transport,
+    dest: &Transport,
+    side: ProxySide,
+    ctx: &ForwardCtx,
+) -> Result<(), ProxyError> {
+    loop {
+        let (source_send, source_recv) = source.accept_bi().await?;
+        ctx.emit(|| ProxyEvent::BiStreamOpened {
+            session_id: ctx.session_id,
+            side,
+            stream_id: source_recv.stream_id(),
+        });
+        let (dest_send, dest_recv) = dest.open_bi().await?;
+        ctx.emit(|| ProxyEvent::BiStreamOpened {
+            session_id: ctx.session_id,
+            side: egress_side(side),
+            stream_id: dest_send.stream_id(),
+        });
+        let back_side = paired_ingress_side(side);
+        for (recv, send, side) in
+            [(source_recv, dest_send, side), (dest_recv, source_send, back_side)]
+        {
+            let key = ctx.mint_key(side);
+            let (inbox, requests) = mpsc::channel(COMMAND_QUEUE_DEPTH);
+            let guard = ctx.streams.register(key, inbox);
+            let ctx = ctx.clone();
+            tokio::spawn(async move {
+                let _guard = guard;
+                let result =
+                    pipe_data_passthrough(PeekedRecv::new(recv), send, side, key, requests, &ctx)
+                        .await;
+                report_request_stream_end(result, side, &ctx);
+            });
+        }
+    }
 }
 
 /// Whether this draft carries control messages on a **pair of

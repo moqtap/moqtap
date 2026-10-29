@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TransparentProxy` runs each client's handshake on its own task, with `HANDSHAKE_TIMEOUT`. A failed handshake, or a client refused at its first packet, no longer ends the accept loop.
 - A session whose relay cannot be reached, or that is refused before it forwards anything, reports `SessionEnded`.
 - Closing or cancelling a session while its relay is being dialled ends the dial.
+- On drafts 07-15, bidirectional streams other than the control stream, from either peer, are forwarded unread instead of left unaccepted.
 - Requires `moqtap-codec` and `moqtap-client` 0.9.0, `quinn-netem` 0.3.0 and `wtransport` 0.7.1.
 
 ## [0.9.0] - 2026-10-27
