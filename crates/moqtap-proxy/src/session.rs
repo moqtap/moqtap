@@ -5495,6 +5495,7 @@ async fn pipe_data_framed(
                                         side,
                                         stream_id,
                                         header: header.clone(),
+                                        raw: raw.clone(),
                                     });
                                     if let DataStreamHeaderKind::Subgroup(h) = &header {
                                         subgroup_id_mode = h.subgroup_id_mode();
@@ -6271,6 +6272,20 @@ fn datagram_is_status(header: &AnyDatagramHeader) -> bool {
     }
 }
 
+/// Where a decoded datagram's payload starts.
+///
+/// `consumed` is what the decode read. Draft-14's decode reads the payload into
+/// the header as well, so there the start is measured back from the payload.
+#[allow(unused_variables)]
+fn datagram_payload_start(header: &AnyDatagramHeader, len: usize, consumed: usize) -> usize {
+    match header {
+        #[cfg(feature = "draft14")]
+        AnyDatagramHeader::Draft14(h) => len.saturating_sub(h.payload.len()),
+        #[allow(unreachable_patterns)]
+        _ => consumed,
+    }
+}
+
 /// Forward datagrams from source to destination.
 ///
 /// Datagrams have no queue: they are per-connection and unordered by
@@ -6360,11 +6375,14 @@ async fn forward_datagrams(
                         header_len = Some(data.len() - cursor.len());
                         is_status = datagram_is_status(&decoded);
                         if ctx.observer_enabled {
+                            let payload_start =
+                                datagram_payload_start(&decoded, data.len(), data.len() - cursor.len());
                             ctx.observer.on_event(&ProxyEvent::Datagram {
                                 session_id: ctx.session_id,
                                 side,
                                 header: decoded.clone(),
-                                payload_len: cursor.len(),
+                                header_raw: data.slice(..payload_start),
+                                payload_len: data.len() - payload_start,
                             });
                         }
                         header = Some(decoded);
@@ -6772,6 +6790,19 @@ impl rustls::client::danger::ServerCertVerifier for SkipVerification {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Draft-14's datagram decode reads the payload too; the header still ends
+    /// where the payload starts.
+    #[cfg(feature = "draft14")]
+    #[test]
+    fn a_draft14_datagram_header_stops_at_its_payload() {
+        // Type 0x00, alias 1, group 2, object 3, priority 0x80, payload "frame".
+        let data = [0x00, 0x01, 0x02, 0x03, 0x80, b'f', b'r', b'a', b'm', b'e'];
+        let mut cursor = &data[..];
+        let header = AnyDatagramHeader::decode(DraftVersion::Draft14, &mut cursor).unwrap();
+        let start = datagram_payload_start(&header, data.len(), data.len() - cursor.len());
+        assert_eq!(start, 5);
+    }
 
     // These fixtures build SETUP bytes with a local varint encoder rather
     // than through `moqtap_codec::draftNN::message`. Two reasons, and they

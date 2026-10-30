@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
 use moqtap_codec::dispatch::{
     AnyControlMessage, AnyDatagramHeader, AnyFetchHeader, AnyObjectHeader, AnySubgroupHeader,
 };
@@ -123,6 +124,9 @@ pub enum ProxyEvent {
         stream_id: u64,
         /// The parsed header.
         header: DataStreamHeaderKind,
+        /// The header's wire bytes, from the stream type through its last
+        /// field. No transport framing.
+        raw: Bytes,
     },
 
     /// An object header was parsed on a data stream.
@@ -187,6 +191,9 @@ pub enum ProxyEvent {
         side: ProxySide,
         /// The parsed datagram header.
         header: AnyDatagramHeader,
+        /// The datagram's bytes before its payload (all of them for a status
+        /// datagram). No transport framing.
+        header_raw: Bytes,
         /// Size of the datagram payload in bytes.
         payload_len: usize,
     },

@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-30
+
+### Changed
+
+- **Breaking.** `ProxyEvent::DataStreamHeader` carries `raw`, the header's wire bytes, and `ProxyEvent::Datagram` carries `header_raw`, the datagram's bytes before its payload.
+- Requires `moqtap-client` 0.9.1.
+
 ### Fixed
 
 - Events and hook contexts for streams on a WebTransport leg carry the QUIC stream ID instead of 0.
+- On draft-14, `ProxyEvent::Datagram`'s `payload_len` is the payload's length instead of 0.
 
 ## [0.10.0] - 2026-10-29
 

@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "moqtap-proxy"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "bytes",
  "ciborium",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "moqtap-trace"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ciborium",
  "serde",

@@ -510,6 +510,39 @@ fn a_headers_level_trace_groups_three_streams_that_share_a_track_alias() {
     }
 }
 
+/// Both writers put each stream's header bytes under `"hdr"`, and a reader
+/// keeps them beside fields that disagree with them.
+#[test]
+fn every_stream_carries_its_header_bytes_from_both_writers() {
+    let Some(root) = root() else { return };
+
+    for file in ["js.moqtrace", "rust.moqtrace"] {
+        let (segments, _) = read_segments(&case_bytes(&root, "v2-stream-header-bytes", file));
+        let opened: Vec<_> = segments[0]
+            .events
+            .iter()
+            .filter_map(|e| match &e.data {
+                EventData::StreamOpened { stream_id, track_alias, header_raw, .. } => {
+                    Some((*stream_id, *track_alias, header_raw.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            opened,
+            vec![
+                (7, Some(9), Some(vec![0x14, 0x09, 0x07, 0x02, 0x80])),
+                (11, None, Some(vec![0x05, 0x2a])),
+                (0, Some(9), Some(vec![0x00, 0x09, 0xf1, 0x00, 0x00, 0x00, 0x00, 0x03, 0x80])),
+                // The field says 9, the bytes say 8.
+                (15, Some(9), Some(vec![0x14, 0x08, 0x07, 0x03, 0x80])),
+            ],
+            "{file}"
+        );
+        assert!(segments[0].events.iter().all(|e| e.extra.is_empty()), "{file}: hdr in extra");
+    }
+}
+
 /// The value a store holds under a text key, or `None`.
 fn stored<'a>(store: &'a [(Value, Value)], key: &str) -> Option<&'a Value> {
     store.iter().find(|(k, _)| k.as_text() == Some(key)).map(|(_, v)| v)

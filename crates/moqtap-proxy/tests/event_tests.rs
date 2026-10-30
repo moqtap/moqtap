@@ -146,6 +146,7 @@ fn proxy_event_datagram() {
         session_id: SessionId(1),
         side: ProxySide::RelayToProxy,
         header,
+        header_raw: bytes::Bytes::from_static(&[0x00, 0x01, 0x00, 0x00, 0x80]),
         payload_len: 42,
     };
     let debug = format!("{event:?}");

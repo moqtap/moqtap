@@ -116,6 +116,7 @@ fn stream_opened_roundtrip() {
             subgroup_id: None,
             fetch_request_id: None,
             group_id: None,
+            header_raw: None,
         },
     );
     assert_eq!(roundtrip(&event), event);
@@ -271,6 +272,7 @@ fn stream_type_variants() {
                 subgroup_id: None,
                 fetch_request_id: None,
                 group_id: None,
+                header_raw: None,
             },
         );
         let EventData::StreamOpened { stream_type, .. } = roundtrip(&event).data else {
@@ -305,10 +307,9 @@ fn key_count(cbor: &Value, key: &str) -> usize {
     pairs.iter().filter(|(k, _)| k.as_text() == Some(key)).count()
 }
 
-/// No detail level records the bytes of a `SUBGROUP_HEADER`, so a track alias
-/// and a subgroup ID are recorded as fields or not at all — and until these
-/// fields existed, a `headers` trace could not say which track a stream
-/// belonged to, which is most of what the level exists for.
+/// Without a track alias and a subgroup ID, a `headers` trace that holds no
+/// header bytes cannot say which track a stream belonged to, which is most of
+/// what the level exists for.
 #[test]
 fn a_subgroup_stream_round_trips_its_track_alias_and_subgroup_id() {
     let event = TraceEvent::new(
@@ -324,6 +325,7 @@ fn a_subgroup_stream_round_trips_its_track_alias_and_subgroup_id() {
             subgroup_id: Some(2),
             fetch_request_id: None,
             group_id: None,
+            header_raw: None,
         },
     );
     assert_eq!(roundtrip(&event), event);
@@ -345,6 +347,7 @@ fn a_fetch_stream_round_trips_its_request_id() {
             subgroup_id: None,
             fetch_request_id: Some(19),
             group_id: None,
+            header_raw: None,
         },
     );
     assert_eq!(roundtrip(&event), event);
@@ -366,6 +369,7 @@ fn a_datagram_stream_round_trips_its_group_id() {
             subgroup_id: None,
             fetch_request_id: None,
             group_id: Some(11),
+            header_raw: None,
         },
     );
     assert_eq!(roundtrip(&event), event);
@@ -380,7 +384,7 @@ fn a_stream_opened_carrying_none_of_them_still_round_trips() {
     assert_eq!(roundtrip(&event), event);
 
     let cbor: Value = (&event).into();
-    for key in ["ta", "sg", "fri", "g"] {
+    for key in ["ta", "sg", "fri", "g", "hdr"] {
         assert_eq!(key_count(&cbor, key), 0, "'{key}' was written for a field that is None");
     }
 }
@@ -448,6 +452,71 @@ fn a_stream_identifier_outside_its_scope_is_kept_rather_than_rejected() {
     assert_eq!(stream_type, StreamType::Fetch);
     assert_eq!(subgroup_id, Some(2));
     assert_eq!(fetch_request_id, Some(19));
+}
+
+// ── the header bytes on event 1 ────────────────────────────
+
+/// The six bytes `@moqtap/trace`'s own test writes under `"hdr"`.
+const SUBGROUP_HEADER_BYTES: [u8; 6] = [0x14, 0x02, 0x05, 0x01, 0x40, 0x80];
+
+#[test]
+fn a_stream_opened_round_trips_its_header_bytes_as_a_byte_string() {
+    let event = TraceEvent::new(
+        0,
+        100,
+        EventData::StreamOpened {
+            stream_id: 42,
+            direction: Direction::Receive,
+            stream_type: StreamType::Subgroup,
+            track_alias: Some(2),
+            subgroup_id: Some(1),
+            fetch_request_id: None,
+            group_id: None,
+            header_raw: Some(SUBGROUP_HEADER_BYTES.to_vec()),
+        },
+    );
+    let read = roundtrip(&event);
+    assert_eq!(read, event);
+    assert!(read.extra.is_empty());
+
+    let cbor: Value = (&event).into();
+    let Value::Map(pairs) = &cbor else { panic!("event is not a CBOR map") };
+    let hdr = pairs.iter().find(|(k, _)| k.as_text() == Some("hdr")).map(|(_, v)| v);
+    assert_eq!(hdr, Some(&Value::Bytes(SUBGROUP_HEADER_BYTES.to_vec())));
+}
+
+/// cbor-x wraps a byte string in tag 64 unless told not to; a reader takes it.
+#[test]
+fn header_bytes_under_tag_64_read_as_bytes() {
+    let mut cbor = stream_opened_cbor(2, &[("fri", 7)]);
+    let Value::Map(ref mut pairs) = cbor else { panic!("event is not a CBOR map") };
+    pairs.push((
+        Value::Text("hdr".into()),
+        Value::Tag(64, Box::new(Value::Bytes(vec![0x05, 0x07]))),
+    ));
+
+    let event = TraceEvent::try_from(cbor).unwrap();
+    let EventData::StreamOpened { header_raw, .. } = &event.data else {
+        panic!("expected a stream open");
+    };
+    assert_eq!(header_raw.as_deref(), Some(&[0x05, 0x07][..]));
+    assert!(event.extra.is_empty());
+}
+
+/// A `"hdr"` that is not a byte string is not read, and survives in `extra`.
+#[test]
+fn a_header_that_is_not_a_byte_string_is_kept_in_extra() {
+    let mut cbor = stream_opened_cbor(0, &[]);
+    let Value::Map(ref mut pairs) = cbor else { panic!("event is not a CBOR map") };
+    pairs.push((Value::Text("hdr".into()), Value::Text("oops".into())));
+
+    let event = TraceEvent::try_from(cbor).unwrap();
+    let EventData::StreamOpened { header_raw, .. } = &event.data else {
+        panic!("expected a stream open");
+    };
+    assert_eq!(*header_raw, None);
+    assert_eq!(event.extra, vec![(Value::Text("hdr".into()), Value::Text("oops".into()))]);
+    assert_eq!(roundtrip(&event), event);
 }
 
 // ── the bytes behind an error, on event 6 ──────────────────
@@ -1118,6 +1187,7 @@ fn stream_opened() -> TraceEvent {
             subgroup_id: None,
             fetch_request_id: None,
             group_id: None,
+            header_raw: None,
         },
     )
 }

@@ -386,19 +386,15 @@ pub enum EventData {
     },
     /// A QUIC stream was opened (event type 1).
     ///
-    /// The four optional identifiers are what a `headers` recording has
-    /// instead of the stream header bytes. No detail level records the bytes
-    /// of a `SUBGROUP_HEADER`, a fetch header or a datagram header, so a value
-    /// carried only there has nothing left to be re-parsed from — and before
-    /// these fields existed the model could express group, object, priority
-    /// and status and nothing else, which left a `headers` trace unable to say
-    /// which track a stream belonged to.
+    /// The four optional identifiers are what the recorder read from the
+    /// stream's header, and [`header_raw`](EventData::StreamOpened::header_raw)
+    /// is the header itself when the recorder held it. Without them a
+    /// `headers` trace cannot say which track a stream belonged to.
     ///
     /// Each is `None` when the recorder did not know it — and also when the
-    /// file carried the key with a value that is not an unsigned integer, in
-    /// which case the entry is kept verbatim in [`TraceEvent::extra`] instead
-    /// of being read here. A reader must not refuse a stream for lacking one:
-    /// every recording predating the keys lacks all four.
+    /// file carried the key with a value of the wrong type, in which case the
+    /// entry is kept verbatim in [`TraceEvent::extra`] instead of being read
+    /// here. A reader must not refuse a stream for lacking one.
     StreamOpened {
         /// QUIC stream ID.
         stream_id: u64,
@@ -428,6 +424,13 @@ pub enum EventData {
         /// serves a reader that has not yet seen an object, and a
         /// disagreement between the two is not corruption.
         group_id: Option<u64>,
+        /// The header's wire bytes (`"hdr"`, `headers` level and up): from the
+        /// stream type through the last header field, or a datagram's bytes
+        /// before its payload. No transport framing.
+        ///
+        /// Where these and the fields above disagree, the bytes are the
+        /// evidence: the fields are what the recorder read from them.
+        header_raw: Option<Vec<u8>>,
     },
     /// A QUIC stream was closed (event type 2).
     StreamClosed {
@@ -882,12 +885,14 @@ impl serde::Serialize for TraceEvent {
                 subgroup_id,
                 fetch_request_id,
                 group_id,
+                header_raw,
                 ..
             } => {
                 3 + usize::from(track_alias.is_some())
                     + usize::from(subgroup_id.is_some())
                     + usize::from(fetch_request_id.is_some())
                     + usize::from(group_id.is_some())
+                    + usize::from(header_raw.is_some())
             }
             EventData::StreamClosed { .. } => 2,
             EventData::ObjectHeader { .. } => 5,
@@ -961,6 +966,7 @@ impl serde::Serialize for TraceEvent {
                 subgroup_id,
                 fetch_request_id,
                 group_id,
+                header_raw,
             } => {
                 map.serialize_entry("e", &EVENT_STREAM_OPENED)?;
                 map.serialize_entry("sid", stream_id)?;
@@ -977,6 +983,9 @@ impl serde::Serialize for TraceEvent {
                 }
                 if let Some(g) = group_id {
                     map.serialize_entry("g", g)?;
+                }
+                if let Some(hdr) = header_raw {
+                    map.serialize_entry("hdr", &ByteStr(hdr))?;
                 }
             }
             EventData::StreamClosed { stream_id, error_code } => {
@@ -1315,7 +1324,12 @@ fn writes_variant_key(data: &EventData, key: &str) -> bool {
             among(key, &["d", "mt", "msg"], &[("sid", stream_id.is_some()), ("raw", raw.is_some())])
         }
         EventData::StreamOpened {
-            track_alias, subgroup_id, fetch_request_id, group_id, ..
+            track_alias,
+            subgroup_id,
+            fetch_request_id,
+            group_id,
+            header_raw,
+            ..
         } => among(
             key,
             &["sid", "d", "st"],
@@ -1324,6 +1338,7 @@ fn writes_variant_key(data: &EventData, key: &str) -> bool {
                 ("sg", subgroup_id.is_some()),
                 ("fri", fetch_request_id.is_some()),
                 ("g", group_id.is_some()),
+                ("hdr", header_raw.is_some()),
             ],
         ),
         EventData::StreamClosed { .. } => among(key, &["sid", "ec"], &[]),
@@ -1448,6 +1463,7 @@ impl TryFrom<Value> for TraceEvent {
                     subgroup_id: get_uint(&pairs, "sg"),
                     fetch_request_id: get_uint(&pairs, "fri"),
                     group_id: get_uint(&pairs, "g"),
+                    header_raw: get_bytes(&pairs, "hdr"),
                 }
             }
             EVENT_STREAM_CLOSED => EventData::StreamClosed {

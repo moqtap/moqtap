@@ -90,6 +90,7 @@ fn base_events() -> Vec<TraceEvent> {
                 subgroup_id: None,
                 fetch_request_id: None,
                 group_id: None,
+                header_raw: None,
             },
         ),
         TraceEvent::new(
@@ -312,6 +313,7 @@ pub fn v2_unknown_event() -> Case {
                     subgroup_id: None,
                     fetch_request_id: None,
                     group_id: None,
+                    header_raw: None,
                 },
             ),
             TraceEvent::new(
@@ -397,6 +399,7 @@ pub fn v2_extra_keys() -> Case {
                     subgroup_id: None,
                     fetch_request_id: None,
                     group_id: None,
+                    header_raw: None,
                 },
             )
             .with_extra(vec![
@@ -576,6 +579,7 @@ pub fn v2_headers_level_flow() -> Case {
                     subgroup_id: Some(2),
                     fetch_request_id: None,
                     group_id: None,
+                    header_raw: None,
                 },
             ),
             TraceEvent::new(
@@ -603,6 +607,7 @@ pub fn v2_headers_level_flow() -> Case {
                     subgroup_id: None,
                     fetch_request_id: Some(42),
                     group_id: None,
+                    header_raw: None,
                 },
             ),
             // A datagram carries its group on the stream-opened event, because
@@ -619,6 +624,7 @@ pub fn v2_headers_level_flow() -> Case {
                     subgroup_id: None,
                     fetch_request_id: None,
                     group_id: Some(4_294_967_296),
+                    header_raw: None,
                 },
             ),
         ],
@@ -734,6 +740,7 @@ pub fn v2_header_extra() -> Case {
                     subgroup_id: None,
                     fetch_request_id: None,
                     group_id: None,
+                    header_raw: None,
                 },
             ),
             TraceEvent::new(
@@ -793,6 +800,7 @@ pub fn v2_error_with_raw() -> Case {
                     subgroup_id: None,
                     fetch_request_id: None,
                     group_id: None,
+                    header_raw: None,
                 },
             ),
             TraceEvent::new(
@@ -835,6 +843,100 @@ pub fn v2_error_with_raw() -> Case {
     }
 }
 
+/// Event 1 carrying the stream header's bytes under `"hdr"`.
+///
+/// One stream of each type, as `v2-headers-level-flow` has, each with the bytes
+/// a draft-18 peer put on the wire: a `SUBGROUP_HEADER`, a fetch header, and a
+/// datagram's bytes before its payload. The last stream's `"ta"` disagrees with
+/// its own bytes (8 on the wire, 9 in the field). A reader keeps the event; the
+/// bytes are the evidence.
+///
+/// Key order matches the JS case, so the two encodings differ only where the
+/// encoders do.
+pub fn v2_stream_header_bytes() -> Case {
+    let mut header = TraceHeader::new(
+        "moq-transport-18",
+        Perspective::Observer,
+        DetailLevel::Headers,
+        START_TIME,
+    );
+    header.session_id = Some("v2-stream-header-bytes".into());
+    let opened = |stream_id, stream_type, ta, sg, fri, g, hdr: &[u8]| EventData::StreamOpened {
+        stream_id,
+        direction: Direction::Receive,
+        stream_type,
+        track_alias: ta,
+        subgroup_id: sg,
+        fetch_request_id: fri,
+        group_id: g,
+        header_raw: Some(hdr.to_vec()),
+    };
+    let object = |stream_id, group, object| EventData::ObjectHeader {
+        stream_id,
+        group,
+        object,
+        publisher_priority: 128,
+        object_status: 0,
+    };
+    Case {
+        header,
+        events: vec![
+            // Type 0x14 (subgroup ID present), alias 9, group 7, subgroup 2,
+            // priority 0x80.
+            TraceEvent::new(
+                0,
+                100,
+                opened(
+                    7,
+                    StreamType::Subgroup,
+                    Some(9),
+                    Some(2),
+                    None,
+                    None,
+                    &[0x14, 0x09, 0x07, 0x02, 0x80],
+                ),
+            ),
+            TraceEvent::new(1, 150, object(7, 7, 0)),
+            // FETCH_HEADER: type 0x05, request ID 42.
+            TraceEvent::new(
+                2,
+                200,
+                opened(11, StreamType::Fetch, None, None, Some(42), None, &[0x05, 0x2a]),
+            ),
+            // Datagram type 0x00, alias 9, group 2^32 (draft-18's five-byte
+            // varint), object 3, priority 0x80. Stream 0 by convention.
+            TraceEvent::new(
+                3,
+                300,
+                opened(
+                    0,
+                    StreamType::Datagram,
+                    Some(9),
+                    None,
+                    None,
+                    Some(4_294_967_296),
+                    &[0x00, 0x09, 0xf1, 0x00, 0x00, 0x00, 0x00, 0x03, 0x80],
+                ),
+            ),
+            TraceEvent::new(4, 300, object(0, 4_294_967_296, 3)),
+            // The bytes say alias 8; the field says 9.
+            TraceEvent::new(
+                5,
+                400,
+                opened(
+                    15,
+                    StreamType::Subgroup,
+                    Some(9),
+                    Some(3),
+                    None,
+                    None,
+                    &[0x14, 0x08, 0x07, 0x03, 0x80],
+                ),
+            ),
+        ],
+    }
+}
+
 /// Every single-segment case both implementations author, by directory name.
 pub fn authored_cases() -> Vec<(&'static str, Case)> {
     vec![
@@ -847,6 +949,7 @@ pub fn authored_cases() -> Vec<(&'static str, Case)> {
         ("v2-headers-level-flow", v2_headers_level_flow()),
         ("v2-header-extra", v2_header_extra()),
         ("v2-error-with-raw", v2_error_with_raw()),
+        ("v2-stream-header-bytes", v2_stream_header_bytes()),
     ]
 }
 

@@ -193,6 +193,46 @@ async fn events_carry_the_quic_stream_id_of_their_leg() {
         .await;
     assert_eq!(headers, vec![7, 11], "the relay's data streams follow its control stream");
 
+    let mut raws: Vec<Vec<u8>> = recorder
+        .events
+        .lock()
+        .expect("events")
+        .iter()
+        .filter_map(|e| match e {
+            ProxyEvent::DataStreamHeader { side, raw, .. } if *side == r2p => Some(raw.to_vec()),
+            _ => None,
+        })
+        .collect();
+    raws.sort();
+    assert_eq!(
+        raws,
+        vec![vec![0x14, 1, 0, 0, 0x80], vec![0x14, 2, 0, 0, 0x80]],
+        "each header event carries the header's bytes and nothing after them"
+    );
+
+    // Type 0x00, alias 1, group 2^32, object 3, priority 0x80, then the payload.
+    let datagram_header = [0x00, 0x01, 0xf1, 0x00, 0x00, 0x00, 0x00, 0x03, 0x80];
+    let datagram = [&datagram_header[..], b"frame"].concat();
+    relay_conn.send_datagram(datagram.into()).expect("relay send_datagram");
+    let deadline = Instant::now() + PATIENCE;
+    let seen = loop {
+        let seen = recorder.events.lock().expect("events").iter().find_map(|e| match e {
+            ProxyEvent::Datagram { side, header_raw, payload_len, .. } if *side == r2p => {
+                Some((header_raw.to_vec(), *payload_len))
+            }
+            _ => None,
+        });
+        if seen.is_some() || Instant::now() >= deadline {
+            break seen;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(
+        seen,
+        Some((datagram_header.to_vec(), 5)),
+        "a datagram's header bytes stop at its payload"
+    );
+
     let objects = recorder
         .wait_for(&[7, 7, 11, 11], |e| match e {
             ProxyEvent::Object { side, stream_id, .. } => on(r2p, *side, *stream_id),
