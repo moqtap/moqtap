@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-30
+
+### Fixed
+
+- Over WebTransport, `SendStream::stream_id` and `RecvStream::stream_id` return the QUIC stream ID instead of 0, and keep it after `finish` or `stop`.
+
 ## [0.9.0] - 2026-10-29
 
 ### Changed

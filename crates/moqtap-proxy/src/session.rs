@@ -1831,10 +1831,8 @@ impl ForwardCtx {
     /// Mint this stream's session-local identity.
     ///
     /// Called **once** per forwarded stream, at accept, and handed to every
-    /// hook site that stream reaches. Monotonic, never reused, and
-    /// deliberately not the transport stream id: on the WebTransport arm
-    /// that is the constant `0` for every stream, so a transport-keyed
-    /// identity collapses a whole side onto one entry.
+    /// hook site that stream reaches. Monotonic, never reused, and not the
+    /// transport stream id; see [`StreamKey`].
     fn mint_key(&self, side: ProxySide) -> StreamKey {
         StreamKey { side, id: self.next_stream_id.fetch_add(1, Ordering::Relaxed) }
     }
@@ -1955,8 +1953,8 @@ async fn close_after_draining(drain: Duration, ctx: &ForwardCtx) {
 struct StreamState<'a> {
     stream_id: u64,
     /// This stream's session-local identity, minted once at accept and
-    /// carried to every site it reaches. Distinct from `stream_id`, which
-    /// is the transport id and is `0` on every WebTransport stream.
+    /// carried to every site it reaches. Distinct from `stream_id`, the
+    /// transport id.
     key: StreamKey,
     /// `true` selects the control-stream rules at `Site::StreamEnd`, where
     /// a synthesized reset is a session-level protocol violation and is

@@ -210,8 +210,7 @@ pub enum ActionKind {
     /// use moqtap_proxy::event::ProxySide;
     /// use moqtap_proxy::shape::StreamKey;
     ///
-    /// // A session-local id plus the side it arrived on — never a
-    /// // transport stream id, which is the constant 0 on WebTransport.
+    /// // A session-local id and the side it arrived on.
     /// let key = StreamKey { side: ProxySide::ClientToProxy, id: 7 };
     /// let b = StreamAction::SerializeAfter(key);
     /// assert!(matches!(b, StreamAction::SerializeAfter(k) if k == key));

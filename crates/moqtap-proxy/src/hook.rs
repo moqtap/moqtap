@@ -91,9 +91,7 @@ pub struct StreamCtx<'a> {
     pub side: ProxySide,
     /// The source stream's transport-level identifier.
     ///
-    /// **`0` for every WebTransport stream** — `SendStream::stream_id()` and
-    /// `RecvStream::stream_id()` both return the constant on that arm. Use
-    /// it to correlate with the transport-level events in
+    /// Use it to correlate with the transport-level events in
     /// [`crate::event`]; use [`Self::key`] to *identify* the stream.
     pub stream_id: u64,
     /// The draft this stream is being parsed under. See
@@ -238,12 +236,7 @@ impl<'a> StreamCtx<'a> {
     /// [`ProxyHook::on_stream_end`] for one stream, unique for the
     /// session's lifetime, and never reused.
     ///
-    /// **Not** [`Self::stream_id`]: that is the transport id, which is the
-    /// constant `0` on every WebTransport stream, so keying on it would
-    /// collapse every WT stream of a side onto one entry and make
-    /// `SerializeAfter` attach a stream to an arbitrary sibling — or to
-    /// itself, which is a self-deadlock that degrades to a `max_hold`
-    /// stall. See [`StreamKey`].
+    /// **Not** [`Self::stream_id`], the transport's id. See [`StreamKey`].
     #[must_use]
     pub fn key(&self) -> StreamKey {
         self.key

@@ -7,9 +7,22 @@ use std::future::Future;
 use super::{RecvStream, SendStream, TransportError};
 
 /// WebTransport send stream wrapping `wtransport::SendStream`.
-pub struct WtSendStream(Option<wtransport::SendStream>);
+///
+/// The QUIC stream ID is kept beside the stream because [`WtSendStream::finish`]
+/// moves the stream out.
+pub struct WtSendStream(Option<wtransport::SendStream>, u64);
 
 impl WtSendStream {
+    fn new(stream: wtransport::SendStream) -> Self {
+        let id = u64::from(stream.quic_stream().id());
+        Self(Some(stream), id)
+    }
+
+    /// The QUIC stream ID, which outlives the stream.
+    pub fn stream_id(&self) -> u64 {
+        self.1
+    }
+
     /// Write all bytes to the stream.
     pub async fn write_all(&mut self, buf: &[u8]) -> Result<(), TransportError> {
         self.0.as_mut().ok_or(TransportError::StreamClosed)?.write_all(buf).await.map_err(write_err)
@@ -81,9 +94,19 @@ impl WtSendStream {
 /// `wtransport::RecvStream::stop` consumes `self` by value, so
 /// [`WtRecvStream::stop`] must be able to move it out from behind a
 /// `&mut self`. A `None` inner means the stream was already stopped.
-pub struct WtRecvStream(Option<wtransport::RecvStream>);
+pub struct WtRecvStream(Option<wtransport::RecvStream>, u64);
 
 impl WtRecvStream {
+    fn new(stream: wtransport::RecvStream) -> Self {
+        let id = u64::from(stream.quic_stream().id());
+        Self(Some(stream), id)
+    }
+
+    /// The QUIC stream ID, which outlives the stream.
+    pub fn stream_id(&self) -> u64 {
+        self.1
+    }
+
     /// Read data into the buffer. Returns `Ok(Some(n))` with bytes read,
     /// `Ok(None)` on stream end, or `Err` on failure.
     pub async fn read(&mut self, buf: &mut [u8]) -> Result<Option<usize>, TransportError> {
@@ -208,8 +231,8 @@ impl WebTransportTransport {
             self.0.open_bi().await.map_err(|e| TransportError::Connection(e.to_string()))?;
         let (send, recv) = opening.await.map_err(|e| TransportError::Connection(e.to_string()))?;
         Ok((
-            SendStream::WebTransport(WtSendStream(Some(send))),
-            RecvStream::WebTransport(WtRecvStream(Some(recv))),
+            SendStream::WebTransport(WtSendStream::new(send)),
+            RecvStream::WebTransport(WtRecvStream::new(recv)),
         ))
     }
 
@@ -218,8 +241,8 @@ impl WebTransportTransport {
         let (send, recv) =
             self.0.accept_bi().await.map_err(|e| TransportError::Connection(e.to_string()))?;
         Ok((
-            SendStream::WebTransport(WtSendStream(Some(send))),
-            RecvStream::WebTransport(WtRecvStream(Some(recv))),
+            SendStream::WebTransport(WtSendStream::new(send)),
+            RecvStream::WebTransport(WtRecvStream::new(recv)),
         ))
     }
 
@@ -228,14 +251,14 @@ impl WebTransportTransport {
         let opening =
             self.0.open_uni().await.map_err(|e| TransportError::Connection(e.to_string()))?;
         let send = opening.await.map_err(|e| TransportError::Connection(e.to_string()))?;
-        Ok(SendStream::WebTransport(WtSendStream(Some(send))))
+        Ok(SendStream::WebTransport(WtSendStream::new(send)))
     }
 
     /// Accept an incoming unidirectional stream.
     pub async fn accept_uni(&self) -> Result<RecvStream, TransportError> {
         let recv =
             self.0.accept_uni().await.map_err(|e| TransportError::Connection(e.to_string()))?;
-        Ok(RecvStream::WebTransport(WtRecvStream(Some(recv))))
+        Ok(RecvStream::WebTransport(WtRecvStream::new(recv)))
     }
 
     /// Send a datagram.

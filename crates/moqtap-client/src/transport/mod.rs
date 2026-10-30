@@ -346,7 +346,7 @@ impl SendStream {
         match self {
             SendStream::Quic(s) => u64::from(s.id()),
             #[cfg(feature = "webtransport")]
-            SendStream::WebTransport(_) => 0, // WebTransport doesn't expose stream IDs
+            SendStream::WebTransport(s) => s.stream_id(),
         }
     }
 
@@ -516,7 +516,7 @@ impl RecvStream {
         match self {
             RecvStream::Quic(s) => u64::from(s.id()),
             #[cfg(feature = "webtransport")]
-            RecvStream::WebTransport(_) => 0,
+            RecvStream::WebTransport(s) => s.stream_id(),
         }
     }
 

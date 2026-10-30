@@ -988,7 +988,7 @@ dependencies = [
 
 [[package]]
 name = "moqtap-client"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "moqtap-codec",

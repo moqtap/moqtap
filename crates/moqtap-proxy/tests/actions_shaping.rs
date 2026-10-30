@@ -4263,9 +4263,7 @@ impl ProxyHook for MixedClassHook {
 /// ambiguous:
 ///
 /// - `Impairment{ClassChangedMidStream}` — **once per stream**, naming the
-///   [`StreamKey`] the hook was shown. Keyed on the key and not on the
-///   transport id, or "once per stream" would read as "once per session" on
-///   the WebTransport arm, where every transport stream id is `0`.
+///   [`StreamKey`] the hook was shown.
 /// - `ShapeStats::streams_with_mixed_classes` — the running figure beside it.
 /// - `ClassStats::starved_behind_other_class` on the **tail** class, which is
 ///   the number that distinguishes "somebody else was in front of me" from

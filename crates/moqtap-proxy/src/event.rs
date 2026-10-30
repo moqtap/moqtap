@@ -119,7 +119,7 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side opened the stream.
         side: ProxySide,
-        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        /// QUIC stream ID on `side`'s connection.
         stream_id: u64,
         /// The parsed header.
         header: DataStreamHeaderKind,
@@ -152,7 +152,7 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side sent the object.
         side: ProxySide,
-        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        /// QUIC stream ID on `side`'s connection.
         stream_id: u64,
         /// The object's identity and framing, without its payload.
         meta: ObjectMeta,
@@ -197,7 +197,7 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side opened the stream.
         side: ProxySide,
-        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        /// QUIC stream ID on `side`'s connection.
         stream_id: u64,
     },
 
@@ -207,7 +207,7 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side opened the stream.
         side: ProxySide,
-        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        /// QUIC stream ID on `side`'s connection.
         stream_id: u64,
     },
 
@@ -231,7 +231,7 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// Which side closed.
         side: ProxySide,
-        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        /// QUIC stream ID on `side`'s connection.
         stream_id: u64,
     },
 
@@ -256,7 +256,7 @@ pub enum ProxyEvent {
         /// this is the ingress side the bytes were arriving on; for a
         /// `STOP_SENDING` it is the egress side they were leaving on.
         side: ProxySide,
-        /// QUIC stream ID on `side`'s connection; `0` on WebTransport.
+        /// QUIC stream ID on `side`'s connection.
         stream_id: u64,
         /// The peer's application error code, forwarded verbatim.
         code: u64,
@@ -513,12 +513,10 @@ pub enum ProxyEvent {
         session_id: SessionId,
         /// The side the unit arrived on.
         side: ProxySide,
-        /// Session-local identity. Unique even on the WebTransport arm,
-        /// where every transport stream id is the constant `0`.
+        /// Session-local identity.
         key: StreamKey,
         /// Transport stream id, for correlation with the other events in
-        /// this enum. **`0` for every WebTransport stream**; `key` is what
-        /// identifies.
+        /// this enum; `key` is what identifies.
         stream_id: u64,
         /// The class the unit resolved to, or an empty string for a unit
         /// that matched no rule and for an outcome that is about the stream
@@ -964,9 +962,7 @@ pub enum ImpairmentKind {
     /// decision at each of the two stream sites, and a decision that names a
     /// live target reports nothing at all.
     ///
-    /// Both fields are [`StreamKey`]s rather than transport ids, because
-    /// attribution is the whole point of the report and the transport id is
-    /// the constant `0` on every WebTransport stream.
+    /// Both fields are [`StreamKey`]s, the identity a hook names a stream by.
     SerializeTargetUnknown {
         /// The stream that asked to be serialized.
         key: StreamKey,
@@ -1124,21 +1120,16 @@ pub enum ImpairmentKind {
     /// [`DirectionStats::streams_with_mixed_classes`](crate::shape::DirectionStats::streams_with_mixed_classes),
     /// which states it from the other side.
     ///
-    /// Keyed on [`StreamKey`] and **not** on `stream_id`, for the reason
-    /// [`SerializeTargetUnknown`](Self::SerializeTargetUnknown) is: on the
-    /// WebTransport arm every transport stream id is the constant `0`, so a
-    /// report identified by `stream_id` alone would make "once per stream"
-    /// read as "once per session" — and a test asserting one event per mixed
-    /// stream would pass on QUIC and be unwritable on WT. The transport id
-    /// rides along because it is what correlates this report with every
-    /// other event in this enum.
+    /// Keyed on [`StreamKey`], as
+    /// [`SerializeTargetUnknown`](Self::SerializeTargetUnknown) is. The
+    /// transport id rides along because it is what correlates this report
+    /// with every other event in this enum.
     ClassChangedMidStream {
         /// Session-local identity of the destination stream carrying both
-        /// classes. Unique even on the WebTransport arm.
+        /// classes.
         key: StreamKey,
         /// Transport stream id, for correlation with the other events in
-        /// this enum. **`0` for every WebTransport stream**; `key` is what
-        /// identifies.
+        /// this enum; `key` is what identifies.
         stream_id: u64,
     },
 }

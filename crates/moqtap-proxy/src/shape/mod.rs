@@ -631,17 +631,9 @@ pub enum Discipline {
 /// drafts and `track_alias` on every fetch stream, so a media-keyed
 /// serialize would silently miss.
 ///
-/// Deliberately **not** the transport stream id either. On the WebTransport
-/// arm `SendStream::stream_id()` is the constant `0`
-/// (`moqtap-client/src/transport/mod.rs:133-137`), and the proxy really
-/// does accept WebTransport clients — so a transport-keyed `StreamKey`
-/// collapses every WT stream onto one entry per side. A serialize would
-/// then attach a stream to an arbitrary sibling, or to itself, which is a
-/// self-deadlock that degrades to a `max_hold` stall, and every per-stream
-/// report becomes unattributable.
+/// The proxy mints it and the hooks name it; the transport stream id is a
+/// separate field on the events that carry both.
 ///
-/// The transport id is still worth reporting where it means something, so
-/// it stays a separate field on the events that carry both.
 /// `Hash` is hand-written because [`ProxySide`] does not derive it and
 /// lives in a module this type may not edit. It hashes the side's
 /// discriminant, so it agrees with the derived [`PartialEq`] exactly:
