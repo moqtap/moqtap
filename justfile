@@ -215,16 +215,9 @@ draft-cfg:
 draft-parity:
     python3 scripts/check-draft-parity.py
 
-# The fourth silent construct is prose, and one shape of it is checkable: a
-# comment that counts the whole draft set in words is wrong from the commit
-# that adds a draft, and the number was never carrying anything the sentence
-# did not already say: "all of them" and "every other draft" say it. This
-# reads the draft set off the tree, so it needs no edit when one lands; the day
-# it does, every phrase it asks about is a phrase that has just become false.
-#
-# A range that stops at the previous draft is the other half of that construct
-# and stays a judgement call — a draft really can end an era. See
-# `ARCHITECTURE.md` section 4 for the greps that find those.
+# A comment that counts the whole draft set in words is wrong from the commit
+# that adds a draft. The draft set is read off the tree, so this needs no edit
+# when one lands. A range that stops at the previous draft is not checked.
 #
 # No comment may count the draft set in words
 draft-counts:

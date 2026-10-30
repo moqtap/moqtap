@@ -154,12 +154,9 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 | `all-drafts` | yes | Enables every draft; this is `default` |
 | `webtransport` | no | WebTransport client support via `wtransport` |
 
-Four modules here are shared across drafts rather than copied into each one —
-`track_locations`, `forwarding_preference`, `malformed_tracks` and `transport`
-— and each states the rule it is under in its own doc comment: they hold the
-*observation*, and the answer to it belongs to each draft's own module.
-[`ARCHITECTURE.md`](../../ARCHITECTURE.md) is the workspace-wide statement of
-what may be shared and what may not, and of what to run when adding a draft.
+`transport`, `track_locations`, `forwarding_preference` and `malformed_tracks`
+are shared across drafts. `transport` serves every draft; each of the other
+three is compiled for the drafts named in its module docs.
 
 ## License
 

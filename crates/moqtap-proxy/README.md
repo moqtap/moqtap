@@ -142,13 +142,9 @@ would otherwise parse, arm, report shaping and shape nothing.
 | `serde` | no | `Serialize` and `Deserialize` on the configuration types, so a caller can read a shaping or transport profile from a file. No parser and no format: those are the caller's |
 | `qlog` | no | A QUIC-level capture per connection, written by quinn. Each leg config carries its own `QlogSpec` |
 
-**This crate has no `src/draftNN/` module and should not grow one.** It spans
-every draft at runtime, on `DraftVersion`, because it observes the protocol
-rather than implementing it — where `moqtap-codec` and `moqtap-client` use
-per-draft modules behind those feature flags. A behaviour that differs by draft
-is a predicate on `DraftVersion` here, and
-[`ARCHITECTURE.md`](../../ARCHITECTURE.md) says how to write one that cannot
-silently answer for a draft it has never met.
+This crate has no per-draft modules. It handles every enabled draft at runtime,
+keyed on `DraftVersion`. The `draftNN` features above select which drafts
+`moqtap-codec` and `moqtap-client` compile.
 
 ## License
 

@@ -130,23 +130,30 @@ moqtap-monitor        Producer monitor: an API the publisher calls, and the
                       uploader. No MoQT dependency.
 ```
 
-Three crates span every draft and they do it three different ways —
-`moqtap-codec` and `moqtap-client` with per-draft modules behind cargo features,
-`moqtap-proxy` with no draft modules at all and a runtime `match DraftVersion`.
-[`ARCHITECTURE.md`](ARCHITECTURE.md) states which applies where, what may be
-shared across drafts and what may not, and what to run when adding a draft.
-**Read it before sharing code across drafts.**
+### Draft support
+
+`moqtap-codec` and `moqtap-client` have one module per draft, `draft07` through
+`draft22`, each behind a cargo feature of the same name. Use a `draftNN` module
+when you target one draft and want its exact types.
+
+Each of those crates also has a `dispatch` module whose `Any*` enums
+(`AnyControlMessage`, `AnySubgroupHeader`, `AnyConnection`, ...) carry one
+variant per enabled draft. Use them when the draft is chosen at runtime.
+
+`DraftVersion` is not feature-gated: every variant exists in every build, and
+`DraftVersion::ALL` lists them oldest first. The enabled features decide which
+drafts a build can encode, decode and negotiate.
+
+`moqtap-proxy` has no per-draft modules. It handles every enabled draft at
+runtime, keyed on `DraftVersion`.
 
 ## Spec Compliance
 
-This implementation covers MoQT drafts 07 through 22. Each draft is a
-separate module in both `moqtap-codec` and `moqtap-client`; `moqtap-proxy` has
-none and spans them at runtime instead. See
-[`ARCHITECTURE.md`](ARCHITECTURE.md).
+This implementation covers MoQT drafts 07 through 22.
 
-Draft-22 is the newest and is not a default anywhere. It is not the interop
-target — interop ran against draft-18 — so no crate here promotes it to a
+Draft-22 is the newest and is not a default anywhere: no crate uses it as a
 connection default, an advertised-preferred version or an auto-selected draft.
+Interop testing ran against draft-18.
 
 ## License
 

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """No comment may count the draft set in words.
 
-`ARCHITECTURE.md` section 4 calls prose the fourth silent construct: "a doc
-comment saying 'all thirteen drafts' or 'drafts 15-19' compiles, passes, and
-gets quoted by the next person who greps for it". This reads the first half of
-that sentence. The second half — a range ending at the previous draft — stays a
-judgement call, because a draft really can end an era; a count of *all* the
-drafts cannot be anything but the draft set, and the draft set is on disk.
+A doc comment saying "all thirteen drafts" or "drafts 15-19" compiles, passes,
+and is wrong the day a draft lands. This reads the first half of that: a count
+of *all* the drafts cannot be anything but the draft set, and the draft set is
+on disk. The second half, a range ending at the previous draft, stays a
+judgement call, because a draft really can end an era.
 
 ## What it asks
 
@@ -33,8 +32,8 @@ It cannot be judged by its shape - about one in five counts something that is
 not the draft set - so the ones that are not are named in `NOT_THE_DRAFT_SET` with
 the reason, and everything else is an error. The list is short and each entry
 says what the number counts: a sixteen-bit ceiling, sixteen reddened gates,
-modules rather than drafts, and the two design documents that have to keep
-quoting the defective comment they are written about.
+modules rather than drafts, and a gate script that has to quote the defective
+comment it was written about.
 
 Naming them rather than counting them is the difference between a gate and a
 statistic. A residual with a number in front of it is one nobody finishes.
@@ -112,9 +111,8 @@ WORD = {11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen",
 #: What the count has to be counting for this to be the draft set. `rows` is
 #: here because the CI matrix and the justfile sweep are one row per draft;
 #: `versions`, `wire formats`, `session state machines` and `implementations`
-#: because the architecture notes count drafts by what each one holds rather
-#: than by the word draft, and those went stale the same way and were invisible
-#: to a narrower list.
+#: because prose counts drafts by what each one holds rather than by the word
+#: draft, and those go stale the same way.
 NOUNS = (r"drafts?|variants?|texts?|rows?|modules?|places?|versions?"
          r"|wire formats?|session state machines?|implementations?"
          r"|state machines?|arms?|match arms?|-armed|-draft")
@@ -136,23 +134,9 @@ FUNCTION = (r"of|at|is|are|was|were|and|or|that|for|in|on|to|with|but|so"
 
 
 NOT_THE_DRAFT_SET = {
-    ("ARCHITECTURE.md", '"All fourteen". All three have been derived'):
-        "quotes the doc comment that shipped over a short array - the phrase is "
-        "the evidence, and paraphrasing it would make the record say something "
-        "that did not happen",
-    ("ARCHITECTURE.md", 'reading "All fourteen" is this defect'):
-        "the same quotation, in the section that names the defect",
-    ("ARCHITECTURE.md", "which have fourteen and twelve distinct"):
-        "distinct variants in two files, not drafts",
-    ("ARCHITECTURE.md", 'grep -rn "fourteen drafts'):
-        "a grep recipe: it has to contain the phrases it hunts for",
-    ("ARCHITECTURE.md", 'file saying "all fifteen drafts"'):
-        "the example the recipe below it hunts for: a count one short beside a "
-        "range one short is the defect being illustrated",
-    ("ARCHITECTURE.md", "for f in $(grep -rl"):
-        "the same recipe, second half",
     ("scripts/check-draft-parity.py", "so a claim about 'every draft' is one"):
-        "quotes the same shipped comment, for the same reason",
+        "quotes a doc comment that shipped over a short array: the phrase is "
+        "the evidence",
     ("scripts/check-draft-parity.py", "fourteen of them today"):
         "counts the axes that gate reads and prints on every run, which does "
         "not move when a draft is added",

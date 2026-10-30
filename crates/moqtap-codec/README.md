@@ -56,45 +56,12 @@ moqtap_codec::
     draft07, draft08, ..., draft22       (per-draft wire format)
 ```
 
-**"No wire-level code is shared across drafts" is what the older wording here
-said, and it was not true.** `dispatch` and `data_dispatch` are ~4,900 lines at
-the crate root that decode and encode object headers, extension blocks,
-delta-encoded object IDs and stream-type fields across all the drafts — the
-tree diagram above has listed them since runtime dispatch landed, so the page
-contradicted itself in twelve lines. `fields/params.rs` is the sharper
-counterexample: it decodes wire bytes across drafts, calling `VarInt::decode` on
-a length-prefixed parameter value from a table four drafts share, and that is
-exactly where a remotely-triggerable panic lived — four drafts on one table while
-their own decoders disagreed about which parameter types are integers.
+`dispatch` and `data_dispatch` select the draft at runtime and forward to that
+draft's module. `auth_token`, `subscription_filter` and `range_filter` each
+serve the drafts named in their module docs.
 
-The rule that *is* true, and that this crate is actually built on:
-
-- **Every draft's format is decided in that draft's module.** `dispatch` and
-  `data_dispatch` contain an arm per draft that forwards to it; they choose
-  which decoder runs and never what it does. `data_dispatch`'s macro families
-  are grouped by wire era — `legacy_subgroup_glue!` for drafts 07-13,
-  `modern_subgroup_glue!` for draft-14 on, `fetch_glue!` for 07-13, plus
-  hand-written `fo14` onwards where no macro shape captured the flags.
-- **A crate-root module may be shared only where it serves a stated draft
-  subset**, and the subset is a specification fact rather than a convenience:
-  `subscription_filter` is drafts 15-19, `range_filter` is 19-22,
-  `fields/params.rs` is 07-10 because draft-08 removed ROLE and draft-11 keeps
-  its own tables.
-- **Anything reachable from a single draft belongs to that draft's module.**
-  This is the invariant `fields/mod.rs` is written under; violating it produced
-  16 dead-code errors under a single-draft build. Draft-14's parameter handling
-  was moved out of the shared file for exactly this reason.
-
-`fields` is settled and public: `AnyControlMessage::fields()` returns a
-`FieldMap`. `fields/params.rs` is `pub(crate)`, gated
-`any(draft07, draft08, draft09, draft10)`, and holds only what more than one
-draft shares — one non-SETUP parameter table across 07-10 and the generic
-`kvp_to_json_d07_inner` that reads it. Draft-07's SETUP table is draft-07-only;
-the 08-10 SETUP table, the ROLE-less cohort, is gated to those three. Every
-other draft defines its own tables in its own `draftNN/fields.rs`.
-
-The workspace-wide statement of all this — including the two other crates, which
-span drafts differently — is [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+`FieldValue` and `FieldMap` in `fields` are draft-agnostic:
+`AnyControlMessage::fields()` returns a `FieldMap` for any enabled draft.
 
 ## Draft selection
 
