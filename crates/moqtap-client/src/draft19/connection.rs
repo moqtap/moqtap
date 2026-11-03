@@ -214,11 +214,9 @@ pub enum ConnectionError {
     /// Object with status that is not Normal, it MUST close the session with a
     /// PROTOCOL_VIOLATION."
     ///
-    /// The codec decodes such an Object rather than refusing it — the frame is
-    /// well formed, and a tool that reports non-conforming traffic has to be
-    /// able to read it. Being an endpoint rather than an observer is what turns
-    /// it into an error, so it is raised here, on the receive path, and not in
-    /// the decoder.
+    /// The codec's `read_object` refuses such an Object as a bare
+    /// `InvalidField`. Its `read_object_meta` frames it, which is how the
+    /// receive path names the rule here and stays in step with the wire.
     #[error(
         "object {object_id} carries {properties_len} bytes of properties on status {status:?}, \
          which is not Normal"
@@ -788,6 +786,33 @@ impl FramedRecvStream {
                     if !self.fill().await? {
                         return Err(ConnectionError::UnexpectedEnd);
                     }
+                }
+                // The codec refuses properties on a non-Normal status as
+                // `InvalidField`, one of many readings of that variant. Its
+                // framing-only reader accepts them, which tells this case apart
+                // from the others and keeps the stream in step.
+                Err(CodecError::InvalidField) => {
+                    let mut framing = reader.clone();
+                    let mut cursor = &self.buf[..];
+                    if let Ok(meta) = framing.read_object_meta(&mut cursor) {
+                        let status = meta
+                            .status
+                            .and_then(moqtap_codec::draft19::types::ObjectStatus::from_u64);
+                        if let Some(status) = status.filter(|s| {
+                            meta.extension_headers_len > 0
+                                && *s != moqtap_codec::draft19::types::ObjectStatus::Normal
+                        }) {
+                            let consumed = self.buf.len() - cursor.remaining();
+                            self.buf.advance(consumed);
+                            *reader = framing;
+                            return Err(ConnectionError::PropertiesOnNonNormalStatus {
+                                object_id: meta.object_id,
+                                properties_len: meta.extension_headers_len as usize,
+                                status,
+                            });
+                        }
+                    }
+                    return Err(ConnectionError::Codec(CodecError::InvalidField));
                 }
                 Err(e) => return Err(ConnectionError::Codec(e)),
             }
@@ -3255,9 +3280,9 @@ impl Connection {
                 Some(crate::above_codec_rules::DraftSpecificCause::LocalRefusal)
             }
             // Section 11.2.1.2 states the rule and names the code in the same
-            // sentence. The codec decodes such an Object without complaint —
-            // the frame is well formed — so this layer is the only one that
-            // can raise it, and `close_for_data_stream` performs the close by
+            // sentence. The codec refuses such an Object only as a bare
+            // `InvalidField`, so this layer is the one that names the rule,
+            // and `close_for_data_stream` performs the close by
             // reading this same answer.
             ConnectionError::PropertiesOnNonNormalStatus { .. } => {
                 Some(DraftSpecificCause::PeerViolation {
@@ -3512,6 +3537,9 @@ impl Connection {
             // A property block that does not parse makes the Track malformed,
             // Section 12.7.
             | CodecError::MalformedObjectProperties { .. }
+            // A Malformed Track (Section 2.4.2) costs the track and not the
+            // session.
+            | CodecError::MalformedTrack { .. }
             // Raised only by the draft-23 codec.
             | CodecError::ControlMessageExceedsLimit { .. }
             | CodecError::MissingErrorDetail { .. }
@@ -3522,7 +3550,6 @@ impl Connection {
             | CodecError::TrackPropertiesNotPermitted
             | CodecError::DeltaDecodingOverflow { .. }
             | CodecError::MalformedObject { .. }
-            | CodecError::MalformedTrack { .. }
             | CodecError::UnknownObjectStatus(_)
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(
@@ -3649,10 +3676,9 @@ impl Connection {
                 self.close(wire_code, inner.to_string().as_bytes());
                 true
             }
-            // Not a `Codec` failure: the codec decodes such an Object without
-            // complaint, because the frame is well formed. It is being an
-            // endpoint that makes it a violation, so the variant is this
-            // crate's own and the mapping table above never sees it.
+            // Not a `Codec` failure: the codec refuses such an Object as a bare
+            // `InvalidField`, which `read_subgroup_object` narrows to this
+            // crate's own variant, so the mapping table above never sees it.
             //
             // The code comes from `draft_specific_cause` rather than from a
             // constant here, so this draft's reading of its own sentence is

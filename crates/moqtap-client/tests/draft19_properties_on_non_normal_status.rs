@@ -15,17 +15,10 @@
 //! object and the stream it came from, so it is the only one that can refuse it,
 //! and the refusal is worth nothing if the object never reaches it.
 //!
-//! The peer here is raw quinn plus `moqtap-codec`'s own writer. It never calls
-//! the framing helpers in `moqtap-client`, so it cannot agree with the reader
-//! under test by construction.
-//!
-//! # Why the codec writes the offending object rather than refusing it
-//!
-//! `SubgroupObjectReader::write_object` emits properties beside a non-Normal
-//! status without complaint, and that is deliberate: the frame is well formed
-//! and merely non-conforming, so a codec that could not produce one could not
-//! reproduce a capture containing one. That is what lets this peer build the
-//! object out of the same codec the client decodes with.
+//! The peer here is raw quinn and hand-built objects. It never calls the
+//! framing helpers in `moqtap-client`, so it cannot agree with the reader
+//! under test by construction. The codec refuses to write the offending
+//! object, so the peer cannot use it there.
 
 mod common;
 
@@ -35,7 +28,7 @@ use moqtap_client::draft19::connection::{
     ClientConfig, Connection, ConnectionError, TransportType,
 };
 use moqtap_codec::dispatch::AnyControlMessage;
-use moqtap_codec::draft19::data_stream::{SubgroupHeader, SubgroupObject, SubgroupObjectReader};
+use moqtap_codec::draft19::data_stream::SubgroupHeader;
 use moqtap_codec::draft19::message::{ControlMessage, Setup};
 use moqtap_codec::draft19::types::ObjectStatus;
 use moqtap_codec::varint::VarInt;
@@ -95,8 +88,9 @@ fn client_config() -> ClientConfig {
 /// A subgroup stream carrying two objects: one with properties on an End of
 /// Group status, and one ordinary payload object after it.
 ///
-/// Both are written through `SubgroupObjectReader`, so the delta encoding of
-/// the object IDs is the codec's own and not this test's idea of it.
+/// Both objects are hand-built, laid out as draft-19 Figure 25 gives them: the
+/// codec's `write_object` refuses the first. Every field fits a one-byte
+/// varint.
 fn subgroup_stream_bytes() -> Vec<u8> {
     let header = SubgroupHeader {
         header_type: HEADER_WITH_PROPERTIES,
@@ -108,36 +102,20 @@ fn subgroup_stream_bytes() -> Vec<u8> {
     let mut buf = Vec::new();
     header.encode(&mut buf);
 
-    let mut writer = SubgroupObjectReader::new(&header);
     // Properties on End of Group: the combination Section 11.2.1.2 forbids.
     // The status is spelled out because the payload is empty; an object that
     // carried bytes would have no status field at all and would be Normal.
-    writer
-        .write_object(
-            &SubgroupObject {
-                object_id: VarInt::from_u64_moqt(OFFENDING_OBJECT_ID),
-                extension_headers: PROPERTIES.to_vec(),
-                payload_length: VarInt::from_u64_moqt(0),
-                object_status: Some(ObjectStatus::EndOfGroup),
-                payload: Vec::new(),
-            },
-            &mut buf,
-        )
-        .expect("the codec writes a non-conforming object rather than refusing it");
-    // A conforming object behind it. Empty properties are permitted at every
-    // status, and this one is Normal anyway.
-    writer
-        .write_object(
-            &SubgroupObject {
-                object_id: VarInt::from_u64_moqt(NEXT_OBJECT_ID),
-                extension_headers: Vec::new(),
-                payload_length: VarInt::from_u64_moqt(NEXT_PAYLOAD.len() as u64),
-                object_status: None,
-                payload: NEXT_PAYLOAD.to_vec(),
-            },
-            &mut buf,
-        )
-        .expect("encode the object that follows");
+    buf.push(OFFENDING_OBJECT_ID as u8); // Object ID Delta: the first is the ID
+    buf.push(PROPERTIES.len() as u8); // Properties Length
+    buf.extend_from_slice(PROPERTIES);
+    buf.push(0); // Object Payload Length
+    buf.push(ObjectStatus::EndOfGroup as u8); // Object Status
+
+    // A conforming object behind it.
+    buf.push(0); // Object ID Delta: one past the previous ID
+    buf.push(0); // Properties Length
+    buf.push(NEXT_PAYLOAD.len() as u8); // Object Payload Length
+    buf.extend_from_slice(NEXT_PAYLOAD);
     buf
 }
 
@@ -258,19 +236,6 @@ const PROTOCOL_VIOLATION: u64 = 0x3;
 ///
 /// `close_for_data_stream` is where the caller joins the two, and this asserts
 /// on what the *peer* — the endpoint that broke the rule — receives.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Dropping the `PropertiesOnNonNormalStatus` arm from
-/// `close_for_data_stream`, leaving it matching only `ConnectionError::Codec`
-/// as it did when it was added for the Object ID wrap:
-///
-/// ```text
-/// ---- the_refusal_closes_the_quic_connection stdout ----
-///
-/// thread 'the_refusal_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft19_properties_on_non_normal_status.rs:
-/// Section 11.2.1.2 answers this with a close, but close_for_data_stream declined
-/// ```
 #[tokio::test]
 async fn the_refusal_closes_the_quic_connection() {
     common::init_crypto();

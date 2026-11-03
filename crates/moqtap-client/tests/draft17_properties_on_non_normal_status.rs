@@ -15,11 +15,9 @@
 //! number all at once. A gate on draft-19 alone would not notice draft-17
 //! keeping the extension-headers spelling, or losing the check entirely.
 //!
-//! The peer is raw quinn plus `moqtap-codec`'s own writer, so it never calls the
-//! framing helpers under test and cannot agree with them by construction. The
-//! codec writes the offending object rather than refusing it, deliberately: the
-//! frame is well formed and merely non-conforming, so a codec that could not
-//! produce one could not reproduce a capture containing one.
+//! The peer is raw quinn and hand-built objects, so it never calls the framing
+//! helpers under test and cannot agree with them by construction. The codec
+//! refuses to write the offending object, so the peer cannot use it there.
 
 mod common;
 
@@ -29,7 +27,7 @@ use moqtap_client::draft17::connection::{
     ClientConfig, Connection, ConnectionError, TransportType,
 };
 use moqtap_codec::dispatch::AnyControlMessage;
-use moqtap_codec::draft17::data_stream::{SubgroupHeader, SubgroupObject, SubgroupObjectReader};
+use moqtap_codec::draft17::data_stream::SubgroupHeader;
 use moqtap_codec::draft17::message::{ControlMessage, Setup};
 use moqtap_codec::draft17::types::ObjectStatus;
 use moqtap_codec::varint::VarInt;
@@ -84,8 +82,9 @@ fn encode_setup() -> Vec<u8> {
 
 /// A subgroup stream carrying the violation and then a conforming object.
 ///
-/// Both are written through `SubgroupObjectReader`, so the delta encoding is the
-/// codec's own and not this test's idea of it.
+/// Both objects are hand-built, laid out as draft-17 Figure 25 gives them: the
+/// codec's `write_object` refuses the first. Every field fits a one-byte
+/// varint.
 fn subgroup_stream_bytes() -> Vec<u8> {
     let header = SubgroupHeader {
         header_type: HEADER_WITH_PROPERTIES,
@@ -97,34 +96,20 @@ fn subgroup_stream_bytes() -> Vec<u8> {
     let mut buf = Vec::new();
     header.encode(&mut buf);
 
-    let mut writer = SubgroupObjectReader::new(&header);
     // Properties on End of Group: the combination Section 10.2.1.2 forbids. The
     // status is spelled out because the payload is empty; an object carrying
     // bytes would have no status field and would be Normal.
-    writer
-        .write_object(
-            &SubgroupObject {
-                object_id: VarInt::from_u64_moqt(OFFENDING_OBJECT_ID),
-                extension_headers: PROPERTIES.to_vec(),
-                payload_length: VarInt::from_u64_moqt(0),
-                object_status: Some(ObjectStatus::EndOfGroup),
-                payload: Vec::new(),
-            },
-            &mut buf,
-        )
-        .expect("the codec writes a non-conforming object rather than refusing it");
-    writer
-        .write_object(
-            &SubgroupObject {
-                object_id: VarInt::from_u64_moqt(NEXT_OBJECT_ID),
-                extension_headers: Vec::new(),
-                payload_length: VarInt::from_u64_moqt(NEXT_PAYLOAD.len() as u64),
-                object_status: None,
-                payload: NEXT_PAYLOAD.to_vec(),
-            },
-            &mut buf,
-        )
-        .expect("encode the object that follows");
+    buf.push(OFFENDING_OBJECT_ID as u8); // Object ID Delta: the first is the ID
+    buf.push(PROPERTIES.len() as u8); // Properties Length
+    buf.extend_from_slice(PROPERTIES);
+    buf.push(0); // Object Payload Length
+    buf.push(ObjectStatus::EndOfGroup as u8); // Object Status
+
+    // A conforming object behind it.
+    buf.push(0); // Object ID Delta: one past the previous ID
+    buf.push(0); // Properties Length
+    buf.push(NEXT_PAYLOAD.len() as u8); // Object Payload Length
+    buf.extend_from_slice(NEXT_PAYLOAD);
     buf
 }
 

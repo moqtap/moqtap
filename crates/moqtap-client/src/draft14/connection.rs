@@ -1905,6 +1905,9 @@ impl Connection {
             // A property block that does not parse makes the Track malformed,
             // Section 11.2.
             | CodecError::MalformedObjectProperties { .. }
+            // A Malformed Track (Section 2.5) costs the track and not the
+            // session.
+            | CodecError::MalformedTrack { .. }
             // Raised only by the draft-23 codec.
             | CodecError::ControlMessageExceedsLimit { .. }
             | CodecError::MissingErrorDetail { .. }
@@ -1915,7 +1918,6 @@ impl Connection {
             | CodecError::TrackPropertiesNotPermitted
             | CodecError::DeltaDecodingOverflow { .. }
             | CodecError::MalformedObject { .. }
-            | CodecError::MalformedTrack { .. }
             | CodecError::UnknownObjectStatus(_)
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(
