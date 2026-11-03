@@ -155,7 +155,9 @@ pub enum Error {
     #[error("source must match [a-z0-9][a-z0-9._-]{{0,63}}")]
     InvalidSource,
     /// The key is a browser key (`mqt_pk_`); servers use a source key (`mqt_sk_`).
-    #[error("this is a browser ingest key (mqt_pk_); a source needs a source key (mqt_sk_)")]
+    #[error(
+        "this is a browser ingest key (mqt_pk_), for @moqtap/monitor-browser; a source needs a source key (mqt_sk_)"
+    )]
     BrowserKey,
     /// The key is not a source key.
     #[error("the key is not a source key (mqt_sk_)")]
@@ -791,6 +793,7 @@ mod tests {
     async fn the_configuration_is_checked_before_anything_starts() {
         let start = |k: &str| Monitor::builder("enc", k).start().map(|_| ());
         assert!(matches!(start("mqt_pk_abc"), Err(Error::BrowserKey)));
+        assert!(Error::BrowserKey.to_string().contains("@moqtap/monitor-browser"));
         assert!(matches!(start("sk_abc"), Err(Error::InvalidKey)));
         assert!(matches!(start("mqt_sk_a b"), Err(Error::InvalidKey)));
         assert!(matches!(Monitor::builder("Enc", "mqt_sk_x").start(), Err(Error::InvalidSource)));
