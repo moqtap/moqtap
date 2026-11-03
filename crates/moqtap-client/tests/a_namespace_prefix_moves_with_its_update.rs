@@ -241,29 +241,6 @@ macro_rules! gates {
             /// Sections 10.18 and 10.19 state the rule for the arriving
             /// request; Section 10.9.2 states it again for the update, and the
             /// answer it names is the same one.
-            ///
-            /// # What it catches
-            ///
-            /// Reading nothing from an update's parameters:
-            ///
-            /// ```text
-            /// Section 10.9.2 answers this update with REQUEST_ERROR, not Ok(())
-            /// ```
-            ///
-            /// It reddens fourteen tests, the seven gates here that end in a move
-            /// or a refusal, on both drafts.
-            ///
-            /// Taking the verdict on arrival and never reading it back when the
-            /// answer is written, so the endpoint knows the update collides and
-            /// lets it through anyway:
-            ///
-            /// ```text
-            /// Section 10.9.2 answers this update with REQUEST_ERROR, not Ok(())
-            /// ```
-            ///
-            /// It reddens six, the three gates whose subject is the answer, on both
-            /// drafts. The four that watch where a prefix ended up stay green: the
-            /// move still happens, it is only unpoliced.
             #[test]
             fn an_update_may_not_move_a_prefix_onto_an_established_one() {
                 let mut ep = active();
@@ -286,29 +263,6 @@ macro_rules! gates {
 
             /// And the refusal it takes carries PREFIX_OVERLAP and no other
             /// code.
-            ///
-            /// # What it catches
-            ///
-            /// Reading nothing from an update's parameters:
-            ///
-            /// ```text
-            /// the code the sentence names is not optional: Ok(())
-            /// ```
-            ///
-            /// It reddens fourteen tests, the seven gates here that end in a move
-            /// or a refusal, on both drafts.
-            ///
-            /// Taking the verdict on arrival and never reading it back when the
-            /// answer is written, so the endpoint knows the update collides and
-            /// lets it through anyway:
-            ///
-            /// ```text
-            /// the code the sentence names is not optional: Ok(())
-            /// ```
-            ///
-            /// It reddens six, the three gates whose subject is the answer, on both
-            /// drafts. The four that watch where a prefix ended up stay green: the
-            /// move still happens, it is only unpoliced.
             #[test]
             fn an_overlapping_update_is_refused_under_prefix_overlap_and_no_other_code() {
                 let mut ep = active();
@@ -335,31 +289,6 @@ macro_rules! gates {
             /// updates the Track Namespace Prefix for that subscription" -- and
             /// the only way to see it from outside is that ground the
             /// subscription used to hold stops refusing new requests.
-            ///
-            /// # What it catches
-            ///
-            /// Reading nothing from an update's parameters:
-            ///
-            /// ```text
-            /// the prefix the first subscription left is free for the second to
-            /// take: PeerPrefixOverlap { request: 2, established: 0 }
-            /// ```
-            ///
-            /// It reddens fourteen tests, the seven gates here that end in a move
-            /// or a refusal, on both drafts.
-            ///
-            /// Judging the new prefix and never writing it into the record, so the
-            /// subscription goes on selecting what the peer opened it with however
-            /// many updates are accepted:
-            ///
-            /// ```text
-            /// the prefix the first subscription left is free for the second to
-            /// take: PeerPrefixOverlap { request: 2, established: 0 }
-            /// ```
-            ///
-            /// It reddens eight, the four gates that observe a prefix having moved.
-            /// The refusal gates stay green, because the verdict is still taken and
-            /// still enforced.
             #[test]
             fn an_accepted_move_frees_the_prefix_it_leaves() {
                 let mut ep = active();
@@ -376,42 +305,6 @@ macro_rules! gates {
             }
 
             /// And takes the one it arrives at.
-            ///
-            /// # What it catches
-            ///
-            /// Reading nothing from an update's parameters:
-            ///
-            /// ```text
-            /// the moved subscription holds that prefix now: Ok(())
-            /// ```
-            ///
-            /// It reddens fourteen tests, the seven gates here that end in a move
-            /// or a refusal, on both drafts.
-            ///
-            /// Judging the new prefix and never writing it into the record, so the
-            /// subscription goes on selecting what the peer opened it with however
-            /// many updates are accepted:
-            ///
-            /// ```text
-            /// the moved subscription holds that prefix now: Ok(())
-            /// ```
-            ///
-            /// It reddens eight, the four gates that observe a prefix having moved.
-            /// The refusal gates stay green, because the verdict is still taken and
-            /// still enforced.
-            ///
-            /// Dropping the verdict taken for an arriving request, which is the
-            /// machinery this rule was built on top of and the only way most of
-            /// these gates can see where a prefix ended up:
-            ///
-            /// ```text
-            /// the moved subscription holds that prefix now: Ok(())
-            /// ```
-            ///
-            /// It reddens twenty-four, evenly split: six gates here, every one that
-            /// ends by watching a later request be taken in or turned away, and six
-            /// in `overlapping_namespace_subscriptions_are_refused.rs`, which is
-            /// the file that claim belongs to.
             #[test]
             fn an_accepted_move_takes_the_prefix_it_arrives_at() {
                 let mut ep = active();
@@ -434,33 +327,8 @@ macro_rules! gates {
             /// A refused move leaves the subscription selecting what it
             /// selected before.
             ///
-            /// # What it catches
-            ///
-            /// Applying the move on a refusal as well as on an acceptance, which is
-            /// the reading Section 10.9.2 rules out by putting the effect after the
-            /// REQUEST_OK:
-            ///
-            /// ```text
-            /// a refused update moves nothing: Ok(())
-            /// ```
-            ///
-            /// It reddens two, this gate on both drafts and nothing else. The first
-            /// run of it reported three; the third was the proxy's real-QUIC sweep
-            /// failing to connect upstream on draft-09, which carries none of this
-            /// code, and it did not recur.
-            ///
-            /// Dropping the verdict taken for an arriving request, which is the
-            /// machinery this rule was built on top of and the only way most of
-            /// these gates can see where a prefix ended up:
-            ///
-            /// ```text
-            /// a refused update moves nothing: Ok(())
-            /// ```
-            ///
-            /// It reddens twenty-four, evenly split: six gates here, every one that
-            /// ends by watching a later request be taken in or turned away, and six
-            /// in `overlapping_namespace_subscriptions_are_refused.rs`, which is
-            /// the file that claim belongs to.
+            /// Draft-19 Section 10.9.2 puts the effect after the REQUEST_OK, so a
+            /// refusal has none.
             #[test]
             fn a_refused_move_leaves_the_subscription_where_it_was() {
                 let mut ep = active();
@@ -487,21 +355,6 @@ macro_rules! gates {
             /// `conformance/alpha`, and the only subscription holding that is
             /// the one being moved. "Another active subscription" is the word
             /// that lets this through.
-            ///
-            /// # What it catches
-            ///
-            /// Weighing the new prefix against every active subscription of its
-            /// kind, the one being moved included. That is the sentence with the
-            /// word "another" taken out of it, and it forbids every widening and
-            /// every narrowing:
-            ///
-            /// ```text
-            /// a subscription may be widened over the ground it already holds:
-            /// PeerPrefixOverlap { request: 0, established: 0 }
-            /// ```
-            ///
-            /// It reddens two, this gate on both drafts and nothing else. No other
-            /// gate moves a subscription onto ground it already holds.
             #[test]
             fn a_subscription_is_not_weighed_against_itself() {
                 let mut ep = active();
@@ -521,21 +374,6 @@ macro_rules! gates {
             /// update) or SUBSCRIBE_TRACKS (for a SUBSCRIBE_TRACKS update) in the
             /// same session", which names the request kind on both sides of the
             /// comparison.
-            ///
-            /// # What it catches
-            ///
-            /// Merging the two overlap spaces, so a SUBSCRIBE_TRACKS moving its
-            /// prefix is weighed against the peer's SUBSCRIBE_NAMESPACEs:
-            ///
-            /// ```text
-            /// a SUBSCRIBE_TRACKS may move onto a prefix a SUBSCRIBE_NAMESPACE
-            /// holds: PeerPrefixOverlap { request: 2, established: 0 }
-            /// ```
-            ///
-            /// It reddens four: this gate, where the move should be allowed and is
-            /// not, and the one where a SUBSCRIBE_TRACKS should collide with
-            /// another SUBSCRIBE_TRACKS and instead finds a namespace subscription
-            /// to blame.
             #[test]
             fn a_namespace_update_and_a_tracks_update_have_their_own_ground() {
                 let mut ep = active();
@@ -551,44 +389,6 @@ macro_rules! gates {
 
             /// And a tracks update is weighed against the other tracks
             /// subscriptions.
-            ///
-            /// # What it catches
-            ///
-            /// Reading nothing from an update's parameters:
-            ///
-            /// ```text
-            /// SUBSCRIBE_TRACKS has an overlap space of its own: Ok(())
-            /// ```
-            ///
-            /// It reddens fourteen tests, the seven gates here that end in a move
-            /// or a refusal, on both drafts.
-            ///
-            /// Taking the verdict on arrival and never reading it back when the
-            /// answer is written, so the endpoint knows the update collides and
-            /// lets it through anyway:
-            ///
-            /// ```text
-            /// SUBSCRIBE_TRACKS has an overlap space of its own: Ok(())
-            /// ```
-            ///
-            /// It reddens six, the three gates whose subject is the answer, on both
-            /// drafts. The four that watch where a prefix ended up stay green: the
-            /// move still happens, it is only unpoliced.
-            ///
-            /// Merging the two overlap spaces, so a SUBSCRIBE_TRACKS moving its
-            /// prefix is weighed against the peer's SUBSCRIBE_NAMESPACEs:
-            ///
-            /// ```text
-            /// SUBSCRIBE_TRACKS has an overlap space of its own: Ok(()) failures: d
-            /// raft18::a_namespace_update_and_a_tracks_update_have_their_own_ground
-            /// draft18::a_tracks_update_is_weighed_against_the_other_tracks_subscri
-            /// ptions draft1
-            /// ```
-            ///
-            /// It reddens four: this gate, where the move should be allowed and is
-            /// not, and the one where a SUBSCRIBE_TRACKS should collide with
-            /// another SUBSCRIBE_TRACKS and instead finds a namespace subscription
-            /// to blame.
             #[test]
             fn a_tracks_update_is_weighed_against_the_other_tracks_subscriptions() {
                 let mut ep = active();
@@ -611,44 +411,6 @@ macro_rules! gates {
             ///
             /// Section 10.9: "If a parameter previously set on the request is
             /// not present in REQUEST_UPDATE, its value remains unchanged."
-            ///
-            /// # What it catches
-            ///
-            /// Reading nothing from an update's parameters:
-            ///
-            /// ```text
-            /// the first subscription is still at the sibling: PeerPrefixOverlap {
-            /// request: 2, established: 0 }
-            /// ```
-            ///
-            /// It reddens fourteen tests, the seven gates here that end in a move
-            /// or a refusal, on both drafts.
-            ///
-            /// Judging the new prefix and never writing it into the record, so the
-            /// subscription goes on selecting what the peer opened it with however
-            /// many updates are accepted:
-            ///
-            /// ```text
-            /// the first subscription is still at the sibling: PeerPrefixOverlap {
-            /// request: 2, established: 0 }
-            /// ```
-            ///
-            /// It reddens eight, the four gates that observe a prefix having moved.
-            /// The refusal gates stay green, because the verdict is still taken and
-            /// still enforced.
-            ///
-            /// Dropping the verdict taken for an arriving request, which is the
-            /// machinery this rule was built on top of and the only way most of
-            /// these gates can see where a prefix ended up:
-            ///
-            /// ```text
-            /// an empty update does not send it back: Ok(())
-            /// ```
-            ///
-            /// It reddens twenty-four, evenly split: six gates here, every one that
-            /// ends by watching a later request be taken in or turned away, and six
-            /// in `overlapping_namespace_subscriptions_are_refused.rs`, which is
-            /// the file that claim belongs to.
             #[test]
             fn an_update_that_names_no_prefix_moves_nothing() {
                 let mut ep = active();
@@ -679,54 +441,6 @@ macro_rules! gates {
             /// earlier ones" -- applied inside one. Taking the first would
             /// refuse this update, because the first names ground the other
             /// subscription holds.
-            ///
-            /// # What it catches
-            ///
-            /// Reading nothing from an update's parameters:
-            ///
-            /// ```text
-            /// the last prefix is where it went: Ok(())
-            /// ```
-            ///
-            /// It reddens fourteen tests, the seven gates here that end in a move
-            /// or a refusal, on both drafts.
-            ///
-            /// Judging the new prefix and never writing it into the record, so the
-            /// subscription goes on selecting what the peer opened it with however
-            /// many updates are accepted:
-            ///
-            /// ```text
-            /// the last prefix is where it went: Ok(())
-            /// ```
-            ///
-            /// It reddens eight, the four gates that observe a prefix having moved.
-            /// The refusal gates stay green, because the verdict is still taken and
-            /// still enforced.
-            ///
-            /// Taking the first TRACK_NAMESPACE_PREFIX a message carries rather
-            /// than the last:
-            ///
-            /// ```text
-            /// the last prefix names free ground: PeerPrefixOverlap { request: 2,
-            /// established: 0 }
-            /// ```
-            ///
-            /// It reddens two, this gate on both drafts and nothing else. Every
-            /// other gate sends one prefix per message, where first and last are
-            /// the same parameter.
-            ///
-            /// Dropping the verdict taken for an arriving request, which is the
-            /// machinery this rule was built on top of and the only way most of
-            /// these gates can see where a prefix ended up:
-            ///
-            /// ```text
-            /// the last prefix is where it went: Ok(())
-            /// ```
-            ///
-            /// It reddens twenty-four, evenly split: six gates here, every one that
-            /// ends by watching a later request be taken in or turned away, and six
-            /// in `overlapping_namespace_subscriptions_are_refused.rs`, which is
-            /// the file that claim belongs to.
             #[test]
             fn the_last_prefix_an_update_names_is_the_one_that_moves() {
                 let mut ep = active();
@@ -760,20 +474,6 @@ macro_rules! gates {
             /// the cumulative result." The first names ground another
             /// subscription holds and the second moves off it again, so the
             /// cumulative result is legal and there is nothing to refuse.
-            ///
-            /// # What it catches
-            ///
-            /// Leaving an earlier update's verdict in place when a later update
-            /// replaces the prefix that earned it, so a cumulative result
-            /// overlapping nothing is refused anyway:
-            ///
-            /// ```text
-            /// the cumulative result overlaps nothing: PeerPrefixOverlap { request:
-            /// 2, established: 0 }
-            /// ```
-            ///
-            /// It reddens two, this gate on both drafts and nothing else. It is the
-            /// only one that sends a second update.
             #[test]
             fn two_updates_are_judged_on_their_cumulative_result() {
                 let mut ep = active();
@@ -789,30 +489,6 @@ macro_rules! gates {
             }
 
             /// A value that is not a whole Track Namespace moves nothing.
-            ///
-            /// # What it catches
-            ///
-            /// Accepting a parameter value that begins with a Track Namespace and
-            /// has bytes left over after it:
-            ///
-            /// ```text
-            /// half a prefix is not a prefix: Ok(())
-            /// ```
-            ///
-            /// It reddens two, this gate on both drafts and nothing else.
-            ///
-            /// Dropping the verdict taken for an arriving request, which is the
-            /// machinery this rule was built on top of and the only way most of
-            /// these gates can see where a prefix ended up:
-            ///
-            /// ```text
-            /// half a prefix is not a prefix: Ok(())
-            /// ```
-            ///
-            /// It reddens twenty-four, evenly split: six gates here, every one that
-            /// ends by watching a later request be taken in or turned away, and six
-            /// in `overlapping_namespace_subscriptions_are_refused.rs`, which is
-            /// the file that claim belongs to.
             #[test]
             fn a_prefix_that_is_not_a_whole_namespace_moves_nothing() {
                 let mut ep = active();
@@ -839,19 +515,6 @@ macro_rules! gates {
             /// SUBSCRIBE has no prefix for it to move, and weighing it against
             /// the namespace subscriptions would refuse an update this draft
             /// says nothing against.
-            ///
-            /// # What it catches
-            ///
-            /// Judging the update of every request kind rather than the two that
-            /// carry a prefix at all:
-            ///
-            /// ```text
-            /// a SUBSCRIBE has no namespace prefix to be judged against:
-            /// PeerPrefixOverlap { request: 2, established: 0 }
-            /// ```
-            ///
-            /// It reddens two, this gate on both drafts and nothing else. It is the
-            /// only one that updates a request with no prefix of its own.
             #[test]
             fn an_update_to_a_request_that_has_no_prefix_is_not_judged() {
                 let mut ep = active();
@@ -886,21 +549,6 @@ macro_rules! gates {
             /// The arriving request was judged at the moment it arrived, which
             /// is the moment its own sentence names, and that moment does not
             /// come round again.
-            ///
-            /// # What it catches
-            ///
-            /// Dropping the verdict taken for an arriving request, which is the
-            /// machinery this rule was built on top of and the only way most of
-            /// these gates can see where a prefix ended up:
-            ///
-            /// ```text
-            /// the verdict was taken on arrival: Ok(())
-            /// ```
-            ///
-            /// It reddens twenty-four, evenly split: six gates here, every one that
-            /// ends by watching a later request be taken in or turned away, and six
-            /// in `overlapping_namespace_subscriptions_are_refused.rs`, which is
-            /// the file that claim belongs to.
             #[test]
             fn a_refusal_already_decided_is_not_reopened_by_a_move() {
                 let mut ep = active();

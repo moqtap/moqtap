@@ -326,8 +326,7 @@ const EXT_NON_MINIMAL: &[u8] = &[0x3c, 0x40, 0x02];
 ///
 /// The session hard-codes `FramerConfig::default()`, so payload size is
 /// the only lever an end-to-end test has over the oversized path (see the
-/// module note). The margin is the load-bearing part, and it was measured
-/// rather than guessed:
+/// module note). The margin is the load-bearing part:
 ///
 /// * The framer buffers until the cap and then asks whether the object it
 ///   holds is complete. If it is, `poll_object` emits it whole as one
@@ -335,9 +334,7 @@ const EXT_NON_MINIMAL: &[u8] = &[0x3c, 0x40, 0x02];
 ///   padding, fixes up the **first chunk** and streams the remainder.
 /// * `pipe_data_framed` reads 8 KiB at a time, so with a payload of
 ///   `cap + 64` the buffer almost always jumps straight past the object's
-///   end and the chunked path is never entered. The first version of these
-///   tests used exactly that size — and the two ablations aimed at
-///   `poll_oversized` both passed, which is how the gap was found.
+//   end and the chunked path is never entered.
 /// * A payload a whole megabyte past the cap makes the crossing
 ///   unavoidable: at the poll where the buffer first reaches the cap the
 ///   object still owes ~1 MiB, so `poll_oversized` runs every time.
@@ -1030,24 +1027,6 @@ fn assert_prefix_of(draft: DraftVersion, got: &[u8], want: &[u8], what: &str) {
 /// carries a **non-minimally encoded leading Object ID varint**. That is
 /// the only field an elide fix-up can change, so it is the only fixture on
 /// which an unconditional fix-up is visible.
-///
-/// *Ablation (measured):* drop the `self.fixup_pending` guard from
-/// `ObjectFramer::apply_elide_fixup` — treat a fix-up as always owed.
-/// Verified to fail this test, and the *way* it fails is the evidence:
-///
-/// * on the minimal fixtures the ablated build still forwards
-///   byte-identical output — re-encoding an already-minimal varint
-///   minimally changes nothing — so the bytes cannot catch it and the
-///   `object_ids_rewritten == 0` assertion is what does (4 rewrites on
-///   draft-14 where 0 are owed);
-/// * on the draft-19 widened fixture the **bytes** differ, because
-///   `0x40 0x00` is re-encoded to `0x00`.
-///
-/// The same ablation also fails
-/// [`reemit_rewrites_the_leading_varint_when_it_must`],
-/// [`elide_of_a_middle_object_is_byte_equal_to_the_encoded_survivors`] and
-/// the two oversized tests through their counter assertions — and leaves
-/// the other twelve green.
 #[tokio::test]
 async fn no_action_forwarding_is_byte_identical_on_every_draft() {
     for &draft in DRAFTS {
@@ -1080,11 +1059,10 @@ async fn no_action_forwarding_is_byte_identical_on_every_draft() {
         }
     }
 
-    // The fixture the ablation above needs: object 1's leading field is
-    // the two-byte spelling of 0. Minimal is `0x00`, so a fix-up applied
-    // here changes bytes and this assertion catches it. One draft rather
-    // than a sweep, because the claim is about the fix-up guard and not
-    // about any draft's layout.
+    // Object 1's leading field is the two-byte spelling of 0. Minimal is
+    // `0x00`, so a fix-up applied here changes bytes and this assertion
+    // catches it. One draft rather than a sweep, because the claim is about
+    // the fix-up guard and not about any draft's layout.
     let draft = a_compiled_draft();
     let wire = Wire::new(draft);
     let mut objects = wire.objects(&[0, 1, 2]);
@@ -1123,13 +1101,6 @@ fn fixtures_for(draft: DraftVersion) -> Vec<Wire> {
 /// `[0,1]` (the delta was left stale) and successors re-encoded
 /// non-identically (the survivor went through a writer rather than being
 /// copied).
-///
-/// *Ablation (measured):* make `ObjectFramer::note_elided` a no-op on the
-/// delta drafts — never reach `self.fixup_pending = true`. Verified: the
-/// loop runs 07 upwards and the first failure is **draft-14**
-/// (`…, 0x00, 4, …` where `…, 0x01, 4, …` is owed), so drafts 07-13 passed
-/// under the same ablated build. That is the proof the absolute/delta
-/// split is real rather than asserted.
 #[tokio::test]
 async fn elide_of_a_middle_object_is_byte_equal_to_the_encoded_survivors() {
     for &draft in DRAFTS {
@@ -1178,18 +1149,6 @@ async fn elide_of_a_middle_object_is_byte_equal_to_the_encoded_survivors() {
 /// absolute-versus-delta seeding differs: object 1's field stops being a
 /// delta and becomes an absolute ID, because `prev_forwarded` is still
 /// `None`.
-///
-/// *Ablation (measured):* seed the fix-up with `Some(0)` instead of
-/// `None` —
-/// `reemit_subgroup_object(self.draft, self.last_forwarded_id.or(Some(0)), …)`
-/// in `apply_elide_fixup`. Verified twice, because the shared loop stops
-/// at the first failing draft and draft-15 had to be shown to fail on its
-/// own account: once
-/// as written, where it fails at draft-14, and once with this test's loop
-/// narrowed to `[Draft15]` in the ablation sandbox, where it fails there
-/// too — `[…, 0x00, 4, 161, …]` for the `[…, 0x01, 4, 161, …]` that is
-/// owed, i.e. `1 - 0 - 1 = 0` written where the absolute `1` belongs.
-/// Drafts 07-13 stay green, since they never reach the fix-up at all.
 #[tokio::test]
 async fn elide_of_index_zero_is_byte_equal_to_the_encoded_survivors() {
     for &draft in DRAFTS {
@@ -1222,15 +1181,6 @@ async fn elide_of_index_zero_is_byte_equal_to_the_encoded_survivors() {
 /// `[0,1,2,3,4]` minus indices 1 and 2 must be the independently encoded
 /// `[0,3,4]`: on a delta draft object 3's field goes from `0x00` to
 /// `0x02`, and object 4's stays `0x00` because the cursor re-converged.
-///
-/// *Ablation (measured):* commit the object that carried a fix-up as
-/// forwarded inside `apply_elide_fixup` — add
-/// `self.last_forwarded_id = Some(object_id);` next to
-/// `self.fixup_pending = false;`. A plausible mistake, since that object
-/// usually *is* forwarded. It is wrong exactly when the object carrying
-/// the fix-up is itself elided, which only a run can produce. Verified to
-/// fail **this test and no other** in the file: object 3 goes out with the
-/// delta measured from the elided object 2 instead of from object 0.
 #[tokio::test]
 async fn elide_of_a_run_is_byte_equal_to_the_encoded_survivors() {
     for &draft in DRAFTS {
@@ -1259,23 +1209,6 @@ async fn elide_of_a_run_is_byte_equal_to_the_encoded_survivors() {
 /// normalizes `0x40 0x02` to `0x02`. Byte equality here is therefore the
 /// assertion that the proxy deleted bytes rather than round-tripping the
 /// survivors through the codec.
-///
-/// *Ablation (measured):* in `ObjectFramer::poll_object`, replace a
-/// draft-08 object's forwarded slice with
-/// `AnySubgroupObjectReader::read_object` +
-/// `AnySubgroupObjectWriter::write_object` — a full re-serialization.
-/// Verified to fail this test: object 2's extension block comes back one
-/// byte shorter, while every minimal-varint *subgroup* fixture in the file
-/// stays green. (It also takes down
-/// [`fetch_elide_needs_no_encoder_on_drafts_07_to_14`], but only because
-/// the crude patch reaches for a subgroup reader on a fetch stream — that
-/// is the ablation's scaffolding failing, not the property.)
-///
-/// (One ablation that looks apt here cannot fail: forcing
-/// `Reemit::Reencoded` changes nothing on this test, because
-/// `reemit_subgroup_object` never touches the extension block — only the
-/// leading varint. `reemit_rewrites_the_leading_varint_when_it_must` is
-/// where that ablation does bite.)
 #[tokio::test]
 async fn elide_on_absolute_id_drafts_copies_survivors_verbatim() {
     // The first absolute-ID draft this build compiled that also has an
@@ -1323,19 +1256,6 @@ async fn elide_on_absolute_id_drafts_copies_survivors_verbatim() {
 /// exactly; eliding object 0 must replace that field with the minimal
 /// encoding of object 1's new **absolute** ID, and change nothing after
 /// it.
-///
-/// *Ablation (measured):* re-encode the leading field of every object,
-/// untouched ones included — drop `apply_elide_fixup`'s `fixup_pending`
-/// guard. Verified to fail **half one**, whose forwarded stream comes back
-/// with object 1's two-byte field collapsed to `0x00`:
-/// `[…, 0, 4, 160, 177, 194, 0, 0, 4, 161, …]` for the
-/// `[…, 0, 4, 160, 177, 194, 0, 64, 0, 4, 161, …]` that was sent. This is
-/// the ablation that was first aimed at
-/// [`elide_on_absolute_id_drafts_copies_survivors_verbatim`], where it
-/// could not fail — `reemit_subgroup_object` never touches the extension
-/// block, only the leading varint. Half two additionally fails under the
-/// `Some(0)` seeding ablation described on
-/// [`elide_of_index_zero_is_byte_equal_to_the_encoded_survivors`].
 #[tokio::test]
 async fn reemit_rewrites_the_leading_varint_when_it_must() {
     // The newest delta-ID draft this build compiled — draft-19 wherever
@@ -1399,14 +1319,6 @@ async fn reemit_rewrites_the_leading_varint_when_it_must() {
 /// (`2 - 1 - 1 = 0` becomes `2 - 0 - 1 = 1`, both one byte);
 /// [`an_oversized_successor_whose_new_delta_needs_a_wider_varint`] covers
 /// the case where the width changes.
-///
-/// *Ablation (measured):* call the fix-up only from `poll_object`'s
-/// addressable arm, i.e. discard `apply_elide_fixup`'s rewritten bytes in
-/// `poll_oversized`. Verified to
-/// fail on every one of drafts 14-23, the emitted chunk carrying
-/// `…, 0, 0, 128, 80, …` where `…, 0, 1, 128, 80, …` is owed. It fails
-/// nothing outside the two oversized tests, because the addressable path
-/// still fixes up.
 #[tokio::test]
 async fn elide_followed_by_an_oversized_object_keeps_ids_correct() {
     for &draft in DELTA_DRAFTS {
@@ -1456,21 +1368,6 @@ async fn elide_followed_by_an_oversized_object_keeps_ids_correct() {
 /// **source** bytes (so the framer resynchronised on ID 81's real first
 /// byte, not one byte early), and ID 81 was forwarded verbatim because the
 /// cursor re-converged.
-///
-/// *Ablation 1 (measured):* subtract the fix-up's width growth from
-/// `passthrough_remaining` in `poll_oversized` — the plausible-looking
-/// "fix" that counts the destination's bytes where the passthrough budget
-/// is measured in the source's. Verified to fail **this test and no other**:
-/// the framer resynchronises one byte early, so the last object's ID field
-/// starts inside the previous object and the tail decodes to a garbage ID.
-/// [`elide_followed_by_an_oversized_object_keeps_ids_correct`] stays green
-/// because there the two widths are equal, which is precisely why this
-/// fixture exists.
-///
-/// *Ablation 2 (measured):* the earlier-design ablation above — no fix-up
-/// on the oversized path at all. Verified to fail here on the length
-/// assertion (5242914 delivered where 5242915 is owed) before the byte
-/// comparison is reached.
 #[tokio::test]
 async fn an_oversized_successor_whose_new_delta_needs_a_wider_varint() {
     for &draft in DELTA_DRAFTS {
@@ -1522,11 +1419,6 @@ async fn an_oversized_successor_whose_new_delta_needs_a_wider_varint() {
 /// a survivor after the elide would have discharged it before the poison
 /// arrived and the stream would FIN — which is the shape the first draft
 /// of this test had, and it passed against every implementation.
-///
-/// *Ablation (measured):* forward the remainder instead of resetting —
-/// disable the `if fixup_owed` arm in `pipe_data_framed`'s
-/// `FramerOut::Bypassed` branch. Verified to fail **this test and no
-/// other**: the stream ends with `Ending::Fin`.
 #[tokio::test]
 async fn a_bypass_while_a_fixup_is_owed_resets_the_stream() {
     for &draft in DELTA_DRAFTS {
@@ -1598,19 +1490,6 @@ async fn a_bypass_while_a_fixup_is_owed_resets_the_stream() {
 /// 17 read a variable-length integer and refuse the value for not being a flag
 /// set they define. Either way it is a decode failure and not a short read,
 /// which is what makes the framer give up rather than wait.
-///
-/// *Ablation (measured):* have `ObjectFramer::elide_owes_a_fixup` answer
-/// `false` for fetch streams, which is what the predicate it replaced did.
-/// Fails **this test and no other**:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-15] a stranded fetch fix-up must reset the destination
-///   left: Fin
-///  right: Reset(0)
-/// ```
-///
-/// A clean FIN on a stream whose tail was never written, which is the answer
-/// a subscriber cannot tell from a complete response.
 #[tokio::test]
 #[cfg(any(feature = "draft15", feature = "draft16", feature = "draft17"))]
 async fn a_bypass_while_a_fetch_fixup_is_owed_resets_the_stream() {
@@ -1674,11 +1553,6 @@ async fn a_bypass_while_a_fetch_fixup_is_owed_resets_the_stream() {
 /// Nine drafts define that stream type. Removing index 0 there would
 /// silently redefine the subgroup ID for the receiver, which is a
 /// different stream, not a shorter one.
-///
-/// *Ablation (measured):* delete the `cx.subgroup_id_resolved == Some(false)`
-/// arm from `capability::object_drop_elide`. Verified to fail **this test
-/// and no other**: the elide is admitted, the stream comes back one object
-/// shorter, and the refusal vector is empty.
 #[tokio::test]
 async fn elide_of_index_zero_on_an_implicit_subgroup_stream_is_refused() {
     for &draft in IMPLICIT_SUBGROUP_DRAFTS {
@@ -1716,26 +1590,6 @@ async fn elide_of_index_zero_on_an_implicit_subgroup_stream_is_refused() {
 /// the elide the hook asks for is never asked *of* it — no object was ever
 /// addressed for the hook to name. The refusal path is not reached at all,
 /// which is why the refusal vector is empty rather than carrying one.
-///
-/// *Ablation (measured):* drop the buffered bytes where the header decode
-/// fails, so the framer keeps the stream it could not read instead of
-/// releasing it uninterpreted:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-17] every byte of an unreadable stream still reaches the far side
-///   left: [1, 0, 128, 0, 4, 160, 177, 194, 0, 0, 4, 161, 177, 194, 1, 0, 4, 162, 177, 194, 2]
-///  right: [22, 1, 0, 128, 0, 4, 160, 177, 194, 0, 0, 4, 161, 177, 194, 1, 0, 4, 162, 177, 194, 2]
-/// ```
-///
-/// *Ablation (measured), for draft-16's place in the sweep:* the draft was
-/// missing from `MODE_FIELD_DRAFTS` on the reading that only 17-19 carry the
-/// field, so this ran over three drafts where four define the mode. Letting
-/// draft-16's `subgroup_type_is_valid` admit the reserved mode shows the
-/// fourth is doing work rather than repeating the others:
-///
-/// ```text
-/// [draft-16] nothing on the stream is addressable: [144115207968506369]
-/// ```
 #[tokio::test]
 async fn a_reserved_mode_stream_is_forwarded_whole_and_reaches_no_object_site() {
     for &draft in MODE_FIELD_DRAFTS {
@@ -1782,11 +1636,6 @@ async fn a_reserved_mode_stream_is_forwarded_whole_and_reaches_no_object_site() 
 ///
 /// The status object sits at index 1, so the index-0 guard cannot be what
 /// produces the refusal.
-///
-/// *Ablation (measured):* answer `Support::Yes` for
-/// `cx.is_status_object == Some(true)` in `capability::object_drop_elide`.
-/// Verified to fail **this test and no other**: the status object is
-/// removed and the refusal vector is empty.
 #[tokio::test]
 async fn elide_of_a_status_object_is_refused() {
     for &draft in DRAFTS {
@@ -1819,11 +1668,6 @@ async fn elide_of_a_status_object_is_refused() {
 /// independently encoded stream carrying the replacement, and a per-object
 /// re-framing that names *which* object changed and shows its neighbours
 /// still decode.
-///
-/// *Ablation (measured):* move the splice one byte earlier —
-/// `payload_offset(...) - 1` in `exec`'s `Action::ReplacePayload` arm, the
-/// smallest version of "splice somewhere other than the payload offset".
-/// Verified to fail **this test and no other**.
 #[tokio::test]
 async fn replace_payload_at_the_same_length_changes_only_that_object() {
     const REPLACEMENT: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
@@ -1884,10 +1728,6 @@ async fn replace_payload_at_the_same_length_changes_only_that_object() {
 
 /// A payload replacement of a different length is refused with the two
 /// lengths in it, and the object is forwarded unchanged.
-///
-/// *Ablation (measured):* disable the `from != to` arm in
-/// `capability::object_replace_payload`. Verified to fail **this test and
-/// no other**: the splice happens anyway and no refusal is reported.
 #[tokio::test]
 async fn replace_payload_at_a_different_length_is_refused() {
     const TOO_LONG: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF, 0x00];
@@ -1936,11 +1776,6 @@ async fn replace_payload_at_a_different_length_is_refused() {
 /// an exact count: quinn clears the receive assembler when it processes a
 /// `RESET_STREAM` (RFC 9000 §3.2 permits it), so only bytes the
 /// application had already read out survive.
-///
-/// *Ablation (measured):* queue the whole object instead of
-/// `raw.slice(..bytes.min(raw.len()))` in `exec`'s `Action::Truncate` arm.
-/// Verified to fail **this test and no other**, on the upper bound: more
-/// than `TRUNCATE_AT` bytes of object 1 reach the peer.
 #[tokio::test]
 async fn truncate_writes_a_bounded_prefix_and_then_resets_with_its_code() {
     const TRUNCATE_AT: usize = 3;
@@ -2006,11 +1841,6 @@ async fn truncate_writes_a_bounded_prefix_and_then_resets_with_its_code() {
 /// Eliding a fetch object needs no encoder at all: fetch object IDs are
 /// absolute, so the survivors are the source's bytes with one object's
 /// bytes deleted.
-///
-/// *Ablation (measured):* let `ObjectFramer::delta_encodes_object_ids`
-/// answer `true` for fetch streams too. Verified to fail **this test and
-/// no other**, on draft-14: the framer rewrites the survivor's leading
-/// **Group ID** varint, which is not an Object ID at all.
 #[tokio::test]
 async fn fetch_elide_needs_no_encoder_on_drafts_07_to_14() {
     for &draft in FETCH_OBJECT_DRAFTS {
@@ -2063,13 +1893,6 @@ async fn fetch_elide_needs_no_encoder_on_drafts_07_to_14() {
 /// The count is asserted, not the presence: the counter is read from
 /// **this** session's recorder, which is what makes `== 0` meaningful
 /// while five eliding tests share the binary.
-///
-/// *Ablation (measured):* revert `ObjectFramer::latch_bypass` to the
-/// silent form — never set `pending_bypass`, so no `FramerOut::Bypassed`
-/// is produced. Verified to fail this test with an impairment count of 0.
-/// It also fails
-/// [`a_bypass_while_a_fixup_is_owed_resets_the_stream`], which needs the
-/// same item to learn a fix-up was stranded.
 #[tokio::test]
 async fn a_matching_rule_on_a_fetch_stream_without_a_group_order_reports_a_bypass() {
     for &draft in FETCH_BYPASS_DRAFTS {
@@ -2128,40 +1951,6 @@ async fn a_matching_rule_on_a_fetch_stream_without_a_group_order_reports_a_bypas
 /// is measured against: deleting object 1's seven bytes leaves a stream that
 /// decodes, whose length is self-consistent, and whose second object is the
 /// deleted object's Location.
-///
-/// *Ablation (measured), three cuts, three different wrong streams:*
-///
-/// 1. `AnyFetchObjectWriter::reemit_object` answers `Unchanged` for every
-///    frame — byte deletion, the defect this replaced:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-15] the survivor keeps its own Location
-///   left: [5, 9, 31, 7, 0, 0, 128, 4, 111, 111, 111, 111, 1, 4, 111, 111, 111, 111]
-///  right: [5, 9, 31, 7, 0, 0, 128, 4, 111, 111, 111, 111, 5, 2, 4, 111, 111, 111, 111]
-/// ```
-///
-///    The survivor's flags byte is `1`: nothing stated, so its Location is
-///    the previous object's stepped by one. It arrives as object **1** — the
-///    Location of the object that was deleted — and the stream decodes.
-///
-/// 2. `ObjectFramer::note_elided` does not put the fetch writer back. Byte
-///    for byte the same wrong stream, for the opposite reason: the writer
-///    advanced past the elided frame before the hook's verdict landed, so it
-///    believed the survivor already followed its predecessor.
-///
-/// 3. `ObjectFramer::apply_elide_fixup` shows the writer only the frames a
-///    fix-up was owed for:
-///
-/// ```text
-///   left: [5, 9, 31, 7, 0, 0, 128, 4, 111, 111, 111, 111, 28, 7, 2, 128, 4, 111, 111, 111, 111]
-/// ```
-///
-///    The survivor is written out absolutely — flags `28`, group 7, object 2,
-///    priority 128 — because the writer had never been shown a frame and had
-///    no predecessor to write against. Its Location is right and its bytes are
-///    four longer than they need to be, which is the visible half of a stale
-///    writer; the corrupting half needs a forwarded frame between one elide
-///    and the next.
 #[tokio::test]
 #[cfg(any(feature = "draft15", feature = "draft16", feature = "draft17"))]
 async fn a_fetch_elide_re_encodes_the_survivor_where_the_objects_inherit() {

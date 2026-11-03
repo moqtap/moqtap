@@ -6,29 +6,18 @@
 //! same parser the proxy uses rather than a hand-rolled loop.
 //!
 //! The negative path goes through [`drain_subgroup_objects`], and all
-//! runners now read a malformed subgroup stream the same way: decode the header
+//! runners read a malformed subgroup stream the same way: decode the header
 //! through the entry point that reads the stream type off the wire, then read
 //! objects until the bytes run out, and hand the first failure to
-//! `TestVector::assert_error`. Three ablations, each measured in both
-//! directions:
+//! `TestVector::assert_error`. That path catches:
 //!
-//! - Relabelling draft-19 `subgroup-truncated` from `incomplete` to
-//!   `invalid_value` now fails with `[subgroup-truncated] the decoder refused
-//!   this for a different reason than the vector claims: UnexpectedEnd`. Under
-//!   the previous arm — which asserted only when the header *decoded* — the
-//!   same relabelled vector passed, so those six suites were spending their one
-//!   negative subgroup vector on nothing at all.
-//! - Decoding the header with a fixed shape instead of the type's own, with
-//!   everything else held constant, makes draft-12's whole and valid
-//!   `subgroup-single-object` look truncated: labelled `incomplete` it passes,
-//!   because a type 0x10 stream carries no Subgroup ID and reading one eats the
-//!   Publisher Priority and desynchronises every object after it. Through
-//!   `decode_stream` the same label fails with `[subgroup-single-object]
-//!   expected decode error but succeeded`.
-//! - Answering `None` for a header that decoded, rather than draining the
-//!   objects, makes a stream truncated *inside its first object* — draft-12
-//!   `100100800004dead` — pass as well-formed: `[subgroup-truncated] expected
-//!   decode error but succeeded`.
+//! - a vector labelled with the wrong error kind, even when its header decodes;
+//! - a header decoded with a fixed shape instead of the type's own: a type 0x10
+//!   stream carries no Subgroup ID, and reading one eats the Publisher Priority
+//!   and desynchronises every object after it;
+//! - a stream truncated *inside its first object*, such as draft-12
+//!   `100100800004dead`, which reads as well-formed unless the objects are
+//!   drained.
 
 use bytes::Buf;
 use moqtap_codec::dispatch::{

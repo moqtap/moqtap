@@ -251,14 +251,6 @@ mod draft14 {
     /// well-formed status object. The caller's bytes are gone and nothing on the
     /// wire says so, which is why this writer encodes through `encode_checked`
     /// and refuses the pairing instead.
-    ///
-    /// Ablation: writing the object with `object.encode(&mut buf);` in place of
-    /// `encode_checked` in `write_fetch_object` fails with
-    ///
-    /// ```text
-    /// an object whose status forbids a payload must be refused rather than
-    /// written: Ok(())
-    /// ```
     #[tokio::test]
     async fn a_payload_beside_a_status_that_forbids_one_is_refused() {
         common::init_crypto();
@@ -338,26 +330,6 @@ mod draft15 {
     /// declares a length and a reader that takes the wrong number of bytes leaves
     /// every later object misaligned, which is the failure this method exists to
     /// keep out of callers.
-    ///
-    /// # What it catches
-    ///
-    /// Ablation: renaming `FramedRecvStream::read_fetch_object` out of the way:
-    ///
-    /// ```text
-    /// error[E0599]: no method named `read_fetch_object` found for struct
-    /// `FramedRecvStream` in the current scope
-    ///    --> crates/moqtap-client/tests/fetch_stream_round_trip.rs:355:32
-    /// ```
-    ///
-    /// A compile error rather than a failing assertion, which is the only shape
-    /// an absent method can be caught in.
-    ///
-    /// Ablation: leaving the payload on the buffer after handing it back, so the
-    /// next read starts inside the last object's bytes:
-    ///
-    /// ```text
-    /// the second object: Codec(InvalidField)
-    /// ```
     ///
     /// The payload of the fixture happens to begin 0xDE, which is not a
     /// Serialization Flags value draft-15 assigns. A payload whose first byte
@@ -503,11 +475,8 @@ mod draft17 {
     /// The resolved Location is what comes back, not the flags: both Objects
     /// state every field here, so the interesting half is the gate below.
     ///
-    /// Ablation: dropping the line in `read_fetch_header` that seeds the reader,
-    /// so nothing starts it — `the first object:
-    /// DataStreamState("fetch header not read yet")`. Draft-17 has no
-    /// `begin_fetch_objects` and the header is the only thing that can start it,
-    /// so the seeding is what makes this method reachable at all.
+    /// Draft-17 has no `begin_fetch_objects`, so `read_fetch_header` seeding the
+    /// reader is what makes this method reachable at all.
     #[tokio::test]
     async fn a_fetch_stream_this_client_wrote_is_one_it_can_read() {
         common::init_crypto();
@@ -553,18 +522,6 @@ mod draft17 {
     /// none of the three, so every field this asserts on is one the wire never
     /// carried — which is what separates a reader that resolves from one that
     /// hands the header back.
-    ///
-    /// Ablation: an absent Object ID takes the prior Object's without stepping
-    /// it:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an absent Object ID is the prior Object's plus one
-    ///   left: 4
-    ///  right: 5
-    /// ```
-    ///
-    /// Repeating rather than stepping is the mistake the wording invites, and it
-    /// hands two Objects the same Location rather than failing to decode.
     #[tokio::test]
     async fn an_object_that_states_nothing_comes_back_with_what_it_inherited() {
         common::init_crypto();
@@ -619,15 +576,6 @@ mod draft17 {
     /// Flag bits, from Table 8: the low two are the Subgroup ID mode, `0b11`
     /// putting it on the wire and `0b01` taking the prior Object's; 0x04 is the
     /// Object ID, 0x08 the Group ID, 0x10 the Priority.
-    ///
-    /// Ablation: the absent-Group-ID branch answers 0 instead of refusing when
-    /// there is no prior Object — `a first Object has no prior Object to take a
-    /// Group ID from`.
-    ///
-    /// The same ablation **passed** against the single-frame form of this gate,
-    /// which wrote one Object inheriting all four fields: the Object ID and
-    /// Priority guards still refused it, so three guards stood in for one and a
-    /// missing guard was invisible. Four frames, four refusals, one each.
     #[tokio::test]
     async fn each_field_a_first_object_could_inherit_is_refused_on_its_own() {
         let inherits_group_id = FetchObjectHeader {
@@ -899,9 +847,6 @@ mod draft19 {
     /// It is also why draft-19 has this method at all, as draft-18 does: nothing
     /// on a fetch stream says which order its Groups are in, and an endpoint
     /// that guessed would mis-locate every Object after the first.
-    ///
-    /// Ablation: `FetchObjectReader::new` takes the order and stores Ascending
-    /// regardless — `counting down from Group 0 reaches no Group at all`.
     #[tokio::test]
     async fn the_group_order_the_reader_was_started_in_is_the_one_it_reads_in() {
         common::init_crypto();
@@ -942,9 +887,6 @@ mod draft19 {
     /// header does not carry the Group Order. Defaulting to Ascending would
     /// decode a Descending stream into Locations that walk the wrong way and
     /// report success, so the absence is an error rather than an assumption.
-    ///
-    /// Ablation: an unstarted reader is started as Ascending instead of refused
-    /// — `the reader was never given a Group Order`.
     #[tokio::test]
     async fn reading_before_the_reader_is_started_is_refused() {
         common::init_crypto();
@@ -1053,9 +995,6 @@ mod draft20 {
     /// It is also why draft-20 has this method at all, as draft-18 does: nothing
     /// on a fetch stream says which order its Groups are in, and an endpoint
     /// that guessed would mis-locate every Object after the first.
-    ///
-    /// Ablation: `FetchObjectReader::new` takes the order and stores Ascending
-    /// regardless — `counting down from Group 0 reaches no Group at all`.
     #[tokio::test]
     async fn the_group_order_the_reader_was_started_in_is_the_one_it_reads_in() {
         common::init_crypto();
@@ -1096,9 +1035,6 @@ mod draft20 {
     /// header does not carry the Group Order. Defaulting to Ascending would
     /// decode a Descending stream into Locations that walk the wrong way and
     /// report success, so the absence is an error rather than an assumption.
-    ///
-    /// Ablation: an unstarted reader is started as Ascending instead of refused
-    /// — `the reader was never given a Group Order`.
     #[tokio::test]
     async fn reading_before_the_reader_is_started_is_refused() {
         common::init_crypto();
@@ -1206,9 +1142,6 @@ mod draft21 {
     /// It is also why draft-21 has this method at all, as draft-18 does: nothing
     /// on a fetch stream says which order its Groups are in, and an endpoint
     /// that guessed would mis-locate every Object after the first.
-    ///
-    /// Ablation: `FetchObjectReader::new` takes the order and stores Ascending
-    /// regardless — `counting down from Group 0 reaches no Group at all`.
     #[tokio::test]
     async fn the_group_order_the_reader_was_started_in_is_the_one_it_reads_in() {
         common::init_crypto();
@@ -1249,9 +1182,6 @@ mod draft21 {
     /// header does not carry the Group Order. Defaulting to Ascending would
     /// decode a Descending stream into Locations that walk the wrong way and
     /// report success, so the absence is an error rather than an assumption.
-    ///
-    /// Ablation: an unstarted reader is started as Ascending instead of refused
-    /// — `the reader was never given a Group Order`.
     #[tokio::test]
     async fn reading_before_the_reader_is_started_is_refused() {
         common::init_crypto();
@@ -1359,9 +1289,6 @@ mod draft22 {
     /// It is also why draft-22 has this method at all, as draft-18 does: nothing
     /// on a fetch stream says which order its Groups are in, and an endpoint
     /// that guessed would mis-locate every Object after the first.
-    ///
-    /// Ablation: `FetchObjectReader::new` takes the order and stores Ascending
-    /// regardless — `counting down from Group 0 reaches no Group at all`.
     #[tokio::test]
     async fn the_group_order_the_reader_was_started_in_is_the_one_it_reads_in() {
         common::init_crypto();
@@ -1402,9 +1329,6 @@ mod draft22 {
     /// header does not carry the Group Order. Defaulting to Ascending would
     /// decode a Descending stream into Locations that walk the wrong way and
     /// report success, so the absence is an error rather than an assumption.
-    ///
-    /// Ablation: an unstarted reader is started as Ascending instead of refused
-    /// — `the reader was never given a Group Order`.
     #[tokio::test]
     async fn reading_before_the_reader_is_started_is_refused() {
         common::init_crypto();
@@ -1512,9 +1436,6 @@ mod draft23 {
     /// It is also why draft-23 has this method at all, as draft-18 does: nothing
     /// on a fetch stream says which order its Groups are in, and an endpoint
     /// that guessed would mis-locate every Object after the first.
-    ///
-    /// Ablation: `FetchObjectReader::new` takes the order and stores Ascending
-    /// regardless — `counting down from Group 0 reaches no Group at all`.
     #[tokio::test]
     async fn the_group_order_the_reader_was_started_in_is_the_one_it_reads_in() {
         common::init_crypto();
@@ -1555,9 +1476,6 @@ mod draft23 {
     /// header does not carry the Group Order. Defaulting to Ascending would
     /// decode a Descending stream into Locations that walk the wrong way and
     /// report success, so the absence is an error rather than an assumption.
-    ///
-    /// Ablation: an unstarted reader is started as Ascending instead of refused
-    /// — `the reader was never given a Group Order`.
     #[tokio::test]
     async fn reading_before_the_reader_is_started_is_refused() {
         common::init_crypto();

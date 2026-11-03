@@ -42,17 +42,12 @@ macro_rules! fetch_stream_suite {
 
             /// What `encode_stream` writes, `decode_stream` reads back.
             ///
-            /// Writing the body alone instead fails with:
-            ///
-            /// ```text
-            /// a fetch stream this codec opened must be readable by this codec: Err(VarInt(UnexpectedEnd))
-            /// ```
-            ///
-            /// The error is the *body* running out rather than a bad type,
-            /// because the id chosen here is 5 and so reads as the fetch type
-            /// itself. That is the adversarial case on purpose: a value that
-            /// did not collide would be caught by the type check alone and
-            /// would say nothing about whether the field was written.
+            /// Fails if `encode_stream` writes the body alone. The id chosen
+            /// here is 5, which reads as the fetch type itself, so the failure
+            /// is the *body* running out rather than a bad type. That is the
+            /// adversarial case on purpose: a value that did not collide would
+            /// be caught by the type check alone and would say nothing about
+            /// whether the field was written.
             #[test]
             fn a_fetch_stream_opening_round_trips() {
                 let mut buf = Vec::new();

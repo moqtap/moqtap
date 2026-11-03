@@ -71,15 +71,6 @@ mod draft07 {
     }
 
     /// A code the draft does not assign has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// this draft assigns no Status Code 0x5: Ok([...])
-    /// ```
-    ///
-    /// The byte list is elided here; in the real output it is the frame the
-    /// encoder had just finished building, which is the point.
     #[test]
     fn an_unassigned_status_code_never_reaches_the_wire() {
         for code in [0x05, 0xff] {
@@ -93,15 +84,6 @@ mod draft07 {
     /// The byte is moved in a message the encoder built, so everything around
     /// it is exactly what the codec would have written - the frame is a real
     /// one and only the Status Code is out of range.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an unassigned Status Code is a malformed message: Ok(TrackStatus(TrackStatus { .. }))
-    /// ```
-    ///
-    /// The decoded message is elided; it comes back with the out-of-range code
-    /// in place, which is what "carried inwards" means.
     #[test]
     fn an_unassigned_status_code_is_refused_on_decode() {
         let mut buf = encode(0x04, 0, 0).expect("0x04 is assigned");
@@ -115,15 +97,6 @@ mod draft07 {
 
     /// 0x01 says the track does not exist, so a location beside it contradicts
     /// it. The draft says the fields after such a code MUST be zero.
-    ///
-    /// Dropping the second half of the check fails with:
-    ///
-    /// ```text
-    /// Status Code 0x1 requires the fields after it to be zero: Ok([...])
-    /// ```
-    ///
-    /// Byte list elided. It carries `1, 7, 0`: the code that says the track
-    /// does not exist, followed by a group that says where its data is.
     #[test]
     fn a_code_that_requires_zero_fields_refuses_a_location() {
         for code in [0x01, 0x02] {
@@ -182,15 +155,6 @@ mod draft08 {
     }
 
     /// A code the draft does not assign has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// this draft assigns no Status Code 0x5: Ok([...])
-    /// ```
-    ///
-    /// The byte list is elided here; in the real output it is the frame the
-    /// encoder had just finished building, which is the point.
     #[test]
     fn an_unassigned_status_code_never_reaches_the_wire() {
         for code in [0x05, 0xff] {
@@ -204,15 +168,6 @@ mod draft08 {
     /// The byte is moved in a message the encoder built, so everything around
     /// it is exactly what the codec would have written - the frame is a real
     /// one and only the Status Code is out of range.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an unassigned Status Code is a malformed message: Ok(TrackStatus(TrackStatus { .. }))
-    /// ```
-    ///
-    /// The decoded message is elided; it comes back with the out-of-range code
-    /// in place, which is what "carried inwards" means.
     #[test]
     fn an_unassigned_status_code_is_refused_on_decode() {
         let mut buf = encode(0x04, 0, 0).expect("0x04 is assigned");
@@ -226,15 +181,6 @@ mod draft08 {
 
     /// 0x01 says the track does not exist, so a location beside it contradicts
     /// it. The draft says the fields after such a code MUST be zero.
-    ///
-    /// Dropping the second half of the check fails with:
-    ///
-    /// ```text
-    /// Status Code 0x1 requires the fields after it to be zero: Ok([...])
-    /// ```
-    ///
-    /// Byte list elided. It carries `1, 7, 0`: the code that says the track
-    /// does not exist, followed by a group that says where its data is.
     #[test]
     fn a_code_that_requires_zero_fields_refuses_a_location() {
         for code in [0x01, 0x02] {
@@ -293,15 +239,6 @@ mod draft09 {
     }
 
     /// A code the draft does not assign has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// this draft assigns no Status Code 0x5: Ok([...])
-    /// ```
-    ///
-    /// The byte list is elided here; in the real output it is the frame the
-    /// encoder had just finished building, which is the point.
     #[test]
     fn an_unassigned_status_code_never_reaches_the_wire() {
         for code in [0x05, 0xff] {
@@ -315,15 +252,6 @@ mod draft09 {
     /// The byte is moved in a message the encoder built, so everything around
     /// it is exactly what the codec would have written - the frame is a real
     /// one and only the Status Code is out of range.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an unassigned Status Code is a malformed message: Ok(TrackStatus(TrackStatus { .. }))
-    /// ```
-    ///
-    /// The decoded message is elided; it comes back with the out-of-range code
-    /// in place, which is what "carried inwards" means.
     #[test]
     fn an_unassigned_status_code_is_refused_on_decode() {
         let mut buf = encode(0x04, 0, 0).expect("0x04 is assigned");
@@ -337,15 +265,6 @@ mod draft09 {
 
     /// 0x01 says the track does not exist, so a location beside it contradicts
     /// it. The draft says the fields after such a code MUST be zero.
-    ///
-    /// Dropping the second half of the check fails with:
-    ///
-    /// ```text
-    /// Status Code 0x1 requires the fields after it to be zero: Ok([...])
-    /// ```
-    ///
-    /// Byte list elided. It carries `1, 7, 0`: the code that says the track
-    /// does not exist, followed by a group that says where its data is.
     #[test]
     fn a_code_that_requires_zero_fields_refuses_a_location() {
         for code in [0x01, 0x02] {
@@ -404,15 +323,6 @@ mod draft10 {
     }
 
     /// A code the draft does not assign has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// this draft assigns no Status Code 0x5: Ok([...])
-    /// ```
-    ///
-    /// The byte list is elided here; in the real output it is the frame the
-    /// encoder had just finished building, which is the point.
     #[test]
     fn an_unassigned_status_code_never_reaches_the_wire() {
         for code in [0x05, 0xff] {
@@ -426,15 +336,6 @@ mod draft10 {
     /// The byte is moved in a message the encoder built, so everything around
     /// it is exactly what the codec would have written - the frame is a real
     /// one and only the Status Code is out of range.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an unassigned Status Code is a malformed message: Ok(TrackStatus(TrackStatus { .. }))
-    /// ```
-    ///
-    /// The decoded message is elided; it comes back with the out-of-range code
-    /// in place, which is what "carried inwards" means.
     #[test]
     fn an_unassigned_status_code_is_refused_on_decode() {
         let mut buf = encode(0x04, 0, 0).expect("0x04 is assigned");
@@ -448,15 +349,6 @@ mod draft10 {
 
     /// 0x01 says the track does not exist, so a location beside it contradicts
     /// it. The draft says the fields after such a code MUST be zero.
-    ///
-    /// Dropping the second half of the check fails with:
-    ///
-    /// ```text
-    /// Status Code 0x1 requires the fields after it to be zero: Ok([...])
-    /// ```
-    ///
-    /// Byte list elided. It carries `1, 7, 0`: the code that says the track
-    /// does not exist, followed by a group that says where its data is.
     #[test]
     fn a_code_that_requires_zero_fields_refuses_a_location() {
         for code in [0x01, 0x02] {
@@ -514,15 +406,6 @@ mod draft11 {
     }
 
     /// A code the draft does not assign has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// this draft assigns no Status Code 0x5: Ok([...])
-    /// ```
-    ///
-    /// The byte list is elided here; in the real output it is the frame the
-    /// encoder had just finished building, which is the point.
     #[test]
     fn an_unassigned_status_code_never_reaches_the_wire() {
         for code in [0x05, 0xff] {
@@ -536,15 +419,6 @@ mod draft11 {
     /// The byte is moved in a message the encoder built, so everything around
     /// it is exactly what the codec would have written - the frame is a real
     /// one and only the Status Code is out of range.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an unassigned Status Code is a malformed message: Ok(TrackStatus(TrackStatus { .. }))
-    /// ```
-    ///
-    /// The decoded message is elided; it comes back with the out-of-range code
-    /// in place, which is what "carried inwards" means.
     #[test]
     fn an_unassigned_status_code_is_refused_on_decode() {
         let mut buf = encode(0x04, 0, 0).expect("0x04 is assigned");
@@ -558,15 +432,6 @@ mod draft11 {
 
     /// 0x01 says the track does not exist, so a location beside it contradicts
     /// it. The draft says the fields after such a code MUST be zero.
-    ///
-    /// Dropping the second half of the check fails with:
-    ///
-    /// ```text
-    /// Status Code 0x1 requires the fields after it to be zero: Ok([...])
-    /// ```
-    ///
-    /// Byte list elided. It carries `1, 7, 0`: the code that says the track
-    /// does not exist, followed by a group that says where its data is.
     #[test]
     fn a_code_that_requires_zero_fields_refuses_a_location() {
         for code in [0x01, 0x02] {
@@ -624,15 +489,6 @@ mod draft12 {
     }
 
     /// A code the draft does not assign has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// this draft assigns no Status Code 0x5: Ok([...])
-    /// ```
-    ///
-    /// The byte list is elided here; in the real output it is the frame the
-    /// encoder had just finished building, which is the point.
     #[test]
     fn an_unassigned_status_code_never_reaches_the_wire() {
         for code in [0x05, 0xff] {
@@ -646,15 +502,6 @@ mod draft12 {
     /// The byte is moved in a message the encoder built, so everything around
     /// it is exactly what the codec would have written - the frame is a real
     /// one and only the Status Code is out of range.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an unassigned Status Code is a malformed message: Ok(TrackStatus(TrackStatus { .. }))
-    /// ```
-    ///
-    /// The decoded message is elided; it comes back with the out-of-range code
-    /// in place, which is what "carried inwards" means.
     #[test]
     fn an_unassigned_status_code_is_refused_on_decode() {
         let mut buf = encode(0x04, 0, 0).expect("0x04 is assigned");
@@ -668,15 +515,6 @@ mod draft12 {
 
     /// 0x01 says the track does not exist, so a location beside it contradicts
     /// it. The draft says the fields after such a code MUST be zero.
-    ///
-    /// Dropping the second half of the check fails with:
-    ///
-    /// ```text
-    /// Status Code 0x1 requires the fields after it to be zero: Ok([...])
-    /// ```
-    ///
-    /// Byte list elided. It carries `1, 7, 0`: the code that says the track
-    /// does not exist, followed by a group that says where its data is.
     #[test]
     fn a_code_that_requires_zero_fields_refuses_a_location() {
         for code in [0x01, 0x02] {

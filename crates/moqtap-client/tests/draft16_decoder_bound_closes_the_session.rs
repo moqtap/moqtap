@@ -2,9 +2,6 @@
 //! Draft-16's close table is draft-15's plus two rules, and this gates one of
 //! the two.
 //!
-//! `close_for_codec` and its mapping table arrived with draft-17; drafts 15 and
-//! 16 state most of the same bounds and had neither, so every one of them
-//! stopped at refusing the frame while the peer went on sending.
 //! The companion file `draft15_decoder_bound_closes_the_session.rs` gates a rule
 //! both drafts share. This one deliberately does not: it uses a rule draft-15
 //! does not state at all, so a table copied wholesale from draft-15 to draft-16
@@ -74,19 +71,6 @@ fn namespace_with_an_empty_field() -> Vec<u8> {
 
 /// A zero-length Track Namespace Field closes the QUIC connection with
 /// PROTOCOL_VIOLATION.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Dropping `CodecError::EmptyNamespaceField` from draft-16's
-/// `codec_session_error_code` — that is, giving draft-16 the table draft-15
-/// needs, which is the mistake a copy between the two would make:
-///
-/// ```text
-/// ---- an_empty_track_namespace_field_closes_the_quic_connection stdout ----
-///
-/// thread 'an_empty_track_namespace_field_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft16_decoder_bound_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
 #[tokio::test]
 async fn an_empty_track_namespace_field_closes_the_quic_connection() {
     common::init_crypto();

@@ -803,26 +803,13 @@ mod tests {
     }
 
     /// **A `Fetch`-aimed rule claims a fetch object.** The positive half of
-    /// `kind_matches`, which nothing exercised: `the_other_keys_and_ends_a_match`
-    /// only asserts that a *Subgroup* rule rejects a fetch meta, and that
-    /// stays green with the `Fetch` arm deleted.
+    /// `kind_matches`: `the_other_keys_and_ends_a_match` only asserts that a
+    /// *Subgroup* rule rejects a fetch meta.
     ///
     /// The three assertions are the three things one arm has to get right:
     /// the kind it names matches, the *other* stream kind does not, and the
     /// `Datagram` kind matches neither — so a `kind_matches` rewritten as
     /// `want != Datagram` would still redden.
-    ///
-    /// *Ablation, recorded:* delete `| (MatchKind::Fetch,
-    /// DataStreamType::Fetch)` from `kind_matches`. Before this test the
-    /// whole crate stayed green at 392 passed / 0 failed / 0 filtered out —
-    /// a matcher arm with no gate at all. With it:
-    ///
-    /// ```text
-    /// thread '...the_fetch_arm_claims_a_fetch_object' panicked at
-    /// crates\moqtap-proxy\src\shape\matcher.rs:
-    /// a Fetch-aimed class must claim a fetch object: the arm is live on all
-    /// drafts, every one of which has a fetch object codec
-    /// ```
     #[test]
     fn the_fetch_arm_claims_a_fetch_object() {
         let fetch = ObjectMeta {
@@ -862,16 +849,6 @@ mod tests {
     /// keyed on the alias can never claim a fetch object on any draft — and
     /// that is a fact about the *key* rather than about one header, which is
     /// what makes it hold wherever the rule is measured.
-    ///
-    /// *Ablation:* drop the `TrackAlias` row from
-    /// [`Matcher::unmatchable_fields`]:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a fetch header carries a request id
-    /// where a subgroup header carries an alias, on every draft
-    ///   left: None
-    ///  right: Some(TrackAlias)
-    /// ```
     #[test]
     fn naming_a_stream_kind_never_makes_a_rule_unmatchable() {
         let fetch_unit = |draft| ObjectMeta {
@@ -942,9 +919,6 @@ mod tests {
     /// *non-empty* value: without it the table would pass against an
     /// `inert_key` that answered `Some` for any key that was set at all,
     /// which would reject every working profile.
-    ///
-    /// *Ablation, recorded:* drop the `every_nth` arm — the `n == 0` row
-    /// reddens with `left: None / right: Some("every_nth")`.
     #[test]
     fn an_empty_value_set_is_an_inert_key() {
         // A literal `9..=1` is a clippy error at the call site; a runtime

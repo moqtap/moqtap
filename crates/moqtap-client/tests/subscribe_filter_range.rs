@@ -76,12 +76,6 @@ mod draft07 {
 
     /// A filter that names a Start Location is refused by the call that has
     /// none to give.
-    ///
-    /// Dropping the refusal fails with:
-    ///
-    /// ```text
-    /// a filter that names a Start Location must be refused here, got Ok((VarInt(0), Subscribe(Subscribe { .. })))
-    /// ```
     #[test]
     fn subscribe_refuses_the_filters_it_cannot_carry() {
         for filter in [FilterType::AbsoluteStart, FilterType::AbsoluteRange] {
@@ -154,12 +148,6 @@ mod draft08 {
 
     /// A filter that names a Start Location is refused by the call that has
     /// none to give.
-    ///
-    /// Dropping the refusal fails with:
-    ///
-    /// ```text
-    /// a filter that names a Start Location must be refused here, got Ok((VarInt(0), Subscribe(Subscribe { .. })))
-    /// ```
     #[test]
     fn subscribe_refuses_the_filters_it_cannot_carry() {
         for filter in [FilterType::AbsoluteStart, FilterType::AbsoluteRange] {
@@ -232,12 +220,6 @@ mod draft09 {
 
     /// A filter that names a Start Location is refused by the call that has
     /// none to give.
-    ///
-    /// Dropping the refusal fails with:
-    ///
-    /// ```text
-    /// a filter that names a Start Location must be refused here, got Ok((VarInt(0), Subscribe(Subscribe { .. })))
-    /// ```
     #[test]
     fn subscribe_refuses_the_filters_it_cannot_carry() {
         for filter in [FilterType::AbsoluteStart, FilterType::AbsoluteRange] {
@@ -310,12 +292,6 @@ mod draft10 {
 
     /// A filter that names a Start Location is refused by the call that has
     /// none to give.
-    ///
-    /// Dropping the refusal fails with:
-    ///
-    /// ```text
-    /// a filter that names a Start Location must be refused here, got Ok((VarInt(0), Subscribe(Subscribe { .. })))
-    /// ```
     #[test]
     fn subscribe_refuses_the_filters_it_cannot_carry() {
         for filter in [FilterType::AbsoluteStart, FilterType::AbsoluteRange] {
@@ -389,12 +365,6 @@ mod draft11 {
 
     /// A filter that names a Start Location is refused by the call that has
     /// none to give.
-    ///
-    /// Dropping the refusal fails with:
-    ///
-    /// ```text
-    /// a filter that names a Start Location must be refused here, got Ok((VarInt(0), Subscribe(Subscribe { .. })))
-    /// ```
     #[test]
     fn subscribe_refuses_the_filters_it_cannot_carry() {
         for filter in [varint(3), varint(4)] {
@@ -468,12 +438,6 @@ mod draft12 {
 
     /// A filter that names a Start Location is refused by the call that has
     /// none to give.
-    ///
-    /// Dropping the refusal fails with:
-    ///
-    /// ```text
-    /// a filter that names a Start Location must be refused here, got Ok((VarInt(0), Subscribe(Subscribe { .. })))
-    /// ```
     #[test]
     fn subscribe_refuses_the_filters_it_cannot_carry() {
         for filter in [varint(3), varint(4)] {
@@ -547,12 +511,6 @@ mod draft13 {
 
     /// A filter that names a Start Location is refused by the call that has
     /// none to give.
-    ///
-    /// Dropping the refusal fails with:
-    ///
-    /// ```text
-    /// a filter that names a Start Location must be refused here, got Ok((VarInt(0), Subscribe(Subscribe { .. })))
-    /// ```
     #[test]
     fn subscribe_refuses_the_filters_it_cannot_carry() {
         for filter in [FilterType::AbsoluteStart, FilterType::AbsoluteRange] {
@@ -626,12 +584,6 @@ mod draft14 {
 
     /// A filter that names a Start Location is refused by the call that has
     /// none to give.
-    ///
-    /// Dropping the refusal fails with:
-    ///
-    /// ```text
-    /// a filter that names a Start Location must be refused here, got Ok((VarInt(0), Subscribe(Subscribe { .. })))
-    /// ```
     #[test]
     fn subscribe_refuses_the_filters_it_cannot_carry() {
         for filter in [FilterType::AbsoluteStart, FilterType::AbsoluteRange] {

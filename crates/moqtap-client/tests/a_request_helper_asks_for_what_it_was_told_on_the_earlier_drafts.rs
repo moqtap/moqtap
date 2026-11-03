@@ -665,17 +665,6 @@ fn publish_request(
 /// eight drafts carry. A rendering that kept eleven of twelve fields would
 /// still be wrong about the twelfth, and a single pair of unlike requests
 /// would not say which.
-///
-/// # What it catches
-///
-/// Making [`common::render`] return the name and the type alone, which is the
-/// degenerate rendering the sweep would not notice:
-///
-/// ```text
-/// assertion `left != right` failed: the Request ID has to reach the rendering
-///   left: "SUBSCRIBE 0x03"
-///  right: "SUBSCRIBE 0x03"
-/// ```
 #[test]
 fn a_rendering_that_dropped_a_field_would_hide_a_helper_asking_for_the_wrong_thing() {
     let plain = || Subscription::default();
@@ -1943,16 +1932,6 @@ macro_rules! request_helper_gates {
             /// number no draft uses in every failure message this file can
             /// produce. The codec's registry is where these numbers are read
             /// against the draft, so it is what they are held to.
-            ///
-            /// # What it catches
-            ///
-            /// A digit wrong in one of them:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: FETCH
-            ///   left: 22
-            ///  right: 23
-            /// ```
             #[test]
             fn the_numbers_the_renderings_carry_are_this_drafts() {
                 assert_eq!(MessageType::Subscribe.id(), SUBSCRIBE_TYPE, "SUBSCRIBE");
@@ -1976,97 +1955,6 @@ macro_rules! request_helper_gates {
             /// fails, because the id the peer read is the one on the wire. The
             /// three helpers drafts 07 through 10 give no id to return nothing
             /// instead, and their renderings carry no id to check.
-            ///
-            /// # What it catches
-            ///
-            /// Nine cuts, run on these drafts and reverted. A failure prints
-            /// both lists whole — six to nine requests each — so only the
-            /// element that differs is reproduced here, and the assertion line
-            /// above it is verbatim.
-            ///
-            /// Draft-14's `absolute_joining_fetch` left calling the endpoint's
-            /// *relative* builder, which is the cut this pair of files was
-            /// opened for:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: draft-14: every helper must write the request it was told to
-            ///   left: … "FETCH 0x16 request id=8 fetch type=2 priority=128 order=1 joining request id=0 joining start=9 parameters=1" …
-            ///  right: … "FETCH 0x16 request id=8 fetch type=3 priority=128 order=1 joining request id=0 joining start=9 parameters=1" …
-            /// ```
-            ///
-            /// Draft-13's `track_status` handing the endpoint an empty list
-            /// instead of the caller's, which asks for the right track without
-            /// the authorization it was given:
-            ///
-            /// ```text
-            ///   left: … "TRACK_STATUS 0x0d request id=12 namespace=one-control-stream track=track-1 priority=128 order=1 forward=1 filter type=2 parameters=0" …
-            ///  right: … "TRACK_STATUS 0x0d request id=12 namespace=one-control-stream track=track-1 priority=128 order=1 forward=1 filter type=2 parameters=1" …
-            /// ```
-            ///
-            /// Draft-11's `subscribe` dropping the Subscriber Priority it was
-            /// passed, which on these drafts is a field of the message and has
-            /// nowhere else to be:
-            ///
-            /// ```text
-            ///   left: … "SUBSCRIBE 0x03 request id=0 track alias=7 namespace=one-control-stream track=track-1 priority=0 order=1 forward=1 filter type=2 parameters=0" …
-            ///  right: … "SUBSCRIBE 0x03 request id=0 track alias=7 namespace=one-control-stream track=track-1 priority=128 order=1 forward=1 filter type=2 parameters=0" …
-            /// ```
-            ///
-            /// And draft-12's `publish` ignoring the Largest Location it was
-            /// given, which changes the Content Exists the helper derives and
-            /// takes two fields off the message with it:
-            ///
-            /// ```text
-            ///   left: … "PUBLISH 0x1d request id=6 namespace=one-control-stream track=track-1 track alias=7 order=1 content exists=0 forward=1 parameters=1" …
-            ///  right: … "PUBLISH 0x1d request id=6 namespace=one-control-stream track=track-1 track alias=7 order=1 content exists=1 largest group=5 largest object=6 forward=1 parameters=1" …
-            /// ```
-            ///
-            /// Then three the joining-fetch helpers brought with them, one
-            /// per shape. Drafts 08, 09 and 10 hand their helper two joining
-            /// fields and nothing else to tell them apart, so the order they
-            /// go in is the whole of what it can get wrong — draft-09's
-            /// `joining_fetch` passing them the wrong way round:
-            ///
-            /// ```text
-            ///   left: … "FETCH 0x16 request id=3 fetch type=2 priority=128 order=1 joining subscribe id=2 preceding group offset=0 parameters=0" …
-            ///  right: … "FETCH 0x16 request id=3 fetch type=2 priority=128 order=1 joining subscribe id=0 preceding group offset=2 parameters=0" …
-            /// ```
-            ///
-            /// Draft-11's `absolute_joining_fetch` handing the endpoint a
-            /// Relative Fetch Type — the same defect as draft-14's cut above,
-            /// on a draft that has only just been given the pair, and the one
-            /// that two calls rather than one Fetch Type argument exist to put
-            /// out of a caller's reach:
-            ///
-            /// ```text
-            ///   left: … "FETCH 0x16 request id=8 fetch type=2 priority=128 order=1 joining subscribe id=0 joining start=9 parameters=0" …
-            ///  right: … "FETCH 0x16 request id=8 fetch type=3 priority=128 order=1 joining subscribe id=0 joining start=9 parameters=0" …
-            /// ```
-            ///
-            /// And draft-13's `joining_fetch` dropping the caller's parameter
-            /// list, which no helper below draft-12 could get wrong because
-            /// none of them takes one:
-            ///
-            /// ```text
-            ///   left: … "FETCH 0x16 request id=6 fetch type=2 priority=128 order=1 joining request id=0 joining start=2 parameters=0" …
-            ///  right: … "FETCH 0x16 request id=6 fetch type=2 priority=128 order=1 joining request id=0 joining start=2 parameters=1" …
-            /// ```
-            ///
-            /// # Two cuts that never reach the wire
-            ///
-            /// Recorded because they say where this gate's reach ends rather
-            /// than what it adds. Draft-07's `subscribe_range` deriving
-            /// AbsoluteStart while carrying an end, and draft-09's `fetch`
-            /// leaving out the track it is for, both redden — but as a call
-            /// that failed, not as a comparison:
-            ///
-            /// ```text
-            /// subscribe_range: Codec(InvalidField)
-            /// ```
-            ///
-            /// ```text
-            /// fetch: Codec(InvalidField)
-            /// ```
             ///
             /// The encoder already refuses a SUBSCRIBE whose Filter Type
             /// disagrees with the fields it carries, and a FETCH with no

@@ -138,12 +138,6 @@ mod tests {
     /// ids each allocator actually hands out, so a parity that is inverted in
     /// both places at once — which would let a client talk to itself — still
     /// fails.
-    ///
-    /// Inverting `expected_even` in `validate_peer_id` fails with:
-    ///
-    /// ```text
-    /// a Client refused 1, which a Server allocates
-    /// ```
     #[test]
     fn each_role_accepts_only_the_ids_the_other_role_allocates() {
         for (role, peer_role) in [(Role::Client, Role::Server), (Role::Server, Role::Client)] {

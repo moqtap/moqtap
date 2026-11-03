@@ -126,11 +126,7 @@ mod draft08 {
 
     /// Draft-08 states no rule against extensions on a non-existent object.
     ///
-    /// Back-porting draft-11's sentence to the subgroup carrier fails with:
-    ///
-    /// ```text
-    /// draft-08 states no rule against this: Err(InvalidField)
-    /// ```
+    /// Fails if draft-11's rule against it is applied to the subgroup carrier.
     #[test]
     fn a_non_existent_subgroup_object_may_carry_extensions() {
         let mut buf = Vec::new();
@@ -145,11 +141,7 @@ mod draft08 {
 
     /// The fetch carrier is the one a partial back-port forgets.
     ///
-    /// Back-porting draft-11's sentence to the fetch carrier fails with:
-    ///
-    /// ```text
-    /// draft-08 states no rule against this: Err(InvalidField)
-    /// ```
+    /// Fails if draft-11's rule against it is applied to the fetch carrier.
     #[test]
     fn a_non_existent_fetch_object_may_carry_extensions() {
         let mut buf = Vec::new();
@@ -165,12 +157,9 @@ mod draft08 {
     /// A datagram declaring no extensions is ordinary draft-08 output.
     ///
     /// Draft-08 Section 8.1.1 says of the Object Extension Count: "A value of 0
-    /// indicates that no Object Extension Headers are present." Refusing it, as
-    /// drafts 11 through 16 refuse their own zero-length block, fails with:
-    ///
-    /// ```text
-    /// a count of zero is how draft-08 says "no extensions": Err(InvalidField)
-    /// ```
+    /// indicates that no Object Extension Headers are present." Fails if the
+    /// encoder refuses it, as drafts 11 through 16 refuse their own zero-length
+    /// block.
     #[test]
     fn a_datagram_may_declare_no_extensions() {
         let datagram = DatagramHeader {
@@ -270,19 +259,8 @@ macro_rules! byte_length_gates {
 
             /// The subgroup object writes the length its bytes hold.
             ///
-            /// Writing the field instead fails on the over-stated case with:
-            ///
-            /// ```text
-            /// an over-stated length must not reach the wire: UnexpectedEnd
-            /// ```
-            ///
-            /// and on the under-stated case with:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: an under-stated length must not reach the wire
-            ///   left: []
-            ///  right: [170, 187]
-            /// ```
+            /// Fails if the encoder writes the length field instead, whether it
+            /// over-states or under-states the bytes.
             #[test]
             fn a_subgroup_object_writes_the_length_its_bytes_hold() {
                 for stated in [99, 0] {
@@ -304,19 +282,8 @@ macro_rules! byte_length_gates {
 
             /// The datagram writes the length its bytes hold.
             ///
-            /// Writing the field instead fails on the over-stated case with:
-            ///
-            /// ```text
-            /// an over-stated length must not reach the wire: UnexpectedEnd
-            /// ```
-            ///
-            /// and on the under-stated case with:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: an under-stated length must not reach the wire
-            ///   left: []
-            ///  right: [170, 187]
-            /// ```
+            /// Fails if the encoder writes the length field instead, whether it
+            /// over-states or under-states the bytes.
             #[test]
             fn a_datagram_writes_the_length_its_bytes_hold() {
                 for stated in [99, 0] {
@@ -338,22 +305,8 @@ macro_rules! byte_length_gates {
 
             /// The status datagram writes the length its bytes hold.
             ///
-            /// Writing the field instead fails on the over-stated case with:
-            ///
-            /// ```text
-            /// an over-stated length must not reach the wire: UnexpectedEnd
-            /// ```
-            ///
-            /// and on the under-stated case with:
-            ///
-            /// ```text
-            /// an over-stated length must not reach the wire: VarInt(UnexpectedEnd)
-            /// ```
-            ///
-            /// The under-stated case fails at a different point here, and on a
-            /// different error: the two extension bytes left unread are taken
-            /// for the Object Status varint, 0xAA opens a two-byte varint, and
-            /// the byte it needs is the last one in the frame.
+            /// Fails if the encoder writes the length field instead, whether it
+            /// over-states or under-states the bytes.
             #[test]
             fn a_status_datagram_writes_the_length_its_bytes_hold() {
                 for stated in [99, 0] {
@@ -376,20 +329,9 @@ macro_rules! byte_length_gates {
 
             /// The fetch object writes the length its bytes hold.
             ///
-            /// This is the carrier a partial fix leaves behind. Writing the
-            /// field instead fails on the over-stated case with:
-            ///
-            /// ```text
-            /// an over-stated length must not reach the wire: UnexpectedEnd
-            /// ```
-            ///
-            /// and on the under-stated case with:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: an under-stated length must not reach the wire
-            ///   left: []
-            ///  right: [170, 187]
-            /// ```
+            /// This is the carrier a partial fix leaves behind. Fails if the
+            /// encoder writes the length field instead, whether it over-states
+            /// or under-states the bytes.
             #[test]
             fn a_fetch_object_writes_the_length_its_bytes_hold() {
                 for stated in [99, 0] {
@@ -412,11 +354,7 @@ macro_rules! byte_length_gates {
             /// This draft states no rule against extensions on a non-existent
             /// object, on any of the three carriers that can announce a status.
             ///
-            /// Back-porting draft-11's sentence fails with:
-            ///
-            /// ```text
-            /// this draft states no rule against this: Err(InvalidField)
-            /// ```
+            /// Fails if draft-11's rule against it is applied to any of them.
             #[test]
             fn a_non_existent_object_may_carry_extensions_on_every_carrier() {
                 let mut buf = Vec::new();
@@ -453,11 +391,8 @@ macro_rules! byte_length_gates {
             /// output on this draft, on both datagram carriers.
             ///
             /// The field is not optional here, so zero is the only way to say
-            /// "no extensions". Back-porting draft-14's refusal fails with:
-            ///
-            /// ```text
-            /// a zero-length block is how this draft says "no extensions": Err(InvalidField)
-            /// ```
+            /// "no extensions". Fails if the encoder refuses it, as draft-14
+            /// does.
             #[test]
             fn a_datagram_may_carry_a_zero_length_extension_block() {
                 let empty = DatagramHeader { extensions: Vec::new(), ..datagram(0) };

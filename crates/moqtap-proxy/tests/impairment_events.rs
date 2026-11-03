@@ -539,58 +539,6 @@ impl Rig {
 /// verbatim; the wire is byte-identical either way, and the run's own
 /// `ActionRefused` says the attempt happened. The only place a spurious
 /// impairment shows up is this vector.
-///
-/// # Two ablations, both run, and this is what each of them said
-///
-/// **(a) The ordering — the one this file was written for.** In
-/// `exec::plan_action`'s `Action::Delay` arm, hoist the clamp above the
-/// inner action: move `let config = queue_config(engine); let deferral =
-/// egress::defer_by(unit.arrived_at, by, &config); if deferral.was_clamped()
-/// { report.impairment(..) }` to sit *before* `let content =
-/// prepare_content(unit, &then, report)?;`. That is the ordering the
-/// `Impairment` variant's rustdoc forbids, and it is invisible on the wire:
-/// object 1 is still refused, still forwarded verbatim, and every byte of
-/// both streams is unchanged. Only this vector moves.
-///
-/// ```text
-/// assertion `left == right` failed: the impairment sequence is what the run did, in order, on the leg it did it to
-///   left: [(Some(Upstream), SerializeTargetUnknown { key: StreamKey { side: ClientToProxy, id: 0 }, target: StreamKey { side: ClientToProxy, id: 9999 } }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Client), FramerBypass { stream_id: 1, draft: Draft19, reason: DecodeError })]
-///  right: [(Some(Upstream), SerializeTargetUnknown { key: StreamKey { side: ClientToProxy, id: 0 }, target: StreamKey { side: ClientToProxy, id: 9999 } }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Client), FramerBypass { stream_id: 1, draft: Draft19, reason: DecodeError })]
-/// ```
-///
-/// A third `HoldClamped`, identical to the two real ones, reporting a hold on
-/// an object that was never held. Every count, every kind filter and every
-/// `contains` assertion in the rest of the suite stays green through it, and
-/// so does every byte assertion in this test.
-///
-/// **(b) The leg.** In `event::impairment_leg`, move
-/// `ImpairmentKind::FramerBypass` out of the arrival arm into the departure
-/// arm, so every report answers the far connection. The sequence keeps its
-/// length, its order and every field of every element; one word changes.
-///
-/// ```text
-/// assertion `left == right` failed: the impairment sequence is what the run did, in order, on the leg it did it to
-///   left: [(Some(Upstream), SerializeTargetUnknown { key: StreamKey { side: ClientToProxy, id: 0 }, target: StreamKey { side: ClientToProxy, id: 9999 } }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Upstream), FramerBypass { stream_id: 1, draft: Draft19, reason: DecodeError })]
-///  right: [(Some(Upstream), SerializeTargetUnknown { key: StreamKey { side: ClientToProxy, id: 0 }, target: StreamKey { side: ClientToProxy, id: 9999 } }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Upstream), HoldClamped { requested: Some(9s), applied: 60ms }),
-///          (Some(Client), FramerBypass { stream_id: 1, draft: Draft19, reason: DecodeError })]
-/// ```
-///
-/// A stream the proxy could not parse on the way *in*, blamed on the relay
-/// connection it was writing out to — with the three rows above it still
-/// correct, so the whole sequence reads plausibly. Nothing else in the suite
-/// notices: every other reader of this report filters on the kind.
 #[tokio::test]
 async fn the_impairment_sequence_is_exactly_what_the_run_did() {
     let (head, objects) = subgroup_stream(3);

@@ -305,11 +305,9 @@ fn run_datagram_vectors(relative_path: &str) {
             // published datagram vector cannot catch an encoder and decoder
             // that disagree, because only one of the two is ever run.
             //
-            // Ablation: writing the Object ID from a datagram header whose Type
-            // says there is none — `[datagram-no-object-id] re-encoded datagram
-            // mismatch / left: "0405640080" / right: "04056480"`, measured on
-            // draft-19. The decoder honours the bit either way, so nothing else
-            // in these suites notices.
+            // Fails if the encoder writes an Object ID the Type says is absent.
+            // The decoder honours the bit either way, so nothing else in these
+            // suites notices.
             if vector.is_canonical() {
                 let mut out = Vec::new();
                 hdr.encode(&mut out);
@@ -630,16 +628,8 @@ fn d19_data_stream_datagram() {
 /// offsets can still produce field values that pass every other assertion, and
 /// only writing them back out again catches it.
 ///
-/// # What this catches, observed by making the change and running it
-///
-/// Swapping the Subgroup ID and Object ID Delta reads in
-/// `FetchObjectHeader::decode`:
-///
-/// ```text
-/// assertion `left == right` failed: [fetch-with-subgroup-id-present] re-encoded fetch object mismatch
-///   left: "1f0000078004"
-///  right: "1f0007008004"
-/// ```
+/// Fails if `FetchObjectHeader::decode` reads the Subgroup ID and Object ID
+/// Delta in the wrong order.
 #[test]
 fn d19_data_stream_fetch() {
     run_fetch_vectors("transport/draft19/codec/data-streams/fetch-header.json");

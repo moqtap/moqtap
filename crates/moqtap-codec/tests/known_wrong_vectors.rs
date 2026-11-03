@@ -19,11 +19,11 @@
 //! either draft is that trap; the corpus encodes 0x4, so no row is needed.
 //!
 //! An empty table is not a weaker check than a populated one — it is the
-//! stronger claim. The sweep is the invariant; the table only ever named the
-//! exceptions to it. With no exceptions left, every draft asserts that its
-//! corpus agrees with it completely, and a bad vector on any draft fails
-//! outright rather than being excused by a row. A row is added only to record a
-//! disagreement this repository has decided to keep, and never to quiet one.
+//! stronger claim. The sweep is the invariant; the table names the exceptions
+//! to it. With none, every draft asserts that its corpus agrees with it
+//! completely, and a bad vector on any draft fails outright rather than being
+//! excused by a row. A row is added only to record a disagreement this
+//! repository has decided to keep, and never to quiet one.
 //!
 //! # Why an empty result is not trusted on its own
 //!
@@ -36,46 +36,12 @@
 //! That last one is why [`test_vectors::statuses_in`] names two JSON keys. The
 //! corpus spells the field `object_status` in drafts 07-14 and on drafts 15-23's
 //! datagram headers, but `status` inside drafts 15-23's subgroup objects. A walk
-//! that knew only the first name read none of those six drafts' subgroup
-//! objects and reported a clean sweep over vectors it had never opened.
+//! that knew only the first name would read none of those drafts' subgroup
+//! objects and report a clean sweep over vectors it never opened.
 //!
-//! # What these tests catch, observed by making each change and running them
-//!
-//! A disagreement on a draft that has none. Deleting `ObjectStatus::EndOfGroup`
-//! from draft-13's `ObjectStatus::ALL` turns every draft-13 vector carrying
-//! `0x3` into a status the draft no longer assigns, and
-//! `draft13_corpus_object_statuses` fails with:
-//!
-//! ```text
-//! assertion `left == right` failed: draft13: the corpus disagrees with the draft
-//! somewhere this repository has no record of. Every row must be listed in
-//! KNOWN_WRONG with why, or the corpus must be fixed.
-//!   left: [("datagram.json", "datagram-status-end-of-group", 3), ("datagram.json",
-//!   "datagram-status-with-extensions", 3), ("fetch-header.json",
-//!   "fetch-zero-payload-status", 3), ("subgroup.json", "subgroup-end-of-group", 3)]
-//!  right: []
-//! ```
-//!
-//! A disagreement the walk cannot see. Deleting `ObjectStatus::Normal` from
-//! draft-17's `ObjectStatus::ALL` — 0x0 appears in draft-17's corpus only under
-//! `status` — fails `draft17_corpus_object_statuses` with:
-//!
-//! ```text
-//! left: [("subgroup.json", "subgroup-explicit-subgroup-id", 0)]
-//! right: []
-//! ```
-//!
-//! With `object_status` as the only key the walk knows, the same deletion
-//! passes: 1 passed, 0 failed. That is what the second key is worth.
-//!
-//! The key names going stale again. Renaming both of them in `statuses_in` to
-//! spellings the corpus does not use fails every sweep here:
-//!
-//! ```text
-//! draft19: swept 34 vectors and found no object status in any of them. Every draft's
-//! data-stream corpus carries statuses, so this is the walk having lost the corpus, not
-//! the corpus having lost its statuses — check the JSON key names in `statuses_in`.
-//! ```
+//! A sweep fails if its draft's `ObjectStatus::ALL` loses a code the corpus
+//! uses, including one the corpus spells only under `status`, and every sweep
+//! fails if `statuses_in` loses both key names.
 
 #![cfg(any(
     feature = "draft07",
@@ -197,8 +163,8 @@ fn expected(draft: &str) -> Vec<Row> {
 }
 
 /// Generates one draft's corpus sweep. Every draft gets one, and every one of
-/// them now expects an empty row set — that is the assertion that no
-/// disagreement survives anywhere in the corpus.
+/// them expects an empty row set — that is the assertion that no disagreement
+/// survives anywhere in the corpus.
 macro_rules! corpus_sweep {
     ($name:ident, $feat:literal, $module:ident, $dir:literal) => {
         #[cfg(feature = $feat)]
@@ -271,24 +237,8 @@ corpus_sweep!(draft23_corpus_object_statuses, "draft23", draft23, "draft23");
 // `parameter_out_of_scope` rather than as rows here, which is the difference
 // between a rule being tested and a rule being tolerated.
 //
-// A corrected vector is read, not skipped, and that is measured rather than
-// assumed. Splicing the length back into draft-18 `request-ok.json
-// [with-largest-object]` — `07000401090a03` becoming `0700050109020a03`, which
-// is what it shipped as — fails in both places at once. Here:
-//
-// ```text
-// assertion `left == right` failed: draft18: the set of message vectors this
-// codec refuses is not the set KNOWN_WRONG_MESSAGE_VECTORS records. ...
-//   left: [("fetch-ok.json", "with-params-and-properties"), ("request-ok.json", "with-largest-object")]
-//  right: [("fetch-ok.json", "with-params-and-properties")]
-// ```
-//
-// and in the runner that would otherwise have skipped it:
-//
-// ```text
-// thread 'd18_request_ok' panicked at crates\moqtap-codec\tests\vectors_draft18.rs:
-// [with-largest-object] decode failed: control message declares 5 bytes of payload; its fields ran past the end
-// ```
+// A corrected vector is read, not skipped: if its outer length comes back,
+// both this sweep and the per-draft runner fail.
 
 /// The `messages` directory for one draft.
 fn messages_dir(draft: &str) -> std::path::PathBuf {

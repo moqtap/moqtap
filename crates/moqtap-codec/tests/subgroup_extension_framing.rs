@@ -79,14 +79,6 @@ fn object_11() -> moqtap_codec::draft11::data_stream::ObjectHeader {
 /// who has not been told otherwise — so extensions handed to it have nowhere to
 /// go, and the choice is between refusing and putting an unreadable object on
 /// the wire.
-///
-/// Ablation: dropping the `!has_extensions && !self.extensions.is_empty()` arm
-/// from draft-11's `encode_checked_with_extensions` fails with
-///
-/// ```text
-/// an object carrying extensions has no encoding in the framing that omits
-/// them, so the checked writer must refuse it; it wrote [00, 02]
-/// ```
 #[test]
 fn the_writer_that_was_not_told_refuses_the_extensions_it_would_lose() {
     let mut wrote = Vec::new();
@@ -385,16 +377,6 @@ fn headers() -> Vec<(&'static str, AnySubgroupHeader, bool)> {
 /// table on the ten drafts that have one. Encoding and re-decoding each header
 /// is what makes this a test of the type byte rather than of a struct field a
 /// caller happened to set.
-///
-/// Ablation: flipping the drafts 11-13 arm of `carries_extension_block` to
-/// `!h.stream_type.has_extensions()` fails with
-///
-/// ```text
-/// assertion `left == right` failed: draft-11 without extensions: the accessor
-/// disagrees with the framing this header fixes
-///   left: true
-///  right: false
-/// ```
 #[test]
 fn the_accessor_reports_the_framing_the_header_fixes() {
     for (name, header, expected) in headers() {
@@ -479,14 +461,6 @@ fn the_accessor_predicts_what_the_draft_neutral_writer_accepts() {
 /// A zero is accepted under every type, because a zero is what the decoder
 /// produces for the types that carry no field, and refusing it would refuse
 /// every header that has been round-tripped.
-///
-/// Ablation: dropping the check from draft-11's `SubgroupHeader::encode_checked`
-/// fails with
-///
-/// ```text
-/// draft-11: a Subgroup ID this stream type has nowhere to put must be refused
-/// rather than dropped; it wrote [01, 02, 80]
-/// ```
 #[test]
 fn a_subgroup_id_the_stream_type_cannot_carry_is_refused() {
     macro_rules! check {

@@ -330,19 +330,6 @@ macro_rules! update_gates {
 
             /// The peer updates the subscription it opened, and it is
             /// accepted.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Looking the update up among the subscriptions this endpoint
-            /// opened rather than among the peer's:
-            ///
-            /// ```text
-            /// the peer's update of its own subscription: UpdateForUnknownSubscribe(0)
-            /// ```
-            ///
-            /// It reddens forty-eight tests across both update files and the draft-14
-            /// dispatch test: every gate that puts a legal update through the endpoint
-            /// reads it out of that one probe.
             #[test]
             fn an_update_for_the_peers_subscription_is_accepted() {
                 let mut ep = publishing();
@@ -358,20 +345,6 @@ macro_rules! update_gates {
             /// can be numerically the same as the peer's: neither end's
             /// sequence is set apart from the other's. What decides the answer
             /// is which record the identifier is looked for in.
-            ///
-            /// # What it catches
-            ///
-            /// The same cut as the gate above, from the other side: a lookup
-            /// in this endpoint's own map accepts this and it must not.
-            ///
-            /// ```text
-            /// an update moved a subscription this endpoint had opened: ()
-            /// ```
-            ///
-            /// The same cut as the gate above, and this is the half of it only these
-            /// five drafts can show: with no parity rule the identifier is a live
-            /// subscription's either way, so the wrong probe does not miss - it
-            /// succeeds on the wrong record.
             #[test]
             fn an_update_for_our_own_subscription_is_refused() {
                 let mut ep = active();
@@ -443,19 +416,6 @@ macro_rules! update_gates {
             /// record outlives the subscription for exactly that reason, so
             /// this refusal comes from the state machine and names the
             /// transition rather than the identifier.
-            ///
-            /// # What it catches
-            ///
-            /// Dropping the record when the subscription ends, which turns an
-            /// identifier the session has had into one it never had:
-            ///
-            /// ```text
-            /// an identifier the session has had should be refused by its flow, and was
-            /// refused by UpdateForUnknownSubscribe(0)
-            /// ```
-            ///
-            /// Made by removing the inbound record when the subscription ends. It
-            /// reddens fifteen tests across both update files.
             #[test]
             fn an_update_for_an_ended_subscription_is_refused_by_the_flow() {
                 let mut ep = publishing();
@@ -490,22 +450,7 @@ macro_rules! update_gates {
             ///
             /// The other half of the same sentence: the subscriber sends the
             /// update, and this endpoint is the subscriber for every
-            /// subscription it opened. Earlier only draft-14 could
-            /// build one.
-            ///
-            /// # What it catches
-            ///
-            /// Building the update without moving the subscription's own
-            /// record, which is what a builder that ignores the flow looks
-            /// like - it would go on building updates for a subscription that
-            /// had ended:
-            ///
-            /// ```text
-            /// a subscription this endpoint had ended was updated: SubscribeUpdate(SubscribeUpdate { subscribe_id: VarInt(0), start_group: VarInt(0), start_object: VarInt(0), end_group: VarInt(0), subscriber_priority: 128, parameters: [] })
-            /// ```
-            ///
-            /// It reddens ten tests: this gate on all ten drafts that can build an
-            /// update. Nothing that judges one arriving is touched.
+            /// subscription it opened.
             #[test]
             fn this_endpoint_can_update_a_subscription_of_its_own() {
                 let mut ep = active();

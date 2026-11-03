@@ -14,26 +14,14 @@
 //!   same zero-length block is legal on a subgroup stream, and a check that
 //!   refuses both breaks frames the draft spells out.
 //! * A draft-15 object carrying extension headers beside a status other than
-//!   Normal is reported rather than refused, except by the one encoder that has
-//!   an unchecked twin. The frame is well formed, so the codec must stay able to
-//!   read it, write it back byte for byte, and say that it is a violation; only
-//!   `DatagramHeader::encode_checked` refuses, because `encode` still stands
-//!   beside it for verbatim reproduction.
+//!   Normal is refused by the whole-object reader and writer and by
+//!   `DatagramHeader::encode_checked`. The framing-only reader and the datagram
+//!   decoder read it and say that it is a violation, and `DatagramHeader::encode`
+//!   still stands beside the checked encoder for verbatim reproduction.
 //! * A draft-15 FETCH's body must be the one its Fetch Type names.
 //! * Repeating a Parameter Type is forbidden to a sender and only sometimes to a
 //!   receiver, on both draft-14 and draft-15. The asymmetry is the rule, and a
 //!   test here fails if either side is collapsed into the other.
-//!
-//! Each test's docstring records the failures observed by patching the defect
-//! back into the codec and running it, so the gate is known to be load-bearing
-//! rather than assumed to be. The recorded blocks give the test's own path and
-//! the panic message and stop there: the file-and-line coordinate the harness
-//! prints alongside them moves whenever these comments are edited, and a
-//! coordinate that drifts is worse than no coordinate at all.
-//!
-//! The duplicate-parameter suite is generated for both drafts from one macro, so
-//! each of its ablations was applied to draft-14 and draft-15 together and both
-//! failures are recorded.
 
 #![cfg(all(feature = "draft14", feature = "draft15"))]
 
@@ -102,19 +90,12 @@ mod subgroup_priority_follows_the_type_byte {
     /// the wire whatever the struct holds. A `None` beside it is written as a
     /// zero rather than dropped.
     ///
-    /// Observed by making `SubgroupHeader::encode` write the byte only when the
-    /// `Option` is populated — `if let Some(p) = self.publisher_priority` in
-    /// place of the `has_priority` test — which fails this with:
-    ///
-    /// ```text
-    /// ---- subgroup_priority_follows_the_type_byte::a_type_that_declares_a_priority_always_spends_a_byte_on_it stdout ----
-    /// object decode: UnexpectedEnd
-    /// ```
-    ///
-    /// The byte the header does not spend is the object's Object ID delta, so
-    /// the reader takes the delta for a priority, the extension-or-length varint
-    /// for a delta, and the first payload byte for a length. It asks for
-    /// ninety-eight bytes of payload from a buffer holding four.
+    /// Fails if `SubgroupHeader::encode` writes the byte only when the `Option`
+    /// is populated. The byte the header does not spend is the object's Object
+    /// ID delta, so the reader takes the delta for a priority, the
+    /// extension-or-length varint for a delta, and the first payload byte for a
+    /// length. It asks for ninety-eight bytes of payload from a buffer holding
+    /// four.
     #[test]
     fn a_type_that_declares_a_priority_always_spends_a_byte_on_it() {
         let (object_id, payload, left_over) = round_trip(&header(0x10, None));
@@ -129,17 +110,10 @@ mod subgroup_priority_follows_the_type_byte {
     /// Type 0x30 sets the 0x20 bit, so no Publisher Priority byte is on the
     /// wire. A populated `Option` beside it is dropped rather than written.
     ///
-    /// Observed the same way, with the same one-line change, which fails this
-    /// with:
-    ///
-    /// ```text
-    /// ---- subgroup_priority_follows_the_type_byte::a_type_that_declares_no_priority_never_spends_a_byte_on_one stdout ----
-    /// object decode: UnexpectedEnd
-    /// ```
-    ///
-    /// The extra byte shifts the stream the other way: the reader takes the
-    /// priority for the first object's Object ID delta and every field after it
-    /// moves up one.
+    /// Fails if `SubgroupHeader::encode` writes the byte whenever the `Option`
+    /// is populated. The extra byte shifts the stream the other way: the reader
+    /// takes the priority for the first object's Object ID delta and every
+    /// field after it moves up one.
     #[test]
     fn a_type_that_declares_no_priority_never_spends_a_byte_on_one() {
         let (object_id, payload, left_over) = round_trip(&header(0x30, Some(7)));
@@ -154,13 +128,8 @@ mod subgroup_priority_follows_the_type_byte {
     /// The checked encoder refuses the disagreement outright, rather than
     /// resolving it the way the infallible one has to.
     ///
-    /// Observed by dropping the `has_priority() != publisher_priority.is_some()`
-    /// arm from `SubgroupHeader::encode_checked`, which fails this with:
-    ///
-    /// ```text
-    /// ---- subgroup_priority_follows_the_type_byte::the_checked_encoder_refuses_a_header_that_disagrees_with_itself stdout ----
-    /// a type declaring a priority accepted a header holding none
-    /// ```
+    /// Fails if `SubgroupHeader::encode_checked` drops the
+    /// `has_priority() != publisher_priority.is_some()` arm.
     #[test]
     fn the_checked_encoder_refuses_a_header_that_disagrees_with_itself() {
         let mut buf = Vec::new();
@@ -198,14 +167,8 @@ mod data_stream_types_are_not_truncated {
     /// The consequence is observed as the pair: the short form parses, the long
     /// form does not, and so the two cannot be confused.
     ///
-    /// Observed by restoring the truncation in `SubgroupHeader::decode` —
-    /// `let header_type = VarInt::decode(buf)?.into_inner() as u8;` followed by
-    /// the assignment test on that byte — which fails this with:
-    ///
-    /// ```text
-    /// ---- data_stream_types_are_not_truncated::a_long_form_subgroup_type_does_not_alias_onto_a_short_one stdout ----
-    /// subgroup type 0x110 was accepted as though it were 0x10
-    /// ```
+    /// Fails if `SubgroupHeader::decode` narrows the Type to `u8` before the
+    /// assignment test.
     #[test]
     fn a_long_form_subgroup_type_does_not_alias_onto_a_short_one() {
         let short = hex("10010280");
@@ -231,13 +194,8 @@ mod data_stream_types_are_not_truncated {
     /// follows the Group ID: guessing wrong shifts every later field by that
     /// varint's width.
     ///
-    /// Observed by relaxing `subgroup_type_is_assigned` to test only the base —
-    /// dropping the `(ty & 0x06) != 0x06` conjunct — which fails this with:
-    ///
-    /// ```text
-    /// ---- data_stream_types_are_not_truncated::the_reserved_subgroup_id_mode_is_refused stdout ----
-    /// subgroup type 0x16 was accepted, and its Subgroup ID mode has no framing
-    /// ```
+    /// Fails if `subgroup_type_is_assigned` tests only the base and not the
+    /// Subgroup ID mode.
     #[test]
     fn the_reserved_subgroup_id_mode_is_refused() {
         for reserved in [0x16u8, 0x17, 0x1E, 0x1F, 0x36, 0x37, 0x3E, 0x3F] {
@@ -272,14 +230,8 @@ mod data_stream_types_are_not_truncated {
     /// truncating decoder therefore reads a greased or future datagram as a
     /// payload-bearing object with a priority and no extensions.
     ///
-    /// Observed by restoring the truncation in `DatagramHeader::decode` —
-    /// `let datagram_type = VarInt::decode(buf)?.into_inner() as u8;` before the
-    /// assignment test — which fails this with:
-    ///
-    /// ```text
-    /// ---- data_stream_types_are_not_truncated::a_long_form_datagram_type_does_not_alias_onto_a_short_one stdout ----
-    /// datagram type 0x100 was accepted as though it were 0x00
-    /// ```
+    /// Fails if `DatagramHeader::decode` narrows the Type to `u8` before the
+    /// assignment test.
     #[test]
     fn a_long_form_datagram_type_does_not_alias_onto_a_short_one() {
         let short = hex("0001020380");
@@ -304,16 +256,9 @@ mod data_stream_types_are_not_truncated {
     /// end-of-group bit clear. A status datagram carries no object, so there is
     /// nothing for it to mark the end of a group with.
     ///
-    /// Observed by relaxing `datagram_type_is_assigned` to test only the form
-    /// bits — dropping the `ty & 0x22 != 0x22` conjunct — which fails this with:
-    ///
-    /// ```text
-    /// ---- data_stream_types_are_not_truncated::a_status_datagram_may_not_also_end_a_group stdout ----
-    /// datagram type 0x2e was accepted as both a status and an end-of-group marker
-    /// ```
-    ///
-    /// The loop reports 0x2E rather than 0x22 because the four combined Types
-    /// that keep the Object ID and Priority fields on the wire run out of bytes
+    /// Fails if `datagram_type_is_assigned` tests only the form bits. The loop
+    /// then reports 0x2E rather than 0x22, because the four combined Types that
+    /// keep the Object ID and Priority fields on the wire run out of bytes
     /// before reaching the status field, and are refused for that reason
     /// instead. 0x2E omits both fields, so its status parses and the datagram is
     /// accepted whole — which is the case the rule is actually about.
@@ -366,13 +311,7 @@ mod datagram_extension_block {
     /// it writes is a frame the module's own decoder refuses. That is what makes
     /// the checked encoder's refusal a fix and not a preference.
     ///
-    /// Observed by dropping the extension-block arm from
-    /// `DatagramHeader::encode_checked`, which fails this with:
-    ///
-    /// ```text
-    /// ---- datagram_extension_block::a_datagram_announcing_extensions_must_carry_some stdout ----
-    /// the checked encoder wrote a datagram its own decoder refuses
-    /// ```
+    /// Fails if `DatagramHeader::encode_checked` drops the extension-block arm.
     #[test]
     fn a_datagram_announcing_extensions_must_carry_some() {
         let empty_block = datagram(0x01, Vec::new());
@@ -396,12 +335,7 @@ mod datagram_extension_block {
     /// Extension bytes with the Type's extensions bit clear are refused rather
     /// than dropped.
     ///
-    /// Observed by dropping the same arm, which fails this with:
-    ///
-    /// ```text
-    /// ---- datagram_extension_block::extensions_the_type_byte_cannot_carry_are_refused stdout ----
-    /// extension bytes were accepted under a type that cannot carry them, and the encoder would drop them in silence
-    /// ```
+    /// Fails if `DatagramHeader::encode_checked` drops the extension-block arm.
     #[test]
     fn extensions_the_type_byte_cannot_carry_are_refused() {
         let orphaned = datagram(0x00, vec![0x3c, 0x01]);
@@ -431,16 +365,8 @@ mod datagram_extension_block {
     /// byte there is fixed for the whole stream, so a zero-length block is the
     /// only way one object among many can say it carries nothing.
     ///
-    /// This is the guard on the fix above rather than a rule of its own: it
-    /// fails if the datagram check is ever generalised to subgroup objects.
-    ///
-    /// Observed by adding the datagram's `extension_headers.is_empty()` refusal
-    /// to `SubgroupObjectReader::write_object`, which fails this with:
-    ///
-    /// ```text
-    /// ---- datagram_extension_block::a_subgroup_object_may_carry_a_zero_length_block stdout ----
-    /// write object: InvalidField
-    /// ```
+    /// This is the guard on the datagram check above rather than a rule of its
+    /// own: it fails if that check is ever generalised to subgroup objects.
     #[test]
     fn a_subgroup_object_may_carry_a_zero_length_block() {
         let header = SubgroupHeader {
@@ -542,21 +468,8 @@ mod extensions_beside_a_non_normal_status {
     /// turns on whether the block is empty, and the declared length says that on
     /// its own.
     ///
-    /// Observed by making `SubgroupObjectReader::read_object_meta` call
-    /// `check_extensions_against_status_on_encode`, which fails this with:
-    ///
-    /// ```text
-    /// ---- extensions_beside_a_non_normal_status::the_framing_reader_reports_without_the_block stdout ----
-    /// object framing: InvalidField
-    /// ```
-    ///
-    /// and by making `SubgroupObjectMeta::extensions_permitted` ignore the
-    /// status, which fails it with:
-    ///
-    /// ```text
-    /// ---- extensions_beside_a_non_normal_status::the_framing_reader_reports_without_the_block stdout ----
-    /// assertion `left == right` failed: the meta did not report extensions beside End of Group as forbidden
-    /// ```
+    /// Fails if `SubgroupObjectReader::read_object_meta` refuses the frame, or if
+    /// `SubgroupObjectMeta::extensions_permitted` ignores the status.
     #[test]
     fn the_framing_reader_reports_without_the_block() {
         let bytes = hex(CAPTURED_VIOLATION);
@@ -578,13 +491,8 @@ mod extensions_beside_a_non_normal_status {
 
     /// A datagram carrying the same violation decodes and reports it too.
     ///
-    /// Observed by making `DatagramHeader::decode` call
-    /// `check_extensions_against_status_on_encode`, which fails this with:
-    ///
-    /// ```text
-    /// ---- extensions_beside_a_non_normal_status::a_captured_datagram_violation_decodes_and_reports_itself stdout ----
-    /// datagram decode: InvalidField
-    /// ```
+    /// Fails if `DatagramHeader::decode` calls
+    /// `check_extensions_against_status_on_encode`.
     #[test]
     fn a_captured_datagram_violation_decodes_and_reports_itself() {
         // Type 0x21, track alias 1, group 2, object 3, priority 0x80, a
@@ -611,13 +519,8 @@ mod extensions_beside_a_non_normal_status {
     /// the refusal is a choice about what this codec originates, not a claim
     /// that the bytes are unreadable.
     ///
-    /// Observed by removing the `check_extensions_against_status_on_encode` call
-    /// from `DatagramHeader::encode_checked`, which fails this with:
-    ///
-    /// ```text
-    /// ---- extensions_beside_a_non_normal_status::the_checked_datagram_encoder_refuses_the_violation stdout ----
-    /// a status datagram carrying extension headers was written to the wire
-    /// ```
+    /// Fails if `DatagramHeader::encode_checked` stops calling
+    /// `check_extensions_against_status_on_encode`.
     #[test]
     fn the_checked_datagram_encoder_refuses_the_violation() {
         // Type 0x21: status datagram, extensions present, Object ID and
@@ -738,14 +641,6 @@ mod fetch_discriminator {
     /// The consequence is spelled out: the mismatched pair either fails to parse
     /// or parses as a different message, and either way the fix is to refuse it
     /// before a byte is written.
-    ///
-    /// Observed by removing the `check_discriminators` call from
-    /// `ControlMessage::encode`, which fails this with:
-    ///
-    /// ```text
-    /// ---- fetch_discriminator::a_standalone_type_beside_a_joining_body_is_refused stdout ----
-    /// a FETCH whose type and body disagree was written to the wire
-    /// ```
     #[test]
     fn a_standalone_type_beside_a_joining_body_is_refused() {
         let mut buf = Vec::new();
@@ -758,13 +653,6 @@ mod fetch_discriminator {
     }
 
     /// And the mirror: a joining type beside a standalone body.
-    ///
-    /// Observed the same way, which fails this with:
-    ///
-    /// ```text
-    /// ---- fetch_discriminator::a_joining_type_beside_a_standalone_body_is_refused stdout ----
-    /// a FETCH whose type and body disagree was written to the wire
-    /// ```
     #[test]
     fn a_joining_type_beside_a_standalone_body_is_refused() {
         for fetch_type in [FetchType::RelativeJoining, FetchType::AbsoluteJoining] {
@@ -934,29 +822,6 @@ macro_rules! duplicate_parameter_suite {
             /// collapsed, which is what the test is for. Making the receiver as
             /// strict as the sender fails the first half; making the sender as
             /// lenient as the receiver fails the second.
-            ///
-            /// Observed by pointing `decode_parameters` at
-            /// `check_no_duplicate_parameters_sent`, which fails this with:
-            ///
-            /// ```text
-            /// ---- duplicates_draft14::an_unknown_type_may_arrive_twice_but_may_not_be_sent_twice stdout ----
-            /// a repeated unknown parameter type was refused on decode: DuplicateParameter(47)
-            ///
-            /// ---- duplicates_draft15::an_unknown_type_may_arrive_twice_but_may_not_be_sent_twice stdout ----
-            /// a repeated unknown parameter type was refused on decode: DuplicateParameter(47)
-            /// ```
-            ///
-            /// and by pointing `encode_parameters` at
-            /// `check_no_duplicate_parameters_received` with the
-            /// version-specific list, which fails it with:
-            ///
-            /// ```text
-            /// ---- duplicates_draft14::an_unknown_type_may_arrive_twice_but_may_not_be_sent_twice stdout ----
-            /// a repeated unknown parameter type was written to the wire
-            ///
-            /// ---- duplicates_draft15::an_unknown_type_may_arrive_twice_but_may_not_be_sent_twice stdout ----
-            /// a repeated unknown parameter type was written to the wire
-            /// ```
             #[test]
             fn an_unknown_type_may_arrive_twice_but_may_not_be_sent_twice() {
                 let repeated = vec![param(UNKNOWN_TYPE), param(UNKNOWN_TYPE)];
@@ -985,17 +850,8 @@ macro_rules! duplicate_parameter_suite {
 
             /// A type the draft names may not repeat in either direction.
             ///
-            /// Observed by dropping the `known.contains(&key)` test from
-            /// `check_no_duplicate_parameters_received`, inverting it so every
-            /// named type is skipped, which fails this with:
-            ///
-            /// ```text
-            /// ---- duplicates_draft14::a_named_type_may_not_repeat_in_either_direction stdout ----
-            /// a repeated DELIVERY TIMEOUT was accepted on decode
-            ///
-            /// ---- duplicates_draft15::a_named_type_may_not_repeat_in_either_direction stdout ----
-            /// a repeated DELIVERY TIMEOUT was accepted on decode
-            /// ```
+            /// Fails if `check_no_duplicate_parameters_received` skips the types
+            /// it names.
             #[test]
             fn a_named_type_may_not_repeat_in_either_direction() {
                 let repeated = vec![param(KNOWN_MESSAGE_TYPE), param(KNOWN_MESSAGE_TYPE)];
@@ -1020,16 +876,8 @@ macro_rules! duplicate_parameter_suite {
             /// repeated within a message." That is the carve-out Section 9.2
             /// leaves open, and on this draft it is the only one taken up.
             ///
-            /// Observed by removing the `REPEATABLE_PARAMETER` skip from
-            /// `check_no_duplicate_parameters_sent`, which fails this with:
-            ///
-            /// ```text
-            /// ---- duplicates_draft14::the_authorization_token_may_repeat stdout ----
-            /// a repeated AUTHORIZATION TOKEN was refused on encode: DuplicateParameter(3)
-            ///
-            /// ---- duplicates_draft15::the_authorization_token_may_repeat stdout ----
-            /// a repeated AUTHORIZATION TOKEN was refused on encode: DuplicateParameter(3)
-            /// ```
+            /// Fails if `check_no_duplicate_parameters_sent` stops skipping
+            /// `REPEATABLE_PARAMETER`.
             ///
             /// The code point is 0x03 on both drafts: draft-14 Section 9.2.1.1
             /// and draft-15 Section 9.2.1.1 each assign it, and each setup
@@ -1063,16 +911,8 @@ macro_rules! duplicate_parameter_suite {
             /// neither draft in the other, so a receiver that consults the wrong
             /// list treats a repeated PATH as an unknown type and carries it.
             ///
-            /// Observed by pointing the CLIENT_SETUP decode arm back at
-            /// `decode_parameters`, which fails this with:
-            ///
-            /// ```text
-            /// ---- duplicates_draft14::a_setup_is_read_against_the_setup_namespace stdout ----
-            /// a repeated PATH was accepted in a CLIENT_SETUP
-            ///
-            /// ---- duplicates_draft15::a_setup_is_read_against_the_setup_namespace stdout ----
-            /// a repeated PATH was accepted in a CLIENT_SETUP
-            /// ```
+            /// Fails if the CLIENT_SETUP decode arm reads its parameters with
+            /// `decode_parameters`.
             #[test]
             fn a_setup_is_read_against_the_setup_namespace() {
                 let repeated = vec![param(KNOWN_SETUP_TYPE), param(KNOWN_SETUP_TYPE)];

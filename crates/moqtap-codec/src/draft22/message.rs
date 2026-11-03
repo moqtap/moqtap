@@ -2489,14 +2489,10 @@ mod tests {
     /// two varints `0x0a` and `0x03` for Location (10, 3). A length-prefixed
     /// spelling would need a fifth byte.
     ///
-    /// With `0x09` back in the Length-prefixed arm, the decoder reads the
-    /// group varint `0x0a` as a value length of 10 and runs off the end of a
-    /// four-byte body. Both this test and
-    /// [`a_location_does_not_eat_the_block_that_follows_it`] fail with:
-    ///
-    /// ```text
-    /// spec-correct frame must decode: UnexpectedEnd
-    /// ```
+    /// Fails, as does [`a_location_does_not_eat_the_block_that_follows_it`],
+    /// if LARGEST_OBJECT is read as Length-prefixed: the decoder would take the
+    /// group varint `0x0a` as a value length of 10 and run off the end of a
+    /// four-byte body.
     #[test]
     fn largest_object_is_two_bare_varints() {
         let body = [0x01, 0x09, 0x0a, 0x03];
@@ -2523,21 +2519,7 @@ mod tests {
     /// two varints, and without this check the codec answers `Ok(())` and puts
     /// a frame on the wire that `ControlMessage::decode` then refuses. One
     /// varint short and one varint long are the two ways to get it wrong.
-    ///
-    /// # What it catches
-    ///
-    /// Dropping the `is_location_value` guard from this draft's encode arm,
-    /// run:
-    ///
-    /// ```text
-    /// panicked at crates\moqtap-codec\src\draft22\message.rs:
-    /// LARGEST_OBJECT of one varint must not encode: the decoder cannot read it back
-    ///
-    /// test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 108 filtered out
-    /// ```
-    ///
-    /// The sibling draft kept its guard and kept passing, which is what shows
-    /// the check is per-draft and not inherited from somewhere shared.
+    /// Fails if this draft's encode arm drops its `is_location_value` guard.
     #[test]
     fn a_location_value_that_is_not_two_varints_is_refused_on_encode() {
         for (label, value) in
@@ -2607,25 +2589,16 @@ mod tests {
     /// "sports") as `02 04 "live" 06 "sports"`. Sixteen body bytes; a
     /// length-prefixed spelling would need a seventeenth for the outer length.
     ///
-    /// With `0x34` back in the Length-prefixed arm the field count `0x02` is
-    /// read as an outer length of two bytes, leaving eleven bytes of namespace
-    /// unread. Draft-22's Section 9 body-length check turns that into a
-    /// refusal rather than a truncated value:
-    ///
-    /// ```text
-    /// spec-correct frame must decode: InvalidField
-    /// ```
+    /// Fails if TRACK_NAMESPACE_PREFIX is read as Length-prefixed: the field
+    /// count `0x02` would be taken as an outer length of two bytes, leaving
+    /// eleven bytes of namespace unread. The draft-22 Section 9 body-length
+    /// check turns that into a refusal rather than a truncated value.
     ///
     /// That check is not a safety net here. Where the surplus lands inside the
     /// declared body — as in
     /// [`an_empty_track_namespace_prefix_is_one_zero_byte`], whose namespace is
-    /// one byte long — the misread is silent, and that test fails instead with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: [KeyValuePair { key: VarInt(52), value: Bytes([]) }]
-    ///  right: [KeyValuePair { key: VarInt(52), value: Bytes([0]) }]
-    /// ```
+    /// one byte long — the misread is silent, and only that test's value
+    /// comparison catches it.
     #[test]
     fn track_namespace_prefix_is_a_bare_track_namespace() {
         let namespace: Vec<u8> = [&[0x02, 0x04][..], b"live", &[0x06][..], b"sports"].concat();

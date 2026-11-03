@@ -2,26 +2,20 @@
 //! Draft-19 Section 5.1.2: "An endpoint that receives a filter type other than
 //! the above MUST close the session with PROTOCOL_VIOLATION."
 //!
-//! # Why the rule went quiet without the sentence changing
+//! # Where the Filter Type lives
 //!
 //! Through draft-14 the Filter Type is a field of SUBSCRIBE, and a decoder reads
 //! it whether or not it means to enforce anything: the value decides how many
 //! fields follow. Draft-15 moved the Filter Type, the Start Location and the End
 //! Group into one length-prefixed parameter, and draft-19 renamed that parameter
 //! from SUBSCRIPTION_FILTER to LOCATION_FILTER without touching either its number
-//! or its contents. A codec that carries a parameter value as opaque bytes reads
-//! none of it, so the rule was enforced on the eight drafts where the value is a
-//! field and unread on the five where it is a parameter — and nothing about the
-//! drafts said so.
+//! or its contents.
 //!
 //! # Why the close and not the refusal is under test
 //!
 //! Because a codec test cannot tell them apart. A frame carrying an unassigned
 //! Filter Type is refused whether the refusal reaches the session or not, and the
-//! peer that broke the rule only learns about it if the connection ends. The
-//! value the eight earlier drafts refuse reported the shared malformed-field
-//! variant, which every draft's table sends to the no-close arm, so all thirteen
-//! drafts refused the frame and none of them closed.
+//! peer that broke the rule only learns about it if the connection ends.
 
 mod common;
 
@@ -117,29 +111,6 @@ fn subscribe_with_an_unassigned_filter_type() -> Vec<u8> {
 
 /// An unassigned Filter Type inside the parameter closes the QUIC connection
 /// with PROTOCOL_VIOLATION.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Removing `check_subscription_filters` from draft-19's `decode_parameters` —
-/// the state the codec was in, where nothing read the value and the filter
-/// reached the application as ordinary parameter bytes:
-///
-/// ```text
-/// ---- an_unassigned_filter_type_closes_the_quic_connection stdout ----
-///
-/// thread 'an_unassigned_filter_type_closes_the_quic_connection' (92560) panicked at crates\moqtap-client\tests\draft19_location_filter_closes_the_session.rs:
-/// an unassigned Filter Type must be refused: Subscribe(Subscribe { request_id: VarInt(1), track_namespace: TrackNamespace([[108, 105, 118, 101]]), track_name: [118, 105, 100, 101, 111], parameters: [KeyValuePair { key: VarInt(33), value: Bytes([7]) }] })
-/// ```
-///
-/// Sending `CodecError::InvalidFilterType` to the no-close arm of draft-19's
-/// `codec_session_error_code` instead — which is where the eight drafts that
-/// carry the Filter Type as a field effectively had it, reporting the rule under
-/// a variant every table ignores:
-///
-/// ```text
-/// thread 'an_unassigned_filter_type_closes_the_quic_connection' (101768) panicked at crates\moqtap-client\tests\draft19_location_filter_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
 #[tokio::test]
 async fn an_unassigned_filter_type_closes_the_quic_connection() {
     common::init_crypto();

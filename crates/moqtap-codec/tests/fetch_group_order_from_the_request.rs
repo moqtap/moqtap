@@ -3,9 +3,8 @@
 //! Drafts 18 and 19 write a fetch Object's Group ID as a difference from the
 //! Object before it, and the Group Order decides whether the difference is
 //! added or subtracted — draft-19 Section 11.4.4.1. Nothing on the data stream
-//! says which, so a reader has to be told, and until now nothing in this
-//! workspace could work out what to tell it from the traffic it had already
-//! decoded.
+//! says which, so a reader has to be told, and this accessor works out what to
+//! tell it from traffic already decoded.
 //!
 //! One message settles it. Draft-19 Section 10.12.3: "The publisher responding
 //! to a FETCH is responsible for delivering all available Objects in the
@@ -144,16 +143,6 @@ macro_rules! fetch_group_order_gates {
         /// it, under Group IDs walking the wrong way, so an accessor that
         /// answered the default whatever the request said would be wrong
         /// exactly where being wrong costs the most and says nothing.
-        ///
-        /// *Ablation:* answering `AnyFetchGroupOrder::Ascending` for a present
-        /// parameter instead of reading its value:
-        ///
-        /// ```text
-        /// assertion `left == right` failed: a FETCH asking for Descending
-        /// must answer Descending
-        ///   left: Some((7, Ascending))
-        ///  right: Some((7, Descending))
-        /// ```
         #[test]
         fn a_fetch_asking_for_descending_answers_descending() {
             assert_eq!(
@@ -171,16 +160,6 @@ macro_rules! fetch_group_order_gates {
         /// surely as one that names it. A `None` here would be read one layer
         /// up as "the order is unknown", which would leave every conforming
         /// fetch that did not bother to write the parameter unaddressed.
-        ///
-        /// *Ablation:* answering `None` when no GROUP_ORDER parameter is
-        /// present:
-        ///
-        /// ```text
-        /// assertion `left == right` failed: a FETCH that omits GROUP_ORDER
-        /// has asked for Ascending
-        ///   left: None
-        ///  right: Some((7, Ascending))
-        /// ```
         #[test]
         fn a_fetch_that_omits_the_parameter_answers_the_stated_default() {
             assert_eq!(
@@ -202,15 +181,6 @@ macro_rules! fetch_group_order_gates {
         /// subscription's Objects are never on a fetch stream. An accessor that
         /// keyed on the parameter would hand a subscription's preference to a
         /// fetch reader under whatever Request ID happened to match.
-        ///
-        /// *Ablation:* answering from a SUBSCRIBE's parameters as well:
-        ///
-        /// ```text
-        /// assertion `left == right` failed: a SUBSCRIBE settles no fetch's
-        /// Group Order
-        ///   left: Some((7, Descending))
-        ///  right: None
-        /// ```
         #[test]
         fn a_subscribe_carrying_the_same_parameter_answers_nothing() {
             assert_eq!(
@@ -226,20 +196,6 @@ macro_rules! fetch_group_order_gates {
         /// names its request in the header. An answer under the wrong id is
         /// worse than no answer: it addresses some other fetch's stream with
         /// this one's order.
-        ///
-        /// *Ablation:* answering a constant `0` for the Request ID:
-        ///
-        /// ```text
-        /// assertion `left == right` failed: the answer is filed under the
-        /// FETCH's own Request ID
-        ///   left: 0
-        ///  right: 7
-        /// ```
-        ///
-        /// The same cut also fails the two gates above, which compare the whole
-        /// pair. It is kept as a gate of its own because those two would still
-        /// pass an answer that carried the order and lost the id, if either had
-        /// been written to assert only what it was named for.
         #[test]
         fn the_answer_carries_the_requests_own_id() {
             let (id, _) = round_trip(fetch(vec![param(GROUP_ORDER, 0x2)])).expect("a FETCH answers");
@@ -425,15 +381,6 @@ mod draft14 {
     /// 07 to 14 means the subscriber expressed no preference, and the answer
     /// then comes from the publisher's FETCH_OK. An accessor handed one message
     /// cannot tell the two apart afterwards, so it answers for neither.
-    ///
-    /// *Ablation:* adding a draft-14 arm that reads the field:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a draft-14 FETCH settles no order by
-    /// itself
-    ///   left: Some((7, Descending))
-    ///  right: None
-    /// ```
     #[test]
     fn a_fetch_on_the_negotiating_cohort_answers_nothing() {
         let message = ControlMessage::Fetch(Fetch {

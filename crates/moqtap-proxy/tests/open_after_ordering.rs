@@ -369,26 +369,6 @@ fn first_byte_arrived_at(rx: &TimedReceiver) -> Option<Instant> {
 ///
 /// The assertion compares two recorded instants for order and nothing else,
 /// so there is no window to widen and no threshold to tune.
-///
-/// *Ablation, run:* open the dependent stream immediately — in
-/// `session.rs`'s unidirectional accept loop, replace the two-arm `match
-/// open_after` with an unconditional `Some(dest.open_uni().await?)`, which
-/// is the accept loop as it stands minus the deferral. Recorded:
-///
-/// ```text
-/// thread 'open_after_at_the_open_site_delivers_the_deferred_stream_last'
-/// (53576) panicked at crates\moqtap-proxy\tests\open_after_ordering.rs:
-/// the deferred stream's first byte reached the relay 594µs BEFORE the
-/// trigger stream's header, so the peer stream was opened at once: OpenAfter
-/// was admitted at the open site and changed nothing on the wire
-/// ```
-///
-/// The two margins are worth reading together. Passing, the trigger's
-/// header leads by about the delay the hook asked for — the dependent
-/// stream is not even open yet. Ablated, the dependent stream leads by
-/// 594µs: one scheduling step, which is exactly the head start the client
-/// gave it by writing it first. The order flips because of what the proxy
-/// did, not because of how long anything took.
 #[tokio::test]
 async fn open_after_at_the_open_site_delivers_the_deferred_stream_last() {
     common::init_crypto();
@@ -485,27 +465,7 @@ async fn open_after_at_the_open_site_delivers_the_deferred_stream_last() {
 /// that started honouring the deferral could not deliver a byte inside any
 /// wait below: the row would fail on the byte compare, not pass slowly.
 ///
-/// *Ablation, run:* admit it at the header site — in
-/// `capability::classify_stream_decision`, return `Support::Yes` for
-/// `ActionKind::OpenAfter` at every site instead of only at
-/// `Site::StreamOpen`. The engine then plans a deferral the header site has
-/// no way to perform. Recorded:
-///
-/// ```text
-/// thread 'open_after_at_the_header_site_is_refused_by_name_and_defers_nothing'
-/// (14280) panicked at crates\moqtap-proxy\tests\open_after_ordering.rs:
-/// assertion `left == right` failed: the header site refused OpenAfter by
-/// name, exactly once
-///   left: []
-///  right: [(StreamHeader, OpenAfter, WrongSite { site: StreamHeader, action: OpenAfter })]
-/// ```
-///
-/// That is the outcome this row exists to forbid, and the ablated run shows
-/// the whole of it: the two byte assertions above the refusal *passed* under
-/// the mutation. So with the refusal removed the action is accepted, no
-/// refusal is reported, and the 60-second delay it asked for is performed by
-/// nobody — the stream is forwarded exactly as if the hook had returned
-/// `Open`. An accepted action that does nothing is worse than a refused one,
+/// An accepted action that does nothing is worse than a refused one,
 /// because only the refusal reaches the caller.
 #[tokio::test]
 async fn open_after_at_the_header_site_is_refused_by_name_and_defers_nothing() {

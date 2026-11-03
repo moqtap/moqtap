@@ -2841,13 +2841,6 @@ mod responder_tests {
     /// close is observable twice over — the endpoint stops accepting requests,
     /// and the code the connection layer will put on the wire is the one the
     /// section names.
-    ///
-    /// Deleting the `validate_peer_id` call from `receive_request_on_stream`
-    /// fails with:
-    ///
-    /// ```text
-    /// called `Result::unwrap_err()` on an `Ok` value: VarInt(2)
-    /// ```
     #[test]
     fn a_peer_id_with_our_own_parity_closes_the_session() {
         let mut ep = active_client();
@@ -2881,15 +2874,6 @@ mod responder_tests {
     /// Draft-17 Section 3.3 gives a different code for a different rule: a
     /// bidirectional stream that begins with the wrong message type is a
     /// PROTOCOL_VIOLATION, not an INVALID_REQUEST_ID.
-    ///
-    /// Mapping `NotARequest` to `InvalidRequestId` in `session_error_code`
-    /// fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: Some(InvalidRequestId)
-    ///  right: Some(ProtocolViolation)
-    /// ```
     #[test]
     fn a_stream_that_opens_no_request_closes_the_session_with_protocol_violation() {
         let mut ep = active_client();
@@ -3033,20 +3017,6 @@ mod responder_tests {
     /// the SUBSCRIBE_NAMESPACE stream that asked for it would have its
     /// announcement dropped, which makes SUBSCRIBE_NAMESPACE unusable end to
     /// end.
-    ///
-    /// Adding control-stream arms (`Namespace(ref m) =>
-    /// self.receive_namespace(m)` and its two siblings) fails this test at the
-    /// second half with:
-    ///
-    /// ```text
-    /// NAMESPACE must be refused on the control stream: Ok(())
-    /// ```
-    ///
-    /// and removing the request-stream arms fails it at the first half with:
-    ///
-    /// ```text
-    /// NAMESPACE belongs on a request stream: ResponseOnControlStream
-    /// ```
     #[test]
     fn namespace_and_publish_blocked_arrive_on_a_request_stream() {
         /// A message name paired with a way to build a fresh one, since each

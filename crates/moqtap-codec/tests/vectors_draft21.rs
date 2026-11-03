@@ -376,10 +376,8 @@ fn run_datagram_vectors(relative_path: &str) -> usize {
             // published datagram vector cannot catch an encoder and decoder
             // that disagree, because only one of the two is ever run.
             //
-            // Ablation: writing the Object ID from a datagram header whose Type
-            // says there is none — `[datagram-no-object-id] re-encoded datagram
-            // mismatch / left: "0405640080" / right: "04056480"`, measured on
-            // draft-19 and unchanged here.
+            // Fails if the encoder writes an Object ID for a datagram whose
+            // Type says there is none.
             if vector.is_canonical() {
                 let mut out = Vec::new();
                 hdr.encode(&mut out);

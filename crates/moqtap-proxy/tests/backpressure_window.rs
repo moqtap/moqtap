@@ -9,19 +9,14 @@
 //! source writes up to that limit is accepted by the receiver's transport
 //! and buffered where no application can see it.
 //!
-//! Measured with the fixtures below, front-end listener left on quinn's
-//! defaults and a two-object egress queue held shut by a dry token bucket:
-//! the source pushed **about 1.25 MB** before its first write pended, and
-//! the whole run reported
-//! `objects_seen: 2` and a *single* blocked episode. The shaper had stopped
-//! reading after two objects and the transport absorbed a megabyte of the
-//! consequence. A test written that way measures the receive window,
-//! not the shaper.
+//! So with quinn's defaults on the front-end listener and the egress queue held
+//! shut, the source can push about 1.25 MB before its first write pends, while
+//! the shaper reports two objects seen and a single blocked episode. A test
+//! written that way measures the receive window, not the shaper.
 //!
-//! With the same session behind a 64 KiB window the source stalls at
-//! **82 370 bytes**, and the shaper's own two numbers are unchanged. That
-//! pair — fifteen times the difference at the publisher, no difference at
-//! all at the proxy — is what this file gates.
+//! Behind a 64 KiB window the source stalls near the window, and the shaper's
+//! own two numbers are unchanged. That pair — a large difference at the
+//! publisher, none at the proxy — is what this file gates.
 //!
 //! # This is a configuration fact, not a missing feature
 //!
@@ -82,13 +77,8 @@
 //! the one direction load can push. It would also be asserting a number
 //! that is not a property of the transport: the source stalls a little
 //! *short* of the window, by however much of the final write did not fit,
-//! so the stall point is a function of the writer's chunk size. Measured
-//! directly against a receiver that never reads, with quinn on its
-//! defaults: 1 KiB chunks pend after 1 249 281 bytes, 719 short of the
-//! 1 250 000-byte window. Quoting a stall point without the chunk size
-//! that produced it — and this file quoted 1 250 000 as "the default
-//! window to the byte" for a while — states a fixture detail as a
-//! transport constant. The equality this file does make —
+//! so the stall point is a function of the writer's chunk size. The equality
+//! this file does make —
 //! [`a_configured_window_is_exactly_the_credit_a_source_gets`] — is
 //! assembled out of the two safe forms instead: the window's worth of bytes
 //! goes in, and the next byte does not.
@@ -96,14 +86,11 @@
 //! # Wall time
 //!
 //! Both rows spend real time only where they are *supposed* to see nothing
-//! happen: one [`STALL_WINDOW`] each. The whole binary is 1.07 s for both
-//! rows run one at a time, which includes the megabyte the control arm
-//! pushes (20 ms of it) and the two half-second negative windows.
+//! happen: one [`STALL_WINDOW`] each.
 //!
-//! No row here is `#[ignore]`d, and that is an audit result rather than an
-//! omission: there is no timing *accuracy* claim in the file to be
-//! calibration. Every duration below is either a failure ceiling or a
-//! window a negative claim is made over.
+//! No row here is `#[ignore]`d: there is no timing *accuracy* claim in the file.
+//! Every duration below is either a failure ceiling or a window a negative
+//! claim is made over.
 
 #![cfg(any(
     feature = "draft07",
@@ -240,11 +227,10 @@ const WIDE_PUSH: usize = 1024 * 1024;
 /// chunks and stops the instant the egress queue holds [`QUEUE_DEPTH`]
 /// objects, and an object here is deliberately larger than that read buffer
 /// (see [`OBJECT_PAYLOAD`]), so what it can consume first is capped by the
-/// depth rather than by any clock. Measured: the source stalls at **82 370
-/// bytes**, i.e. 16 834 past its window — the five-byte stream header, two
-/// whole objects and the partial read that filled the queue.
+/// depth rather than by any clock: the five-byte stream header, two whole
+/// objects and the partial read that filled the queue, about 16 KiB.
 ///
-/// 64 KiB is 3.9x that measurement, and the quantity being bounded is
+/// 64 KiB is about four times that, and the quantity being bounded is
 /// derived from a count, so load can only push it down.
 ///
 /// Widen this, do not delete it: it is the upper half of a bracket, and the
@@ -297,9 +283,9 @@ const CLASS: &str = "all";
 /// A queued object that outlives `max_hold` is delivered anyway, which
 /// reopens the drain and therefore reopens the read — so `max_hold` is the
 /// one clock that could unblock a source these rows need to stay blocked.
-/// Both rows together take 1.07 s, so thirty seconds is a separation of
-/// more than 25x, and it is written down rather than inherited so the
-/// margin is a number this file chose rather than one it was handed.
+/// Thirty seconds is well clear of both rows' run time, and it is written down
+/// rather than inherited so the margin is a number this file chose rather than
+/// one it was handed.
 const MAX_HOLD: Duration = Duration::from_secs(30);
 
 /// A profile whose single catch-all class is charged to a bucket that never
@@ -572,15 +558,6 @@ fn stalled_receiver(stream_receive_window: Option<u32>) -> (SocketAddr, JoinHand
 /// The control arm rules out the remaining possibility — that the receiver
 /// is simply slow, or the fixture simply short — by pushing sixteen times
 /// as much through the *same* code with one field changed.
-///
-/// *Ablation, recorded:* pass `None` for the small arm's window, i.e. drop
-/// the `TransportConfig` and keep everything else. The default allowance
-/// covers the extra byte, the write returns, and the negative half reddens:
-///
-/// ```text
-/// assertion failed: a receiver that never reads grants exactly its configured window
-/// and not one byte more: 65537 bytes went in under a 65536-byte window
-/// ```
 #[tokio::test]
 async fn a_configured_window_is_exactly_the_credit_a_source_gets() {
     let window = SMALL_WINDOW as usize;
@@ -659,8 +636,7 @@ async fn a_configured_window_is_exactly_the_credit_a_source_gets() {
 ///   read branch shut, and that is capped by the queue depth.
 ///
 /// Neither side is load-sensitive: the first is a liveness anchor and the
-/// second is a negative claim over a window. See [`DRAIN_CEILING`] for the
-/// measurement — 82 370 bytes, against a ceiling of 131 072.
+/// second is a negative claim over a window. See [`DRAIN_CEILING`].
 #[tokio::test]
 async fn a_small_listener_window_makes_the_shapers_stall_reach_the_source() {
     common::init_crypto();

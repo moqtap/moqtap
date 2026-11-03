@@ -273,17 +273,6 @@ macro_rules! inbound_announce_gates {
 
             /// An announcement the peer makes is kept, rather than counted and
             /// dropped.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the announcement the peer made should be on record
-            /// ```
-            ///
-            /// Made by dropping the record instead of inserting it. It reddens
-            /// 170 tests across all four files: an announcement that is not
-            /// kept is one no answer, no withdrawal and no cancellation can
-            /// find.
             #[test]
             fn an_announcement_the_peer_makes_is_recorded() {
                 let ep = announced();
@@ -301,19 +290,6 @@ macro_rules! inbound_announce_gates {
 
             /// It is kept when it arrives the way it arrives on the wire, which
             /// is through the control stream's dispatcher.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the announcement should have reached the endpoint's record
-            ///   left: 0
-            ///  right: 1
-            /// ```
-            ///
-            /// Made by cutting the dispatch arm, which sends the message back
-            /// to the fall-through that accepts and ignores it. It reddens 20
-            /// tests: this gate on all ten drafts, and both loopback gates on
-            /// the five that have them.
             #[test]
             fn an_announcement_arriving_on_the_control_stream_is_recorded() {
                 let mut ep = active();
@@ -331,17 +307,6 @@ macro_rules! inbound_announce_gates {
             }
 
             /// Accepting it answers it, and it is no longer waiting.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the announcement should be answered
-            /// ```
-            ///
-            /// Made by building the acceptance without moving the flow, so the
-            /// announcement stays where it was and could be answered again. It
-            /// reddens 85 tests across all four files: nothing downstream of an
-            /// acceptance happens if the acceptance leaves no trace.
             #[test]
             fn accepting_an_announcement_answers_it() {
                 let mut ep = announced();
@@ -364,15 +329,6 @@ macro_rules! inbound_announce_gates {
             }
 
             /// Refusing it answers it too, and the other way is closed.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the refusal should answer it
-            /// ```
-            ///
-            /// Made by building the refusal without moving the flow. It reddens
-            /// 25 tests across two files.
             #[test]
             fn refusing_an_announcement_answers_it() {
                 let mut ep = announced();
@@ -429,17 +385,6 @@ macro_rules! inbound_announce_gates {
             /// answer names a different one. An empty record cannot tell a
             /// lookup that reads its key from one that ignores it: both come up
             /// with nothing.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// there is nothing to accept: AnnounceOk(AnnounceOk { track_namespace: ... })
-            /// ```
-            ///
-            /// Made by answering whichever announcement the record happens to
-            /// hold instead of the one named, at every place that reads it. It
-            /// reddens 20 tests: this gate, and the two beside it that name an
-            /// announcement the peer never made.
             #[test]
             fn an_answer_to_an_announcement_that_never_arrived_is_refused() {
                 let mut ep = announced();
@@ -454,16 +399,6 @@ macro_rules! inbound_announce_gates {
 
             /// The peer withdraws an announcement this endpoint accepted, and
             /// the record ends.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a withdrawal ends the announcement once: ()
-            /// ```
-            ///
-            /// Made by leaving the flow where it was when the withdrawal
-            /// arrives, so the same announcement could be withdrawn for ever.
-            /// It reddens 20 tests, two per draft.
             #[test]
             fn the_peer_withdraws_an_announcement_this_endpoint_accepted() {
                 let mut ep = accepted();
@@ -515,17 +450,6 @@ macro_rules! inbound_announce_gates {
 
             /// A withdrawal naming nothing the peer ever announced is refused,
             /// and the refusal says which record came up empty.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the peer announced nothing under that name: ()
-            /// ```
-            ///
-            /// Made by cutting the withdrawal's dispatch arm, so it reaches the
-            /// fall-through that accepts and ignores it - which is where
-            /// UNANNOUNCE went on all ten drafts. It reddens 30 tests, three
-            /// per draft.
             #[test]
             fn a_withdrawal_for_an_announcement_that_never_arrived_is_refused() {
                 let mut ep = accepted();

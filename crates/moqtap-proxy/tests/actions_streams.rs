@@ -22,8 +22,8 @@
 //! [`a_track_targeted_reject_only_rejects_that_track`], both of which
 //! attach a **non-event** observer on purpose: with `wants_events() ==
 //! true` the session frames the stream for the observer's sake and
-//! `objects_enabled` is true whatever `STREAMS` contains, so the ablation
-//! would not bite.
+//! `objects_enabled` is true whatever `STREAMS` contains, so the tests would
+//! pass without the implication.
 
 mod common;
 

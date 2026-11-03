@@ -9,11 +9,9 @@
 //! Pending (subscriber) states, it MUST return a REQUEST_ERROR with error code
 //! INVALID_JOINING_REQUEST_ID."
 //!
-//! These three already had the record: a FETCH arriving on a request stream
+//! A FETCH arriving on a request stream
 //! opens a fetch in the same map that holds this endpoint's own, because the
-//! parity rule keeps the identifiers apart. What they had no check for is the
-//! identifier the Joining Fetch names, so a fetch joining nothing was answered
-//! FETCH_OK and the objects it asked for could not be found.
+//! parity rule keeps the identifiers apart.
 //!
 //! The same rule on drafts 08 through 16 is in
 //! `a_joining_fetch_names_a_live_subscription.rs`, which is where the range
@@ -256,15 +254,6 @@ macro_rules! joining_stream_gates {
 
             /// A Joining Fetch naming a live subscription of the peer's is
             /// answered like any other.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a Joining Fetch naming a live subscription is answerable: UnjoinableSubscription { fetch: 2, joining: 0 }
-            /// ```
-            ///
-            /// Made by judging every fetch unjoinable, standalone ones included, on
-            /// every draft that states the rule.
             #[test]
             fn a_joining_fetch_naming_a_live_subscription_is_accepted() {
                 let (mut ep, sub) = publishing();
@@ -275,16 +264,6 @@ macro_rules! joining_stream_gates {
 
             /// A Joining Fetch naming nothing this session has cannot be
             /// accepted.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a Joining Fetch naming nothing was accepted: ()
-            /// ```
-            ///
-            /// Made by taking the verdict and not acting on it. It reddens twenty-four
-            /// tests: this gate and the ended-subscription one, on all the drafts
-            /// that state the rule.
             #[test]
             fn a_joining_fetch_naming_nothing_is_refused() {
                 let (mut ep, _) = publishing();
@@ -304,15 +283,6 @@ macro_rules! joining_stream_gates {
 
             /// A Joining Fetch naming a subscription that has already ended
             /// cannot be accepted either.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a Joining Fetch naming an ended subscription was accepted: ()
-            /// ```
-            ///
-            /// Made by reading a subscription as live whenever its record exists. It
-            /// reddens twelve tests and only this gate.
             #[test]
             fn a_joining_fetch_naming_an_ended_subscription_is_refused() {
                 let (mut ep, sub) = publishing();
@@ -338,15 +308,6 @@ macro_rules! joining_stream_gates {
 
             /// A standalone FETCH joins nothing, so no subscription has to
             /// exist for it.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a standalone fetch names no subscription to join: UnjoinableSubscription { fetch: 0, joining: 0 }
-            /// ```
-            ///
-            /// The same cut as the first gate, and this is the half of it that says
-            /// the rule is about Joining Fetches and not about fetches.
             #[test]
             fn a_standalone_fetch_needs_no_subscription() {
                 let mut ep = responder();
@@ -363,17 +324,6 @@ macro_rules! joining_stream_gates {
 
             /// The verdict is taken when the FETCH arrives, not when it is
             /// answered.
-            ///
-            /// # What no cut here catches, and why
-            ///
-            /// Nothing on these three drafts can be cut to redden this gate.
-            /// The verdict is taken as the FETCH arrives and there is no
-            /// second place that could take it again: the message itself is
-            /// not kept, so re-judging it at answer time is not a change that
-            /// can be written. The sibling of this gate in
-            /// `a_joining_fetch_names_a_live_subscription.rs` does have that
-            /// cut, on the nine drafts that keep the FETCH, and carries the
-            /// message it produced.
             #[test]
             fn a_subscription_that_ends_after_the_fetch_does_not_unmake_it() {
                 let (mut ep, sub) = publishing();
@@ -394,15 +344,6 @@ macro_rules! joining_stream_gates {
             }
 
             /// The refusal the section names can be sent.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the code the section names should send the refusal: WrongJoiningRefusal { fetch: 2, required: 0 }
-            /// ```
-            ///
-            /// Made by requiring the internal-error code instead of the one the
-            /// section names.
             #[test]
             fn the_refusal_carries_the_code_the_section_names() {
                 let (mut ep, _) = publishing();
@@ -413,15 +354,6 @@ macro_rules! joining_stream_gates {
             }
 
             /// It cannot be sent under any other code.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the refusal went out under a code the section does not name: ()
-            /// ```
-            ///
-            /// Made by dropping the guard entirely. It reddens nine tests and only
-            /// this gate, on the nine drafts that name a code.
             #[test]
             fn the_refusal_cannot_carry_another_code() {
                 let (mut ep, _) = publishing();
@@ -439,15 +371,6 @@ macro_rules! joining_stream_gates {
 
             /// A subscription this endpoint established with PUBLISH can be
             /// joined.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// Section 5.1 saves the Largest Location from PUBLISH as well as SUBSCRIBE_OK, so a subscription a PUBLISH established can be joined: UnjoinableSubscription { fetch: 0, joining: 1 }
-            /// ```
-            ///
-            /// Made by dropping the `publishes` half of the probe. It reddens five
-            /// tests and only this gate.
             #[test]
             fn a_subscription_a_publish_established_can_be_joined() {
                 let mut ep = responder();

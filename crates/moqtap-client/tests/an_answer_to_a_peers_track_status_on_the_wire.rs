@@ -14,8 +14,7 @@
 //! a route to the wire, and only a peer can see which bytes came out.
 //!
 //! Drafts 07 through 11 have no loopback harness here, so the ten `Connection`s
-//! are covered by five gates. A cut in the write reaches all ten and is visible
-//! on these five, which is what the recorded ablation measures.
+//! are covered by five gates.
 
 mod common;
 
@@ -104,16 +103,6 @@ macro_rules! track_status_answer_wire_gates {
             }
 
             /// The answer to the peer's request reaches the peer.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the client was asked about a track and never answered: Elapsed(())
-            /// ```
-            ///
-            /// Made by building the answer and dropping it instead of writing it.
-            /// The cut reaches all ten `Connection`s and reddens 5 tests, one on
-            /// each draft with a loopback here: in process the endpoint's own
             /// record moves either way, so nothing but a peer can see the
             /// difference.
             #[tokio::test]

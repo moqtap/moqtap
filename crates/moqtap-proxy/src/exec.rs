@@ -2026,11 +2026,6 @@ mod tests {
     /// they arrive with, which is the half a partially-applied action would
     /// break. Impairments are excluded on purpose — a clamp or a
     /// backpressure transition is not a decision.
-    ///
-    /// *Ablation:* in `execute`'s `Err` arm, call
-    /// `report.applied(site, action, Effect::ForwardedVerbatim)` beside
-    /// `report.refused(..)`. Every refusing cell fails the one-decision
-    /// assertion.
     #[test]
     fn exactly_one_decision_event_per_unit_and_refusals_forward_the_original() {
         let mut refused_cells = 0usize;
@@ -2163,10 +2158,6 @@ mod tests {
     /// overtaking it — `execute`'s "through the same queue-or-write-now
     /// fork an admitted `Pass` takes" clause, which the empty-queue sweep
     /// above cannot reach.
-    ///
-    /// *Ablation:* make `forward_unchanged` return `Plan::WriteNow(raw)`
-    /// unconditionally. The refused object then jumps the delayed one and
-    /// `pending.len()` stays at 1.
     #[test]
     fn a_refused_unit_queues_behind_a_delayed_one_rather_than_overtaking_it() {
         const DELAY: Duration = Duration::from_millis(60);
@@ -2366,10 +2357,6 @@ mod tests {
     /// `ReplacePayload` at the control site is `WrongSite`, and rightly.
     /// What must never happen is `WrongComposition` naming one of the four
     /// content actions.
-    ///
-    /// *Ablation:* move `Action::Drop(_)` out of `check_composition`'s `Ok`
-    /// arm into any of the three refusing arms. The first loop fails on
-    /// `Drop(Elide)`.
     #[test]
     fn the_composition_rule_admits_exactly_the_four_content_actions() {
         for inner in [
@@ -2408,15 +2395,6 @@ mod tests {
     /// instead of going out inline. Deleting the unit and stalling the
     /// stream behind it is one impairment with two effects, both on the
     /// wire.
-    ///
-    /// *Ablation, both ways:*
-    /// * refuse `Drop` in `check_composition` — the first assertion fails
-    ///   with `Err(WrongComposition { .. })`, which is the defect this test
-    ///   was written for;
-    /// * keep the admission but let a `Payload::Elide` skip `push_unit` in
-    ///   the `Delay` arm — the drop then holds no slot, the `Pass` behind it
-    ///   comes back `Plan::WriteNow` and overtakes an object the hook had
-    ///   already ordered ahead of it.
     #[test]
     fn a_delayed_drop_is_admitted_and_blocks_the_stream_behind_it() {
         const DELAY: Duration = Duration::from_millis(80);
@@ -2485,9 +2463,6 @@ mod tests {
     /// The same ruling under a [`Gate`]. The gate is the observable here:
     /// the unit is not due while the gate holds, and is the moment it is
     /// released.
-    ///
-    /// *Ablation:* refuse `Drop` in `check_composition`; the first
-    /// assertion fails.
     #[test]
     fn a_held_drop_is_admitted_and_stays_undue_until_its_gate_is_released() {
         for &draft in COMPILED_DRAFTS {
@@ -2682,9 +2657,6 @@ mod tests {
     /// The losing close is recorded behind a control-plane close still
     /// inside its drain window: refused, and the session still ends, but
     /// only after the refusal has been reported.
-    ///
-    /// *Ablation:* move `engine.closer.cancel()` into `plan_action`,
-    /// ahead of the report, and both cases go red on the `seen` assertion.
     #[test]
     fn a_close_is_reported_before_the_session_is_cancelled() {
         struct CancelledAtEvent {
@@ -2860,11 +2832,6 @@ mod tests {
     /// `execute(.., Drop(Elide), ..)`: routing a configured drop through
     /// the hook path would emit a per-object `ActionApplied` naming a
     /// decision nobody made.
-    ///
-    /// *Ablation, recorded:* have `shape_elide` return `true`
-    /// unconditionally (skip `admit_kind`) — the refusal half reddens on
-    /// `assert!(!exec::shape_elide(..))`, and, in the integration fixture,
-    /// a status object would be silently destroyed.
     #[test]
     fn a_shaper_tail_drop_takes_the_elide_guards_and_reports_only_refusals() {
         for &draft in COMPILED_DRAFTS {
@@ -2937,20 +2904,6 @@ mod tests {
     /// shaping statistics, where every figure is gated on a configured
     /// profile — so a deferral counted there would read zero on the
     /// sessions a hook alone impairs, which need no profile whatever.
-    ///
-    /// *Ablation, run:* delete the `ActionKind::Delay` arm from
-    /// `Reporter::applied`.
-    ///
-    /// ```text
-    /// assertion `left == right` failed: draft Draft07: the engine took the unit
-    /// off the wire and queued it for a later release, and the figure for what
-    /// it deferred did not move
-    ///   left: 0
-    ///  right: 1
-    /// ```
-    ///
-    /// Recorded without a `file:line` prefix: editing this paragraph moves
-    /// the line it would name.
     #[test]
     fn a_deferred_unit_is_counted_and_a_forwarded_one_is_not() {
         for &draft in COMPILED_DRAFTS {
@@ -3019,16 +2972,6 @@ mod tests {
     /// one of them and fail the other. The error code is checked inside the
     /// `Truncate` arm itself; the site is checked by `classify`, before the
     /// arm is reached at all.
-    ///
-    /// *Ablation, run:* delete the `ActionKind::Truncate` arm from
-    /// `Reporter::applied`.
-    ///
-    /// ```text
-    /// assertion `left == right` failed: draft Draft07: the object went out cut
-    /// short to its first three bytes and nothing counted it
-    ///   left: 0
-    ///  right: 1
-    /// ```
     #[test]
     fn a_truncation_counts_when_it_is_applied_and_never_when_it_is_refused() {
         for &draft in COMPILED_DRAFTS {
@@ -3082,17 +3025,6 @@ mod tests {
     /// that matters: a counter bumped inside the gate agrees with its event
     /// in every test that has an observer attached, which is all of them,
     /// and reads zero only in production.
-    ///
-    /// *Ablation, run:* move both bumps inside `Reporter::emit`'s `enabled`
-    /// check by writing them as `if self.enabled { .. }`.
-    ///
-    /// ```text
-    /// assertion `left == right` failed: draft Draft07: a deferral on a session
-    /// nobody attached to is still a deferral, and this figure is the only
-    /// thing that says so
-    ///   left: 0
-    ///  right: 1
-    /// ```
     #[test]
     fn a_session_with_nobody_watching_still_counts_what_it_applied() {
         for &draft in COMPILED_DRAFTS {
@@ -3829,22 +3761,6 @@ mod tests {
     /// an inner action that is admitted, does clamp and does report. Without
     /// it the assertion would also pass against an engine that had stopped
     /// reporting clamps altogether.
-    ///
-    /// *Ablation, recorded:* in `plan_action`'s `Action::Delay` arm, hoist
-    /// the `egress::defer_by` call and the `if deferral.was_clamped()`
-    /// report above `let content = prepare_content(...)?;`, so the clamp is
-    /// computed and reported before the inner action is judged. This test
-    /// goes red with the real message
-    ///
-    /// ```text
-    /// assertion `left == right` failed: [Draft07] a refused action changed
-    /// nothing, so it impaired nothing
-    ///   left: [HoldClamped { requested: Some(9s), applied: 50ms }]
-    ///  right: []
-    /// ```
-    ///
-    /// which is exactly the failure the rule exists to prevent: a hold
-    /// reported against a unit that was forwarded verbatim.
     #[test]
     fn a_refused_action_reports_its_refusal_and_no_impairment() {
         for &draft in COMPILED_DRAFTS {
@@ -3909,20 +3825,6 @@ mod tests {
     /// A reader who took the event's `side` for a connection would attribute
     /// them to the client leg — the one this proxy was reading from and the
     /// one that is behaving perfectly.
-    ///
-    /// *Ablation, recorded:* in `event::impairment_leg`, move
-    /// `EgressQueueFull` and `HoldClamped` out of the departure arm into the
-    /// arrival arm — `Some(here)`. This test goes red with the real message
-    ///
-    /// ```text
-    /// assertion `left == right` failed: [Draft07] the clamp is decided
-    /// before the push and both belong to the connection being written to
-    ///   left: [(Some(Client), HoldClamped { requested: Some(9s), applied:
-    ///          50ms }), (Some(Client), EgressQueueFull { stream_id: 4 })]
-    ///  right: [(Some(Upstream), HoldClamped { requested: Some(9s),
-    ///          applied: 50ms }), (Some(Upstream), EgressQueueFull {
-    ///          stream_id: 4 })]
-    /// ```
     #[test]
     fn one_action_owes_two_impairments_in_the_order_it_earned_them() {
         for &draft in COMPILED_DRAFTS {
@@ -3969,22 +3871,6 @@ mod tests {
     /// host's clock: it is equally true of both legs, stays true if one goes
     /// away, and so answers `None` rather than being pinned to whichever
     /// pipe noticed the coarse tick first.
-    ///
-    /// *Ablation, recorded:* in `event::impairment_leg`, move
-    /// `CoarseReleaseTimer` from the `None` arm into the departure arm. This
-    /// test goes red with the real message
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the release wheel belongs to the
-    /// process, not to a connection, so the pipe reading from
-    /// ClientToProxy must not name one either
-    ///   left: Some(Upstream)
-    ///  right: None
-    /// ```
-    ///
-    /// — a host-clock fact attributed to the relay connection, and it would
-    /// have been attributed to the client connection had the other pipe
-    /// reported it first.
     #[test]
     fn the_leg_turns_with_the_pipe_and_is_absent_where_there_is_none() {
         let draft = COMPILED_DRAFTS[0];
@@ -4045,27 +3931,6 @@ mod tests {
     /// after what it reports, so the sequence is the order the proxy did
     /// things in, and a set would pass against a proxy that reported them
     /// backwards.
-    ///
-    /// *Ablation, recorded:* in `event::impairment_leg`, fold
-    /// `FramerBypass` and `ObjectNotAddressable` into the departure arm, so
-    /// every report answers the far connection. This test goes red with the
-    /// real message
-    ///
-    /// ```text
-    /// assertion `left == right` failed: one pipe, three answers: what
-    /// arrived, what could not be written, and neither
-    ///   left: [(Some(Upstream), FramerBypass { stream_id: 4, draft:
-    ///          Draft07, reason: DecodeError }), (Some(Upstream),
-    ///          EgressQueueFull { stream_id: 4 }), (None, CoarseReleaseTimer
-    ///          { backend: Condvar, detail: None })]
-    ///  right: [(Some(Client), FramerBypass { stream_id: 4, draft: Draft07,
-    ///          reason: DecodeError }), (Some(Upstream), EgressQueueFull {
-    ///          stream_id: 4 }), (None, CoarseReleaseTimer { backend:
-    ///          Condvar, detail: None })]
-    /// ```
-    ///
-    /// — a stream the proxy could not parse on the way *in*, blamed on the
-    /// connection it was writing out to.
     #[test]
     fn one_pipe_reports_the_near_leg_the_far_leg_and_neither_in_order() {
         let draft = COMPILED_DRAFTS[0];

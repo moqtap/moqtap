@@ -199,33 +199,6 @@ macro_rules! publisher_alias_wire_gate {
 
             /// Two of the peer's subscriptions under one alias end the QUIC
             /// connection, with the code the section names.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the new arm from `EndpointError::session_error_code`
-            /// leaves the endpoint refusing the SUBSCRIBE and ending its own
-            /// session, and leaves the connection layer with no code to close
-            /// with:
-            ///
-            /// ```text
-            /// the client was given one alias for two tracks and never closed: Elapsed(())
-            /// ```
-            ///
-            /// It reddens twenty-five tests across two files, because every
-            /// gate that reads the code back off an error reads it out of that
-            /// one arm.
-            ///
-            /// Answering that arm with `ProtocolViolation` instead leaves the
-            /// close going out with the wrong number on it, which is the
-            /// failure only a peer can see. It reddens the ten gates in this
-            /// file and nothing in process, where the session ends either way:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: draft-08 Section 7.4 answers one alias
-            /// naming two tracks with Duplicate Track Alias; the close carried 3 instead
-            ///   left: 3
-            ///  right: 4
-            /// ```
             #[tokio::test]
             async fn one_alias_for_two_tracks_closes_the_quic_connection() {
                 crate::common::init_crypto();
@@ -263,20 +236,6 @@ macro_rules! publisher_alias_wire_gate {
             /// A different section, a different message and a different code
             /// path from the gate above, which is why it is a second gate
             /// rather than a second assertion.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `conflicting_retry_alias` call from
-            /// `receive_subscribe_error` leaves the retry accepted and nothing
-            /// closes:
-            ///
-            /// ```text
-            /// the client was offered an alias it was using and never closed: Elapsed(())
-            /// ```
-            ///
-            /// It reddens ten tests: this gate on all five drafts and the
-            /// in-process one on the same five. The gate above stays green,
-            /// which is what makes the retry a rule of its own.
             #[tokio::test]
             async fn a_retry_alias_in_use_closes_the_quic_connection() {
                 crate::common::init_crypto();

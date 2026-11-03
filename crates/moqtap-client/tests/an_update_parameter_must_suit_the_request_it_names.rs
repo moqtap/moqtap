@@ -98,15 +98,6 @@ fn fetch_request(ep: &mut Endpoint) -> u64 {
 
 /// SUBSCRIPTION_FILTER on a namespace subscription is refused, and the session
 /// ends.
-///
-/// # What it catches
-///
-/// A REQUEST_UPDATE whose parameters are never judged, which is what this
-/// draft shipped before the rule was read:
-///
-/// ```text
-/// SUBSCRIPTION_FILTER is for a subscription and this is not one: ()
-/// ```
 #[test]
 fn a_subscription_only_parameter_on_a_namespace_request_closes_the_session() {
     let mut ep = active();
@@ -175,11 +166,7 @@ fn an_unqualified_parameter_is_admitted_on_a_namespace_request() {
 
 /// A parameter REQUEST_UPDATE does not carry at all is ignored, not refused.
 ///
-/// # What it catches
-///
-/// A check that answers every parameter it does not recognise with a close.
-/// Section 9.2.2 says such a parameter "MUST be ignored", so this gate fails
-/// on an implementation that reads the qualifier table as a whitelist.
+/// Draft-16 Section 9.2.2 says such a parameter "MUST be ignored".
 #[test]
 fn a_parameter_that_is_not_for_request_update_at_all_is_ignored() {
     let mut ep = active();

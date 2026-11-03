@@ -50,17 +50,9 @@
 //!
 //! ## Paired comparison does not rescue an accuracy pair
 //!
-//! It is tempting to rank paired comparisons **first**, on the reasoning
-//! that "scheduler noise is additive and lands on both arms, so it cancels
-//! in the difference". For an accuracy pair that is wrong, and it is
-//! falsified by measurement rather than argued away:
-//! under 16 busy-loop processes the wheel arm does *not* keep its ~0.5 ms
-//! lateness while the tokio arm keeps its ~11 ms tick. Both arms degrade
-//! to the same tens of milliseconds and the separation collapses. Measured
-//! wheel/control pairs across seven loaded failures: 12.58/12.03,
-//! 10.49/11.12, 12.58/12.87, 12.58/11.94, 12.58/12.09, 12.58/11.45 and
-//! 12.58/13.26 ms — the wheel *slower* in four of the seven, against a
-//! 3 ms margin. The noise is not additive; it is a ceiling both arms hit.
+//! Scheduler noise is not additive for an accuracy pair: under load both
+//! arms degrade to the same tens of milliseconds, so the separation
+//! collapses. The noise is a ceiling both arms hit.
 //!
 //! Pairing still works for the claims in group 3 above, because those pairs
 //! are two events in a fixed order rather than two rates.
@@ -72,8 +64,7 @@
 //! [`a_delay_behind_a_hold_keeps_its_own_deadline`]), a 1 s resume window
 //! against a 2 s or 30 s `max_hold` ceiling, and a 1 s teardown window.
 //! Each is separated from the defect it rejects by at least a factor of
-//! two, which is why none of them moved under the load that broke the
-//! accuracy pair.
+//! two.
 //!
 //! # What "teardown" is observable as, and what it is not
 //!
@@ -89,11 +80,9 @@
 //! the window — the "never silently gone" guarantee, and the thing an
 //! inline drain loop fails.
 //!
-//! # Three tests here each pin a measured defect
+//! # Three tests here each pin a defect
 //!
-//! They are the regression tests for three concrete failure modes. Each
-//! rustdoc records the measurement that caught its defect and the ablation
-//! that puts the failure back.
+//! They are the regression tests for three concrete failure modes.
 //!
 //! * `releasing_a_gate_resumes_the_stream` and
 //!   `releasing_a_gate_resumes_the_stream_and_its_fin` — a `Hold` on one
@@ -107,10 +96,9 @@
 //!   the hold's ceiling.
 //! * `a_held_object_is_never_silently_lost_at_teardown` — on a multi-thread
 //!   runtime, cancelling a session while an object is held loses that
-//!   object with no event at all, 8 runs out of 8, unless every teardown
-//!   path reports `PendingQueue::unconfirmed_bytes` rather than
-//!   `queued_bytes`: bytes handed to a transport the session is closing are
-//!   not delivered bytes.
+//!   object with no event at all unless every teardown path reports
+//!   `PendingQueue::unconfirmed_bytes` rather than `queued_bytes`: bytes
+//!   handed to a transport the session is closing are not delivered bytes.
 //!
 //! None of them is `#[ignore]`d, because an ignored test is a defect that
 //! has stopped being visible. That rule holds for every claim about *what* the
@@ -129,21 +117,17 @@
 //!
 //! So [`DRAFT`] is the newest draft **this build compiled**, and the
 //! fixture's five header bytes are derived from it by
-//! [`subgroup_header_bytes`]. A hardcoded `DraftVersion::Draft19` was
-//! wrong in two directions at once and both were measured:
+//! [`subgroup_header_bytes`]. A hardcoded draft would be wrong in two
+//! directions at once:
 //!
 //! * with no draft compiled, `AnySubgroupHeader` is uninhabited, so
 //!   `decode_stream` can never return `Ok` and every line after it is
-//!   `unreachable_code` — `cargo check --no-default-features` exited 101
-//!   under `-D warnings`;
-//! * with *one* draft compiled that was not 19, the constant still asked
-//!   for draft-19 bytes and `decode_stream` returned
-//!   `UnsupportedDraft("draft Draft19 not enabled via feature flag")` —
-//!   0 passed / 13 failed on each of draft07, draft13, draft14 and
-//!   draft18, and 13/13 only on draft19.
+//!   `unreachable_code`, which `-D warnings` refuses;
+//! * with *one* draft compiled that was not the hardcoded one,
+//!   `decode_stream` returns `UnsupportedDraft` and every test fails.
 //!
-//! The second is why deriving beats gating: `#![cfg(feature = "draft19")]`
-//! would have made the twelve other rows *green by absence*, and this
+//! The second is why deriving beats gating: a `#![cfg(feature = ...)]` on
+//! one draft would make the other rows *green by absence*, and this
 //! file's subject — a wheel, a deque and a `select!` — is exercised on
 //! every one of them. A per-row **run** is what catches it; a compile-only
 //! gate cannot see a fixture that decodes to the wrong draft.
@@ -516,22 +500,9 @@ impl Rig {
 ///
 /// Objects are concatenated on one stream, so **byte equality is the
 /// ordering assertion** — stronger than comparing arrival instants and
-/// cheaper. It is also the only form that can fail: the plan's original
-/// wording ("ordering preserved under `Delay`") cannot, because each
+/// cheaper. It is also the only form that can fail, because each
 /// `pipe_data_framed` owns its `SendStream` exclusively and nothing else
 /// writes to it.
-///
-/// *Ablation (run, and it fails):* let a zero-delay unit overtake a queued
-/// one — in `exec.rs`'s `Action::Delay` arm, write the unit inline
-/// (`Plan::WriteNow`) instead of pushing it whenever its release time has
-/// already passed. Objects 1..N then reach the relay ahead of object 0 and
-/// the mid-flight assertion below goes red inside 150 ms.
-///
-/// Note that removing the monotonic clamp in `PendingQueue::push` is *not*
-/// an ablation for this test and never was: `pop_next_due` only ever looks
-/// at the queue's front, so wire order survives an unclamped push. What the
-/// clamp buys is that the release time the queue *reports* is the one it
-/// will honour, which is a different claim.
 #[tokio::test]
 async fn ordering_is_preserved_under_delay() {
     const COUNT: u64 = 8;
@@ -554,7 +525,7 @@ async fn ordering_is_preserved_under_delay() {
     rig.send.write_all(&objects.concat()).await.expect("write objects");
 
     // Mid-flight: while object 0 waits, nothing behind it may be on the
-    // wire. This is where the ablation dies, and it dies fast.
+    // wire.
     tokio::time::sleep(HEAD_DELAY / 2).await;
     assert_eq!(
         rig.rx.len(),
@@ -627,10 +598,6 @@ async fn arrival_offsets(delay: Option<Duration>, count: u64) -> Vec<Duration> {
 /// release later — so it is asserted tightly. The upper bound is the
 /// scheduler-exposed half and is deliberately loose; if it ever goes red on
 /// a runner, widen it, do not delete it.
-///
-/// *Ablation (run, and it fails):* in `exec.rs`'s `Action::Delay` arm,
-/// ignore `by` and use `unit.arrived_at` as the release time. Every object
-/// then lands in the control band and the delayed run's lower bound fails.
 #[tokio::test]
 async fn a_delayed_object_never_arrives_early() {
     const DELAY: Duration = Duration::from_millis(300);
@@ -706,15 +673,6 @@ fn percentile(samples: &mut [Duration], q: usize) -> Duration {
 /// the acceptable direction — it can go quiet, it cannot go falsely red —
 /// and [`a_delayed_object_never_arrives_early`] holds the same claim at
 /// 300 ms with a paired control that a loaded box cannot fake.
-///
-/// *Ablation (run, and it fails):* in `exec.rs`'s `Action::Delay` arm,
-/// ignore `by` and use `unit.arrived_at` as the release time. Object 0
-/// reaches the relay well inside the 5 ms it asked for — measured 1.49 ms
-/// on an idle box, and 2.14-2.55 ms in **5 of 5** runs under 16 busy-loop
-/// processes, so the ablation is caught under exactly the load that made
-/// the accuracy form of this test unusable. Re-run once the loop staged on
-/// arrivals rather than on a settle: `object 0 reached the relay 1.7013ms
-/// after it was written, inside the 5ms deadline it asked for`.
 #[tokio::test]
 async fn a_five_millisecond_delay_is_never_released_early() {
     const COUNT: u64 = 40;
@@ -737,11 +695,7 @@ async fn a_five_millisecond_delay_is_never_released_early() {
 
         // Object *i* is on the relay before *i+1* is written, so each
         // release is its own wake rather than one batch release of
-        // whatever happened to be queued when the wheel next fired. That
-        // was a flat 12 ms — wider than `DELAY`, and wide enough on an
-        // idle box — but a release slower than the settle turned the run
-        // into exactly the batch case the settle was there to avoid, and
-        // said nothing. Waiting for the arrival says it happened.
+        // whatever happened to be queued when the wheel next fired.
         let seen = rig.rx.wait_for_bytes(through).await;
         assert_eq!(
             seen.len(),
@@ -796,30 +750,9 @@ async fn a_five_millisecond_delay_is_never_released_early() {
 /// than "the bound was too tight", and it is the reason this is `#[ignore]`d
 /// rather than loosened.
 ///
-/// The history is worth having in one place, because two formulations have
-/// now failed:
-///
-/// * **Absolute bound.** Shipped as "the session's p50 release lateness is
-///   under 3 ms": green 12 runs of 12 alone, red 1 run in 8 inside a full
-///   `cargo test --workspace` (p50 8388 µs, p95 29 360, max 38 512).
-///   Widening does not fix it — at 8.4 ms the wheel is already inside the
-///   ~10 ms a `tokio::time::sleep` implementation lands at on Windows, so a
-///   10 ms bound is passed by the very implementation this exists to reject
-///   and the ablation below stops failing.
-/// * **Paired difference**, i.e. what is written below. The reasoning was
-///   that scheduler noise is additive and lands on both arms, so it cancels.
-///   **Measured, that is false.** Under 16 busy-loop processes on 16 logical
-///   cores the wheel does not hold its ~0.5 ms while tokio keeps its tick;
-///   both arms hit the same ceiling. Seven loaded failures, wheel/control:
-///   12.58/12.03, 10.49/11.12, 12.58/12.87, 12.58/11.94, 12.58/12.09,
-///   12.58/11.45, 12.58/13.26 ms — the wheel slower in four of seven — so
-///   the separation was 0 ns against a 3 ms margin. **7 red in 8 loaded
-///   runs, 0 red in 5 idle runs**; re-measured while re-homing it, **5 red
-///   in 5** loaded runs of this target alone.
-///
-/// There is no third formulation. A quantity that reads 0.5 ms idle and
-/// 12 ms saturated is reporting the box, and `cargo test --workspace` runs
-/// on three shared CI runners alongside 76 other targets.
+/// Neither an absolute bound nor a paired difference survives load: both
+/// arms hit the same ceiling, so under saturation the quantity reports the
+/// box rather than the code.
 ///
 /// # This is not concealment
 ///
@@ -829,7 +762,7 @@ async fn a_five_millisecond_delay_is_never_released_early() {
 ///   release branch) and by `release_timer.rs`'s never-early,
 ///   never-lost and preemption tests. An implementation that regressed to
 ///   `tokio::time::sleep` is rejected by `release_timer.rs`'s test 2 with
-///   no timing budget at all: measured 1975 ms late under its ablation.
+///   no timing budget at all.
 /// * The full form of this measurement — schedule 10 000 releases at 1 ms,
 ///   5 ms, 200 µs spacing and assert p95 release error under a per-platform
 ///   budget, the test that catches a CI runner with a pathological
@@ -837,22 +770,6 @@ async fn a_five_millisecond_delay_is_never_released_early() {
 ///   is reported in `Counters::release_errors` so a caller can prove its
 ///   timing was honoured rather than assume it. That reporting is what this
 ///   test reads, and it is what such a job would read too.
-///
-/// # Reference numbers, measured on a quiet box
-///
-/// Windows 11, i9-11900K, 16 logical cores, debug profile, this target
-/// alone, five runs, `MARGIN` 3 ms:
-///
-/// | | wheel p50 (bucket upper bound) | tokio p50 | separation |
-/// |---|---|---|---|
-/// | idle | 459-524 µs | 10.27-10.56 ms | 9.7-10.1 ms |
-/// | under the ablation below | 10.486 ms | 10.522 ms | 36 µs |
-/// | 16 busy-loop processes | 10.49-12.58 ms | 11.45-13.26 ms | 0-2.6 ms |
-///
-/// The wheel's p50 is a bucket **upper** bound (two significant bits per
-/// octave) while the control's is exact, so the comparison is biased
-/// against the wheel by up to 25% — conservative in the direction that
-/// matters.
 ///
 /// # How the two arms are sampled, which is load-bearing
 ///
@@ -872,18 +789,15 @@ async fn a_five_millisecond_delay_is_never_released_early() {
 /// have done.
 ///
 /// Both p50s, never p95: a median cannot be moved by a single unlucky wake.
-///
-/// *Ablation (run, and it fails):* make `release_timer::arm_at` spawn a
-/// `tokio::time::sleep` task that cancels the deadline token instead of
-/// arming the wheel. Both arms then measure the same ~15.6 ms Windows tick,
-/// the difference collapses to about zero (36 µs, measured), and `MARGIN`
-/// fails.
+/// The wheel's p50 is a bucket **upper** bound (two significant bits per
+/// octave) while the control's is exact, so the comparison is biased
+/// against the wheel by up to 25% — conservative in the direction that
+/// matters.
 ///
 /// **This is the accuracy measurement taken at session level**, as against
-/// the wheel-level one in `release_timer.rs`, and it is still worth having
-/// — which is why it was re-homed rather than deleted. Run it when the
-/// question is "is this box still fast enough to release on time", not to
-/// decide whether a commit is good.
+/// the wheel-level one in `release_timer.rs`, and it is still worth having.
+/// Run it when the question is "is this box still fast enough to release on
+/// time", not to decide whether a commit is good.
 #[tokio::test]
 #[ignore = "calibration measurement: asserts timing accuracy, which is not \
             measurable on a loaded box — run with --ignored on a quiet machine"]
@@ -906,16 +820,12 @@ async fn calibration_a_five_millisecond_delay_is_measured_as_five_milliseconds()
     ///
     /// Windows quantises every interruptible wait to the ~15.6 ms system
     /// tick, so on a **quiet** box the two arms separate by about 10 ms
-    /// there: measured wheel p50 459-524 µs end to end against control p50
-    /// 10.27-10.56 ms, i.e. 9.7-10.1 ms of separation, and 3 ms is a third
-    /// of it. Under the ablation in this test's rustdoc the same two
-    /// numbers were 10.486 ms and 10.522 ms — 36 µs.
+    /// there, and 3 ms is a third of it.
     ///
     /// **Do not tune this to make a loaded run green.** The separation does
-    /// move between an idle box and a loaded one: under 16 busy-loop
-    /// processes the wheel arm degrades to the control's own level and the
-    /// separation reaches 0 ns, which is why this whole test is
-    /// `#[ignore]`d rather than margined.
+    /// move between an idle box and a loaded one: under load the wheel arm
+    /// degrades to the control's own level and the separation vanishes,
+    /// which is why this whole test is `#[ignore]`d rather than margined.
     /// There is no value here that is both meaningful and load-proof:
     /// anything above ~10 ms is passed by the `tokio::time::sleep`
     /// implementation this exists to reject, and anything below it is
@@ -1016,26 +926,17 @@ async fn calibration_a_five_millisecond_delay_is_measured_as_five_milliseconds()
 ///
 /// # The write loop is a feedback loop, and it has to be
 ///
-/// The obvious shape — write the five objects with a fixed gap and compare
-/// instants afterwards — **does not fail under its own ablation**, and this
-/// was measured, not reasoned about. Under backpressure the client's later
-/// objects simply sit in the proxy's QUIC receive buffer, so when the read
-/// branch is finally re-enabled *one* read returns all four at once and all
-/// four hook calls land within microseconds of object 0's write. The margin
-/// between "the last hook call" and "object 0's bytes reached the relay"
-/// collapses to the cost of a `write_all` plus a loopback packet, and the
-/// test passes on a coin flip.
+/// Writing the five objects with a fixed gap and comparing instants
+/// afterwards cannot tell the two apart. Under backpressure the client's
+/// later objects sit in the proxy's QUIC receive buffer, so when the read
+/// branch is re-enabled *one* read returns all four at once and all four
+/// hook calls land within microseconds of object 0's write.
 ///
 /// So object *i+1* is not written until the hook has been shown object *i*.
 /// A read loop that keeps reading gets all five within a few milliseconds; a
 /// read loop that stalls behind its queue cannot ask for object *i+1* until
 /// object *i* has gone out, and the loop below then takes `COUNT × DELAY`
 /// rather than `COUNT` round trips.
-///
-/// *Ablation (run, and it fails):* in `pipe_data_framed`, make the read
-/// branch's precondition `pending.accepts_more() && pending.is_empty()`.
-/// The last hook call lands at roughly `COUNT × DELAY` — measured 1.2 s
-/// against object 0's arrival at 0.3 s.
 #[tokio::test]
 async fn delay_is_not_backpressure() {
     const COUNT: u64 = 5;
@@ -1085,11 +986,6 @@ async fn delay_is_not_backpressure() {
 /// primary assertion is the paired one — how far apart the two arrived —
 /// because that is what a spacing implementation gets wrong and it needs no
 /// wall-clock bound.
-///
-/// *Ablation (run, and it fails):* in `egress::defer_by`, return
-/// `tail_release_at + by` instead of `arrived_at + by` (equivalently: in
-/// `PendingQueue::push`, clamp to `tail + by`). The two objects then land
-/// 100 ms apart and `BAND` fails.
 #[tokio::test]
 async fn delay_is_a_deadline_not_a_spacing() {
     const DELAY: Duration = Duration::from_millis(100);
@@ -1160,12 +1056,7 @@ fn egress_with_ceiling() -> EgressConfig {
 ///
 /// Exactly one object, so the only thing this can fail on is the gate
 /// clause. [`releasing_a_gate_resumes_the_stream`] is the same shape with
-/// traffic queued behind the hold, and it does not pass; keeping the two
-/// apart is what makes that failure diagnostic rather than ambiguous.
-///
-/// *Ablation (run, and it fails):* in `egress::Pending::is_due`, drop the
-/// `|| gate released` clause and consider only `release_at`. The object
-/// then arrives at the 2 s ceiling and `RESUME_WINDOW` fails.
+/// traffic queued behind the hold.
 #[tokio::test]
 async fn a_released_gate_makes_the_held_unit_due_at_once() {
     let (head, objects) = subgroup_stream(1, 8);
@@ -1204,45 +1095,14 @@ async fn a_released_gate_makes_the_held_unit_due_at_once() {
 /// stream — every object queued behind the hold, and the FIN — byte-equal
 /// to the source.
 ///
-/// # What this pinned, and what fixed it
-///
-/// Measured on 2026-08-05, four objects, object 0 held and objects 1-3
-/// `Pass`, `max_hold` 2 s, the gate released 200 ms in: the whole stream
-/// arrived **1.84 s** after the release — that is, at object 0's `max_hold`
-/// ceiling. With the shipped default `max_hold` of 30 s it would have been
-/// 30 s. Releasing the gate resumed the *held object* and nothing else.
-///
-/// The cause was the interaction of two rules, each fine on its own:
-///
-/// * `Action::Hold` gives its unit `due_at = arrived_at + max_hold` — the
-///   ceiling, not an expected release (`egress::hold_ceiling`).
-/// * `PendingQueue::push` clamped every later unit's *release time* to
-///   `max(release_at, now, tail_release_at)`.
-///
-/// So objects 1-3 were stamped with the *ceiling* of a unit that would not
-/// wait for it, and they carry no gate, so `Pending::is_due` had nothing to
-/// make them due early. The gate clause fixed the head and only the head.
-///
-/// What keeps it green: `push` does not clamp a unit's own deadline at all.
+/// `Action::Hold` gives its unit `due_at = arrived_at + max_hold` — the
+/// ceiling, not an expected release (`egress::hold_ceiling`) — so
+/// `PendingQueue::push` does not clamp a later unit's own deadline to it.
 /// Ordering is the deque's job — `pop_next_due` only ever looks at the
 /// front — and the clamp is what `Pending::expected_at` computes, which is
-/// reported as `Effect::Queued { release_at }` and gates nothing.
-///
-/// It was not visible from `egress.rs`'s own tests:
-/// `a_released_gate_makes_a_unit_due_before_its_ceiling` puts exactly one
-/// unit in the queue, so it never pushes anything behind a gated tail. It is
-/// the gap between that unit test and this integration test, which is why
-/// this test asserts on the whole stream and not just the held object;
-/// `egress::tests::releasing_a_gate_frees_the_whole_run_queued_behind_it`
-/// now closes it at queue level too.
-///
-/// *Ablation (run, and it fails):* in `PendingQueue::push`, clamp
-/// `unit.due_at` the way `unit.expected_at` is clamped. The stream resumes
-/// at the 2 s ceiling instead of at the release, and `RESUME_WINDOW` fails.
-///
-/// Companion: [`a_released_gate_makes_the_held_unit_due_at_once`] is this
-/// test with the queue behind the hold removed, and it passed throughout —
-/// which is what localised the defect to the successors.
+/// reported as `Effect::Queued { release_at }` and gates nothing. This test
+/// asserts on the whole stream, not just the held object, because the
+/// successors are what a clamped deadline strands.
 #[tokio::test]
 async fn releasing_a_gate_resumes_the_stream() {
     let (head, objects) = subgroup_stream(4, 8);
@@ -1285,9 +1145,8 @@ async fn releasing_a_gate_resumes_the_stream() {
 /// The same, at the **shipped** `max_hold` of 30 s, with the source FINed
 /// before the release — because the FIN is queued behind the hold too.
 ///
-/// This is the reproduction as it was measured, and it is a strictly harder
-/// shape than [`releasing_a_gate_resumes_the_stream`] in two ways that both
-/// matter:
+/// It is a strictly harder shape than
+/// [`releasing_a_gate_resumes_the_stream`] in two ways that both matter:
 ///
 /// * `EgressConfig::default()` — no lowered ceiling, so a successor that
 ///   inherits the hold's deadline waits **30 s** and `wait_for_bytes` gives
@@ -1297,14 +1156,6 @@ async fn releasing_a_gate_resumes_the_stream() {
 ///   (`egress::drain_honouring_release_times`) rather than the pipe loop's
 ///   release branch, and `Ending::Fin` is the assertion that the drain ran
 ///   to completion instead of returning after the held unit.
-///
-/// Measured before the fix, 5 runs of 5, five objects of 8 bytes each with
-/// object 1 held: five seconds after the release the relay had **25 of 55
-/// bytes** — the header and object 0 at 44 µs, object 1 at 158 ms, then
-/// nothing. Objects 2, 3, 4 and the FIN were stranded until `max_hold`.
-///
-/// *Ablation (run, and it fails):* in `PendingQueue::push`, clamp
-/// `unit.due_at` the way `unit.expected_at` is clamped.
 #[tokio::test]
 async fn releasing_a_gate_resumes_the_stream_and_its_fin() {
     const COUNT: u64 = 5;
@@ -1373,11 +1224,6 @@ async fn releasing_a_gate_resumes_the_stream_and_its_fin() {
 /// it may make it *later* — ordering — but may not redefine what it is
 /// waiting for.
 ///
-/// Measured before the fix, `max_hold` 20 s, object 1 held and object 2
-/// `Pass.delayed(50 ms)` with the gate released at 200 ms: object 2 was
-/// stamped with the hold's ceiling and never became due — 25 of 35 bytes
-/// three seconds after the release.
-///
 /// The assertions are a matched pair around object 2's arrival, and both
 /// are needed:
 ///
@@ -1389,10 +1235,6 @@ async fn releasing_a_gate_resumes_the_stream_and_its_fin() {
 ///
 /// `CEILING` is deliberately far outside `DELAY + SLACK` so the two cannot
 /// be confused on a loaded runner.
-///
-/// *Ablation (run, and it fails):* in `PendingQueue::push`, clamp
-/// `unit.due_at` the way `unit.expected_at` is clamped. Object 2 arrives at
-/// the 5 s ceiling and the upper bound fails.
 #[tokio::test]
 async fn a_delay_behind_a_hold_keeps_its_own_deadline() {
     /// Far enough out that inheriting it is unmistakable.
@@ -1460,10 +1302,6 @@ async fn a_delay_behind_a_hold_keeps_its_own_deadline() {
 
 /// A delay longer than `max_hold` is clamped, executed at the ceiling, and
 /// reported once.
-///
-/// *Ablation (run, and it fails):* in `egress::Deferral::was_clamped`,
-/// return `false`. The object still goes out at the ceiling — so a test
-/// that only timed it would pass — and no `HoldClamped` is emitted.
 #[tokio::test]
 async fn a_delay_beyond_max_hold_is_clamped_and_reported() {
     const MAX_HOLD: Duration = Duration::from_millis(60);
@@ -1551,16 +1389,8 @@ fn never_grants(max_hold: Duration) -> ShapeProfile {
 /// neither — which is the whole property, because the field's job is to
 /// **distinguish** a bounded request from an unbounded one.
 ///
-/// # What it replaces
-///
-/// The unbounded case was reported as `Duration::MAX`, i.e. as
-/// `18446744073709551615.999999999s` in an event log. The assertion an
-/// author writes against a clamp is that it *reduced* the request —
-/// `requested > applied` — and that inequality holds for the sentinel and
-/// for a real thirty-second request alike, so it certified nothing while
-/// looking like the strongest available claim. `applied` is asserted on
-/// both legs for the same reason it always was: a clamp that reports no
-/// ceiling is not a clamp.
+/// `applied` is asserted on both legs: a clamp that reports no ceiling is
+/// not a clamp.
 #[tokio::test]
 async fn hold_clamped_reports_no_request_for_an_unbounded_wait() {
     const MAX_HOLD: Duration = Duration::from_millis(60);
@@ -1626,12 +1456,6 @@ async fn hold_clamped_reports_no_request_for_an_unbounded_wait() {
 /// the refusal.
 ///
 /// Four cases, one session each, because counters are session-scoped.
-///
-/// *Ablation (run, and it fails):* in `exec.rs`'s `Action::Delay` arm, push
-/// a `Pending::bytes(raw, deferral.release_at)` before calling
-/// `check_composition`. Every refusal is still reported — so the event
-/// assertions still pass — and `egress_items_queued` moves to 1, which is
-/// the assertion that catches it.
 #[tokio::test]
 async fn a_delay_wrapping_a_terminal_is_refused_before_it_is_queued() {
     const WRAPPED_TERMINAL: &str = "Delay or Hold wrapping Truncate or ResetStream";
@@ -1735,7 +1559,7 @@ enum HeldOutcome {
 /// disjunction is not slack: on cancellation the pipe races
 /// `run_with_transport`'s `client.close()` / `relay.close()`, and the two
 /// outcomes are exactly the two sides of that race. A drain that never
-/// resolves produces **neither**, which is what the ablations below do.
+/// resolves produces **neither**.
 async fn held_unit_settled(
     rx: &TimedReceiver,
     observer: &RecordingObserver,
@@ -1780,34 +1604,13 @@ async fn held_unit_settled(
 /// code: case 1 through the pipe loop's own cancel arm, cases 2 and 3
 /// through `egress::drain_honouring_release_times` — nominally two drains,
 /// the FIN drain and the terminal drain, but one shared function in the
-/// implementation. Cases 2 and 3 therefore share an ablation: there is no
-/// separate terminal-drain body left to revert on its own. Both call sites
-/// are still exercised, which is what keeping them as separate cases buys.
-///
-/// *Ablations (both run, and each fails only its own cases):*
-/// (a) delete the `_ = ctx.cancel.cancelled()` arm from `pipe_data_framed`'s
-///     `select!`. `wait_release` still resolves on cancel, so the loop wakes,
-///     finds the held head not due, and spins — case 1 fails, cases 2 and 3
-///     still pass;
-/// (b) rewrite `egress::drain_honouring_release_times` as a plain
-///     `while let Some(release) = pending.head_release()` loop over
-///     `wait_release` + `pop_next_due`, with no `biased` cancel arm — cases 2
-///     and 3 fail, case 1 still passes.
-///
-/// Both ablations are *hot spins*: `wait_release` resolves immediately once
-/// the session is cancelled, `pop_next_due` finds the held head not due, and
-/// the loop goes round without ever yielding. On this runtime that starves
-/// the test's own timers too, so the failure takes the 30 s `max_hold`
-/// ceiling to surface and ablation (b) against case 3 reports through
-/// `wait_for_ending`'s internal expect rather than through this file's
-/// message. Both still fail, for the right reason; the delay is noted so the
-/// next person does not read a 30 s ablation run as a hang.
+/// implementation. Both call sites are exercised, which is what keeping them
+/// as separate cases buys.
 ///
 /// # Why the default runtime and not `flavor = "multi_thread"`
 ///
-/// Because on a multi-thread runtime case 1 does not pass, and the reason is
-/// a **separate defect**, not this one — see
-/// [`a_held_object_is_never_silently_lost_at_teardown`], which pins it. Left
+/// A multi-thread runtime adds a separate race, the one
+/// [`a_held_object_is_never_silently_lost_at_teardown`] pins. Left
 /// here it would conflate "the drain noticed the cancel" (this test) with
 /// "the bytes survived the teardown race" (that one), and neither diagnosis
 /// would be readable.
@@ -1918,11 +1721,10 @@ async fn cancel_after_the_source_fins(window: Duration) {
 /// **The observable here is the `RESET_STREAM`, not the bytes**, and that is
 /// forced rather than chosen. The cancel-fallback drain writes the held
 /// object and the truncated prefix and *then* calls `reset()`, which
-/// discards whatever of them quinn had not yet put on the wire — measured:
-/// zero bytes past the header reach the relay, every time. `Action::Truncate`
-/// says exactly this ("the peer observes **at most** `bytes` further bytes,
-/// and may observe none"), and the truncate tests in `actions_objects.rs`
-/// assert an upper bound and a prefix for the same
+/// discards whatever of them quinn had not yet put on the wire.
+/// `Action::Truncate` says exactly this ("the peer observes **at most**
+/// `bytes` further bytes, and may observe none"), and the truncate tests in
+/// `actions_objects.rs` assert an upper bound and a prefix for the same
 /// reason. So the drain having run is proved by the reset arriving with the
 /// action's code; asserting on delivered bytes here would be asserting on
 /// something QUIC does not promise.
@@ -1989,58 +1791,20 @@ async fn cancel_with_a_terminal_behind_the_hold(window: Duration) {
 /// A held object is either delivered or reported as
 /// `Impairment { QueuedBytesAtTeardown }` — never silently gone.
 ///
-/// # What this pinned, on a multi-thread runtime, and what fixed it
+/// Runs on a multi-thread runtime, the one a real deployment uses
+/// (`#[tokio::main]` is multi-thread by default), and is kept apart from
+/// [`cancelling_while_an_object_is_held_tears_down_promptly`], the same case
+/// on tokio's default current-thread runtime, because the difference is
+/// scheduling.
 ///
-/// Measured on 2026-08-05, `flavor = "multi_thread"`, **8 runs out of 8**:
-/// one 256 KiB object held on a gate nobody releases, the source still open,
-/// the session cancelled. One second later the relay had received the stream
-/// header and nothing else — 5 of 262 154 bytes — and the observer had
-/// recorded **no impairment at all**. The relay's read then failed with
-/// `ConnectionLost(ApplicationClosed(… b"proxy session ended"))`: the
-/// session's own `relay.close()` had already torn the connection down.
-///
-/// With a 32-byte object the same case failed 12 runs out of 14 — a
-/// race, not a certainty. The object size below is what turns the race into
-/// a fact, and the reasoning is in its doc comment. It is deliberately
-/// separate from [`cancelling_while_an_object_is_held_tears_down_promptly`]
-/// so that one stays a clean measurement of a different property.
-///
-/// [`cancelling_while_an_object_is_held_tears_down_promptly`] is the same
-/// case on tokio's default current-thread runtime and passed every time,
-/// which is exactly why this was filed separately: the difference is
-/// scheduling, and the runtime this failed on is the one a real deployment
-/// uses (`#[tokio::main]` is multi-thread by default).
-///
-/// The race itself is known and remains open: a cancelled session still
-/// races `client.close()` / `relay.close()` on tasks nobody awaits. What is
-/// supposed to make that race harmless — and what was **not** true — is that
-/// anything still queued is reported as
-/// `Impairment { QueuedBytesAtTeardown }`. It was not, on either of the two
-/// paths that can win this race:
-///
-/// * the pipe loop's cancel arm calls `drain_ignoring_release_times` and then
-///   reported only `pending.queued_bytes()`. A `write_all` that succeeded
-///   into a connection that is about to close leaves **nothing** queued, so
-///   there was nothing to report and the bytes were gone silently. This is
-///   the path that won here: instrumented, the cancel arm saw
-///   `queued=262149` on entry and `stranded=0` after the drain;
-/// * `propagate_reset` — reached when the read arm's `ConnectionLost` wins
-///   over the cancel arm — drained best-effort with `let _ = …` and never
-///   emitted `QueuedBytesAtTeardown` at all.
-///
-/// So the guarantee was not "delivered or reported"; it was "delivered, or
-/// reported, or lost, depending on which task the scheduler ran first". Both
-/// paths are closed the same way: `PendingQueue` now counts what a teardown
-/// drain *hands to the transport* as unconfirmed, every teardown site
-/// reports `unconfirmed_bytes()` instead of `queued_bytes()`, and
-/// `propagate_reset` reports at all. The event already documented itself
-/// this way — "flushed best-effort; `bytes` may not have reached the peer".
-///
-/// *Ablation (run, and it fails):* make
-/// `egress::PendingQueue::unconfirmed_bytes` return `self.queued_bytes`.
-/// The 256 KiB object is handed to a dying quinn connection, nothing is left
-/// queued, no impairment is emitted, and this goes red exactly as it did on
-/// 2026-08-05.
+/// A cancelled session still races `client.close()` / `relay.close()` on
+/// tasks nobody awaits; that race is open. What makes it harmless is that
+/// anything not confirmed delivered is reported as
+/// `Impairment { QueuedBytesAtTeardown }`: `PendingQueue` counts what a
+/// teardown drain *hands to the transport* as unconfirmed, and every
+/// teardown site, `propagate_reset` included, reports `unconfirmed_bytes()`
+/// rather than `queued_bytes()`. The event documents itself this way —
+/// "flushed best-effort; `bytes` may not have reached the peer".
 #[tokio::test(flavor = "multi_thread")]
 async fn a_held_object_is_never_silently_lost_at_teardown() {
     const WINDOW: Duration = Duration::from_secs(1);
@@ -2049,9 +1813,8 @@ async fn a_held_object_is_never_silently_lost_at_teardown() {
     /// queue's 1 MiB budget, so the object is a real held unit and not a
     /// `Passthrough`; large enough that quinn cannot possibly have put it on
     /// the wire in the microseconds between the drain's `write_all` and
-    /// `relay.close()`. With a 32-byte object the same defect shows up as a
-    /// coin flip (12 failures in 14 runs), which is a bad way to report a
-    /// bug; with this one the loss is what the transport must do.
+    /// `relay.close()`: the loss is what the transport must do, not a coin
+    /// flip.
     const PAYLOAD: usize = 256 * 1024;
 
     let (head, objects) = subgroup_stream(1, PAYLOAD);
@@ -2090,13 +1853,14 @@ async fn a_held_object_is_never_silently_lost_at_teardown() {
 // `STOP_SENDING`. Seven are inline `send.write_all` calls and every one of
 // them routes its error through `propagate_stop`. The other two are the
 // `release_due_units(..)` calls in the two `select!` release branches —
-// the control pipe's and the data pipe's — and they used a bare `?`.
+// the control pipe's and the data pipe's — and they must route it the
+// same way.
 //
-// That is not a cosmetic asymmetry. The release branch is the *only* write
-// a `Delay`/`Hold` stream ever makes: the whole point of deferring is that
-// nothing goes out inline. So on exactly the streams this file exists to
-// test, a peer's stop reason was replaced by the hard-coded `0` that
-// quinn's `RecvStream::drop` sends.
+// The release branch is the *only* write a `Delay`/`Hold` stream ever
+// makes: the whole point of deferring is that nothing goes out inline. A
+// bare `?` there would replace a peer's stop reason, on exactly the
+// streams this file exists to test, with the hard-coded `0` that quinn's
+// `RecvStream::drop` sends.
 //
 // # Why these fixtures block the write, and why they must
 //
@@ -2114,8 +1878,7 @@ async fn a_held_object_is_never_silently_lost_at_teardown() {
 // that never reads still absorbs every fixture in this file and no proxy
 // write is ever in flight long enough to be stopped. Pinning the window
 // small makes "the proxy is parked inside `write_all`" a property of the
-// fixture rather than a race, which is what lets each leg's ablation be
-// attributed to one source line.
+// fixture rather than a race.
 //
 // # And each leg waits for the park rather than timing it
 //
@@ -2125,7 +1888,7 @@ async fn a_held_object_is_never_silently_lost_at_teardown() {
 // never asked. It matters more here than in most places: a stop that lands
 // before the release branch has entered its write is mirrored by
 // `StopWatcher` instead, and a leg that drifted into that ordering would
-// stay green under its own ablation while gating the other site.
+// be testing the watcher rather than this site.
 //
 // So each leg waits for something it can see, and the two are
 // different because the two fixtures park differently:
@@ -2140,11 +1903,6 @@ async fn a_held_object_is_never_silently_lost_at_teardown() {
 //   `release_errors.count` reaches a window's worth of them and the next
 //   write is the one that parks, with thousands of bytes still queued
 //   behind it.
-//
-// Both legs' ablations were re-run against the waits, and each still fails
-// only its own leg with `left: Some(0), right: Some(7)`. Neither wait
-// changed under them, which is the point: they observe the write, and the
-// ablation is about what happens to its error.
 
 /// The code the destination peer stops with. Not `0` — that is what
 /// `RecvStream::drop` sends, and telling the two apart is the whole test.
@@ -2227,11 +1985,6 @@ fn assert_stop_during_a_delay_is_mirrored(leg: &str, out: &StopLegOutcome) {
 /// only thing that ever writes; the client accepts the forwarded stream and
 /// then never reads it, so the first released object fills its 4 KiB window
 /// and the write parks. The stop lands 200 ms into that park.
-///
-/// *Ablation (run, and it fails):* in `pipe_data_framed`, replace the
-/// `match released { .. }` block with the original
-/// `if release_due_units(..).await? == Flow::StreamOver { return Ok(()); }`.
-/// The relay then observes `Some(0)` instead of `Some(7)`.
 #[tokio::test]
 async fn a_stop_during_a_delay_is_mirrored_on_the_data_path() {
     common::init_crypto();
@@ -2363,11 +2116,6 @@ impl ProxyHook for DelayingControlHook {
 /// only be closed by a CLIENT_SETUP and those only travel that way. The
 /// relay accepts the control stream and never reads it, so the first
 /// released frames fill its 4 KiB window and the write parks.
-///
-/// *Ablation (run, and it fails):* in `pipe_control_mutating`, replace the
-/// `match released { .. }` block with the original
-/// `if release_due_units(..).await? == Flow::StreamOver { return Ok(()); }`.
-/// The client then observes `Some(0)` instead of `Some(7)`.
 #[cfg(feature = "draft14")]
 #[tokio::test]
 async fn a_stop_during_a_delay_is_mirrored_on_the_control_path() {

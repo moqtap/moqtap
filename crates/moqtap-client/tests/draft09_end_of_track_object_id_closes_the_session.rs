@@ -107,30 +107,7 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// Object ID it saw, so a log says which object on the stream broke the rule
 /// rather than that some object did. And the peer receives a CONNECTION_CLOSE —
 /// the only part of "the receiver MUST terminate the session" that is about the
-/// wire, and the part this draft had no way to reach.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Deleting `close_for_data_stream` from draft-09's connection, leaving
-/// `close_for_codec` — which only `recv_control` reaches — as the sole route to
-/// a close:
-///
-/// ```text
-/// error[E0599]: no method named `close_for_data_stream` found for struct `moqtap_client::draft09::connection::Connection` in the current scope
-///    --> crates\moqtap-client\tests\draft09_end_of_track_object_id_closes_the_session.rs:202:14
-///     |
-/// 202 |         conn.close_for_data_stream(&err),
-///     |              ^^^^^^^^^^^^^^^^^^^^^
-/// ```
-///
-/// With the method kept but its `Codec` arm dropped, so it compiles and declines:
-///
-/// ```text
-/// ---- an_end_of_track_object_at_a_non_zero_id_closes_the_connection stdout ----
-///
-/// thread 'an_end_of_track_object_at_a_non_zero_id_closes_the_connection' (51516) panicked at crates\moqtap-client\tests\draft09_end_of_track_object_id_closes_the_session.rs:
-/// Section 8.1.1.1 answers this with a close, but close_for_data_stream declined
-/// ```
+/// wire.
 #[tokio::test]
 async fn an_end_of_track_object_at_a_non_zero_id_closes_the_connection() {
     common::init_crypto();

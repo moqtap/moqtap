@@ -117,15 +117,6 @@ macro_rules! ceiling_gates {
 
             /// The peer raises the ceiling, then offers the same number again,
             /// and the client closes the QUIC connection.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Reducing the intake to `self.endpoint.receive_message(msg
-            /// .clone())?`:
-            ///
-            /// ```text
-            /// the client refused the repeated ceiling but never closed the connection: Elapsed(())
-            /// ```
             #[tokio::test]
             async fn a_ceiling_that_does_not_increase_closes_the_quic_connection() {
                 crate::common::init_crypto();
@@ -209,17 +200,6 @@ macro_rules! ceiling_gates {
             /// `Closed` is reachable from nowhere else here: the endpoint is
             /// asserted `Active` before the first ceiling, and the first
             /// ceiling is legal.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Reducing `fail_session` to `err`:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the violation was reported but
-            /// the session was left running: Active
-            ///   left: Active
-            ///  right: Closed
-            /// ```
             #[test]
             fn a_ceiling_that_does_not_increase_ends_the_endpoints_session() {
                 let mut endpoint = active_client();

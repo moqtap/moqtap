@@ -2142,15 +2142,7 @@ mod tests {
 
     /// Every status the type can hold reaches the wire as its own code and
     /// comes back unchanged, through both subgroup readers and the datagram.
-    ///
-    /// Observed by making `write_object` encode `ObjectStatus::Normal` instead
-    /// of the object's own status, which fails this with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: ObjectDoesNotExist on the subgroup wire
-    ///   left: [0, 0, 0]
-    ///  right: [0, 0, 1]
-    /// ```
+    /// Fails if `write_object` writes any status other than the object's own.
     #[test]
     fn assigned_statuses_round_trip() {
         let header = plain_header();
@@ -2192,20 +2184,8 @@ mod tests {
 
     /// A datagram whose type byte sets the status flag always carries a status
     /// field, because the flag is what puts the field on the wire — an unset
-    /// `object_status` writes Normal rather than nothing.
-    ///
-    /// Observed by putting back the `if let Some(s) = &self.object_status`
-    /// with no `else`, which emits a datagram that stops before its status
-    /// field and fails this with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: [32, 1, 2, 3, 128]
-    ///  right: [32, 1, 2, 3, 128, 0]
-    /// ```
-    ///
-    /// and, with the byte comparison removed, fails the decode of its own
-    /// output with `own output refused: VarInt(UnexpectedEnd)`.
+    /// `object_status` writes Normal rather than nothing. Fails if such a
+    /// datagram stops before its status field.
     #[test]
     fn a_status_datagram_without_a_status_encodes_normal() {
         let mut bytes = Vec::new();
@@ -2225,16 +2205,8 @@ mod tests {
     /// from [`ObjectStatus::ALL`] rather than written out here, so reassigning
     /// a code moves both halves of the test at once.
     ///
-    /// Observed by teaching `ObjectStatus::from_u64` to answer `Some` for a
-    /// code that is not in `ALL` — 0x05, which drafts 07-10 assigned and
-    /// draft-15 does not, mapped onto an existing variant — which fails this
-    /// with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: subgroup read_object on status 0x5: Ok(SubgroupObject { object_id: VarInt(0), extension_headers: [], payload_length: VarInt(0), object_status: Some(EndOfTrack), payload: [] })
-    ///   left: true
-    ///  right: false
-    /// ```
+    /// Fails if `ObjectStatus::from_u64` answers `Some` for a code not in
+    /// `ALL`, such as 0x05, which drafts 07-10 assigned and draft-15 does not.
     #[test]
     fn the_wire_accepts_exactly_what_the_type_can_hold() {
         let header = plain_header();

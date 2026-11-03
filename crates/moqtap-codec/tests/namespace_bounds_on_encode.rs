@@ -51,17 +51,6 @@ mod draft07 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -81,16 +70,6 @@ mod draft07 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -116,17 +95,6 @@ mod draft08 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -146,16 +114,6 @@ mod draft08 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -181,17 +139,6 @@ mod draft09 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -211,16 +158,6 @@ mod draft09 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -246,17 +183,6 @@ mod draft10 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -276,16 +202,6 @@ mod draft10 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -311,17 +227,6 @@ mod draft11 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -341,16 +246,6 @@ mod draft11 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -376,17 +271,6 @@ mod draft12 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -406,16 +290,6 @@ mod draft12 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -441,17 +315,6 @@ mod draft13 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -471,16 +334,6 @@ mod draft13 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -506,17 +359,6 @@ mod draft14 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -536,16 +378,6 @@ mod draft14 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -571,17 +403,6 @@ mod draft15 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -601,16 +422,6 @@ mod draft15 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -640,17 +451,6 @@ mod draft16 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -670,16 +470,6 @@ mod draft16 {
     ///
     /// Section 2.4.1 calls a Track Namespace "between 1 and 32" here, and
     /// this draft's own reader refuses a field count of zero.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// this draft defines no empty namespace: Ok([9, 1, 0])
-    /// ```
-    ///
-    /// Three bytes: the message type, a length of one, and a field
-    /// count of zero. That is the whole frame, and no reader in this
-    /// crate accepts it.
     #[test]
     fn an_empty_namespace_never_reaches_the_wire() {
         let result = encode(0);
@@ -710,17 +500,6 @@ mod draft17 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -773,17 +552,6 @@ mod draft18 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -836,17 +604,6 @@ mod draft19 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -899,17 +656,6 @@ mod draft20 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -961,17 +707,6 @@ mod draft21 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);
@@ -1024,17 +759,6 @@ mod draft22 {
     }
 
     /// More fields than Section 2.4.1 permits, refused before the bytes exist.
-    ///
-    /// Dropping the check from this draft's encoder fails with:
-    ///
-    /// ```text
-    /// 33 fields is more than this draft permits: Ok([9, 64, 67, 33, 1, 120, ...])
-    /// ```
-    ///
-    /// The `Ok` carries the frame the encoder just built, which is the whole
-    /// point: those bytes were about to go out. The list is elided here and
-    /// its leading bytes differ per draft; the message above was taken from
-    /// draft-09 with its check removed.
     #[test]
     fn a_namespace_of_33_fields_never_reaches_the_wire() {
         let result = encode(33);

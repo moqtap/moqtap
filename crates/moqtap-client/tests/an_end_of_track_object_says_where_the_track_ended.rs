@@ -79,66 +79,6 @@
 //! answered through Malformed Tracks rather than by ending the session, and
 //! drafts 16 through 20 rewrote the entry as a bare statement of absence with no
 //! condition in it.
-//!
-//! # Ablations, measured
-//!
-//! Each cut was applied to the working tree, run under the one draft it
-//! concerns, and reverted with the file compared byte for byte afterwards;
-//! `scratchpad/r83_ablate.py` runs them.
-//!
-//! Dropping the call that measures a subgroup stream's objects, in draft-09's
-//! `read_subgroup_object` — and, separately, the call in draft-12's
-//! `accept_subgroup_stream` that hands the stream the record in the first place.
-//! Two different edits, one message, which is the point of keeping them apart:
-//! having the check is not having anything to check against.
-//!
-//! ```text
-//! Section 8.1.1.1 calls an end-of-track object behind the track a protocol error, and it was accepted: ()
-//! Section 9.2.1.1 calls an end-of-track object behind the track a protocol error, and it was accepted: ()
-//! ```
-//!
-//! Dropping the datagram half, in draft-10's `recv_datagram`:
-//!
-//! ```text
-//! Section 9.1.1.1 calls an end-of-track object behind the track a protocol error, and it was accepted: ()
-//! ```
-//!
-//! Dropping the Group ID half of the condition. The object is still refused —
-//! by the *other* half, which is why the gate asserts on which half fired and
-//! not merely that something did:
-//!
-//! ```text
-//! assertion `left == right` failed: the report should name which half of the condition was broken, and what the object was measured against
-//!   left: ObjectBehind { largest_object: 2 }
-//!  right: GroupBehind { largest_group: 5 }
-//! ```
-//!
-//! Reading the Object ID half as "less than" where the draft says "less than or
-//! equal to", which is the whole of the boundary:
-//!
-//! ```text
-//! Section 9.1.1.1 calls an end-of-track object behind the track a protocol error, and it was accepted: ()
-//! ```
-//!
-//! And one notch the other way, refusing an object exactly where the draft puts
-//! the end of a track — the cut only the accepting gate can see:
-//!
-//! ```text
-//! Section 9.2.1.1 puts the end of a track one past the largest object in its largest group: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 5, object: 3, placement: ObjectBehind { largest_object: 2 } })
-//! ```
-//!
-//! Giving the stricter of drafts 08 through 10's two statuses the looser
-//! condition, which is the merge draft-11 made and these three had not:
-//!
-//! ```text
-//! Section 8.1.1.1 calls an end-of-track object behind the track a protocol error, and it was accepted: ()
-//! ```
-//!
-//! Taking the rule out of draft-13's close table:
-//!
-//! ```text
-//! Section 9.2.1.1 answers this with a protocol error, but close_for_data_stream declined
-//! ```
 
 mod common;
 

@@ -92,22 +92,6 @@ fn frame_of_an_unassigned_type() -> Vec<u8> {
 
 /// A control message of an unassigned type closes the QUIC connection with
 /// PROTOCOL_VIOLATION.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Removing `CodecError::UnknownMessageType(_)` from draft-17's
-/// `codec_session_error_code` — the state the table was in for as long as it has
-/// existed, and the state drafts 15, 16, 18 and 19 were in alongside it:
-///
-/// ```text
-/// ---- an_unassigned_control_message_type_closes_the_quic_connection stdout ----
-///
-/// thread 'an_unassigned_control_message_type_closes_the_quic_connection' (3252) panicked at crates\moqtap-client\tests\draft17_unknown_message_type_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
-///
-/// The client still returns `Err(UnknownMessageType)` in that state. The peer
-/// never hears about it and can repeat the frame indefinitely.
 #[tokio::test]
 async fn an_unassigned_control_message_type_closes_the_quic_connection() {
     common::init_crypto();

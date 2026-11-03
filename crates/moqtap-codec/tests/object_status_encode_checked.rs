@@ -8,13 +8,13 @@
 //! The infallible encoder resolves that by writing the payload length and
 //! dropping the status, which is the worst of the three possible answers: the
 //! peer reads an ordinary object, the caller is told nothing, and the object
-//! that was meant to end the group simply never ends it. The datagram types on
-//! these drafts already refused the pairing; the two stream object types - the
-//! ones a publisher writes on every stream - did not.
+//! that was meant to end the group simply never ends it. `encode_checked` on
+//! the two stream object types - the ones a publisher writes on every stream -
+//! refuses the pairing instead.
 //!
-//! Each gate below drives both halves. The refusal is the fix; the assertion
-//! that the plain encoder still drops the status is what says why the fix is
-//! needed, and it is the reason a round trip alone could never have found this.
+//! Each gate below drives both halves. The refusal is the check; the assertion
+//! that the plain encoder still drops the status is what says why the check is
+//! needed, and why a round trip alone cannot catch this.
 
 #![allow(clippy::items_after_test_module)]
 
@@ -69,12 +69,6 @@ mod draft07 {
     }
 
     /// A status paired with a payload is refused rather than resolved.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subgroup object cannot state both a status and a payload: Ok(())
-    /// ```
     #[test]
     fn a_status_carried_with_a_payload_is_refused() {
         let mut buf = Vec::new();
@@ -164,12 +158,6 @@ mod draft08 {
     }
 
     /// A status paired with a payload is refused rather than resolved.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subgroup object cannot state both a status and a payload: Ok(())
-    /// ```
     #[test]
     fn a_status_carried_with_a_payload_is_refused() {
         let mut buf = Vec::new();
@@ -259,12 +247,6 @@ mod draft09 {
     }
 
     /// A status paired with a payload is refused rather than resolved.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subgroup object cannot state both a status and a payload: Ok(())
-    /// ```
     #[test]
     fn a_status_carried_with_a_payload_is_refused() {
         let mut buf = Vec::new();
@@ -354,12 +336,6 @@ mod draft10 {
     }
 
     /// A status paired with a payload is refused rather than resolved.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subgroup object cannot state both a status and a payload: Ok(())
-    /// ```
     #[test]
     fn a_status_carried_with_a_payload_is_refused() {
         let mut buf = Vec::new();
@@ -449,12 +425,6 @@ mod draft11 {
     }
 
     /// A status paired with a payload is refused rather than resolved.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subgroup object cannot state both a status and a payload: Ok(())
-    /// ```
     #[test]
     fn a_status_carried_with_a_payload_is_refused() {
         let mut buf = Vec::new();
@@ -544,12 +514,6 @@ mod draft12 {
     }
 
     /// A status paired with a payload is refused rather than resolved.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subgroup object cannot state both a status and a payload: Ok(())
-    /// ```
     #[test]
     fn a_status_carried_with_a_payload_is_refused() {
         let mut buf = Vec::new();
@@ -639,12 +603,6 @@ mod draft13 {
     }
 
     /// A status paired with a payload is refused rather than resolved.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subgroup object cannot state both a status and a payload: Ok(())
-    /// ```
     #[test]
     fn a_status_carried_with_a_payload_is_refused() {
         let mut buf = Vec::new();

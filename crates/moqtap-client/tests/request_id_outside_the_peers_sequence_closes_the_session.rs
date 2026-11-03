@@ -211,25 +211,6 @@ macro_rules! wrong_request_id_gates {
             /// A request under an ID out of this endpoint's own half of the
             /// space closes the QUIC connection, with the code the section
             /// names.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `WrongParity | OutOfSequence` arm from
-            /// `session_error_code`:
-            ///
-            /// ```text
-            /// the client refused the request but never closed the connection: Elapsed(())
-            /// ```
-            ///
-            /// Answering that arm with `ProtocolViolation` instead:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: Section 8.1 answers a Request ID
-            /// that is not the peer's to spend with Invalid Request ID; the close
-            /// carried 3 instead
-            ///   left: 3
-            ///  right: 4
-            /// ```
             #[tokio::test]
             async fn an_id_from_this_endpoints_own_half_closes_the_quic_connection() {
                 crate::common::init_crypto();
@@ -269,18 +250,6 @@ macro_rules! wrong_request_id_gates {
             /// `Closed` is reachable from nowhere else here: the endpoint is
             /// asserted `Active` on the way out of `active_client`, and the
             /// only message it is given afterwards is the illegal one.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Reducing the parity check in `validate_peer_request_id` to a
-            /// plain `?`:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the violation was reported but
-            /// the session was left running: Active
-            ///   left: Active
-            ///  right: Closed
-            /// ```
             #[test]
             fn an_id_from_this_endpoints_own_half_ends_the_endpoints_session() {
                 let mut endpoint = active_client();
@@ -304,15 +273,6 @@ macro_rules! wrong_request_id_gates {
             /// one a repeat rather than a skip and what makes the refusal mean
             /// something: an endpoint that refused both would pass a gate built
             /// on the second alone.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `WrongParity | OutOfSequence` arm from
-            /// `session_error_code`:
-            ///
-            /// ```text
-            /// the client refused the request but never closed the connection: Elapsed(())
-            /// ```
             #[tokio::test]
             async fn an_id_the_peer_already_spent_closes_the_quic_connection() {
                 crate::common::init_crypto();
@@ -350,18 +310,6 @@ macro_rules! wrong_request_id_gates {
             }
 
             /// The repeat ends the endpoint's own session too.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Reducing the sequence check in `validate_peer_request_id` to
-            /// a plain `?`:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the violation was reported but
-            /// the session was left running: Active
-            ///   left: Active
-            ///  right: Closed
-            /// ```
             #[test]
             fn an_id_the_peer_already_spent_ends_the_endpoints_session() {
                 let mut endpoint = active_client();

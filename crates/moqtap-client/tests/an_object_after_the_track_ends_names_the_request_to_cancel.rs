@@ -77,63 +77,6 @@
 //! against a tree with the rule and against one without it. The request stream
 //! is also **held** for the whole of each gate: dropping it resets it, which on
 //! these drafts cancels the subscription and frees the alias.
-//!
-//! # Ablations, measured
-//!
-//! Four cuts, each applied to the working tree, run, and reverted with every
-//! touched file compared byte for byte afterwards. They are spread over all
-//! three drafts, because each carries the rule through modules of its own and a
-//! cut that only ever landed on one of them would say nothing about the others
-//! — and **no cut reddened a draft it was not aimed at**, which is the
-//! evidence for that being true rather than assumed.
-//!
-//! Taking the measurement off draft-18's stream objects:
-//!
-//! ```text
-//! an Object in a later group is past the track's final Object: ()
-//! ```
-//!
-//! One gate, and draft-18's datagram gates stay green.
-//!
-//! Taking it off draft-17's datagrams:
-//!
-//! ```text
-//! an object past the track's final Object is a malformed track: (Draft17(DatagramHeader { datagram_type: 0, track_alias: VarInt(7), group_id: VarInt(5), object_id: VarInt(3), publisher_priority: Some(128), properties: [], object_status: None }), b"")
-//! ```
-//!
-//! Two gates, both of them draft-17's datagram ones, with the stream gate
-//! untouched. The two paths are wired separately and neither stands in for the
-//! other — the same separation the drafts that answer with a message show, on
-//! drafts where neither path can answer at all.
-//!
-//! Making every binding on draft-19 read as still in use, so a cancelled
-//! request is still found:
-//!
-//! ```text
-//! the request ending is what keeps the answer to one, and on this draft the caller is the side that ends it
-//! ```
-//!
-//! **One gate, and it is the one that matters here.** Nothing in this crate
-//! ends a request on these drafts, so if the caller's cancellation did not take
-//! the binding out of use there would be no mechanism at all keeping the answer
-//! to one — the same object would be named again for ever.
-//!
-//! Making draft-18 answer that it receives no track through any request:
-//!
-//! ```text
-//! assertion `left == right` failed: Section 2.4.2 asks for the subscription carrying this track to be cancelled, and Section 3.3.2 makes that a reset of its own stream — so the request has to be named
-//!   left: []
-//!  right: [VarInt(0)]
-//! ```
-//!
-//! Three gates, which is right: detection is unaffected and every gate that
-//! reads the *list* goes red. The acceptance gate stays green under all four,
-//! because none of these makes the crate refuse something it should not.
-//!
-//! The field-by-field reading of *larger* is not cut here. It lives in the
-//! shared `track_locations`, so a cut there reddens drafts 12 through 20 at
-//! once; it is recorded where it was measured, in
-//! `an_object_after_the_track_ends_is_a_malformed_track.rs`.
 
 mod common;
 

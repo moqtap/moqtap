@@ -271,13 +271,6 @@ const EVERY_CAUSE: [DropCause; 6] = [
 /// `Result` rather than through the panicking wrapper, so an implementation of
 /// the comparison that does nothing is a compile error at this call site rather
 /// than a green test.
-///
-/// Written the other way, by **key lookup**, the same map is order-independent
-/// and therefore perfectly deterministic: `5 passed; 0 failed`, ten runs
-/// identical and the fixture comparison green. That distinction is the whole
-/// content of the experiment. An implementer who ran only the keyed version,
-/// saw green, and applied the usual rule — an ablation that cannot redden means
-/// the test measures nothing — would delete a check that works.
 #[test]
 fn the_same_seed_and_pattern_mode_yield_an_identical_decision_log() {
     // 1. Ten runs in one process. A CHECK FOR STATE THAT VARIES BETWEEN RUNS —

@@ -457,24 +457,6 @@ macro_rules! prefix_keyed_gates {
             }
 
             /// Two equal prefixes overlap.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Reading the relation as a proper prefix - one a prefix of the
-            /// other and the two not equal - which is what "a prefix of" says
-            /// if a prefix is taken to exclude the whole:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping an open one is refused: ()
-            /// an overlapping namespace subscription may not be accepted: ()
-            /// ```
-            ///
-            /// It reddens fourteen tests, this gate on every draft and
-            /// nothing else: every other gate in this file compares prefixes
-            /// of different lengths, so a relation that is merely too strict
-            /// about equality leaves them alone. An equal prefix is the case
-            /// the sentence names first, and on drafts 07 through 10 it is
-            /// the case that cannot be written down beside the first at all.
             #[test]
             fn a_second_subscription_under_the_same_prefix_is_refused() {
                 let mut ep = opened();
@@ -489,23 +471,6 @@ macro_rules! prefix_keyed_gates {
             }
 
             /// A prefix that extends an open one overlaps it.
-            ///
-            /// # What it catches
-            ///
-            /// Reading the relation as equality, which is all drafts 12
-            /// through 14 spell out in so many words and none of what the
-            /// sentence means:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping an open one is refused: ()
-            /// an overlapping namespace subscription may not be accepted: ()
-            /// ```
-            ///
-            /// It reddens sixty-seven tests - everything the cut that drops
-            /// the relation altogether reaches, less the thirteen equal-
-            /// prefix gates above, which an equality still catches. The gate
-            /// below this one is the same comparison the other way round, and
-            /// this cut reaches both.
             #[test]
             fn a_subscription_under_an_open_prefix_is_refused() {
                 let mut ep = opened();
@@ -528,25 +493,6 @@ macro_rules! prefix_keyed_gates {
             }
 
             /// Prefixes sharing no element do not overlap.
-            ///
-            /// # What it catches
-            ///
-            /// Reading "shares a common prefix with" at its word. Any two
-            /// prefixes share the empty one, so the relation holds for every
-            /// pair and no second namespace subscription in a session is ever
-            /// legal:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping nothing is taken in: PeerPrefixOverlap
-            /// and this endpoint may accept it: PeerPrefixOverlap { request: 3, established: 1 }
-            /// ```
-            ///
-            /// It reddens twenty-six tests: this gate and the one below it,
-            /// on every draft. The two that read the *other* direction's set
-            /// stay green, and that is the shape of them - an always-true
-            /// relation over an empty set still finds nothing, so those two
-            /// are gates about which set is consulted rather than about the
-            /// relation.
             #[test]
             fn a_subscription_under_an_unrelated_prefix_is_taken() {
                 let mut ep = opened();
@@ -556,22 +502,6 @@ macro_rules! prefix_keyed_gates {
             /// Prefixes sharing only their first element do not overlap, which
             /// is what keeps "shares a common prefix" from being read at its
             /// word.
-            ///
-            /// # What it catches
-            ///
-            /// The same loose reading applied to one element instead of none,
-            /// which is what a prefix tree reaches for: compare the first
-            /// element and stop.
-            ///
-            /// ```text
-            /// a namespace subscription overlapping nothing is taken in: PeerPrefixOverlap
-            /// and this endpoint may accept it: PeerPrefixOverlap { request: 3, established: 1 }
-            /// ```
-            ///
-            /// It reddens fourteen tests, this gate on every draft. It is the
-            /// sharpest of the relation cuts, because the pair it refuses
-            /// share everything a loose reading looks at and select disjoint
-            /// sets of namespaces.
             #[test]
             fn two_prefixes_beneath_one_namespace_are_both_taken() {
                 let mut ep = active();
@@ -582,23 +512,6 @@ macro_rules! prefix_keyed_gates {
             }
 
             /// One still waiting for an answer counts.
-            ///
-            /// # What it catches
-            ///
-            /// Counting only the namespace subscriptions this endpoint has
-            /// already accepted, on the ground that "active" and
-            /// "established" say so:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping an open one is refused: ()
-            /// an overlapping namespace subscription may not be accepted: ()
-            /// ```
-            ///
-            /// It reddens fourteen tests, this gate on every draft. That
-            /// reading is not available: this endpoint is the one about to
-            /// establish the first request, and accepting both would leave
-            /// the session holding exactly the pair the sentence exists to
-            /// prevent.
             #[test]
             fn an_unanswered_subscription_still_counts() {
                 let mut ep = active();
@@ -610,23 +523,6 @@ macro_rules! prefix_keyed_gates {
             /// One that has been withdrawn counts as well, because this draft
             /// weighs the arriving prefix against "an earlier" namespace
             /// subscription rather than a live one.
-            ///
-            /// # What it catches
-            ///
-            /// Dropping a namespace subscription that has ended from the set,
-            /// which is what the eight drafts after these do and what these
-            /// five do not:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping an open one is refused: ()
-            /// an overlapping namespace subscription may not be accepted: ()
-            /// ```
-            ///
-            /// It reddens five tests, this gate on drafts 07 through 11 - the
-            /// five that weigh the arriving prefix against "an earlier"
-            /// namespace subscription rather than a live one. It is one half
-            /// of the split; the other half is the gate of the opposite name
-            /// below, on the eight drafts after them.
             #[test]
             fn a_withdrawn_subscription_still_counts() {
                 let mut ep = opened();
@@ -639,23 +535,6 @@ macro_rules! prefix_keyed_gates {
 
             /// A prefix this endpoint subscribed to does not stop the peer
             /// subscribing to it.
-            ///
-            /// # What it catches
-            ///
-            /// Weighing the arriving prefix against this endpoint's own
-            /// namespace subscriptions as well as the peer's, which one map
-            /// of state machines holding both directions invites:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping nothing is taken in: PeerPrefixOverlap
-            /// and this endpoint may accept it: PeerPrefixOverlap { request: 1, established: 0 }
-            /// ```
-            ///
-            /// It reddens eleven tests, this gate on drafts 07 through 17.
-            /// Drafts 18 and 19 keep no set of this endpoint's own prefixes
-            /// for that cut to read; there the same gate is reached by
-            /// writing the arriving-request record on the outbound path too,
-            /// which reddens three.
             #[test]
             fn a_prefix_of_this_endpoints_own_does_not_block_the_peers() {
                 let mut ep = active();
@@ -667,18 +546,6 @@ macro_rules! prefix_keyed_gates {
 
             /// The subscriber's half: this endpoint refuses to build a second
             /// request overlapping one of its own.
-            ///
-            /// # What it catches
-            ///
-            /// Building the request and leaving the publisher to refuse it:
-            ///
-            /// ```text
-            /// a second request overlapping the first is not built: ()
-            /// ```
-            ///
-            /// It reddens eleven tests, this gate on drafts 07 through 17.
-            /// Drafts 18 and 19 drop the sentence addressed to the subscriber
-            /// and have no gate here.
             #[test]
             fn this_endpoint_refuses_to_make_an_overlapping_request() {
                 let mut ep = active();
@@ -702,23 +569,6 @@ macro_rules! prefix_keyed_gates {
 
             /// A prefix the peer subscribed to does not stop this endpoint
             /// subscribing to it.
-            ///
-            /// # What it catches
-            ///
-            /// Weighing a request this endpoint is about to make against the
-            /// peer's namespace subscriptions:
-            ///
-            /// ```text
-            /// this endpoint may subscribe to a namespace the peer asked about: OwnPrefixOverlap
-            /// this endpoint may subscribe to a namespace the peer asked about: OwnPrefixOverlap { established: 1 }
-            /// ```
-            ///
-            /// It reddens fifteen tests. eleven are this gate on drafts 07
-            /// through 17. The other four are the subscriber's-half gate on
-            /// drafts 07 through 10, where the cut swaps one map for the
-            /// other rather than adding to it, so this endpoint's own
-            /// prefixes stop being read at all; on drafts 11 through 17 it
-            /// adds the peer's set to its own and that gate stays green.
             #[test]
             fn the_peers_prefix_does_not_block_this_endpoints() {
                 let mut ep = opened();
@@ -745,11 +595,6 @@ macro_rules! ended_gate {
         /// One that has been withdrawn counts as well, because this draft
         /// weighs the arriving prefix against "an earlier" namespace
         /// subscription rather than a live one.
-        ///
-        /// # What it catches
-        ///
-        /// The cut recorded on this gate in the group above, which reaches
-        /// draft-11 here.
         #[test]
         fn a_withdrawn_subscription_still_counts() {
             let mut ep = opened();
@@ -760,20 +605,6 @@ macro_rules! ended_gate {
     (ignored, $sec:literal) => {
         /// One that has ended stops counting, because this draft weighs the
         /// arriving prefix against an "active" or "established" one.
-        ///
-        /// # What it catches
-        ///
-        /// Keeping a namespace subscription that has ended in the set, which
-        /// is what drafts 07 through 11 do:
-        ///
-        /// ```text
-        /// and this endpoint may accept it: PeerPrefixOverlap { request: 3, established: 1 }
-        /// ```
-        ///
-        /// It reddens nine tests, this gate on drafts 12 through 20, and
-        /// nothing else: no other gate in this file ends a subscription
-        /// before making the second request, which is what makes this pair
-        /// the only one that can see the word the range turns on.
         #[test]
         fn a_withdrawn_subscription_stops_counting() {
             let mut ep = opened();
@@ -791,11 +622,6 @@ macro_rules! subscriber_gates {
     (stated, $sub:tt) => {
         /// The subscriber's half: this endpoint refuses to build a second
         /// request overlapping one of its own.
-        ///
-        /// # What it catches
-        ///
-        /// The cut recorded on this gate in the group above, which reaches
-        /// drafts 11 through 17 here.
         #[test]
         fn this_endpoint_refuses_to_make_an_overlapping_request() {
             let mut ep = active();
@@ -812,11 +638,6 @@ macro_rules! subscriber_gates {
 
         /// A prefix the peer subscribed to does not stop this endpoint
         /// subscribing to it.
-        ///
-        /// # What it catches
-        ///
-        /// The cut recorded on this gate in the group above, which reaches
-        /// drafts 11 through 17 here.
         #[test]
         fn the_peers_prefix_does_not_block_this_endpoints() {
             let mut ep = opened();
@@ -835,17 +656,6 @@ macro_rules! tracks_gates {
         /// SUBSCRIBE_TRACKS with a Track Namespace Prefix that shares a common
         /// prefix with an established SUBSCRIBE_TRACKS, it MUST respond with
         /// REQUEST_ERROR with error code PREFIX_OVERLAP."
-        ///
-        /// # What it catches
-        ///
-        /// Judging a SUBSCRIBE_TRACKS against nothing at all:
-        ///
-        /// ```text
-        /// an overlapping track subscription may not be accepted: ()
-        /// ```
-        ///
-        /// It reddens two tests, this gate on each of the two drafts that
-        /// carry the message.
         #[test]
         fn a_second_track_subscription_that_overlaps_is_refused() {
             let mut ep = active();
@@ -870,29 +680,6 @@ macro_rules! tracks_gates {
         /// Section 10.6.2: "SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS have
         /// independent overlap spaces, so a SUBSCRIBE_NAMESPACE and a
         /// SUBSCRIBE_TRACKS may share the same prefix."
-        ///
-        /// # What it catches
-        ///
-        /// Judging a SUBSCRIBE_TRACKS against the SUBSCRIBE_NAMESPACE the
-        /// peer has open instead of against the SUBSCRIBE_TRACKS, which is
-        /// the arrangement Section 10.6.2 says these drafts do not have:
-        ///
-        /// ```text
-        /// and this endpoint may accept it: PeerPrefixOverlap { request: 2, established: 0 }
-        /// ```
-        ///
-        /// It reddens six tests, and where they fall was not what the cut was
-        /// expected to do. Two are this gate and two are the gate above it,
-        /// because pointing the arm at the other helper does not merge the
-        /// two spaces - it replaces one with the other, so a second
-        /// overlapping SUBSCRIBE_TRACKS stops being refused as well. The
-        /// remaining two are unit tests in `draft18::endpoint` that were
-        /// already defending this: they open a SUBSCRIBE_NAMESPACE and a
-        /// SUBSCRIBE_TRACKS under one prefix and fail with
-        ///
-        /// ```text
-        /// called `Result::unwrap()` on an `Err` value: PeerPrefixOverlap { request: 3, established: 1 }
-        /// ```
         #[test]
         fn a_track_subscription_and_a_namespace_subscription_may_share_a_prefix() {
             let mut ep = opened();
@@ -998,24 +785,6 @@ macro_rules! id_keyed_gates {
             }
 
             /// Two equal prefixes overlap.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Reading the relation as a proper prefix - one a prefix of the
-            /// other and the two not equal - which is what "a prefix of" says
-            /// if a prefix is taken to exclude the whole:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping an open one is refused: ()
-            /// an overlapping namespace subscription may not be accepted: ()
-            /// ```
-            ///
-            /// It reddens fourteen tests, this gate on every draft and
-            /// nothing else: every other gate in this file compares prefixes
-            /// of different lengths, so a relation that is merely too strict
-            /// about equality leaves them alone. An equal prefix is the case
-            /// the sentence names first, and on drafts 07 through 10 it is
-            /// the case that cannot be written down beside the first at all.
             #[test]
             fn a_second_subscription_under_the_same_prefix_is_refused() {
                 let mut ep = opened();
@@ -1023,23 +792,6 @@ macro_rules! id_keyed_gates {
             }
 
             /// A prefix that extends an open one overlaps it.
-            ///
-            /// # What it catches
-            ///
-            /// Reading the relation as equality, which is all drafts 12
-            /// through 14 spell out in so many words and none of what the
-            /// sentence means:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping an open one is refused: ()
-            /// an overlapping namespace subscription may not be accepted: ()
-            /// ```
-            ///
-            /// It reddens sixty-seven tests - everything the cut that drops
-            /// the relation altogether reaches, less the thirteen equal-
-            /// prefix gates above, which an equality still catches. The gate
-            /// below this one is the same comparison the other way round, and
-            /// this cut reaches both.
             #[test]
             fn a_subscription_under_an_open_prefix_is_refused() {
                 let mut ep = opened();
@@ -1062,25 +814,6 @@ macro_rules! id_keyed_gates {
             }
 
             /// Prefixes sharing no element do not overlap.
-            ///
-            /// # What it catches
-            ///
-            /// Reading "shares a common prefix with" at its word. Any two
-            /// prefixes share the empty one, so the relation holds for every
-            /// pair and no second namespace subscription in a session is ever
-            /// legal:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping nothing is taken in: PeerPrefixOverlap
-            /// and this endpoint may accept it: PeerPrefixOverlap { request: 3, established: 1 }
-            /// ```
-            ///
-            /// It reddens twenty-six tests: this gate and the one below it,
-            /// on every draft. The two that read the *other* direction's set
-            /// stay green, and that is the shape of them - an always-true
-            /// relation over an empty set still finds nothing, so those two
-            /// are gates about which set is consulted rather than about the
-            /// relation.
             #[test]
             fn a_subscription_under_an_unrelated_prefix_is_taken() {
                 let mut ep = opened();
@@ -1090,22 +823,6 @@ macro_rules! id_keyed_gates {
             /// Prefixes sharing only their first element do not overlap, which
             /// is what keeps "shares a common prefix" from being read at its
             /// word.
-            ///
-            /// # What it catches
-            ///
-            /// The same loose reading applied to one element instead of none,
-            /// which is what a prefix tree reaches for: compare the first
-            /// element and stop.
-            ///
-            /// ```text
-            /// a namespace subscription overlapping nothing is taken in: PeerPrefixOverlap
-            /// and this endpoint may accept it: PeerPrefixOverlap { request: 3, established: 1 }
-            /// ```
-            ///
-            /// It reddens fourteen tests, this gate on every draft. It is the
-            /// sharpest of the relation cuts, because the pair it refuses
-            /// share everything a loose reading looks at and select disjoint
-            /// sets of namespaces.
             #[test]
             fn two_prefixes_beneath_one_namespace_are_both_taken() {
                 let mut ep = active();
@@ -1120,23 +837,6 @@ macro_rules! id_keyed_gates {
             }
 
             /// One still waiting for an answer counts.
-            ///
-            /// # What it catches
-            ///
-            /// Counting only the namespace subscriptions this endpoint has
-            /// already accepted, on the ground that "active" and
-            /// "established" say so:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping an open one is refused: ()
-            /// an overlapping namespace subscription may not be accepted: ()
-            /// ```
-            ///
-            /// It reddens fourteen tests, this gate on every draft. That
-            /// reading is not available: this endpoint is the one about to
-            /// establish the first request, and accepting both would leave
-            /// the session holding exactly the pair the sentence exists to
-            /// prevent.
             #[test]
             fn an_unanswered_subscription_still_counts() {
                 let mut ep = active();
@@ -1153,21 +853,6 @@ macro_rules! id_keyed_gates {
 
             /// The refusal goes out under the code the sentence names, and
             /// under no other.
-            ///
-            /// # What it catches
-            ///
-            /// Refusing an overlapping request like any other, without
-            /// holding the refusal to the code the sentence names for it:
-            ///
-            /// ```text
-            /// a refusal under some other code is not this refusal: ()
-            /// ```
-            ///
-            /// It reddens nine tests, this gate on each draft that gives the
-            /// code a number. Drafts 07 through 10 have no gate here at all:
-            /// they name the code SUBSCRIBE_ANNOUNCES_OVERLAP in the prose of
-            /// the rule and define it in no registry, so there is no number a
-            /// refusal could be held to.
             #[test]
             fn the_refusal_carries_the_code_the_draft_names() {
                 let mut ep = opened();
@@ -1190,23 +875,6 @@ macro_rules! id_keyed_gates {
 
             /// A prefix this endpoint subscribed to does not stop the peer
             /// subscribing to it.
-            ///
-            /// # What it catches
-            ///
-            /// Weighing the arriving prefix against this endpoint's own
-            /// namespace subscriptions as well as the peer's, which one map
-            /// of state machines holding both directions invites:
-            ///
-            /// ```text
-            /// a namespace subscription overlapping nothing is taken in: PeerPrefixOverlap
-            /// and this endpoint may accept it: PeerPrefixOverlap { request: 1, established: 0 }
-            /// ```
-            ///
-            /// It reddens eleven tests, this gate on drafts 07 through 17.
-            /// Drafts 18 and 19 keep no set of this endpoint's own prefixes
-            /// for that cut to read; there the same gate is reached by
-            /// writing the arriving-request record on the outbound path too,
-            /// which reddens three.
             #[test]
             fn a_prefix_of_this_endpoints_own_does_not_block_the_peers() {
                 let mut ep = active();

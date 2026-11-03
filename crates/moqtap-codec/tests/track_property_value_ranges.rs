@@ -177,30 +177,9 @@ macro_rules! track_property_range_gate {
             /// Each entry the draft gives a range, refused outside it, whether it
             /// arrives beside the Immutable block or inside it.
             ///
-            /// # What it catches
-            ///
-            /// Both messages below were measured on draft-16 and again on
-            /// draft-19, and are identical: the two registries differ in name
-            /// and in which varint spells them, not in what a violation looks
-            /// like once decoded.
-            ///
-            /// With the value check removed from the decode path, the value is
-            /// handed to the caller as an ordinary entry:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: type 0x22 value 0 beside the immutable block must be refused
-            ///   left: Ok([KeyValuePair { key: VarInt(34), value: Varint(VarInt(0)) }])
-            ///  right: Err(TrackPropertyValueOutOfRange { key: 34, value: 0 })
-            /// ```
-            ///
-            /// With the check present but not descending into the block, the
-            /// outer half passes and the nested half reports the block itself:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: type 0x22 value 0 inside the immutable block must be refused
-            ///   left: Ok([KeyValuePair { key: VarInt(11), value: Bytes([34, 0]) }])
-            ///  right: Err(TrackPropertyValueOutOfRange { key: 34, value: 0 })
-            /// ```
+            /// Fails if the decode path drops the value check, handing the value
+            /// to the caller as an ordinary entry, or if the check does not
+            /// descend into the Immutable block.
             #[test]
             fn a_value_outside_the_range_its_type_allows_is_refused() {
                 for &(key, value) in OUT_OF_RANGE.iter().chain($also_refused) {
@@ -260,15 +239,7 @@ macro_rules! track_property_range_gate {
             /// payload into scratch before copying it out, so a refused message
             /// leaves the caller's buffer exactly as it found it.
             ///
-            /// # What it catches
-            ///
-            /// Without the check on the encode path:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: type 0x22 value 0 must not be written
-            ///   left: Ok(())
-            ///  right: Err(TrackPropertyValueOutOfRange { key: 34, value: 0 })
-            /// ```
+            /// Fails if the encode path drops the check.
             #[test]
             fn a_value_the_decoder_refuses_is_never_written() {
                 for &(key, value) in OUT_OF_RANGE.iter().chain($also_refused) {
@@ -314,12 +285,12 @@ macro_rules! track_property_range_gate {
             /// from being checked.
             ///
             /// The test above says such a block is carried. This one says what
-            /// "carried" is scoped to. The walk answered the unreadable block by
-            /// returning from the whole function, so every property *after* it
-            /// went unexamined — and a peer wanting an out-of-range value
-            /// carried had only to put a one-byte 0xFF block in front of it.
-            /// That is the same opt-out the module note describes one level up,
-            /// reached from the other side.
+            /// "carried" is scoped to. A walk that answered the unreadable block
+            /// by returning from the whole function would leave every property
+            /// *after* it unexamined, and a peer wanting an out-of-range value
+            /// carried would have only to put a one-byte 0xFF block in front of
+            /// it. That is the same opt-out the module note describes one level
+            /// up, reached from the other side.
             ///
             /// The draft scopes the rule to the block and not to its
             /// neighbours. Draft-16 Section 11.2: "A Track is considered
@@ -328,16 +299,8 @@ macro_rules! track_property_range_gate {
             /// the sentence under Immutable Properties. Nothing in it reaches
             /// the run outside.
             ///
-            /// # What it catches
-            ///
-            /// With `Err(_) => return Ok(())` restored, the out-of-range value
-            /// is handed to the caller behind the block that hid it:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: type 0x22 value 0 behind an unreadable block must still be refused
-            ///   left: Ok([KeyValuePair { key: VarInt(11), value: Bytes([255]) }, KeyValuePair { key: VarInt(34), value: Varint(VarInt(0)) }])
-            ///  right: Err(TrackPropertyValueOutOfRange { key: 34, value: 0 })
-            /// ```
+            /// Fails if the walk answers an unreadable block with
+            /// `Err(_) => return Ok(())`.
             #[test]
             fn an_unreadable_immutable_block_does_not_shield_what_follows_it() {
                 // Types in a run ascend, so "after the block" is only a place a

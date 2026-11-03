@@ -68,17 +68,7 @@ fn locations(body: &str) -> Vec<FetchObjectLocation> {
 /// object before. Reading the bits the other way puts 9 in the Object ID and
 /// carries group 3 forward, so the two readings disagree on both fields — which
 /// no shipped vector can show, since every one of them sets both bits at once.
-///
-/// Observed by swapping the masks in `has_group_id` and `has_object_id`, which
-/// fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: the second object's stated field is its Group ID
-///   left: 3
-///  right: 9
-/// ```
-///
-/// The shipped fetch vectors all pass under that swap.
+/// Fails if the masks in `has_group_id` and `has_object_id` are swapped.
 #[test]
 fn a_stated_field_is_the_one_its_own_bit_names() {
     // 1c: Group ID, Object ID and Priority present, Subgroup ID zero.
@@ -107,14 +97,8 @@ fn a_stated_field_is_the_one_its_own_bit_names() {
 /// is absent. No shipped vector states an Object ID on anything but the first
 /// object of a stream, where absolute and delta agree.
 ///
-/// Observed by resolving a stated Object ID as `prior + 1 + wire value`, which is
-/// the subgroup stream's rule, and which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: a stated Object ID is absolute
-///   left: 13
-///  right: 9
-/// ```
+/// Fails if a stated Object ID is resolved as `prior + 1 + wire value`, the
+/// subgroup stream's rule.
 #[test]
 fn a_stated_object_id_is_absolute_not_a_delta() {
     let objects = locations("1c000340001c00094000");
@@ -127,14 +111,7 @@ fn a_stated_object_id_is_absolute_not_a_delta() {
 /// draft-16 Section 10.4.4.1 Table 5: 0x00 is zero, 0x01 repeats the prior
 /// object's, 0x02 adds one to it, 0x03 puts the field on the wire.
 ///
-/// Observed by making mode 0x02 repeat the prior Subgroup ID instead of stepping
-/// it, which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: Subgroup IDs across modes 0x03, 0x01, 0x02, 0x00
-///   left: [Some(4), Some(4), Some(4), Some(0)]
-///  right: [Some(4), Some(4), Some(5), Some(0)]
-/// ```
+/// Fails if mode 0x02 repeats the prior Subgroup ID instead of stepping it.
 #[test]
 fn the_low_two_bits_choose_how_the_subgroup_id_is_stated() {
     // 1f: mode 0x03, Subgroup ID present (4).
@@ -162,14 +139,9 @@ fn the_low_two_bits_choose_how_the_subgroup_id_is_stated() {
 /// SHOULD zero them, so a reader that honours them is not caught by any
 /// well-formed stream.
 ///
-/// Observed by dropping the Datagram case from `subgroup_mode`, so the two bits
-/// are read as mode 0x03. The Subgroup ID then eats the Object ID's varint, the
-/// Object ID eats the payload length, and the payload length eats the payload —
-/// which fails this with:
-///
-/// ```text
-/// the datagram object resolves: VarInt(UnexpectedEnd)
-/// ```
+/// Fails if `subgroup_mode` reads the two bits as mode 0x03 on a Datagram
+/// object: the Subgroup ID then eats the Object ID's varint, the Object ID eats
+/// the payload length, and the payload length eats the payload.
 #[test]
 fn the_datagram_bit_makes_the_low_two_bits_framing_noise() {
     // 4f = 0x40 | 0x08 | 0x04 | 0x03: Datagram, Group ID and Object ID present,
@@ -196,12 +168,6 @@ fn the_datagram_bit_makes_the_low_two_bits_framing_noise() {
 /// Each object here is complete under the bit-field reading — the bytes after
 /// the flags are exactly the fields those bits would call for — so a decoder
 /// that skipped the check would accept every one of them and carry on.
-///
-/// Observed by dropping the refusal from `decode`, which fails this with:
-///
-/// ```text
-/// called `Result::unwrap_err()` on an `Ok` value: FetchObjectHeader { serialization_flags: VarInt(128), group_id: None, subgroup_id: None, object_id: None, publisher_priority: None, extensions: None, payload_length: VarInt(0) }
-/// ```
 #[test]
 fn an_unassigned_serialization_flags_value_is_refused() {
     // 0x80 and 0x1000 call for a payload length alone; 0x8d for a Group ID and
@@ -217,12 +183,8 @@ fn an_unassigned_serialization_flags_value_is_refused() {
 /// carry a Group ID and an Object ID and nothing else — no Subgroup ID, no
 /// Priority, no Extensions.
 ///
-/// Observed by giving an End of Range marker a Priority field, which makes it eat
-/// the payload length and run off the end of the object, failing this with:
-///
-/// ```text
-/// [408c050a00] refused: VarInt(UnexpectedEnd)
-/// ```
+/// Fails if an End of Range marker is read with a Priority field, which eats the
+/// payload length and runs off the end of the object.
 #[test]
 fn an_end_of_range_marker_carries_a_group_and_an_object_id_only() {
     for (body, marker) in [("408c050a00", 0x8c_u64), ("410c050a00", 0x10c)] {
@@ -258,13 +220,9 @@ fn an_end_of_range_marker_carries_a_group_and_an_object_id_only() {
 /// This is the one place draft-16's fetch object parts company with drafts
 /// 07-13, whose zero-length fetch objects do carry a status.
 ///
-/// Observed by reading a status varint after a zero payload length, the way
-/// drafts 07-13 do. That swallows the second object's flags byte and leaves its
-/// payload length to be parsed out of the payload, failing this with:
-///
-/// ```text
-/// both objects resolve: VarInt(UnexpectedEnd)
-/// ```
+/// Fails if a status varint is read after a zero payload length, the way
+/// drafts 07-13 do: that swallows the second object's flags byte and leaves its
+/// payload length to be parsed out of the payload.
 #[test]
 fn a_zero_length_fetch_object_carries_no_status() {
     // 1c: Group 0, Object 0, Priority 0x80, payload length 0.
@@ -286,12 +244,7 @@ fn a_zero_length_fetch_object_carries_no_status() {
 /// Group ID, an Object ID or an inherited Subgroup ID there is also no value
 /// the resolver could produce.
 ///
-/// Observed by letting an absent Group ID fall back to 0 on the first object,
-/// which fails this with:
-///
-/// ```text
-/// called `Result::unwrap_err()` on an `Ok` value: [(FetchObjectHeader { serialization_flags: VarInt(20), group_id: None, subgroup_id: None, object_id: Some(VarInt(5)), publisher_priority: Some(128), extensions: None, payload_length: VarInt(0) }, FetchObjectLocation { group_id: 0, subgroup_id: Some(0), object_id: 5, publisher_priority: Some(128), end_of_range: None })]
-/// ```
+/// Fails if an absent Group ID falls back to 0 on the first object.
 #[test]
 fn a_first_object_cannot_inherit_a_location() {
     // 14: Object ID and Priority present, Group ID absent.
@@ -315,12 +268,7 @@ fn a_first_object_cannot_inherit_a_location() {
 /// bodies below are written here for that reason — a rule the corpus does not
 /// exercise is one only a hand-written frame can hold.
 ///
-/// Observed by dropping the Priority term from `references_prior_object`, which
-/// fails this with:
-///
-/// ```text
-/// 0x0f leaves the Priority bit clear
-/// ```
+/// Fails if `references_prior_object` drops its Priority term.
 #[test]
 fn the_prior_object_predicate_covers_every_inheriting_flag() {
     let flags_of = |body: &str| {
@@ -357,12 +305,6 @@ fn the_prior_object_predicate_covers_every_inheriting_flag() {
 /// one that is `None` while its bit is set leaves a hole the reader fills from
 /// the next field's bytes. Either way the bytes are not the object that was
 /// handed in.
-///
-/// Observed by dropping the agreement check from `encode`, which fails this with:
-///
-/// ```text
-/// called `Result::unwrap_err()` on an `Ok` value: ()
-/// ```
 #[test]
 fn encode_refuses_a_header_that_disagrees_with_its_flags() {
     let bytes = hex("1c03074000");
@@ -417,13 +359,7 @@ fn meta(body: &str) -> SubgroupObjectMeta {
 /// wire only when the payload length is zero — and the same section makes
 /// Normal "implicit for any non-zero length object".
 ///
-/// Observed by answering `Permitted` for End of Group, which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: End of Group
-///   left: Some(Permitted)
-///  right: Some(Forbidden)
-/// ```
+/// Fails if End of Group answers `Permitted`.
 #[test]
 fn an_assigned_status_answers_with_the_drafts_payload_rule() {
     // Object 0, empty payload, status 0x0 / 0x3 / 0x4.
@@ -462,14 +398,7 @@ fn an_assigned_status_answers_with_the_drafts_payload_rule() {
 /// for it, and neither answer is safe to invent — `Permitted` waves through a
 /// payload the peer may reject, `Forbidden` discards one it may accept.
 ///
-/// Observed by falling back to Normal for a code the draft does not assign, which
-/// fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: status 0x1 is not one draft-16 assigns
-///   left: Some(Permitted)
-///  right: None
-/// ```
+/// Fails if a code the draft does not assign falls back to Normal.
 #[test]
 fn an_unassigned_status_has_no_payload_permission() {
     let mut from_the_wire = meta("000003");
@@ -502,16 +431,8 @@ fn an_unassigned_status_has_no_payload_permission() {
 /// Observed through `encode`, because the bytes are what a caller is handed;
 /// asserting the predicates would only read the flags back. `decode` refuses
 /// `0x16` outright, asserted here as well so the header under test stays one
-/// that had to be built by hand.
-///
-/// *Ablation (measured):* give either predicate a single-bit reading,
-/// `self.header_type & 0x04 != 0`:
-///
-/// ```text
-/// assertion `left == right` failed: a reserved SUBGROUP_ID_MODE carries no Subgroup ID field
-///   left: [22, 7, 9, 5, 128]
-///  right: [22, 7, 9, 128]
-/// ```
+/// that had to be built by hand. Fails if either predicate reads a single bit,
+/// such as `self.header_type & 0x04 != 0`.
 #[test]
 fn a_reserved_subgroup_id_mode_writes_no_subgroup_id_field() {
     // `0x16` clears `0x20`, so a priority byte is present, and sets both `0x06`

@@ -239,17 +239,6 @@ async fn listener_builds_a_profile_through_the_supplied_installer() {
 /// reaching the wire; and the capture holds bytes, which is the sink
 /// reaching the same config. A run with the spec silently dropped would
 /// satisfy the first and not the second.
-///
-/// *Ablation, run:* restore the old profile-and-spec arm of
-/// `transport::resolve` — build the config with `profile.into_config()` and
-/// ignore `installer`. This row reddens with
-///
-/// ```text
-/// thread 'a_leg_with_a_profile_a_spec_and_an_installer_runs_on_the_installers_base'
-/// (62076) panicked at crates\moqtap-proxy\tests\transport_config.rs:
-/// the installer was skipped because a capture was asked for beside it: the leg
-/// is running on quinn's defaults and reporting success
-/// ```
 #[cfg(feature = "qlog")]
 #[tokio::test]
 async fn a_leg_with_a_profile_a_spec_and_an_installer_runs_on_the_installers_base() {

@@ -220,12 +220,10 @@ fn field(decoded: &serde_json::Value, key: &str) -> Option<u64> {
 ///
 /// `datagram.json` holds the payload form on every draft. The status form is a
 /// separate message type on drafts 07 through 13, and drafts 08, 09 and 10
-/// give it a file of its own. **Reading only the first file asked drafts 09
-/// and 10 a question their vectors answer in the other one**: both dropped the
-/// status field from the payload datagram, so the 0x02 form is the only way
-/// either can state a status and every vector that does sits in
-/// `datagram-status.json`. Draft-08 keeps the field on both forms, which is
-/// why it was never named as short of the case while its two neighbours were.
+/// give it a file of its own. Drafts 09 and 10 dropped the status field from
+/// the payload datagram, so the 0x02 form is the only way either can state a
+/// status and every vector that does sits in `datagram-status.json`. Draft-08
+/// keeps the field on both forms.
 const DATAGRAM_FILES: [&str; 2] = ["datagram.json", "datagram-status.json"];
 
 /// Every positive datagram vector the corpus has for `draft`, decoded.
@@ -293,15 +291,7 @@ fn cases(draft: DraftVersion) -> Vec<Case> {
 /// through 13 carry the status form's fields in a different struct at a
 /// different offset, and every one of them is a plausible `u64`.
 ///
-/// *Ablation (measured):* read `object_id` off `group_id` in the drafts 08-13
-/// macro arm.
-///
-/// ```text
-/// ---- every_datagram_field_matches_the_corpus stdout ----
-/// assertion `left == right` failed: [Draft11 datagram-status] object_id
-///   left: 0
-///  right: 5
-/// ```
+/// Fails if the drafts 08-13 macro arm reads `object_id` off `group_id`.
 #[test]
 fn every_datagram_field_matches_the_corpus() {
     let mut seen = 0usize;
@@ -326,25 +316,15 @@ fn every_datagram_field_matches_the_corpus() {
 ///
 /// The per-draft shape is the whole of the gate. Counting how many drafts
 /// from 15 on show an omission and asserting the count is non-zero passes
-/// while any one of the five still reports correctly — measured, by cutting
-/// draft-19's arm alone and watching this test stay green while its neighbour
-/// reddened. A cohort claim asserted as a total is a claim about the cohort's
-/// best member.
+/// while any one of the five still reports correctly. A cohort claim asserted
+/// as a total is a claim about the cohort's best member.
 ///
 /// Two-sided as well: a draft below 15 must report `Some` for every datagram
 /// it has, or an `Option` that is simply always empty would pass the first
 /// half.
 ///
-/// *Ablation (measured):* have draft-19's arm report
-/// `Some(d.publisher_priority.unwrap_or(128))` — one draft of the five.
+/// Fails if any one draft of the five reports a priority on every datagram.
 ///
-/// ```text
-/// ---- the_priority_is_absent_only_where_a_draft_lets_a_datagram_omit_it stdout ----
-/// assertion `left == right` failed: Draft19 reported a priority on every
-/// datagram it has, though the corpus carries one that omits the field
-///   left: 0
-///  right: 1
-/// ```
 /// A draft with no such vector is named in [`CORPUS_GAPS`] rather than skipped
 /// by the count. An `if corpus_omits > 0` guard reads as protection against a
 /// thin corpus and is really a hole in this claim: a draft with no such vector
@@ -352,24 +332,8 @@ fn every_datagram_field_matches_the_corpus() {
 /// count below is satisfied by its neighbours. The table is empty, so the
 /// assertion is made for every draft in the cohort.
 ///
-/// *Second ablation (measured):* report a priority on every draft-15 datagram,
-/// by giving the draft-15 arm of `AnyDatagramHeader::meta` a
-/// `Some(…unwrap_or(0))` where it passes the decoded field through. **This is
-/// the cut that could not be made until draft-15 had the vector** — before it
-/// the draft was skipped here, and no cut aimed at draft-15 could redden this
-/// gate at all:
-///
-/// ```text
-/// ---- the_priority_is_absent_only_where_a_draft_lets_a_datagram_omit_it
-/// assertion `left == right` failed: Draft15 reported a priority on every datagram it has, though the corpus carries one that omits the field
-///   left: 0
-///  right: 1
-/// ```
-///
-/// `every_datagram_field_matches_the_corpus` fails with it and names the
-/// object rather than the count — `[Draft15 datagram-default-priority]
-/// publisher_priority`, left `Some(0)`, right `None`. The two gates catch one
-/// cut from opposite ends: that a draft's omissions are counted, and that
+/// [`every_datagram_field_matches_the_corpus`] makes the same check per object
+/// rather than per count, so between them a draft's omissions are counted and
 /// there is an object they were counted from.
 #[test]
 fn the_priority_is_absent_only_where_a_draft_lets_a_datagram_omit_it() {
@@ -427,32 +391,16 @@ fn the_priority_is_absent_only_where_a_draft_lets_a_datagram_omit_it() {
 /// reads [`CORPUS_GAPS`] to decide whether it can be asked at all, rather than
 /// exempting itself by its own count — a skip that said nothing about which
 /// draft was thin, and that in an all-drafts build could not be reached to say
-/// anything. Drafts 09 and 10 were named there and are not any more: their
-/// status datagrams were in the file the loader was not reading.
+/// anything.
 ///
-/// *Ablation (measured):* read drafts 07 and 08's payload form the way drafts
-/// 09 through 13's is read — status `None` on the payload arm, taken from the
-/// enum alone. This is the defect this gate found on its first run, before the
-/// two drafts had arms of their own:
+/// Fails if drafts 07 and 08's payload form takes its status from the enum
+/// alone: those drafts put the status field on a payload datagram whose
+/// length is zero.
 ///
-/// ```text
-/// ---- a_stated_status_and_a_carried_payload_are_told_apart stdout ----
-/// assertion `left == right` failed: [Draft08 datagram-zero-payload] status
-///   left: None
-///  right: Some(0)
-/// ```
-///
-/// # One ablation that cannot fail here, and why it is written down
-///
-/// Reading drafts 15 and 16's status off the field (`object_status.map(…)`)
-/// rather than off the type byte's status bit leaves every gate in this file
-/// green. That is not a hole in the corpus: those decoders fill the field
-/// exactly when the bit is set, so the two spellings agree on every value a
-/// decode can produce, and no vector could tell them apart. The bit is the
-/// authority for values built in memory rather than decoded — a status set
-/// under a clear bit is not on the wire and must not be reported as though it
-/// were — and that is a claim about the encoder's contract, which
-/// `draft15_data_stream_rules.rs` holds.
+/// Drafts 15 and 16 fill the status field exactly when the type byte's status
+/// bit is set, so no decoded vector tells the field from the bit. The bit's
+/// authority over values built in memory is held by
+/// `draft15_data_stream_rules.rs`.
 #[test]
 fn a_stated_status_and_a_carried_payload_are_told_apart() {
     let mut with_status = 0usize;
@@ -493,60 +441,12 @@ fn a_stated_status_and_a_carried_payload_are_told_apart() {
 /// left out is neither confirmed nor contradicted here, and the all-drafts
 /// build is what settles the whole table.
 ///
-/// Four cuts, all measured, and **all four land on this one assertion and
-/// differ only in the number it reports.** That is what makes the number worth
-/// reading rather than the verdict: the verdict is identical every time and
-/// the count says which of the three things moved — the table, the loader, or
-/// the corpus.
-///
-/// *Ablation (measured):* name draft-15 here, though the corpus carries a
-/// default-priority datagram for it — an entry exempting a draft that does
-/// not need exempting:
-///
-/// ```text
-/// assertion `left == right` failed: CORPUS_GAPS and the corpus disagree about whether Draft15 has a datagram omitting its priority: the corpus has 1 of them
-///   left: true
-///  right: false
-/// ```
-///
-/// *Second ablation (measured):* name a draft whose corpus has always had the
-/// case — `(Draft11, StatusDatagram)` — which is the same misuse against a
-/// case that was never in doubt:
-///
-/// ```text
-/// assertion `left == right` failed: CORPUS_GAPS and the corpus disagree about whether Draft11 has a status datagram: the corpus has 5 of them
-///   left: true
-///  right: false
-/// ```
-///
-/// *Third ablation (measured):* narrow [`DATAGRAM_FILES`] back to
-/// `datagram.json` alone, which is what a loader sees when it reads one file of
-/// the two. The table is untouched and the count goes to zero, because what
-/// moved is how much of the corpus the loader can see:
-///
-/// ```text
-/// assertion `left == right` failed: CORPUS_GAPS and the corpus disagree about whether Draft09 has a status datagram: the corpus has 0 of them
-///   left: false
-///  right: true
-/// ```
-///
-/// *Fourth ablation (measured):* delete draft-15's
-/// `datagram-default-priority` vector, which is the state the corpus was in
-/// until 2026-08-28:
-///
-/// ```text
-/// assertion `left == right` failed: CORPUS_GAPS and the corpus disagree about whether Draft15 has a datagram omitting its priority: the corpus has 0 of them
-///   left: false
-///  right: true
-/// ```
-///
-/// [`the_priority_is_absent_only_where_a_draft_lets_a_datagram_omit_it`] fails
-/// with the fourth — *the corpus has no Draft15 datagram that omits its
-/// priority, and CORPUS_GAPS does not say so* — which is the point of the
-/// pair: that one refuses to skip a draft the table does not name, and this
-/// one refuses to let the table name a draft that does not need it. Removing
-/// the case has to fail on both sides, or the table would be a place to make a
-/// gate stop asking.
+/// The failure reports a count, which says what moved: the table, the loader,
+/// or the corpus. This test refuses to let the table name a draft that does
+/// not need it, and
+/// [`the_priority_is_absent_only_where_a_draft_lets_a_datagram_omit_it`]
+/// refuses to skip a draft the table does not name, so a removed vector fails
+/// on both sides.
 #[test]
 fn the_named_corpus_gaps_are_exactly_the_real_ones() {
     for &draft in COMPILED_DRAFTS {

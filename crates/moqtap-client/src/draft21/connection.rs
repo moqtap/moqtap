@@ -3883,11 +3883,6 @@ mod tests {
     /// proved it, which is an accusation better evidenced than any real one
     /// this build makes. The section stating that rule is numbered differently
     /// on every draft, and the point does not turn on the number.
-    ///
-    /// Ablated by putting the arm back to
-    /// `ConnectionError::Codec(CodecError::UnknownMessageType(0))`: this test
-    /// reddens on the cause, and so does the probe's own
-    /// `violation::a_message_this_build_could_not_narrow_names_nobody`.
     #[test]
     fn a_message_this_build_could_not_narrow_names_nobody() {
         use crate::dispatch::{AnyConnectionError, ErrorCause};
@@ -3943,13 +3938,6 @@ mod tests {
     }
 
     /// `MOQT_ALPN` is the ALPN a client configured for this draft offers.
-    ///
-    /// Putting `moq-00` back — the value this constant held on all five of
-    /// drafts 15-19 — fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: MOQT_ALPN is "moq-00"; a draft-21 client offers ["moqt-21"]
-    /// ```
     #[test]
     fn moqt_alpn_is_the_one_a_client_offers() {
         // A literal on its own is what let this constant keep `moq-00` for
@@ -3985,18 +3973,6 @@ mod tests {
     /// to 0x50 between draft-17 and draft-18 — is caught even though the
     /// spelling did not change, and so is a port that carries draft-17's six
     /// over and leaves SUBSCRIBE_TRACKS (0x51) out.
-    ///
-    /// Every type this draft assigns is classified: the loop walks the whole
-    /// assigned range and asks the classifier about each one it finds.
-    ///
-    /// Dropping `MessageType::SubscribeTracks` from the true arm — the shape
-    /// a draft-17 classifier copied over unchanged would have — fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the types that open a request stream are [3, 6, 13, 22, 29, 80]; draft-21 Section 6.3 names [3, 6, 13, 22, 29, 80, 81]
-    ///   left: [3, 6, 13, 22, 29, 80]
-    ///  right: [3, 6, 13, 22, 29, 80, 81]
-    /// ```
     #[test]
     fn only_seven_message_types_open_a_request_stream() {
         // TRACK_STATUS, SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE,
@@ -4033,17 +4009,6 @@ mod tests {
     /// draft-17 counterpart at all, so a port that forgot it would leave
     /// `subscribe_tracks` on the control stream and nothing below would
     /// notice.
-    ///
-    /// Pointing `RequestKind::SubscribeTracks` at
-    /// `MessageType::SubscribeNamespace` — the two are adjacent, 0x50 and
-    /// 0x51, and a draft-17 port has no SubscribeTracks to copy from — fails
-    /// with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: SubscribeTracks is labelled 80 but its message leads with 81
-    ///   left: 80
-    ///  right: 81
-    /// ```
     #[test]
     fn each_request_kind_labels_the_message_its_helper_writes() {
         use crate::draft21::endpoint::Endpoint;
@@ -4106,14 +4071,7 @@ mod tests {
     /// no legal place for it.
     ///
     /// SUBSCRIBE_TRACKS is the one a port from draft-17 would drop, because
-    /// draft-17 has no such message to copy. Removing it from
-    /// `from_message_type`'s `Some` arms fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: type 81 opens a request stream but from_message_type calls it None
-    ///   left: false
-    ///  right: true
-    /// ```
+    /// draft-17 has no such message to copy.
     #[test]
     fn the_two_request_stream_classifiers_agree() {
         let mut classified = 0;
@@ -4398,16 +4356,6 @@ mod accept_on_the_wire {
     /// A peer's SUBSCRIBE is accepted, answered on the stream it arrived on,
     /// and cannot be finished until each message draft-21 Section 6.4.2.2
     /// requires has been sent.
-    ///
-    /// # What it catches
-    ///
-    /// Removing the `origin == Peer && !responded` guard from
-    /// `RequestStream::finish` — the shape drafts 17 and 18 correctly have,
-    /// since Section 6.4.2.2 arrived in draft-19 — fails with:
-    ///
-    /// ```text
-    /// a FIN before the response must be refused: None
-    /// ```
     #[tokio::test]
     async fn a_peers_subscribe_is_answered_on_the_stream_it_arrived_on() {
         let mut lb = loopback().await;
@@ -4470,23 +4418,6 @@ mod accept_on_the_wire {
     /// error code UPDATE_FAILED." That message has to go on the request's own
     /// stream, so a REQUEST_ERROR answering an update cannot finish the send
     /// half the way one answering the request does.
-    ///
-    /// # What it catches
-    ///
-    /// The shape this draft had: `respond` cleared `owes_publish_done` and
-    /// finished the stream for every REQUEST_ERROR, on the reasoning that a
-    /// rejected request owes nothing further. It is true of a rejected
-    /// *request* and false of a refused *update*, and the two arrive as the
-    /// same message.
-    ///
-    /// ```text
-    /// a refused update retires nothing: the subscription still owes a
-    /// PUBLISH_DONE
-    /// ```
-    ///
-    /// It reddens one, this gate, and nothing else on any draft: it is the
-    /// only place the two halves of the rule are driven against each other
-    /// over a connection.
     #[tokio::test]
     async fn a_refused_update_leaves_the_stream_open_for_its_termination() {
         let mut lb = loopback().await;
@@ -4538,23 +4469,6 @@ mod accept_on_the_wire {
     /// the responder MUST close the bidi stream (see Section 6.4.2.2)." There is
     /// no subscription to terminate here and no PUBLISH_DONE that could go
     /// out, so a send half held open for one would stay open for good.
-    ///
-    /// # What it catches
-    ///
-    /// The debt this endpoint records when it refuses an update was recorded
-    /// for every request rather than only for the subscriptions that can pay
-    /// it. The connection then held every refused update's stream open waiting
-    /// for a PUBLISH_DONE, and a namespace subscription has none to send:
-    ///
-    /// ```text
-    /// the peer is still reading: the refusal never closed the send half:
-    /// Elapsed(())
-    /// ```
-    ///
-    /// It reddens this gate and nothing else in the client or the proxy. The
-    /// peer is left reading a stream that will never be closed, which is what
-    /// the message says and why the assertion is a timeout rather than a
-    /// wrong value.
     #[tokio::test]
     async fn a_refused_namespace_update_closes_the_stream() {
         let mut lb = loopback().await;
@@ -4634,18 +4548,7 @@ mod accept_on_the_wire {
     /// Draft-21 Section 6.3: a bidirectional stream that begins with a message
     /// type that opens no request "MUST close the Session with a
     /// PROTOCOL_VIOLATION" — on the wire, not only in the local state machine.
-    ///
-    /// # What it catches
-    ///
-    /// Mapping `EndpointError::NotARequest` to `InvalidRequestId` in
-    /// `session_error_code`, which conflates Section 6.3's rule with Section
-    /// 6.4.2.1's, fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the close carried the wrong code
-    ///   left: 4
-    ///  right: 3
-    /// ```
+    /// The code is not draft-21 Section 6.4.2.1's INVALID_REQUEST_ID.
     #[tokio::test]
     async fn a_stream_that_opens_no_request_closes_the_session() {
         let mut lb = loopback().await;
@@ -4704,15 +4607,6 @@ mod accept_on_the_wire {
     /// Dropping a request stream is one act with two meanings, and the peer
     /// can only tell them apart if the codes differ: a request this endpoint
     /// made was cancelled, a request made of it was never served.
-    ///
-    /// # What it catches
-    ///
-    /// Resetting both with `REQUEST_CANCELLED`, which is what `Drop` did before
-    /// the accept path existed, fails with:
-    ///
-    /// ```text
-    /// an unserved inbound request should reset with INTERNAL_ERROR (0x0): transport error: stream reset by peer: code 1
-    /// ```
     #[tokio::test]
     async fn an_unserved_request_and_a_cancelled_one_reset_with_different_codes() {
         let mut lb = loopback().await;
@@ -4766,19 +4660,6 @@ mod accept_on_the_wire {
     /// request that had already arrived, which is what makes
     /// [`Connection::accept_request_stream`] safe to `select!` against anything
     /// else.
-    ///
-    /// # What it catches
-    ///
-    /// Accepting straight off the transport without first taking whatever a
-    /// cancelled accept put back fails with:
-    ///
-    /// ```text
-    /// the retried accept hung: Elapsed(())
-    /// ```
-    ///
-    /// The stream and the byte already read off it are still on the queue; the
-    /// second accept just never looks there, and waits for a request the peer
-    /// has already sent.
     #[tokio::test]
     async fn a_cancelled_accept_keeps_the_stream_and_what_had_arrived() {
         let mut lb = loopback().await;
@@ -4847,22 +4728,6 @@ mod accept_on_the_wire {
     /// stream, so refusing the update on that stream is only half of it; the
     /// data stream has to go too, and the connection can only reset a handle
     /// it still holds.
-    ///
-    /// # What it catches
-    ///
-    /// Refusing the update on the request stream and leaving the data stream
-    /// alone, which is half the sentence and was all of it until the request
-    /// stream started holding the handle:
-    ///
-    /// ```text
-    /// the peer is still waiting on a stream that should have been reset:
-    /// Elapsed(())
-    /// ```
-    ///
-    /// It reddens this gate and nothing else in the client or the proxy. The
-    /// failure is a timeout because a subscriber that is not told the objects
-    /// have stopped has no reason to stop waiting for them, which is the
-    /// consequence the rule exists to prevent.
     #[tokio::test]
     async fn a_refused_fetch_update_resets_the_fetch_data_stream() {
         let mut lb = loopback().await;
@@ -4922,27 +4787,7 @@ mod accept_on_the_wire {
     /// A publisher can open the stream a FETCH's objects go on, and owns it.
     ///
     /// The objects answering a FETCH go on a unidirectional stream of their
-    /// own that opens with a FETCH_HEADER. Until this existed the only data
-    /// stream this connection could open wrote a subgroup header, so serving a
-    /// fetch meant reaching past the API for a raw stream — which is also why
-    /// the rule about resetting a failed fetch update's data stream had
-    /// nothing to reset.
-    ///
-    /// # What it catches
-    ///
-    /// Opening the stream and not writing the header, which is the state
-    /// this connection was in for every draft: a uni stream a publisher could
-    /// have opened for itself, with nothing on it saying which request it
-    /// serves.
-    ///
-    /// ```text
-    /// the client opened no data stream: Elapsed(())
-    /// ```
-    ///
-    /// It reddens this gate and nothing else in the client or the proxy. A
-    /// stream with nothing written on it never reaches the peer at all, which
-    /// is why the failure is the peer's accept timing out rather than a header
-    /// that decodes wrongly.
+    /// own that opens with a FETCH_HEADER.
     #[tokio::test]
     async fn a_fetch_data_stream_can_be_opened_through_the_connection() {
         let lb = loopback().await;
@@ -5031,32 +4876,6 @@ mod accept_on_the_wire {
     /// update "MUST respond with exactly one REQUEST_OK or REQUEST_ERROR
     /// message indicating if the update was successful", and on a PUBLISH this
     /// endpoint sent, the receiver is this endpoint.
-    ///
-    /// # What it catches
-    ///
-    /// Refusing every response on a stream this endpoint opened, which is what
-    /// all three drafts did:
-    ///
-    /// ```text
-    /// the subscriber's update is this endpoint's to answer:
-    /// RespondedToOwnRequest(0)
-    /// ```
-    ///
-    /// It reddens both gates in this pair and nothing else in the client or the
-    /// proxy.
-    ///
-    /// Reading the response as an answer to the PUBLISH rather than to the
-    /// update, which is where it lands once the write is allowed but the
-    /// endpoint still routes it by request kind:
-    ///
-    /// ```text
-    /// the subscriber's update is this endpoint's to answer:
-    /// Endpoint(PublishFlow(InvalidTransition { from: Active, event:
-    /// "on_publish_ok_sent" }))
-    /// ```
-    ///
-    /// The same two. The cut above stops the write and this one misdirects it,
-    /// and they fail at the same call with different errors.
     #[tokio::test]
     async fn an_update_on_a_publish_we_sent_is_answered_here() {
         let mut lb = loopback().await;
@@ -5112,53 +4931,6 @@ mod accept_on_the_wire {
     /// error code UPDATE_FAILED." The publisher of a subscription established
     /// with PUBLISH is the endpoint that sent it, and the ending goes on the
     /// stream that endpoint opened rather than on one the peer opened.
-    ///
-    /// # What it catches
-    ///
-    /// Refusing every response on a stream this endpoint opened, which is what
-    /// all three drafts did:
-    ///
-    /// ```text
-    /// refuse the subscriber's update: RespondedToOwnRequest(0)
-    /// ```
-    ///
-    /// It reddens both gates in this pair and nothing else in the client or the
-    /// proxy.
-    ///
-    /// Reading the response as an answer to the PUBLISH rather than to the
-    /// update, which is where it lands once the write is allowed but the
-    /// endpoint still routes it by request kind:
-    ///
-    /// ```text
-    /// refuse the subscriber's update: Endpoint(PublishFlow(InvalidTransition {
-    /// from: Active, event: `on_publish_error_sent` }))
-    /// ```
-    ///
-    /// The same two. The cut above stops the write and this one misdirects it,
-    /// and they fail at the same call with different errors.
-    ///
-    /// Recording a refusal's debt only for a peer's SUBSCRIBE, so the endpoint
-    /// that sent the PUBLISH owes nothing for refusing an update on it:
-    ///
-    /// ```text
-    /// a refused update retires nothing: the subscription still owes a
-    /// PUBLISH_DONE
-    /// ```
-    ///
-    /// It reddens this gate alone, at the assertion that the ending is still
-    /// owed.
-    ///
-    /// Ending a publication on the route a PUBLISH sender ends on without
-    /// asking what the last refusal left owed:
-    ///
-    /// ```text
-    /// a refused update fixes the status of the ending: ()
-    /// ```
-    ///
-    /// It reddens this gate alone, one assertion later than the cut above: the
-    /// debt is recorded and then not enforced, so the ending goes out under a
-    /// status the refusal forbids and `expect_err` reports the `Ok(())` it got
-    /// instead.
     #[tokio::test]
     async fn a_refused_update_on_a_publish_we_sent_owes_its_ending() {
         let mut lb = loopback().await;

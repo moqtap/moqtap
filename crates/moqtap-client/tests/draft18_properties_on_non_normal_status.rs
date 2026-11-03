@@ -140,19 +140,6 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// which is what says the refusal did not desynchronise the delta encoding. And
 /// the peer receives a CONNECTION_CLOSE carrying PROTOCOL_VIOLATION, which is
 /// the only part of the rule that is about the wire.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Deleting the `properties_permitted` check from draft-18's
-/// `FramedRecvStream::read_subgroup_object`, so the object is handed to the
-/// caller like any other — the state this draft was in until recently:
-///
-/// ```text
-/// ---- properties_on_a_non_normal_status_are_refused_and_close stdout ----
-///
-/// thread 'properties_on_a_non_normal_status_are_refused_and_close' (62108) panicked at crates\moqtap-client\tests\draft18_properties_on_non_normal_status.rs:
-/// properties on End of Group must be refused: SubgroupObject { object_id: VarInt(0), extension_headers: [1, 2, 3, 4], payload_length: VarInt(0), object_status: Some(EndOfGroup), payload: [] }
-/// ```
 #[tokio::test]
 async fn properties_on_a_non_normal_status_are_refused_and_close() {
     common::init_crypto();

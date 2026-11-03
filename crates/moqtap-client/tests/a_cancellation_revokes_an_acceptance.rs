@@ -355,21 +355,6 @@ macro_rules! cancellation_gates {
 
             /// An announcement this endpoint accepted can be cancelled, and the
             /// message names it.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the cancellation should name the namespace
-            ///   left: TrackNamespace([])
-            ///  right: TrackNamespace([[99, 111, 110, ...]])
-            /// ```
-            ///
-            /// Made by building the cancellation with an empty namespace, which
-            /// is what draft-14's did for every announcement it was ever asked
-            /// about. It reaches the nine drafts that name the announcement
-            /// that way and reddens 13 tests: this gate on all nine, and the
-            /// loopback gate on the four of them that have one, where an empty
-            /// namespace does not reach the wire at all.
             #[test]
             fn an_announcement_this_endpoint_accepted_can_be_cancelled() {
                 let mut ep = accepted();
@@ -385,18 +370,6 @@ macro_rules! cancellation_gates {
 
             /// One still waiting for an answer cannot be: nothing has responded
             /// to it yet.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// nothing has responded to it, so there is no acceptance to revoke:
-            /// AnnounceCancel(AnnounceCancel { track_namespace: ... })
-            /// ```
-            ///
-            /// Made by building the cancellation without moving the flow, so
-            /// there is no state for the rule to be about. It reddens 25 tests,
-            /// all three of the gates that turn on which state the announcement
-            /// is in.
             #[test]
             fn an_announcement_still_waiting_cannot_be_cancelled() {
                 let mut ep = announced();
@@ -433,19 +406,6 @@ macro_rules! cancellation_gates {
             }
 
             /// An acceptance is revoked once.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the second cancellation should find nothing live; got
-            /// Namespace(InvalidTransition { from: "Done", ... })
-            /// ```
-            ///
-            /// Made by letting the namespace scan return announcements that
-            /// have ended, so a namespace that stands for nothing live stands
-            /// for something dead instead. It reaches only the five drafts
-            /// whose cancellation names a namespace while the announcement
-            /// carried a Request ID, and reddens 10 tests there.
             #[test]
             fn an_acceptance_is_revoked_once() {
                 let mut ep = accepted();
@@ -482,17 +442,6 @@ macro_rules! cancellation_gates {
             /// acceptance of. Withdrawing this endpoint's own afterwards is what
             /// proves it was untouched: a withdrawal only lands on an
             /// announcement the peer has accepted and nothing has ended.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the publisher may still stop serving its own
-            /// ```
-            ///
-            /// Made by ending this endpoint's own announcements alongside the
-            /// peer's when a cancellation goes out. It reddens 10 tests, one per
-            /// draft, and nothing else: every other gate holds one
-            /// announcement, and this is the only one that holds two.
             #[test]
             fn cancelling_the_peers_announcement_leaves_this_endpoints_own_alone() {
                 let mut ep = active();

@@ -3,19 +3,15 @@
 //!
 //! `tokio::time::sleep` cannot be used for release timing. Tokio parks its
 //! runtime on a wait with a millisecond timeout, and on Windows every
-//! *interruptible* wait is quantised to the ~15.6 ms system tick: measured
-//! on Windows 11, `tokio::time::sleep(1 ms)` returns after 15.96 ms and
-//! `Condvar::wait_timeout(1 ms)` is 14.6 ms late. `std::thread::sleep` is
+//! *interruptible* wait is quantised to the ~15.6 ms system tick.
+//! `std::thread::sleep` is
 //! the exception — std implements it with a high-resolution waitable timer,
 //! so it lands within ~0.3 ms — but it cannot be woken early.
 //!
 //! This module recovers *accurate *and* interruptible* in plain safe code: the
 //! thread sleeps in [`SLICE`]-bounded steps and re-reads the heap between them,
 //! and parks on an untimed `Condvar` — which *is* woken promptly — when there
-//! is nothing to wait for. End to end (the thread wakes, cancels a token, a
-//! tokio task in a `select!` resumes) the measured lateness on Windows 11 is
-//! p50 0.11-0.17 ms and p95 0.52-0.57 ms, against 11-13 ms for
-//! `tokio::time::sleep`.
+//! is nothing to wait for.
 //!
 //! Nothing here is `pub`, the whole module is safe code, and there is no
 //! `#[cfg]` outside its test module: one implementation runs on every
@@ -219,15 +215,6 @@ impl ReleaseTimer {
 ///
 /// # Why the join is conditional
 ///
-/// The join is cheap only from *another* thread. Measured 0.097 ms with a
-/// 10 s deadline armed, because the thread never waits longer than one
-/// [`SLICE`] and so reads `stopping` promptly — but that measurement was
-/// taken with the wheel dropped from a thread other than its own release
-/// thread, and it licenses nothing about the other case. It was the only
-/// case anything could reach while the never-dropped process-wide wheel
-/// was the sole non-test owner; a wheel owned per socket is droppable
-/// from anywhere.
-///
 /// From the release thread the join is not a slow path, it is a permanent
 /// deadlock. Step 3 of [`run`] cancels tokens *outside* the lock and *on*
 /// the release thread, so every waker registered on a deadline — which is
@@ -236,8 +223,6 @@ impl ReleaseTimer {
 /// release thread, and `join()` then waits for the thread executing it.
 /// `stopping` and `notify_all` do not rescue it: the thread is inside the
 /// cancel loop and can never return to the top of `run` to read the flag.
-/// Measured that way, the drop had not returned after 20 s against a
-/// 500 µs [`SLICE`], on every run.
 ///
 /// Detaching there is not a compromise, it is the only outcome that
 /// terminates. `stopping` is set and `notify_all` sent before the branch,
@@ -265,11 +250,6 @@ impl Drop for ReleaseTimer {
 // ── internals ──────────────────────────────────────────────────────────
 
 /// What a [`Deadline`] and its heap slot share.
-///
-/// The frozen sketch also carried an `at: Instant` here. It is dropped
-/// rather than carried: nothing reads it (the ordering copy lives in
-/// [`Slot`]), and a never-read field is `dead_code`, which this crate
-/// builds with `-D warnings`.
 #[derive(Debug)]
 struct Entry {
     token: CancellationToken,
@@ -340,8 +320,7 @@ struct Inner {
 /// every platform. `Condvar` exists because [`TimerBackend::Condvar`] and
 /// `ImpairmentKind::CoarseReleaseTimer` are public API and must be
 /// reachable by a test: forcing it on Windows produces a genuinely
-/// tick-bound wheel — measured p50 lateness 12.256 ms for a 3 ms deadline
-/// — which is exactly what that impairment reports, so the fault
+/// tick-bound wheel, which is exactly what that impairment reports, so the fault
 /// injection is not a simulation. **No `#[cfg]`: both arms compile on
 /// every platform**, and the choice is made once, at construction, from
 /// `MOQTAP_RELEASE_TIMER`. This enum is the seam for adding a platform
@@ -497,10 +476,6 @@ mod tests {
     /// Arming one at a time also makes this the coverage of the
     /// empty-wheel `Condvar::wait` -> `notify_one` path, since the wheel
     /// is idle before every sample.
-    ///
-    /// *Ablation:* fire the head after any wake instead of testing
-    /// `slot.at <= now` in step 1 of `run`; measured 300 of 300 fired
-    /// early, by up to 4.978 ms.
     #[tokio::test]
     async fn a_deadline_never_fires_early() {
         let timer = ReleaseTimer::new();
@@ -536,13 +511,6 @@ mod tests {
     /// The property `SLICE` exists to provide: a nearer deadline
     /// armed while the thread is already waiting on a far one is noticed
     /// within one slice.
-    ///
-    /// *Ablation:* sleep the whole `remaining` instead of
-    /// `min(remaining, SLICE)`; measured 1975 ms late, and the far
-    /// deadline fires first. Re-run once the settle became a wake count:
-    /// `the +2 s deadline fired before the +5 ms one`, reached after
-    /// [`wait_for_wakes`] spends its whole bound, because under this
-    /// ablation the second wake it is counting never comes.
     #[tokio::test]
     async fn an_earlier_deadline_registered_later_preempts_the_current_wait() {
         let timer = ReleaseTimer::new();
@@ -550,8 +518,7 @@ mod tests {
         // The near deadline only arrives mid-wait if the thread is already
         // in its slice loop, and two completed iterations say it is: the
         // first is the wake that saw `far` armed, and a second can only
-        // follow a slice that ran out. This was a 2 ms sleep, which is the
-        // same claim with nothing behind it.
+        // follow a slice that ran out.
         wait_for_wakes(&timer, 2);
 
         let start = Instant::now();
@@ -577,21 +544,6 @@ mod tests {
     /// can resolve one iteration before the thread is asleep, and it is
     /// exactly one iteration, because that one finds nothing armed and
     /// takes the untimed `wait`.
-    ///
-    /// Sleeping 20 ms first would exclude that wake, on the reasoning that
-    /// one iteration cannot take longer than that. It usually cannot — the
-    /// probe measured deltas of 0, 0 and then 1
-    /// across three runs of the same binary — but a settle is a guess at
-    /// somebody else's scheduling, and a wrong guess fails a wheel that is
-    /// working. Counting the wake that is known to be coming needs no
-    /// guess, and 1 against the ~13 the ablation produces is not a margin
-    /// worth buying.
-    ///
-    /// *Ablation:* replace the empty-wheel `cv.wait(g)` with
-    /// `cv.wait_timeout(g, SLICE)`; on Windows each such wait returns
-    /// after ~15.6 ms, so the counter gains one per tick over the idle
-    /// window: `the thread woke 14 times over an idle 200ms window; at
-    /// most one is the post-fire iteration parking`.
     #[tokio::test]
     async fn the_release_thread_parks_when_the_wheel_is_empty() {
         let timer = ReleaseTimer::new();
@@ -622,16 +574,9 @@ mod tests {
     /// Abandoned slots are swept rather than carried to their own
     /// instants.
     ///
-    /// The deadlines are far-dated on purpose: an earlier revision armed
-    /// them at +5 ms and asserted an empty heap 300 ms later, at which
-    /// point every slot was 295 ms overdue and the ordinary pop loop
-    /// emptied the heap whether the sweep existed or not — the test could
-    /// not fail. 30 s is also the case the sweep exists for: it is
-    /// `max_hold`'s default, and a torn-down `Hold` is exactly how a dead
-    /// slot survives its own instant.
-    ///
-    /// *Ablation:* disable the `retain` rebuild; measured 10 000 slots
-    /// still present after a second.
+    /// The deadlines are far-dated on purpose: 30 s is the case the sweep
+    /// exists for. It is `max_hold`'s default, and a torn-down `Hold` is
+    /// exactly how a dead slot survives its own instant.
     ///
     /// This assumes the shipping [`Parker::SleepSlice`]. Under a forced
     /// `MOQTAP_RELEASE_TIMER=condvar` the thread waits out the *whole*
@@ -664,9 +609,6 @@ mod tests {
 
     /// The instance API per-socket owners inherit actually stops, rather
     /// than waiting out its deadlines.
-    ///
-    /// *Ablation:* drop the `stopping` write in `Drop`; the drop had not
-    /// returned after 500 ms and the test hangs.
     #[test]
     fn an_instance_timer_joins_its_thread_on_drop() {
         let timer = ReleaseTimer::new();
@@ -731,9 +673,6 @@ mod tests {
     /// cannot redden because the box was busy. The joining branch is the
     /// one `an_instance_timer_joins_its_thread_on_drop` covers, and it
     /// still holds a 250 ms bound.
-    /// *Ablation:* make the join unconditional again. The drop had not returned
-    /// after 20 s against a 500 µs [`SLICE`], so this test spends its whole
-    /// window and fails with *did not return within 10s*.
     #[test]
     fn dropping_the_wheel_from_inside_its_own_release_callback_returns() {
         /// Liveness limit. The fixed drop returns in microseconds; a
@@ -786,35 +725,21 @@ mod tests {
     ///
     /// The sampled quantity is `lateness = observed - deadline`: the
     /// requested 2 ms is subtracted from *both* arms before the percentile
-    /// is taken. On the lateness reading the measured ratio is 31.8x
-    /// (0.351 ms against 11.170 ms), so `x4` leaves 7.9x of headroom; on
-    /// the elapsed reading it would be 1.4x, which is not an assertion.
+    /// is taken.
     ///
     /// The assertion is on a *median* because the tokio arm's p50 is
     /// bounded below by the ~15.6 ms tick as a property of the timer, not
-    /// of the machine, while the wheel arm's p95 does degrade under load.
-    /// If a runner ever deschedules the release thread past 2.79 ms more
-    /// than half the time, weaken the factor to `x2` and record the runner
-    /// here — the ablation still fails at `x2`.
+    /// of the machine, while the wheel arm's p95 rises under load.
     ///
-    /// # Why this one runs by default when the other two do not
-    ///
-    /// The two accuracy measurements at the bottom of this module are
-    /// `#[ignore]`d because a saturated box invalidates them, and *this
-    /// test is the same class of claim* — so it was measured rather than
-    /// assumed either way. Under 16 busy-loop processes on 16 logical
-    /// cores: **0 red in 10 runs**. Under 32, i.e. 2x oversubscription:
-    /// **0 red in 23 runs**. It holds where they do not because it samples
-    /// the wheel alone on a four-worker runtime — one arm, one token, one
-    /// wake — while the session-level pairing it resembles measures the
+    /// It runs by default, unlike the two calibration measurements at the
+    /// bottom of this module, because it samples the wheel alone on a
+    /// four-worker runtime — one arm, one token, one wake — rather than the
     /// whole read-hook-queue-release-write pipeline on a current-thread
     /// runtime that the same load starves. This test must never be
     /// `#[ignore]`d: it is the one the multi-threaded-runtime requirement
-    /// rests on. If a runner does break it, the remedy is the `x2`
-    /// weakening above, which the ablation still fails — not deletion, and not an
-    /// `#[ignore]`.
-    ///
-    /// *Ablation:* point the wheel arm at a `tokio::time::sleep` task.
+    /// rests on. If a runner ever deschedules the release thread past
+    /// 2.79 ms more than half the time, weaken the factor to `x2` rather
+    /// than delete or ignore the test.
     #[cfg(windows)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn the_wheel_beats_the_tokio_timer_on_lateness() {
@@ -847,10 +772,6 @@ mod tests {
     /// `t0 + 1 ms` is written on the *now* side rather than `t0 - 1 ms` on
     /// the deadline side because `Instant - Duration` panics near the
     /// clock's origin.
-    ///
-    /// *Ablation:* change `d.min(slice)` to `slice`; the fourth case
-    /// fails, and it is the case that would otherwise sleep past a
-    /// deadline.
     #[test]
     fn the_wait_plan_never_overshoots() {
         let t0 = Instant::now();
@@ -871,8 +792,6 @@ mod tests {
     /// the wheel into a LIFO that serves the farthest deadline first — a
     /// defect that would otherwise show up only as a confusing timing
     /// failure.
-    ///
-    /// *Ablation:* swap the operands in `Ord::cmp`.
     #[test]
     fn the_heap_is_a_min_heap_and_ties_break_by_registration() {
         let t0 = Instant::now();
@@ -927,14 +846,6 @@ mod tests {
     ///
     /// Arming runs farthest-first, so every later arm is *nearer* than the
     /// current head and the awaits then run in deadline order.
-    ///
-    /// *Ablation:* in step 2 of [`run`], retain `strong_count() > 1`
-    /// instead of `> 0` — an off-by-one that reads like a tightening,
-    /// since the live `Arc` is held by the [`Deadline`] and not by the
-    /// heap. Measured: this test fails at the first await with all 128
-    /// live deadlines swept out at ~250 ms and never released, while the
-    /// three tests named above all still pass — which is what it is here
-    /// for.
     #[tokio::test]
     async fn every_armed_deadline_is_eventually_released() {
         const LIVE: usize = 128;
@@ -1013,72 +924,25 @@ mod tests {
         }
     }
 
-    // ── calibration, and why it is the one thing here that is opt-in ────
+    // ── calibration: opt-in ────────────────────────────────────────────
     //
-    // The tests above are *correctness* properties: never early, never
-    // lost, never reordered, never left parked. Every one of them holds on
-    // a box whose scheduler is doing something else, because a starved
-    // release thread can only make a release **later** — and "later" is not
-    // what any of them assert. (`the_wheel_beats_the_tokio_timer_on_lateness`
-    // is the one accuracy claim that still runs by default, and its own
-    // rustdoc gives the loaded measurement that earned it the exception.)
-    //
-    // What follows is the other kind of claim: **how late**. That is an
-    // accuracy measurement, and this is the finding that moved it out of
-    // `cargo test --workspace`:
-    //
-    // > Under real CPU saturation the wheel does not hold its sub-millisecond
-    // > lateness. It degrades to the same tens of milliseconds
-    // > `tokio::time::sleep` costs, so *no* formulation of the accuracy
-    // > claim survives — not an absolute bound, and not a paired
-    // > wheel-versus-tokio difference either, because both arms degrade
-    // > together and the separation collapses to zero.
-    //
-    // Measured on this Windows 11 box, 16 busy-loop processes on 16 logical
-    // cores, `release_error_p50_is_within_the_platform_budget` exactly as it
-    // is written below: **7 red in 10 loaded runs** (p50 5.14 / 5.34 ms
-    // against its 5 ms bound, p95 14-15 ms, max 63-67 ms), against 0 red in
-    // 10 idle runs. The paired form is *worse*: at session level the
-    // wheel-versus-tokio pairs came out 12.58/12.03, 10.49/11.12,
-    // 12.58/12.87, 12.58/11.94, 12.58/12.09, 12.58/11.45 and 12.58/13.26 ms
-    // — the wheel slower than its own control in four of seven — so the
-    // difference the pairing was supposed to preserve was 0 ns against a
-    // 3 ms margin.
-    // So this is not *the bound was too tight*. A p50 that reads 0.1 ms idle
-    // and 12 ms saturated is not measuring the wheel; it is measuring the box.
-    // `cargo test --workspace` runs on three shared CI runners with 76 other
-    // targets beside it, and a gate that reports the runner's load as a code
-    // defect is a broken gate whichever number is in it.
-    //
-    // **This is not concealment, and the two reasons are checkable.**
-    //
-    // 1. The capability these tests measure is still gated, by the
-    //    correctness properties above — which is what an implementation
-    //    regression actually trips. The `tokio::time::sleep` implementation
-    //    this module exists to replace is rejected by
-    //    `an_earlier_deadline_registered_later_preempts_the_current_wait`
-    //    (a nearer deadline armed mid-wait is noticed within one slice:
-    //    measured 1975 ms late under the ablation) and by
-    //    `a_deadline_never_fires_early`, on every platform, with no timing
-    //    budget in either.
-    // 2. The measurement this would gate on — schedule 10 000 releases at
-    //    1 ms, 5 ms, 200 µs spacing and assert p95 release error under a
-    //    per-platform budget — needs those budgets *derived from the
-    //    runners*, which is a job for a dedicated quiet-machine run and not
-    //    for the unit-test gate.
-    //
-    // Run it, on an otherwise idle machine:
+    // The tests above are correctness properties — never early, never
+    // lost, never reordered, never left parked — and hold on a loaded box,
+    // because a starved release thread can only make a release later. What
+    // follows measures how late, and under CPU saturation that is a property
+    // of the machine as much as of the wheel: the wheel's lateness rises to
+    // the tens of milliseconds `tokio::time::sleep` costs. So these are
+    // `#[ignore]`d; run them on an otherwise idle machine:
     //
     // ```text
     // cargo test -p moqtap-proxy --lib -- --ignored --nocapture calibration
     // ```
     //
-    // Its session-level companion is
-    // `actions_timing::calibration_a_five_millisecond_delay_is_measured_as_five_milliseconds`,
-    // re-homed the same way and for the same reason. Both still assert, and
-    // both still fail for a release path that regressed — that is the point
-    // of leaving the numbers in rather than reducing them to `println!`s.
-    // They are simply not part of the default test run.
+    // The default run still rejects the `tokio::time::sleep` implementation
+    // this module replaces, through
+    // `an_earlier_deadline_registered_later_preempts_the_current_wait` and
+    // `a_deadline_never_fires_early`. The session-level companion is
+    // `actions_timing::calibration_a_five_millisecond_delay_is_measured_as_five_milliseconds`.
 
     /// **Calibration measurement, not a gate. Requires a quiet machine.**
     /// Ignored by default; run with `-- --ignored --nocapture`.
@@ -1087,33 +951,6 @@ mod tests {
     /// measurement of the Unix backends. 200 deadlines at 3 ms on one
     /// instance; `p50 <= 5 ms` when
     /// the backend is high-resolution, `<= 60 ms` otherwise.
-    ///
-    /// **Why it is opt-in**: see the banner above. Short version — this
-    /// median is a property of the machine's scheduler at least as much as
-    /// of the wheel, it went red 7 times in 10 runs under 16 busy-loop
-    /// processes, and widening the bound past ~10 ms would admit the very
-    /// `tokio::time::sleep` implementation it exists to reject. There is no
-    /// number that is both meaningful and load-proof, so the measurement is
-    /// taken deliberately instead of continuously.
-    ///
-    /// Reference numbers, so a future reader has something to compare
-    /// against. Quiet Windows 11 box (i9-11900K, 16 logical cores),
-    /// `SleepSlice`, debug profile, this test alone:
-    ///
-    /// | | p50 | p95 | p99 | max |
-    /// |---|---|---|---|---|
-    /// | idle, 6 consecutive runs | 0.206-0.408 ms | 0.58-0.68 ms | 0.67-0.81 ms | 0.75-1.22 ms |
-    /// | idle, worst seen in 10 | 5.23 ms | 21.65 ms | 29.00 ms | 36.48 ms |
-    /// | 16 busy-loop processes | 5.14-5.34 ms | 14.3-15.2 ms | 16-17 ms | 63-67 ms |
-    ///
-    /// The equivalent `--release` numbers are p50 0.116-0.168 ms for the
-    /// same shape; the idle debug numbers above are the honest unoptimised
-    /// equivalent. Note the idle *worst* row: even with nothing
-    /// else running this occasionally breaches 5 ms, which is the second
-    /// reason it cannot be a gate.
-    ///
-    /// *Ablation:* point `arm` at a `tokio::time::sleep` task; the
-    /// high-resolution branch must fail.
     #[tokio::test]
     #[ignore = "calibration measurement: asserts timing accuracy, which is not \
                 measurable on a loaded box — run with --ignored on a quiet machine"]

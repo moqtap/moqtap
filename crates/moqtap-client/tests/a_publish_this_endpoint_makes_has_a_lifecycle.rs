@@ -176,39 +176,6 @@ macro_rules! answer_gates {
         const NEVER_USED: u64 = 8;
 
         /// An answer naming no offer of this endpoint's is refused.
-        ///
-        /// # What it catches
-        ///
-        /// Taking the acceptance and dropping it — `receive_publish_ok`
-        /// ignoring its argument and returning `Ok(())`, so nothing the
-        /// subscription does afterwards has a state to be judged against:
-        ///
-        /// ```text
-        /// an acceptance of an offer that was never made, and instead: Ok(())
-        /// ```
-        ///
-        /// It reddens sixteen, on drafts 12 and 13: eight of the gates here.
-        ///
-        /// Taking the refusal and dropping it, the other half of the same pair
-        /// of stubs:
-        ///
-        /// ```text
-        /// a refusal of an offer that was never made, and instead: Ok(())
-        /// ```
-        ///
-        /// It reddens eight, on drafts 12 and 13: three of the gates here and
-        /// one in `an_endpoint_gives_one_alias_to_one_track.rs`:
-        /// `an_alias_is_free_once_its_offer_ends`.
-        ///
-        /// Returning `Ok(())` from the refusal when the identifier names no
-        /// offer, while the acceptance beside it answers `UnknownRequest`:
-        ///
-        /// ```text
-        /// a refusal of an offer that was never made, and instead: Ok(())
-        /// ```
-        ///
-        /// It reddens four: this gate on draft-14, and three in
-        /// `endpoint_tests.rs`.
         #[test]
         fn an_answer_naming_no_offer_is_refused() {
             let mut ep = offered();
@@ -232,56 +199,6 @@ macro_rules! answer_gates {
         /// identifiers apart. An acceptance arriving for a PUBLISH the
         /// *peer* sent is the peer answering itself, which is not a thing
         /// this endpoint has any record of.
-        ///
-        /// # What it catches
-        ///
-        /// Taking the acceptance and dropping it — `receive_publish_ok`
-        /// ignoring its argument and returning `Ok(())`, so nothing the
-        /// subscription does afterwards has a state to be judged against:
-        ///
-        /// ```text
-        /// the peer's own offer was answered as though this endpoint had made
-        /// it, and instead: Ok(())
-        /// ```
-        ///
-        /// It reddens sixteen, on drafts 12 and 13: eight of the gates here.
-        ///
-        /// Falling back to the peer's own offers when the identifier names none
-        /// of this endpoint's, which is the helpful-looking version of holding
-        /// both directions in one record:
-        ///
-        /// ```text
-        /// the peer's own offer was answered as though this endpoint had made
-        /// it, and instead: Ok(())
-        /// ```
-        ///
-        /// It reddens two, this gate on drafts 12 and 13 and nothing else.
-        ///
-        /// Dropping the test that says whose offer an identifier names, from
-        /// the acceptance. Draft-14 keeps both directions in one map, so
-        /// without it the peer's own offer is one this endpoint will answer:
-        ///
-        /// ```text
-        /// the peer's own offer was answered as though this endpoint had made
-        /// it, and instead: Ok(())
-        /// ```
-        ///
-        /// It reddens one, this gate on draft-14 and nothing else. Drafts 12
-        /// and 13 keep the two directions in two records, so there is no such
-        /// test on them to cut.
-        ///
-        /// The same, from the refusal. It needs a cut of its own because it is
-        /// a second call site of the same idea, and a gate that drives only the
-        /// acceptance leaves this one unmeasured:
-        ///
-        /// ```text
-        /// the peer's own offer was refused as though this endpoint had made
-        /// it, and instead: Ok(())
-        /// ```
-        ///
-        /// It reddens one, the same gate on draft-14, and only because that
-        /// gate drives both answers: an acceptance-only gate leaves this cut
-        /// green, which is why the assertion below is a pair.
         #[test]
         fn an_answer_to_the_peers_own_offer_is_not_an_answer_to_ours() {
             let mut ep = offered();
@@ -292,10 +209,9 @@ macro_rules! answer_gates {
                 "the peer's own offer was answered as though this endpoint had made it, \
                  and instead: {crossed:?}"
             );
-            // Both answers, because both read the record and each needs its
-            // own cut to be measured. The offer is still unanswered here, so a
-            // refusal that reached it would succeed rather than be stopped by
-            // the state machine on its way past.
+            // Both answers, because both read the record. The offer is still
+            // unanswered here, so a refusal that reached it would succeed rather
+            // than be stopped by the state machine on its way past.
             let refused = ep.receive_publish_error(&publish_error(PEERS_FIRST));
             assert!(
                 matches!(refused, Err(EndpointError::UnknownRequest(PEERS_FIRST))),
@@ -440,18 +356,6 @@ macro_rules! outbound_publish_gates {
 
             /// This endpoint can build a PUBLISH, and it is the offer it was
             /// asked for.
-            ///
-            /// # What it catches
-            ///
-            /// Building the offer with a Track Alias of zero rather than the one
-            /// the caller chose:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the alias the offer spends left:
-            /// VarInt(0) right: VarInt(7)
-            /// ```
-            ///
-            /// It reddens two, this gate on drafts 12 and 13 and nothing else.
             #[test]
             fn this_endpoint_can_offer_a_track() {
                 let mut ep = active();
@@ -480,22 +384,6 @@ macro_rules! outbound_publish_gates {
 
             /// A second offer takes the next identifier in this endpoint's own
             /// sequence.
-            ///
-            /// # What it catches
-            ///
-            /// Returning a fixed Request ID rather than allocating one, which
-            /// leaves every offer of this endpoint's under the same identifier and
-            /// the peer unable to tell two subscriptions apart:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: Section 8.1 steps this endpoint's
-            /// ids by two, so the second offer is 2 left: VarInt(0) right:
-            /// VarInt(2)
-            /// ```
-            ///
-            /// It reddens four, on drafts 12 and 13: this gate and one in
-            /// `an_endpoint_gives_one_alias_to_one_track.rs`:
-            /// `a_refused_publish_spends_no_request_id`.
             #[test]
             fn a_second_offer_takes_the_next_identifier() {
                 let mut ep = active();
@@ -512,30 +400,6 @@ macro_rules! outbound_publish_gates {
 
             /// An acceptance establishes the subscription, and the publisher
             /// can then end it.
-            ///
-            /// # What it catches
-            ///
-            /// Taking the acceptance and dropping it — `receive_publish_ok`
-            /// ignoring its argument and returning `Ok(())`, so nothing the
-            /// subscription does afterwards has a state to be judged against:
-            ///
-            /// ```text
-            /// Section 4.1 lets the publisher end it with SUBSCRIBE_DONE:
-            /// PublishFlow(InvalidTransition { from: Publishing, event:
-            /// "on_subscribe_done_sent" })
-            /// ```
-            ///
-            /// It reddens sixteen, on drafts 12 and 13: eight of the gates here.
-            ///
-            /// Building the SUBSCRIBE_DONE without moving the record it ends, so
-            /// the message goes out and the subscription stays live behind it:
-            ///
-            /// ```text
-            /// Section 4.1 lets the publisher end it with SUBSCRIBE_DONE:
-            /// UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens eight, on drafts 12 and 13: four of the gates here.
             #[test]
             fn an_accepted_offer_is_a_subscription_this_endpoint_publishes() {
                 let mut ep = offered();
@@ -546,39 +410,6 @@ macro_rules! outbound_publish_gates {
             }
 
             /// A refusal ends the offer, and there is nothing left to end.
-            ///
-            /// # What it catches
-            ///
-            /// Taking the acceptance and dropping it — `receive_publish_ok`
-            /// ignoring its argument and returning `Ok(())`, so nothing the
-            /// subscription does afterwards has a state to be judged against:
-            ///
-            /// ```text
-            /// a refused offer cannot then be accepted, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens sixteen, on drafts 12 and 13: eight of the gates here.
-            ///
-            /// Taking the refusal and dropping it, the other half of the same pair
-            /// of stubs:
-            ///
-            /// ```text
-            /// a refused offer has had its one answer, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens eight, on drafts 12 and 13: three of the gates here and
-            /// one in `an_endpoint_gives_one_alias_to_one_track.rs`:
-            /// `an_alias_is_free_once_its_offer_ends`.
-            ///
-            /// Building the SUBSCRIBE_DONE without moving the record it ends, so
-            /// the message goes out and the subscription stays live behind it:
-            ///
-            /// ```text
-            /// a refused offer opened no subscription for SUBSCRIBE_DONE to end,
-            /// and instead: Err(UnknownRequest(0))
-            /// ```
-            ///
-            /// It reddens eight, on drafts 12 and 13: four of the gates here.
             #[test]
             fn a_refused_offer_opened_no_subscription() {
                 let mut ep = offered();
@@ -608,30 +439,6 @@ macro_rules! outbound_publish_gates {
             }
 
             /// An offer is answered once, whichever answer comes first.
-            ///
-            /// # What it catches
-            ///
-            /// Taking the acceptance and dropping it — `receive_publish_ok`
-            /// ignoring its argument and returning `Ok(())`, so nothing the
-            /// subscription does afterwards has a state to be judged against:
-            ///
-            /// ```text
-            /// Section 4.1 says exactly one answer, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens sixteen, on drafts 12 and 13: eight of the gates here.
-            ///
-            /// Taking the refusal and dropping it, the other half of the same pair
-            /// of stubs:
-            ///
-            /// ```text
-            /// the second answer is refused whichever of the two it is, and
-            /// instead: Ok(())
-            /// ```
-            ///
-            /// It reddens eight, on drafts 12 and 13: three of the gates here and
-            /// one in `an_endpoint_gives_one_alias_to_one_track.rs`:
-            /// `an_alias_is_free_once_its_offer_ends`.
             #[test]
             fn an_offer_is_answered_exactly_once() {
                 let mut ep = offered();
@@ -655,23 +462,6 @@ macro_rules! outbound_publish_gates {
             /// The table is the session's and not this endpoint's half of it:
             /// the peer would close the session over an alias it is already
             /// using itself.
-            ///
-            /// # What it catches
-            ///
-            /// Not weighing an offer against the aliases already spoken for, on all
-            /// eight drafts that can build one:
-            ///
-            /// ```text
-            /// the alias table is the session's, and instead: Ok((VarInt(0),
-            /// Publish(Publish { request_id: VarInt(0), track_namespace:
-            /// TrackNamespace([[99, 111, 110, 102, 111, 114, 109, 97, 110, 99,
-            /// 101]]), track_name: [97, 108, 112, 104, 97], t
-            /// ```
-            ///
-            /// It reddens twenty, on drafts 12 through 19: two of the gates here
-            /// and two in `an_endpoint_gives_one_alias_to_one_track.rs`:
-            /// `a_refused_publish_spends_no_request_id`,
-            /// `one_alias_for_two_tracks_is_refused`.
             #[test]
             fn an_offer_may_not_take_an_alias_the_peer_is_using() {
                 let mut ep = active();
@@ -688,73 +478,6 @@ macro_rules! outbound_publish_gates {
             }
 
             /// A subscription this endpoint ended gives its alias back.
-            ///
-            /// # What it catches
-            ///
-            /// Taking the acceptance and dropping it — `receive_publish_ok`
-            /// ignoring its argument and returning `Ok(())`, so nothing the
-            /// subscription does afterwards has a state to be judged against:
-            ///
-            /// ```text
-            /// the publisher ends it: PublishFlow(InvalidTransition { from:
-            /// Publishing, event: "on_subscribe_done_sent" })
-            /// ```
-            ///
-            /// It reddens sixteen, on drafts 12 and 13: eight of the gates here.
-            ///
-            /// Building the SUBSCRIBE_DONE without moving the record it ends, so
-            /// the message goes out and the subscription stays live behind it:
-            ///
-            /// ```text
-            /// the publisher ends it: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens eight, on drafts 12 and 13: four of the gates here.
-            ///
-            /// Leaving an offer of this endpoint's out of the set the next offer
-            /// this endpoint builds is weighed against:
-            ///
-            /// ```text
-            /// a live subscription is holding the alias, and instead:
-            /// Ok((VarInt(2), Publish(Publish { request_id: VarInt(2),
-            /// track_namespace: TrackNamespace([[99, 111, 110, 102, 111, 114, 109,
-            /// 97, 110, 99, 101]]), track_name: [98, 101, 116, 97], track_al
-            /// ```
-            ///
-            /// It reddens six, on drafts 12 and 13: this gate and two in
-            /// `an_endpoint_gives_one_alias_to_one_track.rs`:
-            /// `a_refused_publish_spends_no_request_id`,
-            /// `one_alias_for_two_tracks_is_refused`.
-            ///
-            /// Not weighing an offer against the aliases already spoken for, on all
-            /// eight drafts that can build one:
-            ///
-            /// ```text
-            /// a live subscription is holding the alias, and instead:
-            /// Ok((VarInt(2), Publish(Publish { request_id: VarInt(2),
-            /// track_namespace: TrackNamespace([[99, 111, 110, 102, 111, 114, 109,
-            /// 97, 110, 99, 101]]), track_name: [98, 101, 116, 97], track_al
-            /// ```
-            ///
-            /// It reddens twenty, on drafts 12 through 19: two of the gates here
-            /// and two in `an_endpoint_gives_one_alias_to_one_track.rs`:
-            /// `a_refused_publish_spends_no_request_id`,
-            /// `one_alias_for_two_tracks_is_refused`.
-            ///
-            /// Recording the offer's state and not the track its alias was bound
-            /// to, so the alias is spent on the wire and free in the table:
-            ///
-            /// ```text
-            /// a live subscription is holding the alias, and instead:
-            /// Ok((VarInt(2), Publish(Publish { request_id: VarInt(2),
-            /// track_namespace: TrackNamespace([[99, 111, 110, 102, 111, 114, 109,
-            /// 97, 110, 99, 101]]), track_name: [98, 101, 116, 97], track_al
-            /// ```
-            ///
-            /// It reddens eight, on drafts 12 and 13: two of the gates here and two
-            /// in `an_endpoint_gives_one_alias_to_one_track.rs`:
-            /// `a_refused_publish_spends_no_request_id`,
-            /// `one_alias_for_two_tracks_is_refused`.
             #[test]
             fn an_ended_subscription_frees_its_alias() {
                 let mut ep = accepted();
@@ -773,28 +496,6 @@ macro_rules! outbound_publish_gates {
             }
 
             /// A subscription is ended once.
-            ///
-            /// # What it catches
-            ///
-            /// Taking the acceptance and dropping it — `receive_publish_ok`
-            /// ignoring its argument and returning `Ok(())`, so nothing the
-            /// subscription does afterwards has a state to be judged against:
-            ///
-            /// ```text
-            /// the publisher ends it: PublishFlow(InvalidTransition { from:
-            /// Publishing, event: "on_subscribe_done_sent" })
-            /// ```
-            ///
-            /// It reddens sixteen, on drafts 12 and 13: eight of the gates here.
-            ///
-            /// Building the SUBSCRIBE_DONE without moving the record it ends, so
-            /// the message goes out and the subscription stays live behind it:
-            ///
-            /// ```text
-            /// the publisher ends it: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens eight, on drafts 12 and 13: four of the gates here.
             #[test]
             fn a_subscription_this_endpoint_publishes_is_ended_once() {
                 let mut ep = accepted();
@@ -814,46 +515,7 @@ macro_rules! outbound_publish_gates {
             /// receives a PUBLISH that uses the same Track Alias as a
             /// different track with an active subscription, it MUST close the
             /// session with error 'Duplicate Track Alias'" - and the record it
-            /// reads is the one this file's subject created. Before it, an
-            /// arriving PUBLISH was weighed against the peer's own offers and
-            /// this endpoint's subscriptions, and against nothing this
-            /// endpoint had published.
-            ///
-            /// # What it catches
-            ///
-            /// Taking the acceptance and dropping it — `receive_publish_ok`
-            /// ignoring its argument and returning `Ok(())`, so nothing the
-            /// subscription does afterwards has a state to be judged against:
-            ///
-            /// ```text
-            /// a PUBLISH took the alias a subscription this endpoint publishes
-            /// holds, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens sixteen, on drafts 12 and 13: eight of the gates here.
-            ///
-            /// Leaving an offer of this endpoint's out of the set an arriving
-            /// message is weighed against:
-            ///
-            /// ```text
-            /// a PUBLISH took the alias a subscription this endpoint publishes
-            /// holds, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens two, this gate on drafts 12 and 13 and nothing else.
-            ///
-            /// Recording the offer's state and not the track its alias was bound
-            /// to, so the alias is spent on the wire and free in the table:
-            ///
-            /// ```text
-            /// a PUBLISH took the alias a subscription this endpoint publishes
-            /// holds, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens eight, on drafts 12 and 13: two of the gates here and two
-            /// in `an_endpoint_gives_one_alias_to_one_track.rs`:
-            /// `a_refused_publish_spends_no_request_id`,
-            /// `one_alias_for_two_tracks_is_refused`.
+            /// reads is the one this file's subject created.
             #[test]
             fn an_accepted_offer_is_judged_against_an_arriving_publish() {
                 let mut ep = accepted();
@@ -873,18 +535,6 @@ macro_rules! outbound_publish_gates {
             crate::answer_gates!($answers);
 
             /// An offer needs a running session.
-            ///
-            /// # What it catches
-            ///
-            /// Building the offer without first asking whether there is a session
-            /// to send it on:
-            ///
-            /// ```text
-            /// there is no session to offer on, and instead:
-            /// Err(RequestId(Blocked))
-            /// ```
-            ///
-            /// It reddens two, this gate on drafts 12 and 13 and nothing else.
             #[test]
             fn an_offer_needs_a_running_session() {
                 let mut ep = Endpoint::new(Role::Client);
@@ -914,47 +564,6 @@ macro_rules! outbound_publish_gates {
             /// default was Ascending, one parameter where the default was
             /// none — so a field filled in rather than passed through is
             /// visible rather than accidentally right.
-            ///
-            /// # What it catches
-            ///
-            /// Writing the Content Exists flag from a constant rather than from the
-            /// field it governs:
-            ///
-            /// ```text
-            /// an offer the encoder accepts is a coherent one: InvalidField
-            /// ```
-            ///
-            /// It reddens three, this gate on drafts 12, 13 and 14 and nothing else.
-            ///
-            /// Filling in the delivery order instead of passing the caller's
-            /// through:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the delivery order is the caller's
-            /// to choose left: Ascending right: Descending
-            /// ```
-            ///
-            /// It reddens three, this gate on drafts 12, 13 and 14 and nothing else.
-            ///
-            /// Dropping the parameters the caller passed:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the parameters the caller passed
-            /// must reach the peer left: 0 right: 1
-            /// ```
-            ///
-            /// It reddens three, this gate on drafts 12, 13 and 14 and nothing else.
-            ///
-            /// Dropping the largest location the caller passed. The flag was
-            /// derived before the field went missing, so the two disagree and the
-            /// encoder is what says so — which is why this gate reads the offer
-            /// back off the wire rather than out of the struct:
-            ///
-            /// ```text
-            /// an offer the encoder accepts is a coherent one: InvalidField
-            /// ```
-            ///
-            /// It reddens three, this gate on drafts 12, 13 and 14 and nothing else.
             #[test]
             fn every_field_the_caller_chooses_reaches_the_peer() {
                 let mut ep = active();

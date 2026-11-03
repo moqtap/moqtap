@@ -9,15 +9,6 @@
 //! a well-formed request asking for something the caller did not ask for. The
 //! session stays up, the peer answers, and nothing returns an error.
 //!
-//! # Why this file exists
-//!
-//! Measured. On drafts 15 through 18 a `Connection::absolute_joining_fetch`
-//! was cut to call the endpoint's *relative* builder, and the whole suite
-//! stayed green. The cut compiles, writes a FETCH and asks for the wrong one.
-//! The gates below are what drives a connection helper as far as the wire on
-//! drafts 15 and 16, which is why the file is those two: on them there is
-//! nothing else for a cut like that to get past.
-//!
 //! # What the peer does
 //!
 //! It reads every message the client writes on the control stream, decodes it,
@@ -443,16 +434,6 @@ macro_rules! describe_subscribe_namespace {
 /// Every field is varied on its own. A rendering that kept four of five
 /// fields would still be wrong about the fifth, and a single pair of unlike
 /// requests would not say which.
-///
-/// # What it catches
-///
-/// Making [`common::render`] return the name and type alone, which is the
-/// degenerate rendering the sweep would not notice:
-///
-/// ```text
-/// assertion `left != right` failed: the Fetch Type has to reach the rendering: the relative and absolute forms are one message and differ in it
-///   left: "FETCH 0x16"
-///  right: "FETCH 0x16"
 /// ```
 #[test]
 fn a_rendering_that_dropped_a_field_would_hide_a_helper_asking_for_the_wrong_thing() {
@@ -673,15 +654,6 @@ macro_rules! request_helper_gates {
             /// no draft uses in every failure message this file can produce. The codec's
             /// registry is where these numbers are read against the draft, so it is what
             /// they are held to.
-            ///
-            /// # What it catches
-            ///
-            /// A digit wrong in one of them:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: FETCH
-            ///   left: 22
-            ///  right: 23
             /// ```
             #[test]
             fn the_numbers_the_renderings_carry_are_this_drafts() {
@@ -722,42 +694,6 @@ macro_rules! request_helper_gates {
             /// values, so the gate stays right if the endpoint changes how it
             /// allocates — and a helper that allocated the wrong id still
             /// fails, because the id the peer read is the one on the wire.
-            ///
-            /// # What it catches
-            ///
-            /// Three cuts, run on these two drafts and reverted. Each prints
-            /// both lists whole — eight requests each — so only the element
-            /// that differs is reproduced here, and the assertion line above
-            /// it is verbatim.
-            ///
-            /// Draft-16's `absolute_joining_fetch` left calling the
-            /// endpoint's *relative* builder, which is the cut that opened
-            /// this file and that nothing on these two drafts could see:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: draft-16: every helper must write the request it was told to
-            ///   left: … "FETCH 0x16 request id=6 fetch type=2 joining request id=0 joining start=9 parameters=1" …
-            ///  right: … "FETCH 0x16 request id=6 fetch type=3 joining request id=0 joining start=9 parameters=1" …
-            /// ```
-            ///
-            /// Draft-15's `track_status` passing an empty list to the
-            /// endpoint instead of the caller's, which is a request that asks
-            /// for the right track without the authorization it was given:
-            ///
-            /// ```text
-            ///   left: … "TRACK_STATUS 0x0d request id=10 namespace=one-control-stream track=track-1 parameters=0" …
-            ///  right: … "TRACK_STATUS 0x0d request id=10 namespace=one-control-stream track=track-1 parameters=1" …
-            /// ```
-            ///
-            /// And draft-16's `joining_fetch` naming the wrong request — the
-            /// fetch's own Joining Start where the subscription's id belongs,
-            /// which is the kind of mistake two adjacent varint arguments
-            /// invite:
-            ///
-            /// ```text
-            ///   left: … "FETCH 0x16 request id=4 fetch type=2 joining request id=2 joining start=2 parameters=1" …
-            ///  right: … "FETCH 0x16 request id=4 fetch type=2 joining request id=0 joining start=2 parameters=1" …
-            /// ```
             #[tokio::test]
             async fn every_request_helper_asks_for_what_it_was_told() {
                 crate::common::init_crypto();

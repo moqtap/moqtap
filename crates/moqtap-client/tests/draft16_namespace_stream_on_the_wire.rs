@@ -115,19 +115,6 @@ async fn handshake(
 ///
 /// Section 6.1: "The subscriber sends SUBSCRIBE_NAMESPACE on a new
 /// bidirectional stream".
-///
-/// # What it catches
-///
-/// Writing the message from `Connection::subscribe_namespace` with
-/// `self.send_control(&msg)` fails with
-///
-/// ```text
-/// the client never opened a second bidirectional stream: Elapsed(())
-/// ```
-///
-/// The client still allocates the Request ID and still writes a well-formed
-/// SUBSCRIBE_NAMESPACE; it writes it in the one place this draft does not put
-/// it, and no endpoint gate can see that.
 #[tokio::test]
 async fn the_request_opens_a_bidirectional_stream_of_its_own() {
     use moqtap_client::draft16::connection::FramedRecvStream;
@@ -220,18 +207,6 @@ async fn the_answer_and_its_namespaces_come_back_on_that_stream() {
 ///
 /// Section 6.1 names a FIN as one of the two forms of the cancellation, so a
 /// clean end of stream is not an error here: it comes back as `Ok(None)`.
-///
-/// # What it catches
-///
-/// Dropping the `cancel_namespace_subscription` call from the `Ok(None)` arm of
-/// `recv_on_namespace_stream` fails with
-///
-/// ```text
-/// the answer owed to a withdrawn subscription must be refused, got Ok(())
-/// ```
-///
-/// The client still sees the stream end; its endpoint goes on believing the
-/// subscription is live and applies whatever arrives next to it.
 #[tokio::test]
 async fn the_peers_fin_withdraws_the_subscription() {
     use moqtap_client::draft16::connection::{FramedRecvStream, FramedSendStream};
@@ -278,15 +253,6 @@ async fn the_peers_fin_withdraws_the_subscription() {
 }
 
 /// The peer's reset withdraws it too, by the other half of the same sentence.
-///
-/// # What it catches
-///
-/// Dropping the `cancel_namespace_subscription` call from the error arm of
-/// `recv_on_namespace_stream` fails with
-///
-/// ```text
-/// the answer owed to a reset subscription must be refused, got Ok(())
-/// ```
 #[tokio::test]
 async fn the_peers_reset_withdraws_the_subscription() {
     use moqtap_client::draft16::connection::FramedRecvStream;
@@ -343,15 +309,6 @@ async fn the_peers_reset_withdraws_the_subscription() {
 /// the request reached it — and the gate would then fail on the peer's *first*
 /// read rather than on the one that measures the ending. Waiting for the peer
 /// to say it has the request puts the failure where the claim is.
-///
-/// # What it catches
-///
-/// Giving `NamespaceStream` the `Drop` impl drafts 17 to 20 carry, resetting
-/// both halves, fails with
-///
-/// ```text
-/// a dropped handle finishes the stream cleanly, got Err(Transport(StreamReset(1)))
-/// ```
 #[tokio::test]
 async fn dropping_the_handle_finishes_the_stream_and_leaves_the_record() {
     use moqtap_client::draft16::connection::FramedRecvStream;
@@ -484,16 +441,6 @@ async fn the_peers_subscription_is_answered_on_its_own_stream() {
 /// with the recording cut out, measuring the answered-once rule instead. Before
 /// the answer the two states differ: `Pending` accepts the answer and `Done`
 /// does not, so the assertion turns on the record and nothing else.
-///
-/// # What it catches
-///
-/// The same cut as `the_peers_fin_withdraws_the_subscription` — dropping the
-/// `cancel_namespace_subscription` call from the `Ok(None)` arm of
-/// `recv_on_namespace_stream` — fails here with
-///
-/// ```text
-/// a subscription the peer withdrew must not be answered, got Ok(())
-/// ```
 #[tokio::test]
 async fn a_subscription_withdrawn_before_the_answer_is_not_answered() {
     use moqtap_client::draft16::connection::FramedSendStream;
@@ -588,15 +535,6 @@ async fn a_subscription_this_endpoint_made_is_not_ours_to_answer() {
 /// type unless negotiated. If they do, the peer MUST close the Session with a
 /// Protocol Violation." That close is a statement about the wire, so only the
 /// peer can check it.
-///
-/// # What it catches
-///
-/// Dropping the `self.close_for(&err)` call from `accept_namespace_stream`
-/// fails with
-///
-/// ```text
-/// the client refused the stream but never closed the session: Elapsed(())
-/// ```
 #[tokio::test]
 async fn a_bidi_stream_that_begins_with_the_wrong_message_closes_the_session() {
     use moqtap_client::draft16::connection::FramedSendStream;
@@ -667,24 +605,11 @@ async fn a_bidi_stream_that_begins_with_the_wrong_message_closes_the_session() {
 /// for a peer that sends one elsewhere, so the endpoint refuses the message and
 /// leaves the session running.
 ///
-/// # What it catches, and why the second message is the whole test
+/// # Why the second message is the whole test
 ///
-/// Replacing the `Namespace` arm of `Endpoint::receive_message` with `Ok(())`
-/// fails at the first read with
-///
-/// ```text
-/// NAMESPACE 1 on the control stream is refused, got Ok(Namespace(Namespace {
-/// namespace_suffix: TrackNamespace([[109, 101, 101, 116, 105, 110, 103, 61, 49, 50, 51]]) }))
-/// ```
-///
-/// Answering `Some(ProtocolViolation)` from `session_error_code` for
-/// `NamespaceMessageOnControlStream`, so that the refusal closes the session,
-/// fails at the *second* read instead, and with a transport error rather than
-/// the endpoint's own refusal, because by then the connection is gone. That
-/// second read is what makes the recovery a measurement rather than a claim:
-/// a control message carries its own length, so the next boundary on the
-/// stream is known however this one was refused, and the proof is that the
-/// client finds it.
+/// A control message carries its own length, so the next boundary on the
+/// stream is known however this one was refused. The second read is what
+/// shows the client finds it and the session is still up.
 #[tokio::test]
 async fn a_namespace_on_the_control_stream_is_refused_without_closing() {
     common::init_crypto();
@@ -746,11 +671,6 @@ async fn a_namespace_on_the_control_stream_is_refused_without_closing() {
 /// What they cannot prove is that the refusal reaches the peer, and on this
 /// draft the two requests arrive on two streams, so only a real peer can put
 /// the second one where the first has already been answered.
-///
-/// # What it catches
-///
-/// The same cuts as the endpoint gates: with the relation never holding, the
-/// acceptance below succeeds and this fails on `expect_err`.
 #[tokio::test]
 async fn an_overlapping_namespace_subscription_is_refused_on_its_own_stream() {
     use moqtap_client::draft16::connection::{FramedRecvStream, FramedSendStream};

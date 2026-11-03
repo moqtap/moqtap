@@ -18,7 +18,7 @@
 //! the caller: "The subscriber can set the Start Location to an absolute
 //! Location or a Location relative to the Largest group."
 //!
-//! # Why it is a gap
+//! # Why both forms
 //!
 //! The relative reading needs a number the subscriber may not have. It counts
 //! back from the subscription's largest group, so an application that knows
@@ -29,16 +29,11 @@
 //!
 //! # Where the range comes from
 //!
-//! Fetch Type 0x3 is defined on every draft from 11 and the call to send one
-//! was on drafts 11 through 14 and draft-19 alone. These five are the drafts
+//! Fetch Type 0x3 is defined on every draft from 11. These five are the drafts
 //! whose call takes a Joining Request ID and a Joining Start and nothing else;
 //! draft-14's carries the Subscriber Priority and Group Order that draft-15
 //! moved into the parameters, so its gate stays with the rest of its draft's
 //! message shapes in `draft14_endpoint_tests.rs`.
-//!
-//! Draft-19 is in the range although it had the pair already. It is the draft
-//! the other four were copied from, and a file that gated the four copies and
-//! not the original would not notice the original breaking.
 //!
 //! # The wording moves twice inside these five drafts
 //!
@@ -109,32 +104,6 @@ macro_rules! absolute_joining_gates {
             ///
             /// The relative half is not decoration: it is what keeps the gate
             /// from being passed by an endpoint that sends 0x3 for everything.
-            ///
-            /// # What it catches
-            ///
-            /// An endpoint with no way to send the absolute form, which is
-            /// what four of these five drafts had. Taking the method away
-            /// again reports at the connection helper before it reports here,
-            /// because the helper is the first caller the compiler reaches:
-            ///
-            /// ```text
-            /// error[E0599]: no method named `absolute_joining_fetch` found
-            /// for struct `endpoint::Endpoint` in the current scope
-            /// ```
-            ///
-            /// And, once there is one, either type sent in the other's place:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: an Absolute Joining Fetch
-            /// reaches the peer as Fetch Type 0x3; 0x2 asks the publisher to
-            /// count back from a group the caller never named
-            ///   left: 2
-            ///  right: 3
-            /// ```
-            ///
-            /// Each of those two reddens this gate on the draft it was cut
-            /// in, and the second reddens draft-19's own unit test beside it,
-            /// which is the only other place the difference is watched.
             #[test]
             fn an_absolute_joining_fetch_names_the_group_it_starts_at() {
                 let mut ep = active();
@@ -181,19 +150,6 @@ macro_rules! absolute_joining_gates {
             /// that is watched: the pair share one private builder, and a
             /// second one written later could quietly stop passing the list
             /// on.
-            ///
-            /// # What it catches
-            ///
-            /// The cut that empties the list, which is made in the shared
-            /// builder and so reddens this gate and the file that owns the
-            /// claim together:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the parameter the caller
-            /// attached must be on the request
-            ///   left: 0
-            ///  right: 1
-            /// ```
             #[test]
             fn an_absolute_joining_fetch_carries_the_parameters_it_was_given() {
                 let mut ep = active();

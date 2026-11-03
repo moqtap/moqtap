@@ -336,9 +336,9 @@ fn identities(draft: DraftVersion, wire: &[u8], id: &str) -> Vec<Identity> {
 /// same bytes — but only for the canonically encoded vectors, and the corpus
 /// carries fetch streams that are not canonically encoded on purpose.
 ///
-/// This is the gate the file header's ablation leaves **passing**, which is
-/// what it is there to show: verbatim forwarding reproduces an untouched
-/// stream perfectly.
+/// A writer that deleted bytes and re-encoded nothing also passes this gate,
+/// which is what it is there to show: verbatim forwarding reproduces an
+/// untouched stream perfectly.
 #[test]
 fn a_stream_nothing_was_removed_from_re_emits_to_itself() {
     for &draft in COMPILED_DRAFTS {
@@ -525,18 +525,11 @@ fn the_framing_is_re_emitted_from_a_prefix_of_the_frame() {
 /// was read off separates those two, and the mistake would produce bytes that
 /// decode — the extension block alone moves three times across that range.
 ///
-/// *Ablation (measured):* drop the draft comparison at the top of
-/// `reemit_object` and leave the match's catch-all arm to refuse what it can.
-///
-/// ```text
-/// ---- a_frame_from_another_draft_is_refused stdout ----
-/// a frame from another draft must not be re-encoded: Unchanged
-/// ```
-///
-/// The catch-all still refuses every pair that crosses the draft-15 boundary,
-/// where the two sides carry different shapes. It cannot refuse a pair inside
-/// drafts 07-14, where both sides are the same shapeless variant — and that is
-/// the pair this test failed on.
+/// Fails if `reemit_object` drops the draft comparison at its top and leaves
+/// the match's catch-all arm to refuse what it can. The catch-all refuses every
+/// pair that crosses the draft-15 boundary, where the two sides carry different
+/// shapes, but not a pair inside drafts 07-14, where both sides are the same
+/// shapeless variant.
 #[test]
 fn a_frame_from_another_draft_is_refused() {
     if COMPILED_DRAFTS.len() < 2 {

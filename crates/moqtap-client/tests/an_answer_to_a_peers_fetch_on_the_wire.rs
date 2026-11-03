@@ -134,16 +134,6 @@ macro_rules! fetch_answer_wire_gates {
             }
 
             /// The FETCH_OK answering the peer's FETCH reaches the peer.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the client was sent a FETCH and never answered it: Elapsed(())
-            /// ```
-            ///
-            /// Made by building the FETCH_OK and dropping it instead of writing it. It
-            /// reddens five tests and only this gate: in process the endpoint's own
-            /// record moves either way, so nothing but a peer can see the difference.
             #[tokio::test]
             async fn a_fetch_ok_reaches_the_peer() {
                 crate::common::init_crypto();
@@ -169,16 +159,6 @@ macro_rules! fetch_answer_wire_gates {
 
             /// The refusal of a Joining Fetch that joins nothing reaches the
             /// peer, carrying the code the section names.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the client was sent a FETCH and never answered it: Elapsed(())
-            /// ```
-            ///
-            /// The same cut on the refusal, which is a method of its own up to
-            /// draft-14 and a branch of REQUEST_ERROR's on the two after it. It
-            /// reddens five tests and only this gate.
             #[tokio::test]
             async fn a_joining_fetchs_refusal_reaches_the_peer() {
                 crate::common::init_crypto();

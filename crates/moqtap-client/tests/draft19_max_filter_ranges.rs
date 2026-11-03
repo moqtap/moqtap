@@ -135,15 +135,6 @@ fn request_error(code: RequestErrorCode) -> ControlMessage {
 /// MUST NOT send any such filter parameters" is the rule; "MUST reject this with
 /// REQUEST_ERROR" is the answer, and it is not the answer the option next door
 /// gives.
-///
-/// # What it catches
-///
-/// Ablation: dropping the guard from `send_response_on_stream` accepts the
-/// subscription the endpoint had no budget to apply the filters of:
-///
-/// ```text
-/// a request whose filters must be rejected cannot be accepted: Ok(())
-/// ```
 #[test]
 fn a_range_filter_with_no_budget_advertised_cannot_be_accepted() {
     let mut endpoint = advertising(None);
@@ -210,16 +201,6 @@ fn a_request_inside_the_budget_is_accepted() {
 /// "the total number of Ranges allowed in all Range Filter parameters for a
 /// given subscription or fetch". A count kept per parameter never reaches the
 /// ceiling: three filters of two ranges each are two, two and two.
-///
-/// # What it catches
-///
-/// Ablation: counting the ranges of the largest filter instead of their sum:
-///
-/// ```text
-/// assertion `left == right` failed: six ranges across three filters must exceed a budget of four
-///   left: None
-///  right: Some(TooManyRanges { ranges: 6, limit: 4 })
-/// ```
 #[test]
 fn the_budget_is_spent_across_every_filter() {
     let mut endpoint = advertising(Some(4));
@@ -344,21 +325,6 @@ fn a_filter_that_does_not_read_is_a_rejection_too() {
 // it to what was already there, and dropping what it did not mention.
 
 /// An update that takes the request past the budget is rejected.
-///
-/// # What it catches
-///
-/// Ablation: dropping the ceiling from `receive_request_update`, so the request
-/// is held to its budget and nothing an update changes it into is:
-///
-/// ```text
-/// assertion `left == right` failed: six ranges in force against a budget of four
-///   left: None
-///  right: Some(TooManyRanges { ranges: 6, limit: 4 })
-/// ```
-///
-/// Measuring the update's parameters on their own does *not* fail this one, and
-/// that is worth saying: six ranges arriving in one message are six however they
-/// are counted. It takes the two gates below to tell the two readings apart.
 #[test]
 fn an_update_past_the_budget_is_rejected() {
     let (mut endpoint, id) =
@@ -400,19 +366,6 @@ fn an_update_past_the_budget_is_rejected() {
 /// sets and Property Types". An endpoint that appended would reject a request
 /// that is inside its budget, and would do it on the peer's second update rather
 /// than its first.
-///
-/// # What it catches
-///
-/// Ablation: extending the set in force instead of replacing by Parameter Type:
-///
-/// ```text
-/// assertion `left == right` failed: the update replaced the three ranges with four, and four is the budget
-///   left: Some(TooManyRanges { ranges: 7, limit: 4 })
-///  right: None
-/// ```
-///
-/// Three and four counted as seven, which is the request's whole history rather
-/// than its current state.
 #[test]
 fn a_replacement_replaces_rather_than_adds() {
     let (mut endpoint, id) = accepted_subscription(
@@ -440,16 +393,6 @@ fn a_replacement_replaces_rather_than_adds() {
 /// from REQUEST_UPDATE, the value is unchanged", so an endpoint that measured
 /// only what the update named would let a subscription take up ranges one
 /// parameter type at a time and never see a total.
-///
-/// # What it catches
-///
-/// Ablation: measuring the update's own parameters rather than the merged set:
-///
-/// ```text
-/// assertion `left == right` failed: three ranges the update left alone plus the two it set
-///   left: None
-///  right: Some(TooManyRanges { ranges: 5, limit: 4 })
-/// ```
 #[test]
 fn a_filter_the_update_does_not_mention_still_counts() {
     let (mut endpoint, id) = accepted_subscription(
@@ -477,20 +420,6 @@ fn a_filter_the_update_does_not_mention_still_counts() {
 /// one filter and take up another in the same update. An endpoint that treated
 /// the zero-length parameter as a filter of its own would leave the old ranges
 /// in force and refuse the exchange.
-///
-/// # What it catches
-///
-/// Ablation: taking the types an update mentions from its non-empty parameters
-/// only, so that a removal names nothing and therefore removes nothing:
-///
-/// ```text
-/// assertion `left == right` failed: the four Subgroup ranges were removed in the same message that took up two
-///   left: Some(TooManyRanges { ranges: 6, limit: 4 })
-///  right: None
-/// ```
-///
-/// A subscriber that did everything the section asks of it would be refused,
-/// which is the failure mode a ceiling has to avoid most.
 #[test]
 fn a_removal_gives_the_budget_back() {
     let (mut endpoint, id) = accepted_subscription(

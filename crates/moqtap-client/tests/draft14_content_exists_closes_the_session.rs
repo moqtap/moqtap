@@ -94,22 +94,8 @@ fn subscribe_ok_with_an_unassigned_content_exists() -> Vec<u8> {
 /// A Content Exists that is neither zero nor one closes the QUIC connection with
 /// PROTOCOL_VIOLATION.
 ///
-/// # What it catches, observed by making the change and running it
-///
-/// Sending `CodecError::InvalidContentExists` to the `None` arm of draft-14's
-/// `codec_session_error_code` — the state every draft from 08 to 14 was in. The
-/// decoder still refuses the frame, so the client-side half of this test passes
-/// unchanged; only the wire shows the difference:
-///
-/// ```text
-/// ---- an_unassigned_content_exists_closes_the_quic_connection stdout ----
-///
-/// thread 'an_unassigned_content_exists_closes_the_quic_connection' (36548) panicked at crates\moqtap-client\tests\draft14_content_exists_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
-///
-/// That is the whole reason this gate is on the wire and not in the codec: a
-/// decoder test cannot tell a routed rule from an unrouted one.
+/// The gate is on the wire because a decoder test cannot tell a routed rule
+/// from an unrouted one.
 #[tokio::test]
 async fn an_unassigned_content_exists_closes_the_quic_connection() {
     common::init_crypto();

@@ -246,29 +246,14 @@ macro_rules! own_publish {
 /// One map of state machines holds both directions on drafts 14, 15 and 16, so
 /// the record that answers which offer the peer made has to be the one that
 /// knows which direction the offer went. Drafts 12 and 13 hold the two
-/// directions in two records and the separation is structural there, which is
-/// why the cut recorded below does not reach them; the gate is still theirs to
-/// pass, because a record that answered by identifier alone would be the
-/// obvious way to write it.
+/// directions in two records and the separation is structural there; the gate
+/// is still theirs to pass, because a record that answered by identifier
+/// alone would be the obvious way to write it.
 #[macro_export]
 macro_rules! own_offer_gate {
     (none, $ignored:tt) => {};
     (own, $call:tt) => {
         /// An offer this endpoint made itself is not one the peer made.
-        ///
-        /// # What it catches
-        ///
-        /// Recording this endpoint's own PUBLISH in the same place the peer's
-        /// goes, which is what a map keyed by Request ID alone invites:
-        ///
-        /// ```text
-        /// an offer this endpoint made was read back as the peer's, and named Some(VarInt(0))
-        /// ```
-        ///
-        /// It reddens three tests, this gate on each of the three drafts. The
-        /// state of both directions is in one map here and that is not the
-        /// defect; what tells them apart is that only an arrival writes the
-        /// message down.
         #[test]
         fn an_offer_of_this_endpoints_own_is_not_the_peers() {
             let mut ep = offered();
@@ -367,20 +352,6 @@ macro_rules! inbound_publish_gates {
             /// it a PUBLISH is checked for its Request ID and then dropped,
             /// and the peer waits for an answer the endpoint has no record to
             /// build one from.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Removing the `ControlMessage::Publish` arm from
-            /// `receive_message`:
-            ///
-            /// ```text
-            /// the PUBLISH that arrived on the control stream could not be answered: UnknownRequest(1)
-            /// ```
-            ///
-            /// It reddens fifteen tests: this gate on all five drafts, and
-            /// both loopback gates on the same five, where the PUBLISH
-            /// arrives off a real QUIC stream and this arm is the only thing
-            /// that takes it anywhere.
             #[test]
             fn a_publish_off_the_control_stream_reaches_the_flow() {
                 let mut ep = active();
@@ -401,26 +372,6 @@ macro_rules! inbound_publish_gates {
             /// the alias is the one the endpoint has to hold against a second
             /// offer, so a record that kept only the identifier would pass the
             /// rest of this file and fail here.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Moving the state machine on and dropping the message, which on
-            /// drafts 14, 15 and 16 leaves nothing holding the offer:
-            ///
-            /// ```text
-            /// the offer the peer made must be readable
-            /// ```
-            ///
-            /// It reddens twelve tests, all on those three drafts: this gate,
-            /// the one that says an offer of this endpoint's own is not the
-            /// peer's, and both loopback gates in
-            /// `duplicate_track_alias_on_the_wire.rs`, where the offer arrives
-            /// off a real QUIC stream. Drafts 12 and 13 stay green, which is
-            /// what already holding the record looks like from here.
-            ///
-            /// The two gates below it are the ones the cut cannot reach: both
-            /// assert an absence, and with no record at all there is nothing
-            /// to read back either way. They have cuts of their own.
             #[test]
             fn the_offer_the_peer_made_is_read_back() {
                 let ep = offered();
@@ -452,21 +403,6 @@ macro_rules! inbound_publish_gates {
             /// the record is read against the state rather than against its
             /// own presence: the offer stays on record for as long as the
             /// subscription does.
-            ///
-            /// # What it catches
-            ///
-            /// Reading the record back without asking the state machine beside
-            /// it whether an answer is still owed - `pending_publish` answering
-            /// `self.inbound_publishes.get(&id)` and nothing more:
-            ///
-            /// ```text
-            /// an answered offer is still waiting for an answer, and named Some(VarInt(1))
-            /// ```
-            ///
-            /// It reddens three tests, this gate on each of the three drafts,
-            /// and no others: every other gate here reads the record while it
-            /// is still owed an answer, which is the state the cut does not
-            /// change.
             #[test]
             fn an_answered_offer_is_no_longer_waiting() {
                 let ep = accepted();
@@ -481,28 +417,6 @@ macro_rules! inbound_publish_gates {
             }
 
             /// An identifier no offer arrived under reads back nothing.
-            ///
-            /// # What it catches
-            ///
-            /// Finding the record by iteration instead of by the identifier
-            /// the caller named, and judging what was found instead of what
-            /// was asked for. Every other gate in this file has exactly one
-            /// offer outstanding, so a lookup that ignores the id finds the
-            /// right record by accident:
-            ///
-            /// ```text
-            /// an offer was read back for an id nothing arrived under
-            /// ```
-            ///
-            /// It reddens six tests: this gate and the one below it, on all
-            /// three drafts that gained the record.
-            ///
-            /// Both halves have to be cut together. `pending_publish` looks the
-            /// record up by id *and* asks the state machine, also by id,
-            /// whether an answer is owed; replacing only the lookup leaves this
-            /// gate green, because the state probe still refuses an identifier
-            /// nothing arrived under. That was measured too: the one-sided cut
-            /// failed two gates away instead of here.
             #[test]
             fn an_identifier_no_offer_arrived_under_reads_back_nothing() {
                 let ep = offered();
@@ -512,21 +426,6 @@ macro_rules! inbound_publish_gates {
 
             crate::own_offer_gate!($own, $ownmsg);
             /// An answer to a PUBLISH that never arrived is refused.
-            ///
-            /// # What it catches
-            ///
-            /// Answering whichever offer is outstanding instead of the one
-            /// the answer names - looking the record up by iteration rather
-            /// than by id:
-            ///
-            /// ```text
-            /// a PUBLISH_OK was built for a request that never arrived: ()
-            /// ```
-            ///
-            /// It reddens five tests and no others: this gate, on all five
-            /// drafts. Every other gate here has exactly one offer
-            /// outstanding, so a lookup that ignores the id finds the right
-            /// record by accident.
             #[test]
             fn an_answer_to_a_publish_that_never_arrived_is_refused() {
                 let mut ep = offered();
@@ -541,18 +440,6 @@ macro_rules! inbound_publish_gates {
             }
 
             /// A second PUBLISH_OK for one PUBLISH is refused.
-            ///
-            /// # What it catches
-            ///
-            /// Answering without moving the record on, so that the answer
-            /// either drops the record or never makes one. That cut is the
-            /// one recorded in this file's header, because it reaches
-            /// thirty-five tests across three files and no single gate is
-            /// where it belongs:
-            ///
-            /// ```text
-            /// a second PUBLISH_OK was sent for one PUBLISH: ()
-            /// ```
             #[test]
             fn a_second_acceptance_is_refused() {
                 let mut ep = accepted();
@@ -566,20 +453,6 @@ macro_rules! inbound_publish_gates {
             /// The other order, and a separate input because it leaves the
             /// record in a different state: "exactly one" is one answer of
             /// either kind, not one of each.
-            ///
-            /// # What it catches
-            ///
-            /// Letting the acceptance run from the state a rejection leaves:
-            ///
-            /// ```text
-            /// a PUBLISH was accepted after it had been rejected: ()
-            /// ```
-            ///
-            /// The cut is the rejection's own, not the acceptance's: leaving
-            /// the record where it was when the PUBLISH_ERROR went out
-            /// reddens five tests and only this gate. The acceptance has a
-            /// cut of its own and it reddens this gate too, which is what
-            /// two answers to one question look like.
             #[test]
             fn a_rejected_publish_cannot_then_be_accepted() {
                 let mut ep = offered();
@@ -595,28 +468,6 @@ macro_rules! inbound_publish_gates {
             /// The section gives the subscriber UNSUBSCRIBE for a
             /// subscription that is established; an offer still waiting for
             /// its answer is refused with the rejection message instead.
-            ///
-            /// # What it catches
-            ///
-            /// Discarding what the record says when the UNSUBSCRIBE is sent,
-            /// so that it ends from any state rather than from the one the
-            /// subscription exists in:
-            ///
-            /// ```text
-            /// an offer this endpoint had not accepted was unsubscribed: Unsubscribe(Unsubscribe { request_id: VarInt(1) })
-            /// ```
-            ///
-            /// It reddens fifteen tests: this gate and the two below it, on
-            /// all five drafts.
-            ///
-            /// A second cut, taking the inbound-offer probe out of
-            /// `unsubscribe` altogether, reddens this gate for a different
-            /// reason - the refusal stops coming from the publish flow and
-            /// starts coming from the request id not being found at all:
-            ///
-            /// ```text
-            /// the refusal should come from the publish flow, and came from UnknownRequest(1)
-            /// ```
             #[test]
             fn an_unanswered_publish_cannot_be_unsubscribed() {
                 let mut ep = offered();
@@ -631,19 +482,6 @@ macro_rules! inbound_publish_gates {
             }
 
             /// The subscriber ends an accepted offer with UNSUBSCRIBE, once.
-            ///
-            /// # What it catches
-            ///
-            /// Taking the inbound-offer probe out of `unsubscribe`, which
-            /// leaves the message with nowhere to land:
-            ///
-            /// ```text
-            /// UNSUBSCRIBE for an accepted offer: UnknownRequest(1)
-            /// ```
-            ///
-            /// It reddens fifteen tests: this gate, the one above it and
-            /// `an_alias_is_free_once_its_publish_ends` in the alias file,
-            /// on all five drafts.
             #[test]
             fn an_accepted_publish_is_ended_by_unsubscribe() {
                 let mut ep = accepted();
@@ -658,20 +496,6 @@ macro_rules! inbound_publish_gates {
             /// The other end of the same subscription, and the message that
             /// carries it is one this endpoint receives rather than sends -
             /// which is a different route into the same record.
-            ///
-            /// # What it catches
-            ///
-            /// Routing the publisher's end-of-subscription message only to
-            /// subscriptions this endpoint asked for:
-            ///
-            /// ```text
-            /// the publisher could not end the subscription it opened: UnknownRequest(1)
-            /// ```
-            ///
-            /// It reddens five tests and no others: this gate, on all five
-            /// drafts. The subscriber's own route into the same record is a
-            /// different probe in a different method, and cutting either one
-            /// leaves the other's gate green.
             #[test]
             fn an_accepted_publish_is_ended_by_the_publisher() {
                 let mut ep = accepted();

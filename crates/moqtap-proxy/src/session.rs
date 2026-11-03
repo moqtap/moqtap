@@ -3171,19 +3171,17 @@ async fn forward_request_streams(
         // session aborting it, and by `accept_bi` failing when the
         // connection goes, not by returning on its own.
         //
-        // Measured rather than assumed. Racing this accept against
-        // `ctx.cancel` and returning first on cancellation moves
-        // `run_with_transport` past `tasks.shutdown()` and into
-        // `client.close()` / `relay.close()` before the *per-stream* tasks
-        // have run their own teardown drains — the drain in
-        // `pipe_data_framed`'s cancel branch that writes what a hook was
-        // holding and fires a queued terminal. On a current-thread runtime
-        // that reordering is deterministic, and
-        // `actions_timing::cancelling_while_an_object_is_held_tears_down_promptly`
-        // fails on it every run: no `RESET_STREAM` at the relay within a
-        // second, the connection closing out from under the drain instead.
-        // A task the session has to abort is a task whose abort yields, and
-        // the drains get their turn.
+        // Racing this accept against `ctx.cancel` and returning first on
+        // cancellation would move `run_with_transport` past
+        // `tasks.shutdown()` and into `client.close()` / `relay.close()`
+        // before the *per-stream* tasks run their own teardown drains — the
+        // drain in `pipe_data_framed`'s cancel branch that writes what a hook
+        // was holding and fires a queued terminal. The connection would close
+        // out from under the drain and no `RESET_STREAM` would reach the relay
+        // (on a current-thread runtime, deterministically). A task the session
+        // has to abort is a task whose abort yields, and the drains get their
+        // turn. Guarded by
+        // `actions_timing::cancelling_while_an_object_is_held_tears_down_promptly`.
         let (source_send, source_recv) = source.accept_bi().await?;
         ctx.emit(|| ProxyEvent::BiStreamOpened {
             session_id: ctx.session_id,
@@ -6902,21 +6900,6 @@ mod tests {
     ///
     /// The fixed-length framing (drafts 11-22): type varint, then a
     /// sixteen-bit big-endian length.
-    ///
-    /// *Ablation, recorded:* have `advance` return the **last** boundary in
-    /// the chunk rather than the first — change `if first.is_none()` to an
-    /// unconditional assignment. The `Some(first.len())` assertion below
-    /// goes red with the real message
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the seam is where the first message
-    /// ends, so an injection goes between the two rather than after both
-    ///   left: Some(13)
-    ///  right: Some(7)
-    /// ```
-    ///
-    /// which is the injection arriving one message later than it could
-    /// have — correct on the wire, and later than the caller asked for.
     #[test]
     fn the_walker_names_the_seam_between_two_messages() {
         let first = frame_u16_length(0x40, &[1, 2, 3]);
@@ -7311,12 +7294,6 @@ mod tests {
     /// watcher that never resolved, so the test asserts that it *did*
     /// resolve — with the value it was given, and by observing
     /// `is_watching()` flip — before asserting that a second poll is inert.
-    ///
-    /// *Ablation (run, and it fails):* delete `self.watching = None;` —
-    /// the line marked `THE FUSE` in [`StopWatcher::watch`]. The
-    /// `is_watching()` assertion below goes red immediately, and the
-    /// second `watch()` panics with "`async fn` resumed after completion"
-    /// rather than staying pending.
     #[tokio::test]
     async fn the_watcher_is_not_repolled_after_it_resolves() {
         let mut watcher = StopWatcher::watching_over(async { Err(TransportError::Stopped(0x2a)) });
@@ -7348,10 +7325,6 @@ mod tests {
     /// outcome allowed to tear a session down is the peer's own
     /// `STOP_SENDING`. `Ok(())` cannot fire on a live stream and a lost
     /// connection is the read side's business; both must be inert here.
-    ///
-    /// *Ablation:* make `stop_error` return `Some` for any `Err`. The
-    /// `Connection` row goes red — and end to end, every session whose
-    /// destination connection ends would mirror a stop it never received.
     #[test]
     fn only_a_peer_stop_ends_a_stream() {
         assert!(matches!(

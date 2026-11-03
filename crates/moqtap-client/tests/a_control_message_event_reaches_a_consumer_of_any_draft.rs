@@ -9,7 +9,7 @@
 //! answers with a [`ControlFrame`] instead, and this is what says it answers
 //! correctly.
 //!
-//! # What it catches
+//! # What it asserts
 //!
 //! **The direction, above everything else.** `ControlFrame::outbound` is a
 //! `bool`, so a mapping that inverted it — `Direction::Send` to `false` — would

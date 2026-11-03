@@ -7,11 +7,9 @@
 //! AbsoluteRange filter and SUBSCRIBE_UPDATE say the same of their own ends,
 //! for as long as those messages carry the range as fields of their own.
 //!
-//! Nothing applied any of it, on either side, so a FETCH from group 100 to
-//! group 5 was written and read without complaint. A range that ends before it
-//! starts selects nothing, and the publisher's only answers are an error
-//! response or a session close, so writing one is not a way to ask for
-//! anything.
+//! A range that ends before it starts selects nothing, and the publisher's
+//! only answers are an error response or a session close, so writing one is
+//! not a way to ask for anything.
 //!
 //! Three field conventions meet here and the gates keep them apart. A SUBSCRIBE
 //! End Group is inclusive. A SUBSCRIBE_UPDATE End Group is the last group plus
@@ -19,10 +17,6 @@
 //! one, and zero asks for the rest of the group. Each is exercised at the
 //! boundary its own convention creates, so a check that collapsed the three
 //! into one comparison would fail here rather than pass.
-//!
-//! The failure messages recorded in the tests below are draft-09's. Every draft
-//! fails the same way; only the leading bytes of the frame differ, because the
-//! field lists in front of the range are not the same on any two of them.
 
 #![allow(clippy::items_after_test_module)]
 
@@ -149,13 +143,6 @@ mod draft07 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -164,13 +151,6 @@ mod draft07 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -178,14 +158,6 @@ mod draft07 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -246,13 +218,6 @@ mod draft07 {
     /// Its End Group is inclusive rather than plus one, so an end group equal
     /// to the start group is the remainder of that group and is legal - the
     /// draft says so in as many words. Only a smaller one is refused.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subscription cannot end before it starts:
-    /// Ok([3, 15, 1, 2, 1, 2, 110, 115, 1, 116, 3, 1, 4, 42, 0, 7, 0])
-    /// ```
     #[test]
     fn a_subscription_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe(GROUP, 0, 7));
@@ -276,12 +241,6 @@ mod draft07 {
 
     /// SUBSCRIBE_UPDATE spells its End Group as the last group plus one, and a
     /// zero there is an open end rather than a bound at group zero.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an update cannot end before it starts: Ok([2, 6, 1, 42, 0, 7, 3, 0])
-    /// ```
     #[test]
     fn an_update_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -290,12 +249,6 @@ mod draft07 {
 
     /// The zero that means "open ended" is not a range ending at group zero,
     /// and a check that read it as one would refuse every open update.
-    ///
-    /// Dropping the exemption fails with:
-    ///
-    /// ```text
-    /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-    /// ```
     #[test]
     fn an_open_ended_update_is_carried() {
         let message = subscribe_update(GROUP, 0, 0);
@@ -357,13 +310,6 @@ mod draft08 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -372,13 +318,6 @@ mod draft08 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -386,14 +325,6 @@ mod draft08 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -452,13 +383,6 @@ mod draft08 {
     /// Its End Group is inclusive rather than plus one, so an end group equal
     /// to the start group is the remainder of that group and is legal - the
     /// draft says so in as many words. Only a smaller one is refused.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subscription cannot end before it starts:
-    /// Ok([3, 15, 1, 2, 1, 2, 110, 115, 1, 116, 3, 1, 4, 42, 0, 7, 0])
-    /// ```
     #[test]
     fn a_subscription_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe(GROUP, 0, 7));
@@ -482,12 +406,6 @@ mod draft08 {
 
     /// SUBSCRIBE_UPDATE spells its End Group as the last group plus one, and a
     /// zero there is an open end rather than a bound at group zero.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an update cannot end before it starts: Ok([2, 6, 1, 42, 0, 7, 3, 0])
-    /// ```
     #[test]
     fn an_update_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -496,12 +414,6 @@ mod draft08 {
 
     /// The zero that means "open ended" is not a range ending at group zero,
     /// and a check that read it as one would refuse every open update.
-    ///
-    /// Dropping the exemption fails with:
-    ///
-    /// ```text
-    /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-    /// ```
     #[test]
     fn an_open_ended_update_is_carried() {
         let message = subscribe_update(GROUP, 0, 0);
@@ -563,13 +475,6 @@ mod draft09 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -578,13 +483,6 @@ mod draft09 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -592,14 +490,6 @@ mod draft09 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -658,13 +548,6 @@ mod draft09 {
     /// Its End Group is inclusive rather than plus one, so an end group equal
     /// to the start group is the remainder of that group and is legal - the
     /// draft says so in as many words. Only a smaller one is refused.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subscription cannot end before it starts:
-    /// Ok([3, 15, 1, 2, 1, 2, 110, 115, 1, 116, 3, 1, 4, 42, 0, 7, 0])
-    /// ```
     #[test]
     fn a_subscription_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe(GROUP, 0, 7));
@@ -688,12 +571,6 @@ mod draft09 {
 
     /// SUBSCRIBE_UPDATE spells its End Group as the last group plus one, and a
     /// zero there is an open end rather than a bound at group zero.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an update cannot end before it starts: Ok([2, 6, 1, 42, 0, 7, 3, 0])
-    /// ```
     #[test]
     fn an_update_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -702,12 +579,6 @@ mod draft09 {
 
     /// The zero that means "open ended" is not a range ending at group zero,
     /// and a check that read it as one would refuse every open update.
-    ///
-    /// Dropping the exemption fails with:
-    ///
-    /// ```text
-    /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-    /// ```
     #[test]
     fn an_open_ended_update_is_carried() {
         let message = subscribe_update(GROUP, 0, 0);
@@ -769,13 +640,6 @@ mod draft10 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -784,13 +648,6 @@ mod draft10 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -798,14 +655,6 @@ mod draft10 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -864,13 +713,6 @@ mod draft10 {
     /// Its End Group is inclusive rather than plus one, so an end group equal
     /// to the start group is the remainder of that group and is legal - the
     /// draft says so in as many words. Only a smaller one is refused.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subscription cannot end before it starts:
-    /// Ok([3, 15, 1, 2, 1, 2, 110, 115, 1, 116, 3, 1, 4, 42, 0, 7, 0])
-    /// ```
     #[test]
     fn a_subscription_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe(GROUP, 0, 7));
@@ -894,12 +736,6 @@ mod draft10 {
 
     /// SUBSCRIBE_UPDATE spells its End Group as the last group plus one, and a
     /// zero there is an open end rather than a bound at group zero.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an update cannot end before it starts: Ok([2, 6, 1, 42, 0, 7, 3, 0])
-    /// ```
     #[test]
     fn an_update_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -908,12 +744,6 @@ mod draft10 {
 
     /// The zero that means "open ended" is not a range ending at group zero,
     /// and a check that read it as one would refuse every open update.
-    ///
-    /// Dropping the exemption fails with:
-    ///
-    /// ```text
-    /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-    /// ```
     #[test]
     fn an_open_ended_update_is_carried() {
         let message = subscribe_update(GROUP, 0, 0);
@@ -975,13 +805,6 @@ mod draft11 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -990,13 +813,6 @@ mod draft11 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -1004,14 +820,6 @@ mod draft11 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -1070,13 +878,6 @@ mod draft11 {
     /// Its End Group is inclusive rather than plus one, so an end group equal
     /// to the start group is the remainder of that group and is legal - the
     /// draft says so in as many words. Only a smaller one is refused.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subscription cannot end before it starts:
-    /// Ok([3, 15, 1, 2, 1, 2, 110, 115, 1, 116, 3, 1, 4, 42, 0, 7, 0])
-    /// ```
     #[test]
     fn a_subscription_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe(GROUP, 0, 7));
@@ -1100,12 +901,6 @@ mod draft11 {
 
     /// SUBSCRIBE_UPDATE spells its End Group as the last group plus one, and a
     /// zero there is an open end rather than a bound at group zero.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an update cannot end before it starts: Ok([2, 6, 1, 42, 0, 7, 3, 0])
-    /// ```
     #[test]
     fn an_update_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -1114,12 +909,6 @@ mod draft11 {
 
     /// The zero that means "open ended" is not a range ending at group zero,
     /// and a check that read it as one would refuse every open update.
-    ///
-    /// Dropping the exemption fails with:
-    ///
-    /// ```text
-    /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-    /// ```
     #[test]
     fn an_open_ended_update_is_carried() {
         let message = subscribe_update(GROUP, 0, 0);
@@ -1181,13 +970,6 @@ mod draft12 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -1196,13 +978,6 @@ mod draft12 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -1210,14 +985,6 @@ mod draft12 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -1275,13 +1042,6 @@ mod draft12 {
     /// Its End Group is inclusive rather than plus one, so an end group equal
     /// to the start group is the remainder of that group and is legal - the
     /// draft says so in as many words. Only a smaller one is refused.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subscription cannot end before it starts:
-    /// Ok([3, 15, 1, 2, 1, 2, 110, 115, 1, 116, 3, 1, 4, 42, 0, 7, 0])
-    /// ```
     #[test]
     fn a_subscription_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe(GROUP, 0, 7));
@@ -1305,12 +1065,6 @@ mod draft12 {
 
     /// SUBSCRIBE_UPDATE spells its End Group as the last group plus one, and a
     /// zero there is an open end rather than a bound at group zero.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an update cannot end before it starts: Ok([2, 6, 1, 42, 0, 7, 3, 0])
-    /// ```
     #[test]
     fn an_update_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -1319,12 +1073,6 @@ mod draft12 {
 
     /// The zero that means "open ended" is not a range ending at group zero,
     /// and a check that read it as one would refuse every open update.
-    ///
-    /// Dropping the exemption fails with:
-    ///
-    /// ```text
-    /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-    /// ```
     #[test]
     fn an_open_ended_update_is_carried() {
         let message = subscribe_update(GROUP, 0, 0);
@@ -1386,13 +1134,6 @@ mod draft13 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -1401,13 +1142,6 @@ mod draft13 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -1415,14 +1149,6 @@ mod draft13 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -1480,13 +1206,6 @@ mod draft13 {
     /// Its End Group is inclusive rather than plus one, so an end group equal
     /// to the start group is the remainder of that group and is legal - the
     /// draft says so in as many words. Only a smaller one is refused.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subscription cannot end before it starts:
-    /// Ok([3, 15, 1, 2, 1, 2, 110, 115, 1, 116, 3, 1, 4, 42, 0, 7, 0])
-    /// ```
     #[test]
     fn a_subscription_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe(GROUP, 0, 7));
@@ -1510,12 +1229,6 @@ mod draft13 {
 
     /// SUBSCRIBE_UPDATE spells its End Group as the last group plus one, and a
     /// zero there is an open end rather than a bound at group zero.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an update cannot end before it starts: Ok([2, 6, 1, 42, 0, 7, 3, 0])
-    /// ```
     #[test]
     fn an_update_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -1524,12 +1237,6 @@ mod draft13 {
 
     /// The zero that means "open ended" is not a range ending at group zero,
     /// and a check that read it as one would refuse every open update.
-    ///
-    /// Dropping the exemption fails with:
-    ///
-    /// ```text
-    /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-    /// ```
     #[test]
     fn an_open_ended_update_is_carried() {
         let message = subscribe_update(GROUP, 0, 0);
@@ -1591,13 +1298,6 @@ mod draft14 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -1606,13 +1306,6 @@ mod draft14 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -1620,14 +1313,6 @@ mod draft14 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -1687,13 +1372,6 @@ mod draft14 {
     /// Its End Group is inclusive rather than plus one, so an end group equal
     /// to the start group is the remainder of that group and is legal - the
     /// draft says so in as many words. Only a smaller one is refused.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a subscription cannot end before it starts:
-    /// Ok([3, 15, 1, 2, 1, 2, 110, 115, 1, 116, 3, 1, 4, 42, 0, 7, 0])
-    /// ```
     #[test]
     fn a_subscription_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe(GROUP, 0, 7));
@@ -1717,12 +1395,6 @@ mod draft14 {
 
     /// SUBSCRIBE_UPDATE spells its End Group as the last group plus one, and a
     /// zero there is an open end rather than a bound at group zero.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an update cannot end before it starts: Ok([2, 6, 1, 42, 0, 7, 3, 0])
-    /// ```
     #[test]
     fn an_update_whose_end_group_precedes_its_start_never_reaches_the_wire() {
         let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -1731,12 +1403,6 @@ mod draft14 {
 
     /// The zero that means "open ended" is not a range ending at group zero,
     /// and a check that read it as one would refuse every open update.
-    ///
-    /// Dropping the exemption fails with:
-    ///
-    /// ```text
-    /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-    /// ```
     #[test]
     fn an_open_ended_update_is_carried() {
         let message = subscribe_update(GROUP, 0, 0);
@@ -1796,13 +1462,6 @@ mod draft15 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -1811,13 +1470,6 @@ mod draft15 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -1825,14 +1477,6 @@ mod draft15 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -1908,13 +1552,6 @@ mod draft16 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -1923,13 +1560,6 @@ mod draft16 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -1937,14 +1567,6 @@ mod draft16 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -2021,13 +1643,6 @@ mod draft17 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -2036,13 +1651,6 @@ mod draft17 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -2050,14 +1658,6 @@ mod draft17 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -2133,13 +1733,6 @@ mod draft18 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -2148,13 +1741,6 @@ mod draft18 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -2162,14 +1748,6 @@ mod draft18 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");
@@ -2245,13 +1823,6 @@ mod draft19 {
     }
 
     /// A FETCH whose end is in an earlier group than its start has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end in a group before its start:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 0, 7, 0, 0])
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 0, 7, 0));
@@ -2260,13 +1831,6 @@ mod draft19 {
 
     /// The end object is the last object plus one, so within one group an end
     /// object at or below the start selects nothing.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a fetch cannot end before the object it starts at:
-    /// Ok([22, 15, 1, 2, 1, 1, 1, 2, 110, 115, 1, 116, 42, 9, 42, 4, 0])
-    /// ```
     #[test]
     fn a_fetch_that_ends_at_an_earlier_object_in_the_start_group_never_reaches_the_wire() {
         let result = encode(&fetch(GROUP, 9, GROUP, 4));
@@ -2274,14 +1838,6 @@ mod draft19 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// an inverted range is not a request: Ok(Fetch(Fetch { subscribe_id:
-    /// VarInt(1), ..., start_group: Some(VarInt(42)), ..., end_group:
-    /// Some(VarInt(7)), ... }))
-    /// ```
     #[test]
     fn a_fetch_whose_range_ends_before_it_starts_is_refused_on_decode() {
         let buf = encode(&fetch(GROUP, 0, GROUP, 0)).expect("a range inside one group is legal");

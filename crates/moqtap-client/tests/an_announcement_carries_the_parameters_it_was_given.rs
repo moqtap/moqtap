@@ -71,18 +71,6 @@ macro_rules! announce_parameter_gates {
             }
 
             /// The parameters the announcement is given reach the peer.
-            ///
-            /// # What it catches
-            ///
-            /// Sending an empty list whatever the caller passed:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, not the empty list a call that
-            /// ignores its argument sends
-            ///   left: 0
-            ///  right: 1
-            /// ```
             #[test]
             fn the_parameters_an_announcement_is_given_reach_the_peer() {
                 let mut ep = active();
@@ -111,12 +99,6 @@ macro_rules! announce_parameter_gates {
             }
 
             /// An announcement with nothing attached still carries nothing.
-            ///
-            /// # What it catches
-            ///
-            /// Nothing the cut reaches, which is what a control is for: the cut
-            /// sends an empty list whatever it is given, which is what this
-            /// gate asserts.
             #[test]
             fn an_announcement_given_no_parameters_carries_none() {
                 let mut ep = active();

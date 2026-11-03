@@ -12,23 +12,6 @@
 //! carries a literal per draft module, and a module copied from its predecessor
 //! keeps the predecessor's number unless someone edits it. The expected value
 //! comes from `DraftVersion::version_varint`, not from the module.
-//!
-//! # What this catches, observed by making each change and running it
-//!
-//! Removing the `("draft22", Draft22, draft22)` row from `adopt_dispatch!`:
-//!
-//! ```text
-//! Draft22 is compiled into this build and adopt refused it as not enabled:
-//! draft Draft22 not enabled in this build
-//! ```
-//!
-//! Writing `0xff000000 + 20` in draft-21's `Connection::adopt`:
-//!
-//! ```text
-//! assertion `left == right` failed: Draft21 reported another draft's version in SetupComplete
-//!   left: Some(4278190100)
-//!  right: Some(4278190101)
-//! ```
 
 mod common;
 

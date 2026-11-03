@@ -240,28 +240,6 @@ macro_rules! duplicate_alias_wire_gate {
             /// The first answer is accepted, which is what makes the second one
             /// the violation rather than the pair of them: a client that
             /// refused both would pass a gate built on the second alone.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the new arm from `EndpointError::session_error_code`
-            /// leaves the endpoint refusing the answer and ending its own
-            /// session, and leaves the connection layer with no code to close
-            /// with:
-            ///
-            /// ```text
-            /// the client refused the second answer but never closed the connection: Elapsed(())
-            /// ```
-            ///
-            /// Answering that arm with `ProtocolViolation` instead leaves the
-            /// close going out with the wrong number on it, which is the
-            /// failure only a peer can see:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: Section 9.10 answers one alias naming
-            /// two live tracks with DUPLICATE_TRACK_ALIAS; the close carried 3 instead
-            ///   left: 3
-            ///  right: 5
-            /// ```
             #[tokio::test]
             async fn one_alias_for_two_tracks_closes_the_quic_connection() {
                 crate::common::init_crypto();
@@ -307,27 +285,6 @@ macro_rules! duplicate_alias_wire_gate {
             /// The peer waits for the PUBLISH_OK before it sends the clashing
             /// answer, so what is being measured is the alias an *established*
             /// offer holds and not merely one that arrived.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Recording nothing for an accepted PUBLISH - dropping the
-            /// `track_bindings.insert` from the inbound PUBLISH path - leaves
-            /// the alias free and the SUBSCRIBE_OK accepted. The client sees
-            /// that before the peer's own wait runs out, so it is the client
-            /// half of the gate that reports it:
-            ///
-            /// ```text
-            /// the SUBSCRIBE_OK took the alias an accepted PUBLISH held and was accepted:
-            /// SubscribeOk(SubscribeOk { request_id: VarInt(0), track_alias: VarInt(7), parameters: [] })
-            /// ```
-            ///
-            /// Taking the `ControlMessage::Publish` arm out of
-            /// `receive_message` stops the offer reaching the flow at all,
-            /// and the peer never gets its answer:
-            ///
-            /// ```text
-            /// accept the peer's offer: Endpoint(UnknownRequest(1))
-            /// ```
             #[tokio::test]
             async fn an_accepted_publish_holds_its_alias_over_quic() {
                 crate::common::init_crypto();
@@ -379,16 +336,6 @@ macro_rules! duplicate_alias_wire_gate {
             /// two answers are two methods writing two different messages.
             /// Drafts 15 and 16 answer with REQUEST_ERROR and the other three
             /// with PUBLISH_ERROR, which is the only thing that differs.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Taking the `ControlMessage::Publish` arm out of
-            /// `receive_message`, so that the offer never reaches the record
-            /// the refusal is built from:
-            ///
-            /// ```text
-            /// reject the peer's offer: Endpoint(UnknownRequest(1))
-            /// ```
             #[tokio::test]
             async fn a_rejected_offer_is_answered_over_quic() {
                 crate::common::init_crypto();

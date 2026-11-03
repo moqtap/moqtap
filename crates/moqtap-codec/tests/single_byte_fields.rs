@@ -18,11 +18,6 @@
 //! twice with two different values of the field and takes the one position at
 //! which the two encodings differ, so a probe cannot drift out of position when
 //! a neighbouring field changes shape.
-//!
-//! # What breaking each fix does, observed by making the change and running
-//!
-//! The output quoted in each docstring came from making that edit and running
-//! the test; none of it is a prediction.
 
 #![cfg(all(
     feature = "draft11",

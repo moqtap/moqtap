@@ -113,18 +113,6 @@ macro_rules! announce_answer_wire_gates {
             }
 
             /// The acceptance of the peer's announcement reaches the peer.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the client was sent an announcement and never answered it: Elapsed(())
-            /// ```
-            ///
-            /// Made by building the acceptance and dropping it instead of
-            /// writing it. The cut reaches all ten `Connection`s and reddens 10
-            /// tests, which is both gates on the five drafts that have a
-            /// loopback here: in process the endpoint's own record moves either
-            /// way, so nothing but a peer can see the difference.
             #[tokio::test]
             async fn an_acceptance_reaches_the_peer() {
                 crate::common::init_crypto();
@@ -152,18 +140,6 @@ macro_rules! announce_answer_wire_gates {
             }
 
             /// And so does the cancellation that revokes it afterwards.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the client was sent an announcement and never answered it: Elapsed(())
-            /// ```
-            ///
-            /// The same cut on the cancellation, which seven of the ten drafts
-            /// could not send at all before this crate built it. It reaches all ten
-            /// `Connection`s and reddens 5 tests, this gate alone. The peer
-            /// reads two messages here, so the acceptance ahead of it is not
-            /// what the assertion sees.
             #[tokio::test]
             async fn a_cancellation_reaches_the_peer() {
                 crate::common::init_crypto();

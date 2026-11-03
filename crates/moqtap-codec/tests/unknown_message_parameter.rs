@@ -82,12 +82,7 @@ mod draft15 {
     /// unknown Message Parameter — the close and the narrowed duplicate sentence
     /// arrive together at draft-16.
     ///
-    /// Applying draft-16's rule here fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an unknown parameter must be carried on
-    /// this draft: Err(UnknownMessageParameter(65))
-    /// ```
+    /// Fails if draft-16's rule is applied here.
     #[test]
     fn an_unknown_message_parameter_is_carried() {
         let message = ControlMessage::Subscribe(Subscribe {
@@ -176,15 +171,6 @@ mod draft16 {
     }
 
     /// A Message Parameter type this draft does not define ends the session.
-    ///
-    /// Removing the check fails with:
-    ///
-    /// ```text
-    /// a type this draft does not define was carried: Ok(Subscribe(Subscribe {
-    /// request_id: VarInt(1), track_namespace: TrackNamespace([[110, 115]]),
-    /// track_name: [116], parameters: [KeyValuePair { key: VarInt(65),
-    /// value: Bytes([222, 173]) }] }))
-    /// ```
     #[test]
     fn an_unknown_message_parameter_is_refused() {
         let got = roundtrip(&subscribe(vec![extension_parameter()]));
@@ -202,13 +188,6 @@ mod draft16 {
     /// wrong is expensive: a codec applying the message rule to both namespaces
     /// closes sessions over the extension mechanism this draft deliberately
     /// keeps.
-    ///
-    /// Applying the message-namespace rule to setup parameters fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an unrecognised Setup Parameter must be
-    /// ignored, not refused: Err(UnknownMessageParameter(65))
-    /// ```
     #[test]
     fn an_unknown_setup_parameter_is_carried() {
         let message = client_setup(vec![extension_parameter()]);
@@ -226,13 +205,6 @@ mod draft16 {
     /// codec whose list is short by one entry refuses a parameter a conforming
     /// peer may send, and the peer learns about it as a closed session rather
     /// than as an ignored field.
-    ///
-    /// Dropping NEW_GROUP_REQUEST from the codec's list fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: NEW_GROUP_REQUEST (0x32) is in this
-    /// draft's registry: Err(UnknownMessageParameter(50))
-    /// ```
     #[test]
     fn every_type_the_registry_assigns_is_carried() {
         for (key, name) in REGISTRY {
@@ -287,12 +259,8 @@ mod draft19 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead fails with:
-    ///
-    /// ```text
-    /// a type this draft does not define was not named as unknown:
-    /// Err(InvalidField)
-    /// ```
+    /// Fails if this is reported as an ordinary malformation rather than as an
+    /// unknown parameter.
     #[test]
     fn an_unknown_message_parameter_is_refused() {
         let got = roundtrip(&subscribe(vec![extension_parameter()]));
@@ -307,12 +275,7 @@ mod draft19 {
     /// Section 10.3: "Receivers MUST ignore unrecognized Setup Options." The
     /// namespaces have not converged; only the message one closes.
     ///
-    /// Applying the message-namespace rule to setup options fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an unrecognised Setup Option must be
-    /// ignored, not refused: Err(UnknownMessageParameter(65))
-    /// ```
+    /// Fails if the message-namespace rule is applied to setup options.
     #[test]
     fn an_unknown_setup_option_is_carried() {
         let message = ControlMessage::Setup(Setup { options: vec![extension_parameter()] });
@@ -356,12 +319,8 @@ mod draft20 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead fails with:
-    ///
-    /// ```text
-    /// a type this draft does not define was not named as unknown:
-    /// Err(InvalidField)
-    /// ```
+    /// Fails if this is reported as an ordinary malformation rather than as an
+    /// unknown parameter.
     #[test]
     fn an_unknown_message_parameter_is_refused() {
         let got = roundtrip(&subscribe(vec![extension_parameter()]));
@@ -376,12 +335,7 @@ mod draft20 {
     /// Section 10.3: "Receivers MUST ignore unrecognized Setup Options." The
     /// namespaces have not converged; only the message one closes.
     ///
-    /// Applying the message-namespace rule to setup options fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an unrecognised Setup Option must be
-    /// ignored, not refused: Err(UnknownMessageParameter(65))
-    /// ```
+    /// Fails if the message-namespace rule is applied to setup options.
     #[test]
     fn an_unknown_setup_option_is_carried() {
         let message = ControlMessage::Setup(Setup { options: vec![extension_parameter()] });
@@ -424,12 +378,8 @@ mod draft21 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead fails with:
-    ///
-    /// ```text
-    /// a type this draft does not define was not named as unknown:
-    /// Err(InvalidField)
-    /// ```
+    /// Fails if this is reported as an ordinary malformation rather than as an
+    /// unknown parameter.
     #[test]
     fn an_unknown_message_parameter_is_refused() {
         let got = roundtrip(&subscribe(vec![extension_parameter()]));
@@ -444,12 +394,7 @@ mod draft21 {
     /// Section 9.1: "Receivers MUST ignore unrecognized Setup Options." The
     /// namespaces have not converged; only the message one closes.
     ///
-    /// Applying the message-namespace rule to setup options fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an unrecognised Setup Option must be
-    /// ignored, not refused: Err(UnknownMessageParameter(65))
-    /// ```
+    /// Fails if the message-namespace rule is applied to setup options.
     #[test]
     fn an_unknown_setup_option_is_carried() {
         let message = ControlMessage::Setup(Setup { options: vec![extension_parameter()] });
@@ -493,12 +438,8 @@ mod draft22 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead fails with:
-    ///
-    /// ```text
-    /// a type this draft does not define was not named as unknown:
-    /// Err(InvalidField)
-    /// ```
+    /// Fails if this is reported as an ordinary malformation rather than as an
+    /// unknown parameter.
     #[test]
     fn an_unknown_message_parameter_is_refused() {
         let got = roundtrip(&subscribe(vec![extension_parameter()]));
@@ -513,12 +454,7 @@ mod draft22 {
     /// Section 9.1: "Receivers MUST ignore unrecognized Setup Options." The
     /// namespaces have not converged; only the message one closes.
     ///
-    /// Applying the message-namespace rule to setup options fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an unrecognised Setup Option must be
-    /// ignored, not refused: Err(UnknownMessageParameter(65))
-    /// ```
+    /// Fails if the message-namespace rule is applied to setup options.
     #[test]
     fn an_unknown_setup_option_is_carried() {
         let message = ControlMessage::Setup(Setup { options: vec![extension_parameter()] });
@@ -561,12 +497,8 @@ mod draft23 {
     /// rather than a length." The framing itself assumes every type is known, so
     /// there is nowhere for an unknown one to go.
     ///
-    /// Reporting this as an ordinary malformation instead fails with:
-    ///
-    /// ```text
-    /// a type this draft does not define was not named as unknown:
-    /// Err(InvalidField)
-    /// ```
+    /// Fails if this is reported as an ordinary malformation rather than as an
+    /// unknown parameter.
     #[test]
     fn an_unknown_message_parameter_is_refused() {
         let got = roundtrip(&subscribe(vec![extension_parameter()]));
@@ -581,12 +513,7 @@ mod draft23 {
     /// Section 9.1: "Receivers MUST ignore unrecognized Setup Options." The
     /// namespaces have not converged; only the message one closes.
     ///
-    /// Applying the message-namespace rule to setup options fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an unrecognised Setup Option must be
-    /// ignored, not refused: Err(UnknownMessageParameter(65))
-    /// ```
+    /// Fails if the message-namespace rule is applied to setup options.
     #[test]
     fn an_unknown_setup_option_is_carried() {
         let message = ControlMessage::Setup(Setup { options: vec![extension_parameter()] });

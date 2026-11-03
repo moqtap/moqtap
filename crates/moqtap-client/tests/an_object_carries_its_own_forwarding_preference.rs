@@ -44,7 +44,7 @@
 //! it to; an alias no binding names resolves to nothing and settles nothing. So
 //! a gate that sent the two framings without ever binding the alias would go on
 //! passing after somebody added the rule to these drafts, and a test that cannot
-//! fail is not a gate. The ablation below is what says this one can.
+//! fail is not a gate.
 //!
 //! # Why this is not in the file next door
 //!
@@ -63,31 +63,6 @@
 //! on a unidirectional stream and its SUBSCRIBE at the front of a bidirectional
 //! one, so a peer that read either anywhere else would read nothing at all and
 //! every test here would time out.
-//!
-//! # Ablation, measured
-//!
-//! The cut is the commit this file exists to stop: draft-17 given the
-//! track-scoped forwarding-preference record drafts 07 through 15 carry, wired
-//! into the two readers and the two writers exactly as they wire it. Applied to
-//! the working tree, run, and reverted with the file compared byte for byte
-//! afterwards; `scratchpad/r82_ablate.py` runs it.
-//!
-//! Reading the second framing:
-//!
-//! ```text
-//! Section 10.2.1 makes the forwarding preference a property of the Object, so a datagram for a track whose objects have used subgroup streams is legal here: Endpoint(MixedForwardingPreference { alias: 7, established: Subgroup, offered: Datagram })
-//! ```
-//!
-//! Writing it:
-//!
-//! ```text
-//! Section 10.2.1 makes the forwarding preference a property of the Object, so a publisher may send one track's objects both ways: Endpoint(MixedForwardingPreference { alias: 7, established: Subgroup, offered: Datagram })
-//! ```
-//!
-//! Both reports name alias 7, which is the alias the SUBSCRIBE_OK bound. That is
-//! the other half of the ablation: a rule reached by resolving an alias to a
-//! track can only report one it resolved, so a gate that had skipped the answer
-//! would have stayed green under the same cut.
 
 mod common;
 

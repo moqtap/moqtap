@@ -62,20 +62,6 @@ fn encode(msg: ControlMessage) -> Vec<u8> {
 
 /// A REQUEST_UPDATE arriving on the control stream closes the QUIC connection
 /// with PROTOCOL_VIOLATION.
-///
-/// # What it catches
-///
-/// Propagating the endpoint's error out of `recv_and_dispatch` with `?`
-/// instead of routing it through `close_if_session_fatal` fails this test with:
-///
-/// ```text
-/// ---- a_control_stream_violation_closes_the_quic_connection stdout ----
-/// thread '...' panicked at crates\moqtap-client\tests\draft19_session_close_on_the_wire.rs:
-/// the client reported the violation but never closed the connection: Elapsed(())
-/// ```
-///
-/// The client still returns the error and still refuses new requests; the peer
-/// just never hears about it.
 #[tokio::test]
 async fn a_control_stream_violation_closes_the_quic_connection() {
     common::init_crypto();
@@ -184,21 +170,6 @@ async fn a_control_stream_violation_closes_the_quic_connection() {
 /// the session with a PROTOCOL_VIOLATION." The frame is built by hand because
 /// the encoder refuses to write one — which is the point: the two directions
 /// agree, and only a hand-made frame can reach the decode-side check.
-///
-/// # What it catches
-///
-/// Replacing `recv_control`'s body with `recv.read_control(capture_raw).await?`,
-/// so the refusal never reaches `close_for_codec`, fails this test with:
-///
-/// ```text
-/// ---- a_decoder_bound_violation_closes_the_quic_connection stdout ----
-///
-/// thread 'a_decoder_bound_violation_closes_the_quic_connection' (57204) panicked at crates\moqtap-client\tests\draft19_session_close_on_the_wire.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
-///
-/// The client still returns `Err(GoAwayUriTooLong)` in that state; the peer just
-/// never hears about it and can repeat the frame indefinitely.
 #[tokio::test]
 async fn a_decoder_bound_violation_closes_the_quic_connection() {
     use moqtap_codec::varint::{Moqt18, VarInt};

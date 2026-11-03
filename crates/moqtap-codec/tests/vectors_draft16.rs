@@ -308,12 +308,9 @@ fn run_datagram_vectors(relative_path: &str) {
             // these bytes has to write back as these bytes. Without it a
             // published datagram vector cannot catch an encoder and decoder
             // that disagree, because only one of the two is ever run.
-            //
-            // Ablation: writing the Object ID from a datagram header whose Type
-            // says there is none — `[datagram-no-object-id] re-encoded datagram
-            // mismatch / left: "0405640080" / right: "04056480"`, measured on
-            // draft-19. The decoder honours the bit either way, so nothing else
-            // in these suites notices.
+            // This is the only check that fails if the encoder writes an Object
+            // ID the datagram Type says is absent: the decoder honours the bit
+            // either way.
             if vector.is_canonical() {
                 let mut out = Vec::new();
                 hdr.encode(&mut out);
@@ -343,16 +340,9 @@ fn run_datagram_vectors(relative_path: &str) {
 /// decode each object's framing, resolve its Location against the object
 /// before it, and rebuild the stream byte for byte.
 ///
-/// The re-encode is the assertion that pins the field order of draft-16
-/// Section 10.4.4 Figure 31. Observed by making
-/// `FetchObjectHeader::encode` write the Object ID before the Group ID, which
-/// fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: [fetch-end-of-non-existent-range] re-encoded fetch stream mismatch
-///   left: "0504408c0a0500"
-///  right: "0504408c050a00"
-/// ```
+/// The re-encode is the assertion that pins the field order of
+/// draft-16 Section 10.4.4 Figure 31. It fails if `FetchObjectHeader::encode`
+/// writes the Object ID before the Group ID.
 fn run_fetch_vectors(relative_path: &str) {
     let path = vectors_dir().join(relative_path);
     let file = load_vectors(&path);

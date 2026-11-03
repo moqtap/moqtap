@@ -17,10 +17,10 @@
 //! a session-level error, so the destination still FINs and the truncation is
 //! reported as `Impairment { ControlStreamTruncated }`.
 //!
-//! **The two untested propagation directions.** `proxy_reset.rs` covers
+//! **The two other propagation directions.** `proxy_reset.rs` covers
 //! `pipe_data` relay→client and both *client-initiated* control paths.
-//! Missing were `pipe_data` client→relay and control relay→client. Both are
-//! here, driven through one `propagation_case` parameterized over
+//! `pipe_data` client→relay and control relay→client are here, driven
+//! through one `propagation_case` parameterized over
 //! [`Leg`] — same code, different `side` argument, which is exactly where
 //! the risk lies: reset propagation is written once per direction, so one
 //! direction can be correct while its mirror image was never wired up.
@@ -28,11 +28,8 @@
 //! **The reset-fidelity guarantees, restated in this file.** `a_clean_fin_stays_a_fin`
 //! and `a_mirrored_reset_keeps_the_peer_code_after_data_already_written` are
 //! not duplicates of `proxy_reset.rs` for their own sake — they are the
-//! *negative controls* for the synthesized-reset ablation. Stub the new
-//! `propagate_reset` arms and the synthesized-reset tests must go red while
-//! those two stay green; a change
-//! that reddened all four would mean the tests were measuring "a reset
-//! happened" rather than "a reset happened *for this reason*".
+//! *negative controls* for the synthesized-reset tests, which have to show "a
+//! reset happened *for this reason*" rather than "a reset happened".
 //!
 //! # Why the data-stream test asserts code `0x0` and not `0x3`
 //!
@@ -110,9 +107,7 @@ const OUT_OF_RANGE_CODE: u64 = u64::MAX;
 ///
 /// Two: one close to win, one to be refused. Nothing here is a lever on a
 /// probability, because [`CountingCloseHook`] holds each decision until
-/// both exist. The number was 24 for as long as it was, because 24 was how
-/// many trials it took for a race to come out the right way often enough —
-/// see the test's own docs for what that cost and what it measured at.
+/// both exist.
 const CLOSING_STREAMS: u8 = 2;
 
 /// How long [`CountingCloseHook`] waits at each of its two gates.
@@ -422,12 +417,6 @@ enum Pipe {
 
 /// The relay dies mid-subgroup; the client must see a `RESET_STREAM`, not a
 /// FIN that would let a player commit a truncated group as complete.
-///
-/// *Ablation:* delete the `synthesized_reset_code`
-/// arm at the end of `propagate_reset` (return instead of resetting) and both
-/// cases report `Ending::Fin`, while `a_clean_fin_stays_a_fin` and
-/// `a_mirrored_reset_keeps_the_peer_code_after_data_already_written` stay
-/// green.
 async fn non_reset_read_failure_case(pipe: Pipe) {
     common::init_crypto();
 
@@ -787,10 +776,8 @@ async fn a_client_control_reset_reaches_the_relay_with_the_same_code() {
 
 /// A clean FIN stays a clean FIN, with every byte ahead of it.
 ///
-/// The negative control for the synthesized-reset ablation: stubbing the
-/// synthesized reset must redden the tests above and leave this one green.
-/// `Fin` is the *default*
-/// outcome of dropping a `SendStream`, so this test on its own proves
+/// The negative control for the synthesized-reset tests above. `Fin` is the
+/// *default* outcome of dropping a `SendStream`, so this test on its own proves
 /// nothing — it is the contrast that carries the information.
 #[tokio::test]
 async fn a_clean_fin_stays_a_fin() {
@@ -886,10 +873,6 @@ async fn a_mirrored_reset_keeps_the_peer_code_after_data_already_written() {
 
 /// A hook returning `ResetStream` at a **data** stream's end turns the clean
 /// FIN into a reset carrying the code it asked for.
-///
-/// *Ablation:* make `Plan::Terminal` fall through to `send.finish()` in
-/// `pipe_data_framed`'s FIN branch; the client sees `Ending::Fin` and this
-/// fails while `a_clean_fin_stays_a_fin` still passes.
 #[tokio::test]
 async fn reset_stream_reaches_the_peer_with_the_requested_code() {
     common::init_crypto();
@@ -952,9 +935,6 @@ async fn reset_stream_reaches_the_peer_with_the_requested_code() {
 
 /// An error code above the QUIC varint ceiling is refused **before anything
 /// is sent**: the stream still ends with a FIN carrying every byte.
-///
-/// *Ablation:* drop the `check_error_code` call from the `ResetStream` arm of
-/// `exec::execute`; `send.reset` then fails or truncates and this goes red.
 #[tokio::test]
 async fn an_out_of_range_reset_code_is_refused_before_anything_is_sent() {
     common::init_crypto();
@@ -1015,9 +995,6 @@ async fn an_out_of_range_reset_code_is_refused_before_anything_is_sent() {
 /// Paired with `reset_stream_reaches_the_peer_with_the_requested_code`, which
 /// must *succeed* on a data stream. Either test alone is compatible with the
 /// two cases never having been distinguished at all.
-///
-/// *Ablation:* drop `is_control_stream` from `exec::Target::StreamEnd`; the
-/// control case synthesizes a reset and this goes red.
 #[tokio::test]
 async fn reset_stream_at_the_control_streams_end_is_refused() {
     common::init_crypto();
@@ -1083,11 +1060,6 @@ async fn reset_stream_at_the_control_streams_end_is_refused() {
 
 /// The close carries the hook's code and reason to the client, not the
 /// proxy's hard-coded pair.
-///
-/// *Ablation:* restore `client.close(0, b"proxy session ended")` in
-/// `run_with_transport`; this fails on both the code and the reason. A test
-/// asserting only "the session ended" would pass against that hard-coding,
-/// which is why both fields are asserted.
 #[tokio::test]
 async fn close_session_carries_the_requested_code_and_reason() {
     common::init_crypto();
@@ -1168,15 +1140,6 @@ async fn close_session_carries_the_requested_code_and_reason() {
 /// and holds the second until the first has been applied — after which
 /// **exactly two** decisions, **exactly one** applied close and **exactly
 /// one** refusal are all assertable, and every one of them is asserted.
-///
-/// *Ablation:* let `SessionCloser::request` return `true` on a second call
-/// instead of `false` — `assertion left == right failed: exactly one
-/// SessionClosing, carrying the first code, out of 2 decisions; left:
-/// [(StreamEnd, CloseSession, SessionClosing { code: 1 }), (StreamEnd,
-/// CloseSession, SessionClosing { code: 3 })]`. The `OnceLock` still keeps
-/// the first pair, so the peer still sees `FIRST_CODE` and the peer
-/// assertion stays green: what the applied-effect count is for is exactly
-/// this, a second close reported as applied when nothing was applied.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_second_close_session_is_refused() {
     common::init_crypto();
@@ -1283,9 +1246,9 @@ async fn a_second_close_session_is_refused() {
 /// Not a restatement of [`DRAFT`]: it reads `DraftVersion::from_alpn`, which
 /// is a different fact. `moq-00` failing to resolve is what leaves
 /// `draft_is_fixed` false, which is what makes the session parse as the
-/// *configured* draft. Add `moq-00` to `from_alpn` and this goes red — which
-/// is the point, because at that moment the control pipes would start
-/// building their parsers eagerly and no other test here would notice.
+/// *configured* draft. If `from_alpn` ever resolved `moq-00`, the control
+/// pipes would build their parsers eagerly and no other test here would
+/// notice.
 #[test]
 fn the_alpn_this_file_uses_leaves_the_draft_to_the_config() {
     assert_eq!(
@@ -1330,10 +1293,6 @@ const IDLE_CONTROL_STOP_WINDOW: Duration = Duration::from_millis(400);
 /// `pipe_control_mutating` are separate functions with separate `select!`
 /// loops, and `Interest::CONTROL` is what chooses between them, so a
 /// watcher wired into one says nothing about the other.
-///
-/// *Ablation (run, and it fails):* delete the `stop.watch()` branch from
-/// the relevant pipe's `select!`. The client observes `None` — it is never
-/// stopped, because nothing writes towards the relay again.
 async fn idle_control_stop_case(mutating: bool) {
     common::init_crypto();
 

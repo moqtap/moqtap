@@ -9,12 +9,12 @@
 //! byte length, and every encoder from there on derives that length from the
 //! extension bytes beside it, so the two cannot disagree.
 //!
-//! On draft-08 they are two fields with nothing tying them together: the
-//! encoder wrote the caller's count and then the caller's bytes. A header
-//! stating two extensions while carrying three left the third where the peer
-//! expects the Object Payload Length, so that field and every field after it —
-//! and every object after that on the same stream — were read at the wrong
-//! offset. Nothing downstream can recover from that, which is why
+//! On draft-08 they are two fields with nothing tying them together. An
+//! encoder that writes the caller's count and then the caller's bytes, for a
+//! header stating two extensions while carrying three, leaves the third where
+//! the peer expects the Object Payload Length, so that field and every field
+//! after it — and every object after that on the same stream — are read at the
+//! wrong offset. Nothing downstream can recover from that, which is why
 //! `encode_checked` refuses rather than correcting the count.
 //!
 //! The reader is the other half of the argument: `skip_extensions` reads
@@ -55,12 +55,6 @@ fn object(count: u64) -> ObjectHeader {
 }
 
 /// A count that does not match the bytes has no encoding.
-///
-/// Dropping the check fails with:
-///
-/// ```text
-/// 1 extension is not what these bytes hold: Ok(())
-/// ```
 #[test]
 fn a_stated_count_below_the_bytes_never_reaches_the_wire() {
     let mut buf = Vec::new();

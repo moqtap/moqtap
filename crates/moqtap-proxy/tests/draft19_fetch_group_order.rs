@@ -270,16 +270,6 @@ async fn run_with_hook(
 /// passes the second half and fails the first; one that assumed Descending
 /// does the reverse; one that read the FETCH passes both. Nothing about the
 /// response stream differs between the two runs.
-///
-/// *Ablation, recorded:* have `note_fetch_orders` file
-/// `AnyFetchGroupOrder::Ascending` whatever the FETCH asked for:
-///
-/// ```text
-/// assertion `left == right` failed: a fetch answered Descending walks its
-/// Group IDs down
-///   left: [20, 21, 22]
-///  right: [20, 19, 18]
-/// ```
 #[tokio::test]
 async fn a_fetch_response_is_read_against_the_order_its_request_asked_for() {
     let descending = run(Some(Some(0x2))).await;
@@ -303,16 +293,6 @@ async fn a_fetch_response_is_read_against_the_order_its_request_asked_for() {
 /// (0x1)." The absence is the answer, so a session that treated it as silence
 /// would leave every conforming fetch that did not bother to write the
 /// parameter unreadable — which is most of them.
-///
-/// *Ablation, recorded:* have `AnyControlMessage::fetch_group_order` answer
-/// `None` for a FETCH carrying no GROUP_ORDER parameter:
-///
-/// ```text
-/// assertion `left == right` failed: an omitted GROUP_ORDER is the draft's
-/// Ascending, not a silence
-///   left: []
-///  right: [20, 21, 22]
-/// ```
 #[tokio::test]
 async fn a_fetch_that_names_no_order_is_read_as_ascending() {
     let plain = run(Some(None)).await;
@@ -331,16 +311,6 @@ async fn a_fetch_that_names_no_order_is_read_as_ascending() {
 /// has no order for it and reading the stream would mean choosing one. It
 /// forwards the bytes untouched and says why — which is the difference between
 /// a gap the operator can see and a report that is quietly wrong.
-///
-/// *Ablation, recorded:* have `ObjectFramer::fetch_stage` fall back to
-/// `AnyFetchGroupOrder::Ascending` when the table has no entry:
-///
-/// ```text
-/// assertion `left == right` failed: a fetch stream nobody asked for is given
-/// up rather than read against a guess
-///   left: []
-///  right: [FetchGroupOrderUnknown]
-/// ```
 #[tokio::test]
 async fn a_response_to_a_request_that_was_never_made_is_given_up() {
     let unasked = run(None).await;
@@ -365,17 +335,6 @@ async fn a_response_to_a_request_that_was_never_made_is_given_up() {
 ///
 /// This is the case a proxy is for. Every other run in this file would pass a
 /// session that filed what arrived.
-///
-/// *Ablation, recorded:* drop the `note_fetch_order` call from the mutating
-/// pipe's `Plan::WriteNow` arm, so nothing is filed on a session whose control
-/// frames a hook may rewrite:
-///
-/// ```text
-/// assertion `left == right` failed: the response follows the FETCH the
-/// publisher received
-///   left: []
-///  right: [20, 19, 18]
-/// ```
 #[tokio::test]
 async fn a_rewritten_fetch_files_the_order_the_publisher_receives() {
     let rewritten =

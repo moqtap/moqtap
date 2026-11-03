@@ -2,15 +2,8 @@
 //! Draft-07 answers a parameter whose value disagrees with its type by closing
 //! the session, with a code no draft above 10 has.
 //!
-//! # Why draft-07 was the last draft without the machinery
-//!
-//! `close_for_codec` and its mapping table arrived with draft-17 and worked
-//! downwards a group at a time. Until this file existed, draft-07's decoder
-//! refused the frame, `recv_control` handed the caller an `Err`, and the peer —
-//! the endpoint that broke the rule — saw a session that was still open and went
-//! on sending. That gap is invisible from inside the process, because the
-//! decoder returns `Err` either way. Only something holding the other end of a
-//! real connection can tell the difference.
+//! The decoder returns `Err` whether or not the session closes, so only a peer
+//! holding the other end of a real connection can tell the difference.
 //!
 //! # Why draft-07's table is not draft-08's
 //!
@@ -139,32 +132,6 @@ fn announce_with_a_mismatched_parameter() -> Vec<u8> {
 
 /// A parameter whose length disagrees with its type closes the QUIC connection
 /// with `Parameter Length Mismatch`, not with Protocol Violation.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Removing `close_for_codec` from draft-07's `recv_control` — the state this
-/// draft was in until now, and the state every draft below 15 was in one round
-/// ago:
-///
-/// ```text
-/// ---- a_mismatched_parameter_length_closes_the_quic_connection stdout ----
-///
-/// thread 'a_mismatched_parameter_length_closes_the_quic_connection' (58952) panicked at crates\moqtap-client\tests\draft07_parameter_length_mismatch_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
-///
-/// Answering this rule with Protocol Violation instead — folding
-/// `ParameterLengthMismatch` into the arm the draft's other two rules share,
-/// which is what a table copied from any draft above 10 would do:
-///
-/// ```text
-/// ---- a_mismatched_parameter_length_closes_the_quic_connection stdout ----
-///
-/// thread 'a_mismatched_parameter_length_closes_the_quic_connection' (49976) panicked at crates\moqtap-client\tests\draft07_parameter_length_mismatch_closes_the_session.rs:
-/// assertion `left == right` failed: Section 6.1 names the code for this rule; the close carried Protocol Violation (0x3) instead
-///   left: 3
-///  right: 5
-/// ```
 #[tokio::test]
 async fn a_mismatched_parameter_length_closes_the_quic_connection() {
     common::init_crypto();

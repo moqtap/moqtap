@@ -104,22 +104,6 @@ fn announce_with_a_mismatched_parameter() -> Vec<u8> {
 
 /// A parameter whose length disagrees with its type closes the QUIC connection
 /// with `Parameter Length Mismatch`, not with Protocol Violation.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Answering this rule with Protocol Violation in draft-08's
-/// `codec_session_error_code` — folding `ParameterLengthMismatch` into the arm
-/// the draft's other four rules share, which is what a table copied from a later
-/// draft would do:
-///
-/// ```text
-/// ---- a_mismatched_parameter_length_closes_the_quic_connection stdout ----
-///
-/// thread 'a_mismatched_parameter_length_closes_the_quic_connection' (60640) panicked at crates\moqtap-client\tests\draft08_parameter_length_mismatch_closes_the_session.rs:
-/// assertion `left == right` failed: Section 7.1 names the code for this rule; the close carried Protocol Violation (0x3) instead
-///   left: 3
-///  right: 5
-/// ```
 #[tokio::test]
 async fn a_mismatched_parameter_length_closes_the_quic_connection() {
     common::init_crypto();

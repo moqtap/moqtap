@@ -379,23 +379,6 @@ fn endpoint_request_ok_routes_to_correct_flow() {
 /// flow Active, and a second REQUEST_OK is then refused *from wherever the flow
 /// now is*, naming that state in the error. So the last assertion reads back
 /// the state the announcements left behind, which is the whole claim.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Dropping the NAMESPACE arm from `Endpoint::receive_response_on_stream`, so
-/// the announcement falls through to the catch-all:
-///
-/// ```text
-/// NAMESPACE belongs on the SUBSCRIBE_NAMESPACE stream: ResponseOnControlStream
-/// ```
-///
-/// Giving that arm a state edge — ending the namespace subscription instead of
-/// reporting on it — so the message is still accepted but no longer
-/// informational:
-///
-/// ```text
-/// the announcements moved the SUBSCRIBE_NAMESPACE flow: namespace error: invalid transition from Done on event on_subscribe_namespace_ok
-/// ```
 #[test]
 fn endpoint_namespace_announcement_is_informational() {
     use moqtap_client::draft17::namespace::NamespaceError;
@@ -436,22 +419,6 @@ fn endpoint_namespace_announcement_is_informational() {
 /// SUBSCRIBE_NAMESPACE" — this draft has no SUBSCRIBE_TRACKS, the request
 /// draft-18 moved it onto, so on draft-17 it shares the one stream with the two
 /// announcements above. The state is read back the same way.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Dropping the PUBLISH_BLOCKED arm from
-/// `Endpoint::receive_response_on_stream`:
-///
-/// ```text
-/// PUBLISH_BLOCKED belongs on the SUBSCRIBE_NAMESPACE stream: ResponseOnControlStream
-/// ```
-///
-/// Giving that arm a state edge, ending the namespace subscription the blocked
-/// track was reported under:
-///
-/// ```text
-/// PUBLISH_BLOCKED moved the SUBSCRIBE_NAMESPACE flow: namespace error: invalid transition from Done on event on_subscribe_namespace_ok
-/// ```
 #[test]
 fn endpoint_publish_blocked_is_informational() {
     use moqtap_client::draft17::namespace::NamespaceError;
@@ -493,15 +460,6 @@ fn endpoint_publish_blocked_is_informational() {
 /// exists and its stream is open.
 ///
 /// A fresh endpoint per message because the first refusal closes the session.
-///
-/// # What this catches, observed by making the change and running it
-///
-/// Adding a control-stream arm that accepts a NAMESPACE there
-/// (`ControlMessage::Namespace(ref m) => self.receive_namespace(m)`):
-///
-/// ```text
-/// NAMESPACE must be refused on the control stream
-/// ```
 #[test]
 fn endpoint_namespace_announcements_on_the_control_stream_are_refused() {
     // The name is the one the endpoint reports the refusal under, so each pair

@@ -381,17 +381,6 @@ macro_rules! inbound_fetch_gates {
             /// The dispatch arm is the whole of what this measures. Without it
             /// the FETCH is counted and dropped, and the peer waits for an
             /// answer the endpoint has no record to build one from.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the FETCH that arrived on the control stream could not be answered: UnknownSubscribe(0)
-            /// ```
-            ///
-            /// Made by removing the `ControlMessage::Fetch` arm from `receive_message`.
-            /// It reddens twenty tests: this gate on all ten drafts, and both wire
-            /// gates on the five that have them, where the FETCH arrives through the
-            /// same dispatch.
             #[test]
             fn a_fetch_off_the_control_stream_reaches_the_flow() {
                 let mut ep = active();
@@ -407,18 +396,6 @@ macro_rules! inbound_fetch_gates {
 
             /// A FETCH is owed an answer from the moment it arrives until one
             /// is sent.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the answer settled it
-            ///   left: 1
-            ///  right: 0
-            /// ```
-            ///
-            /// Made by leaving the record where it was when the FETCH_OK went out. It
-            /// reddens fifty tests on the ten drafts: a fetch that never leaves the
-            /// state it arrived in is one nothing later in the flow can act on.
             #[test]
             fn an_arriving_fetch_is_owed_an_answer() {
                 let mut ep = active();
@@ -440,13 +417,7 @@ macro_rules! inbound_fetch_gates {
 
             /// One FETCH gets one answer.
             ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a fetch that has been answered has left the state an answer is sent from: FetchOk(FetchOk { subscribe_id: VarInt(0), group_order: Ascending, end_of_track: 0, largest_group_id: Some(VarInt(1)), largest_object_id: Some(VarInt(0)), parameters: [] })
-            /// ```
-            ///
-            /// The same cut. Nine of these drafts say a publisher sends exactly one
+            /// Nine of these drafts say a publisher sends exactly one
             /// answer to a FETCH and draft-07 says nothing at all, and the flow
             /// refuses the second one on all ten for the same reason.
             #[test]
@@ -462,17 +433,6 @@ macro_rules! inbound_fetch_gates {
             }
 
             /// A fetch that was refused cannot then be accepted.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the refusal settled it
-            ///   left: 1
-            ///  right: 0
-            /// ```
-            ///
-            /// The refusal has a cut of its own, and it reddens ten tests and only
-            /// this gate: nothing else here refuses a fetch.
             #[test]
             fn a_refused_fetch_cannot_then_be_accepted() {
                 let mut ep = fetched();
@@ -489,17 +449,6 @@ macro_rules! inbound_fetch_gates {
             }
 
             /// An answer to a fetch that never arrived is refused.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// no FETCH arrived under that identifier: FetchOk(FetchOk { subscribe_id: VarInt(9), group_order: Ascending, end_of_track: 0, largest_group_id: Some(VarInt(1)), largest_object_id: Some(VarInt(0)), parameters: [] })
-            /// ```
-            ///
-            /// Made by answering whichever inbound fetch is first in the map, at every
-            /// call site that names an identifier. It reddens forty tests: this gate,
-            /// the cancel's, the second half of the stream gate and the two-record gate,
-            /// on all ten drafts.
             #[test]
             fn an_answer_to_a_fetch_that_never_arrived_is_refused() {
                 let mut ep = fetched();
@@ -519,16 +468,6 @@ macro_rules! inbound_fetch_gates {
             }
 
             /// A FETCH_CANCEL ends a fetch this endpoint is serving.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a fetch that has ended cannot end again: ()
-            /// ```
-            ///
-            /// Made by removing the `ControlMessage::FetchCancel` arm from
-            /// `receive_message`. It reddens ten tests and only this gate: nothing else
-            /// here needs a cancel off the control stream.
             #[test]
             fn a_fetch_cancel_ends_a_fetch_this_endpoint_serves() {
                 let mut ep = serving();
@@ -548,16 +487,6 @@ macro_rules! inbound_fetch_gates {
             }
 
             /// A FETCH_CANCEL for a fetch that never arrived is refused.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// no FETCH arrived under that identifier: ()
-            /// ```
-            ///
-            /// The same cut as the gate above, reached through the cancel rather than
-            /// the answer. One claim with four call sites, so the cut replaces every
-            /// match rather than exactly one.
             #[test]
             fn a_fetch_cancel_for_nothing_is_refused() {
                 let mut ep = serving();
@@ -573,18 +502,6 @@ macro_rules! inbound_fetch_gates {
 
             /// Two fetches of the peer's are two records, and answering one
             /// leaves the other owed its answer.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: both are owed an answer
-            ///   left: 1
-            ///  right: 2
-            /// ```
-            ///
-            /// Made by clearing the map before each insert, which is what one record
-            /// for the whole session amounts to. It reddens ten tests and only this
-            /// gate.
             #[test]
             fn two_fetches_of_the_peers_have_their_own_records() {
                 let mut ep = active();
@@ -604,17 +521,6 @@ macro_rules! inbound_fetch_gates {
             }
 
             /// Finishing the data stream ends a fetch this endpoint served.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a fetch that is over cannot be cancelled: ()
-            /// ```
-            ///
-            /// Made by leaving the record where it was when this endpoint finished the
-            /// objects. It reddens ten tests and only this gate; the cancel's own cut
-            /// reddens this one too, which is what two ways of ending one fetch look
-            /// like.
             #[test]
             fn finishing_the_data_stream_ends_a_served_fetch() {
                 let mut ep = serving();
@@ -642,17 +548,6 @@ macro_rules! inbound_fetch_gates {
             /// The two directions are two records. On the drafts with no
             /// parity rule they can share a number, and answering the wrong
             /// one would move a fetch this endpoint is waiting on.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a fetch this endpoint made is not one it answers: FetchOk(FetchOk { subscribe_id: VarInt(0), group_order: Ascending, end_of_track: 0, largest_group_id: VarInt(1), largest_object_id: VarInt(0), parameters: [] })
-            /// ```
-            ///
-            /// Made by reading the answer out of `fetches`, where this endpoint's own
-            /// fetches live. It reddens a hundred and forty-two tests, because a
-            /// record read from the wrong map is missing from every gate that needs
-            /// it, and only this one shows what the wrong map holds instead.
             #[test]
             fn a_fetch_this_endpoint_made_is_not_the_peers() {
                 let mut ep = active();

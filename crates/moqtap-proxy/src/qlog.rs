@@ -38,19 +38,10 @@
 //! Nor is the presence of 1-RTT packets by itself evidence that anything was
 //! carried. A connection that transfers nothing still sends packets, and with
 //! quinn's defaults a good share of those bytes are padded path-MTU probes
-//! rather than anything anybody asked for. Measured on loopback by the test
-//! at the bottom of this module, over a 100 000-byte transfer against a
-//! connection that carried nothing:
+//! rather than anything anybody asked for.
 //!
-//! | path-MTU discovery | transferring 100 000 bytes | idle |
-//! |---|---|---|
-//! | quinn's default (on) | 108 256 – 108 489 bytes | 1 548 – 1 590 bytes |
-//! | [`MtuDiscovery::Off`] | 102 985 – 102 989 bytes | 219 – 222 bytes |
-//!
-//! Turning discovery off is therefore worth doing on a leg whose capture is
-//! going to be measured: it drops the floor by a factor of seven and brings
-//! the transfer figure from 8% above the payload to 3% above it, which is
-//! what makes a byte total worth bracketing on both sides at all.
+//! Turning discovery off ([`MtuDiscovery::Off`]) is worth doing on a leg
+//! whose capture is going to be measured.
 //!
 //! [`MtuDiscovery::Off`]: crate::transport::MtuDiscovery::Off
 //!
@@ -463,12 +454,7 @@ mod tests {
     /// The second half is the one that matters. quinn answers a missing
     /// writer with `None` and no error, which is the same `None` a writer
     /// that failed produces, so the two faults arrive here indistinguishable
-    /// unless the missing writer is caught first. Ablation: dropping the
-    /// `self.validate()?` line from `into_stream` leaves quinn to answer, and
-    /// this fails with `assertion left == right failed: and `into_stream`
-    /// must reach the same answer rather than quinn's silent `None`  left:
-    /// Some(NotStarted)  right: Some(NoWriter)` — a caller sent to look at
-    /// their disk over a spec that named no file.
+    /// unless the missing writer is caught first.
     #[test]
     fn a_spec_with_no_writer_is_refused_before_any_sink_exists() {
         assert_eq!(
@@ -507,13 +493,6 @@ mod tests {
 
     /// Building the sink writes a whole preamble, framed as JSON-SEQ, and
     /// carrying the two strings the spec was given.
-    ///
-    /// Ablation: dropping the `config.title(self.title)` line from
-    /// `into_stream` fails here with the whole preamble printed —
-    /// `{"qlog_version":"0.3","qlog_format":"JSON-SEQ","description":"proxy
-    /// to client","trace":{"vantage_point":{"type":"unknown"},…}}` — which is
-    /// also the clearest demonstration of the omission rule the next test
-    /// pins: the title is not `null` in there, it is simply not a key.
     #[test]
     fn becoming_a_sink_writes_the_preamble_immediately() {
         let sink = Arc::new(Mutex::new(Vec::new()));
@@ -770,23 +749,10 @@ mod tests {
     /// carried no payload — and it is what makes the loaded figure mean
     /// something.
     ///
-    /// Observed here, MTU discovery off, over five runs: the 100 000-byte
-    /// transfer recorded 89 1-RTT sent packets totalling 102 985–102 989
-    /// bytes, and the idle connection 3 packets totalling 219–222 bytes. With
-    /// discovery left on, over three runs, the same two figures were 83–88
-    /// packets / 108 256–108 489 bytes and 4–5 packets / 1 548–1 590 bytes.
-    /// The thresholds below are far outside both spreads, because the numbers
+    /// The thresholds below are loose, because the numbers
     /// move with the machine and with quinn's version; what does not move is
     /// that a loaded connection and an idle one are two orders of magnitude
     /// apart.
-    ///
-    /// Ablation, the failure this is really here for: attaching the sink to a
-    /// `quinn::TransportConfig` built beside the one the client is actually
-    /// configured with — which is a two-line mistake and produces a capture
-    /// file that exists, parses and names a qlog version — fails here with
-    /// `the capture cannot record fewer bytes than the connection carried: 0
-    /// over 0 packets`, while the 100 000-byte transfer still succeeds and
-    /// the server still reports every byte.
     #[tokio::test]
     async fn a_capture_counts_the_bytes_the_connection_sent() {
         let _ = rustls::crypto::ring::default_provider().install_default();

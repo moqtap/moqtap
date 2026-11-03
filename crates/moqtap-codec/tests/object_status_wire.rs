@@ -3,14 +3,11 @@
 //!
 //! `object_status.rs` gates each draft's `ObjectStatus::from_u64`. That is the
 //! *conversion*, and a conversion nothing calls proves nothing about what the
-//! codec decodes — which is exactly the state drafts 15-19 were in. Those five
-//! decoders kept the status as a raw wire code and never compared it against
-//! the assigned set, so a draft-19 datagram carrying status `0x02` decoded
-//! clean and handed `object_status: Some(2)` to its caller, with 0 bytes left
-//! over and no error, while draft-19 Section 11.2.1.1 assigns only `0x0`,
-//! `0x3` and `0x4` and says any other value SHOULD be treated as a protocol
-//! error. Drafts 07-14 refused the same byte. This file is the gate over the
-//! decoders themselves, so the two halves cannot drift apart again.
+//! codec decodes. A decoder that keeps the status as a raw wire code and never
+//! compares it against the assigned set lets a draft-19 datagram carrying
+//! status `0x02` decode clean, while draft-19 Section 11.2.1.1 assigns only
+//! `0x0`, `0x3` and `0x4` and says any other value SHOULD be treated as a
+//! protocol error. This file is the gate over the decoders themselves.
 //!
 //! # What "the data path" means here
 //!
@@ -55,72 +52,15 @@
 //! (`0x2`); `from_u64`'s behaviour on wider values is `object_status.rs`'s
 //! sweep to make.
 //!
-//! # What these tests catch, observed by making each change and running them
+//! # What these tests check
 //!
-//! Dropping the `checked_status(status.into_inner())?;` line from
-//! `draft19::data_stream::SubgroupObjectReader::read_object` — putting back
-//! the exact defect this file exists for — fails
-//! `draft19_object_status_on_the_wire` with:
-//!
-//! ```text
-//! draft-19: subgroup read_object accepted status 0x1, which the draft does not assign
-//! ```
-//!
-//! Dropping it from `read_object_meta` instead, leaving `read_object` correct,
-//! fails the same test with:
-//!
-//! ```text
-//! draft-19: subgroup read_object_meta accepted status 0x1, which the draft does not assign
-//! ```
-//!
-//! Dropping it from that draft's `DatagramHeader::decode` fails it with:
-//!
-//! ```text
-//! draft-19: status datagram accepted status 0x1, which the draft does not assign
-//! ```
-//!
-//! And the other direction — draft-15 validating against draft-16's narrower
-//! set, so an assigned code is refused — fails
-//! `draft15_object_status_on_the_wire` with:
-//!
-//! ```text
-//! draft-15: subgroup read_object refused status 0x1, which the draft assigns: InvalidField
-//! ```
-//!
-//! On the fetch side, letting `draft15::data_stream::FetchObjectReader`'s
-//! status read fall back to Normal instead of refusing an unassigned code —
-//! `ObjectStatus::from_u64(..).unwrap_or(ObjectStatus::Normal)` in place of
-//! `decoded_status(..)?` — fails `draft15_object_status_on_the_wire` with:
-//!
-//! ```text
-//! assertion `left == right` failed: draft-15: fetch read_object reported a status the wire did not carry
-//!   left: Some(0)
-//!  right: Some(2)
-//! ```
-//!
-//! The typed status field is what makes that the failure: draft-15's enum
-//! cannot hold `0x2`, so an unvalidated read cannot report the code it saw and
-//! is caught for mis-reporting before it is caught for accepting.
-//!
-//! For drafts 16-23 the fetch gate is the absence of the field. Reading a
-//! status varint after a zero payload length in `fo19::read_object`, in
-//! `src/data_dispatch.rs`, fails `draft19_object_status_on_the_wire` with:
-//!
-//! ```text
-//! assertion `left == right` failed: draft-19: fetch read_object consumed the byte after a zero-length object
-//!   left: []
-//!  right: [0]
-//! ```
-//!
-//! and reporting a status for an empty payload instead — `status: None` in
-//! `Resolved::into_object` replaced by `payload.is_empty().then_some(0)` —
-//! fails `draft16_object_status_on_the_wire` with:
-//!
-//! ```text
-//! assertion `left == right` failed: draft-16: fetch read_object reported a status, which the draft does not put on a fetch object
-//!   left: Some(0)
-//!  right: None
-//! ```
+//! Each per-draft test fails if a subgroup `read_object`, a subgroup
+//! `read_object_meta` or a status datagram decode accepts an unassigned code,
+//! or refuses an assigned one. On the fetch side it fails if a draft 07-15
+//! read reports a status other than the one the wire carried (draft-15's typed
+//! status cannot hold `0x2`, so an unvalidated read is caught mis-reporting
+//! it), and if a draft 16-23 read consumes the byte after a zero-length object
+//! or reports a status the draft does not put on a fetch object.
 
 #![cfg(any(
     feature = "draft07",

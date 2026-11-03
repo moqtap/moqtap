@@ -131,20 +131,6 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// recognises it as fatal and says so. And the *peer* — the endpoint that broke
 /// the rule — receives the close, which is the only part of the rule that is
 /// about the wire.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Removing `CodecError::ObjectIdOverflow` from draft-19's
-/// `codec_session_error_code`, which is the state this rule was in before: the
-/// codec reported the wrap, the client refused the object, and the session
-/// stayed open.
-///
-/// ```text
-/// ---- a_wrapped_object_id_delta_closes_the_quic_connection stdout ----
-///
-/// thread 'a_wrapped_object_id_delta_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft19_object_id_wrap_closes_the_session.rs:
-/// the wrap is a rule draft-19 answers with a close, but close_for_data_stream declined to close
-/// ```
 #[tokio::test]
 async fn a_wrapped_object_id_delta_closes_the_quic_connection() {
     common::init_crypto();

@@ -40,16 +40,9 @@
 //! per-field assignment — which is what `tests/actions_shaping.rs` does at
 //! every construction site. What the `Default` provides is a *value* to
 //! start from, not a syntax. Inside this crate both forms compile, which is
-//! why the unit tests below use the shorter one; a sentence claiming the
-//! functional-update form works for an outside caller was measured false
-//! (11 × `E0639` out of tree, on all four structs).
+//! why the unit tests below use the shorter one.
 //!
 //! # State of the module
-//!
-//! The types, [`Matcher::matches`], [`ShapeProfile::try_new`]'s validation
-//! and the pure token bucket ([`charge`]) landed first, with their own unit
-//! tests, so the scheduler that consumes them lands against arithmetic that
-//! is already gated.
 //!
 //! A configured [`ShapeProfile`] arms framing on its own
 //! (`ProxySessionConfig::shape`), [`ShapeStats`] is recorded and readable
@@ -81,8 +74,7 @@
 //! **An object too large for the framer to buffer is outside it as well, and
 //! says so.** Such an object has no `ObjectMeta`, so no rule can name it, so no
 //! bucket charges it and it is granted unconditionally — one object can
-//! therefore cross a class's rate whole. Measured: a 4 MiB object crossed in
-//! 800 ms against a class whose bucket was configured at zero bytes per second.
+//! therefore cross a class's rate whole.
 //! The bytes are accounted on [`ShapeStats::unshapeable`] and the session
 //! reports `Impairment{ShapeUnpacedObject}`, once per stream, naming the class
 //! the stream's other units are charged to — because *my 500 kbps cap was
@@ -107,8 +99,8 @@
 //! subgroup streams and polices datagrams reads its queue policy for the
 //! first and not for the second.
 //!
-//! **This is settled rather than pending, and the sharp edge is worth stating
-//! outright:** the bucket can answer *not now, but at this instant* — the
+//! **The sharp edge, stated outright:** the bucket can answer *not now, but at
+//! this instant* — the
 //! same answer that defers a stream unit — and on the datagram path that
 //! answer is discarded like every other refusal. A datagram over a live rate
 //! is dropped where it arrived, not held until the instant its own bucket
@@ -253,9 +245,7 @@ impl ShapeProfile {
     /// the object sizes, and the sizes are what decide. The second is worth
     /// the attention because its silent form is so plausible: a burst below
     /// one object makes every unit leave at its `max_hold` clamp, at a
-    /// throughput with no relation to the rate that was configured, and
-    /// before the report existed the only signal was the one an ordinary
-    /// rate-limited class produces.
+    /// throughput with no relation to the rate that was configured.
     pub fn try_new(
         buckets: Vec<BucketConfig>,
         classes: Vec<ClassRule>,
@@ -877,32 +867,12 @@ mod tests {
     }
 
     /// **`try_new` rejects every class that can never claim anything** —
-    /// one of the silent no-ops this constructor exists to make loud.
-    /// The constructor's own reason for existing is that *a mis-typed bucket
-    /// name would not be a silently inert class — configuration that looks
-    /// applied and does nothing*, and it checked five things, none of which was
-    /// the matcher's own arithmetic. All three rows below were accepted as
-    /// valid profiles and delivered zero bytes in silence; the detector
-    /// (`RangeSet::is_empty`) was already written and already public.
+    /// one of the silent no-ops this constructor exists to make loud: each row
+    /// below is a valid-looking profile that would deliver zero bytes in silence.
     ///
     /// Each row is paired with the **same key holding a real value**, in
     /// the same body, so a rejection cannot be passing because `try_new`
-    /// rejects any profile that sets that key at all — which would be a far
-    /// worse defect than the one being fixed.
-    ///
-    /// *Ablation, recorded:* delete the `inert_key` check from `try_new` —
-    /// all three rejections redden here, the inert-matcher row of
-    /// `try_new_rejects_every_invalid_profile` reddens with it,
-    /// and each `left` is the accepted profile printed in full, which is the
-    /// point: the thing that ships is a `ShapeProfile` that looks entirely
-    /// ordinary and holds `track_alias: Some(RangeSet { ranges: [] })`.
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an inverted track_alias range is an empty
-    /// set, so this class can never claim a unit
-    ///   left: Ok(ShapeProfile { .. track_alias: Some(RangeSet { ranges: [] }) .. })
-    ///  right: Err(InertMatcher { class: "video", key: "track_alias" })
-    /// ```
+    /// rejects any profile that sets that key at all.
     #[test]
     fn try_new_rejects_a_class_that_can_never_claim_a_unit() {
         // Bound through locals: a literal `9..=1` is a clippy error at the

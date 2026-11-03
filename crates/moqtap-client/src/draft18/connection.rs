@@ -3500,11 +3500,6 @@ mod tests {
     /// proved it, which is an accusation better evidenced than any real one
     /// this build makes. The section stating that rule is numbered differently
     /// on every draft, and the point does not turn on the number.
-    ///
-    /// Ablated by putting the arm back to
-    /// `ConnectionError::Codec(CodecError::UnknownMessageType(0))`: this test
-    /// reddens on the cause, and so does the probe's own
-    /// `violation::a_message_this_build_could_not_narrow_names_nobody`.
     #[test]
     fn a_message_this_build_could_not_narrow_names_nobody() {
         use crate::dispatch::{AnyConnectionError, ErrorCause};
@@ -3560,13 +3555,6 @@ mod tests {
     }
 
     /// `MOQT_ALPN` is the ALPN a client configured for this draft offers.
-    ///
-    /// Putting `moq-00` back — the value this constant held on all five of
-    /// drafts 15-19 — fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: MOQT_ALPN is "moq-00"; a draft-19 client offers ["moqt-19"]
-    /// ```
     #[test]
     fn moqt_alpn_is_the_one_a_client_offers() {
         // A literal on its own is what let this constant keep `moq-00` for
@@ -3606,16 +3594,6 @@ mod tests {
     ///
     /// Every type this draft assigns is classified: the loop walks the whole
     /// assigned range and asks the classifier about each one it finds.
-    ///
-    /// Dropping `MessageType::SubscribeTracks` from the true arm into the
-    /// control-stream arm — the copy of draft-17's six-type classifier a
-    /// blind port would leave behind — fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the types that open a request stream are [3, 6, 13, 22, 29, 80]; draft-18 Section 3.3 names [3, 6, 13, 22, 29, 80, 81]
-    ///   left: [3, 6, 13, 22, 29, 80]
-    ///  right: [3, 6, 13, 22, 29, 80, 81]
-    /// ```
     #[test]
     fn only_seven_message_types_open_a_request_stream() {
         // TRACK_STATUS, SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE,
@@ -3649,16 +3627,6 @@ mod tests {
     /// This is the mislabelling a port from another draft is most likely to
     /// introduce, because the numbers move between drafts while the names do
     /// not: SUBSCRIBE_NAMESPACE is 0x11 on draft-17 and 0x50 here.
-    ///
-    /// Pointing `RequestKind::SubscribeTracks` at
-    /// `MessageType::SubscribeNamespace` — the two draft-18 types whose names
-    /// are closest and whose numbers are adjacent — fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: SubscribeTracks is labelled 80 but its message leads with 81
-    ///   left: 80
-    ///  right: 81
-    /// ```
     #[test]
     fn each_request_kind_labels_the_message_its_helper_writes() {
         use crate::draft18::endpoint::Endpoint;
@@ -3720,16 +3688,6 @@ mod tests {
     /// type this draft assigns, or a message could be refused on the control
     /// stream and refused again as the opening of a request stream — leaving
     /// no legal place for it.
-    ///
-    /// Dropping `MessageType::SubscribeTracks` to `None` in
-    /// `from_message_type` — the draft-18 kind a port from draft-17 is most
-    /// likely to leave out — fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: type 81 opens a request stream but from_message_type calls it None
-    ///   left: false
-    ///  right: true
-    /// ```
     #[test]
     fn the_two_request_stream_classifiers_agree() {
         let mut classified = 0;
@@ -3974,19 +3932,6 @@ mod accept_on_the_wire {
     /// update "MUST respond with exactly one REQUEST_OK or REQUEST_ERROR
     /// message indicating if the update was successful", and on a PUBLISH this
     /// endpoint sent, the receiver is this endpoint.
-    ///
-    /// # What it catches
-    ///
-    /// Making the origin guard on this draft's `respond` unconditional, so
-    /// that no response is written on a stream this endpoint opened:
-    ///
-    /// ```text
-    /// the subscriber's update is this endpoint's to answer:
-    /// RespondedToOwnRequest(0)
-    /// ```
-    ///
-    /// It reddens this gate and the one below it, on draft-18's own line, and
-    /// nothing else in the client or the proxy.
     #[tokio::test]
     async fn an_update_on_a_publish_we_sent_is_answered_here() {
         let mut lb = loopback().await;
@@ -4044,23 +3989,6 @@ mod accept_on_the_wire {
     /// error code UPDATE_FAILED." The publisher of a subscription established
     /// with PUBLISH is the endpoint that sent it, and the ending goes on the
     /// stream that endpoint opened rather than on one the peer opened.
-    ///
-    /// # What it catches
-    ///
-    /// The same cut as the gate above, restoring the origin guard:
-    ///
-    /// ```text
-    /// refuse the subscriber's update: RespondedToOwnRequest(0)
-    /// ```
-    ///
-    /// And narrowing the refusal's debt back to a peer's SUBSCRIBE, so the
-    /// endpoint that sent the PUBLISH owes nothing for refusing an update on
-    /// it — after which the ending goes out under any status and the stream
-    /// has already been finished:
-    ///
-    /// ```text
-    /// transport error: write error: closed stream
-    /// ```
     #[tokio::test]
     async fn a_refused_update_on_a_publish_we_sent_owes_its_ending() {
         let mut lb = loopback().await;
@@ -4132,19 +4060,6 @@ mod accept_on_the_wire {
     /// list and a pointer to its own Section 3.3.2; this draft has neither. There is
     /// no subscription to terminate here and no PUBLISH_DONE that could go
     /// out, so a send half held open for one would stay open for good.
-    ///
-    /// # What it catches
-    ///
-    /// Recording the refusal's debt for a namespace subscription, which is
-    /// what makes the connection hold a stream open for a message that
-    /// subscription has no way to send:
-    ///
-    /// ```text
-    /// the peer is still reading: the refusal never closed the send half:
-    /// Elapsed(())
-    /// ```
-    ///
-    /// Measured on draft-18's own predicate, not inherited from draft-19's.
     #[tokio::test]
     async fn a_refused_namespace_update_closes_the_stream() {
         let mut lb = loopback().await;
@@ -4199,18 +4114,6 @@ mod accept_on_the_wire {
     /// stream, so refusing the update on that stream is only half of it; the
     /// data stream has to go too, and the connection can only reset a handle
     /// it still holds.
-    ///
-    /// # What it catches
-    ///
-    /// Refusing the update on the request stream and leaving the data stream
-    /// alone, which is half the sentence:
-    ///
-    /// ```text
-    /// the peer is still waiting on a stream that should have been reset:
-    /// Elapsed(())
-    /// ```
-    ///
-    /// It reddens this gate and nothing else in the client or the proxy.
     #[tokio::test]
     async fn a_refused_fetch_update_resets_the_fetch_data_stream() {
         let mut lb = loopback().await;

@@ -1863,15 +1863,6 @@ mod tests {
     /// separate OBJECT_DATAGRAM_STATUS, and so must keep accepting every header
     /// a publisher may send. A build with only some drafts enabled compiles
     /// only the arms it has.
-    ///
-    /// # What this catches, observed by making the change and running it
-    ///
-    /// Dropping the check from draft-07's `DatagramHeader::encode_checked`, so
-    /// the dispatch layer has nothing to carry out:
-    ///
-    /// ```text
-    /// draft-07 must refuse a status its framing cannot carry; got Ok(())
-    /// ```
     #[test]
     fn any_datagram_header_encode_refuses_what_the_framing_cannot_carry() {
         #[cfg(feature = "draft07")]
@@ -1952,17 +1943,8 @@ mod tests {
     /// rather than `true` — reporting "permitted" would claim a rule was
     /// consulted. Draft-12 states the narrow form, so an extension block is a
     /// violation beside Object Does Not Exist and legal beside End of Group.
-    /// Draft-18 states the general form, where both are violations.
-    ///
-    /// # What this catches, observed by making the change and running it
-    ///
-    /// Widening draft-12's arm to the general form, by comparing its status
-    /// against `Normal` instead of against `ObjectDoesNotExist`:
-    ///
-    /// ```text
-    /// draft-12 states the narrow form, which leaves End of Group free to
-    /// carry extensions: expected Some(true), got Some(false)
-    /// ```
+    /// Draft-18 states the general form, where both are violations. Fails if
+    /// draft-12's arm is widened to the general form.
     #[test]
     fn any_datagram_header_reports_payload_and_extension_permission() {
         #[cfg(feature = "draft07")]

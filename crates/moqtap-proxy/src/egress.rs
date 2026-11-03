@@ -844,9 +844,6 @@ pub(crate) struct PendingQueue {
     /// forever; if the queue kept reporting it while the shaper was refusing
     /// the same unit, `wait_release` would resolve on every `select!`
     /// iteration and the pipe loop would spin hot until the bucket refilled.
-    /// Measured before this field existed: a barrier-held object on a 0-bps
-    /// class pinned a core for the whole five-second clamp and starved the
-    /// test's own task alongside it.
     ///
     /// Once a unit is due, the only things that may wake its stream are the
     /// deadline the scheduler armed and the gate a discipline handed back.
@@ -2140,10 +2137,6 @@ mod tests {
     /// That last clause is the whole reason `arm_head_at` exists: re-arming
     /// at `due_at` would hand back an already-fired deadline and spin the
     /// release branch hot until the bucket refilled.
-    ///
-    /// *Ablation:* delete the `shaping_grants_head` call from
-    /// `pop_next_due` — the first `is_none` assertion reddens with the unit
-    /// popped, which is a configured rate that paces nothing.
     #[test]
     fn a_shaped_head_waits_for_its_bucket_and_reports_the_scheduler_s_deadline() {
         // 1000 bytes/s, 1000-byte burst: the first 1000-byte unit fits and
@@ -2173,22 +2166,13 @@ mod tests {
         assert!(q.is_empty());
     }
 
-    /// The spin guard, and it is a **measured** defect rather than a
-    /// hypothetical one.
+    /// The spin guard.
     ///
     /// A `Hold` whose gate has been released makes its unit due, and the gate
     /// stays released forever. If the queue kept reporting that gate while
     /// the shaper was refusing the same unit, `wait_release` would resolve on
     /// every `select!` iteration and the pipe loop would spin hot for the
-    /// whole of `max_hold`. Measured before `shape_parked` existed: a
-    /// barrier-held object on a 0-bps class pinned a core for five seconds
-    /// and starved the test's own task alongside it, so
-    /// `a_zero_rate_class_starves_and_the_other_flows` failed with the video
-    /// stream *delivered at its clamp* rather than held.
-    ///
-    /// *Ablation:* restore `head.gate.clone().or_else(|| shape_gate)` in
-    /// `head_release` — the `is_released` assertion reddens, and the
-    /// integration gate above it goes from 30 ms to 5 s.
+    /// whole of `max_hold`.
     #[test]
     fn a_shaper_holding_a_gated_unit_does_not_report_the_gate_that_freed_it() {
         let (mut q, _stats, _s) =
@@ -2246,10 +2230,6 @@ mod tests {
     /// proves nothing. A `Truncate` owes its prefix to the wire, and that
     /// prefix is exactly what a dry bucket would sit on. Both are asserted,
     /// in that order, so the row says which of the two the guard is for.
-    /// *Ablation, recorded:* remove the `Item::Terminal` early return from
-    /// `shaping_grants_head`. The `Reset` still pops; the `Truncate` is held to
-    /// `max_hold` and its `expect` reddens with *a truncate owes its prefix to
-    /// the wire, not to a bucket*.
     #[test]
     fn a_terminal_is_never_gated_by_a_bucket() {
         let (mut q, _stats, _s) =
@@ -2275,10 +2255,6 @@ mod tests {
     /// The two halves are one test because the report is what keeps the
     /// clamp from being a silent lateness, and the delivery is what keeps a
     /// starved class from being a silent loss.
-    ///
-    /// *Ablation:* make the `Expiry::Deliver` arm return `false` — the unit
-    /// is never yielded, the `is_some` assertion reddens, and in a session
-    /// that is a 0-bps class that hangs its stream instead of running late.
     ///
     /// The report is asserted as a **whole variant**, `requested` included,
     /// and not as `matches!(.., Clamped { applied, .. })`: a zero-rate
@@ -2336,12 +2312,6 @@ mod tests {
     /// separating *this rate is being applied and it is low* from *this rate is
     /// not being applied at all*, since both produce this same `Clamped`
     /// afterwards.
-    ///
-    /// *Ablation, run:* restore the sentinel in `expire_head`'s
-    /// `Expiry::Deliver` arm, `requested: Some(Duration::MAX)`. Both legs
-    /// redden with
-    /// `left: Some(Clamped { requested: Some(18446744073709551615.999999999s), applied: 80ms })`
-    /// against `right: Some(Clamped { requested: None, applied: 80ms })`.
     #[test]
     fn an_unbounded_shaping_wait_reports_no_request_at_all() {
         const HOLD: Duration = Duration::from_millis(80);
@@ -2396,9 +2366,6 @@ mod tests {
     /// Everything queued goes with it, and that is deliberate — writing part
     /// of a stream the shaper has given up on leaves the peer a prefix it
     /// cannot tell from a truncation.
-    /// *Ablation:* drop the `note_expired` call — the `objects_expired`
-    /// assertion reddens while the reset still happens, which is exactly the
-    /// *it worked but nothing says so* failure the counter exists for.
     #[test]
     fn expiry_reset_stream_replaces_the_queue_with_its_reset() {
         const HOLD: Duration = Duration::from_millis(50);
@@ -2440,15 +2407,6 @@ mod tests {
     /// elided: it is charged where a unit is classified, which is the pipe
     /// loop's job and not this queue's, so a queue that started moving it
     /// would be counting the same object twice.
-    ///
-    /// *Ablation, recorded:* pass `ProxySide::ClientToProxy` for both queues — the
-    /// uplink compare reddens with `left: DirectionStats { objects_seen: 0,
-    /// bytes_shaped: 112, objects_expired: 1, streams_reset_by_shaping: 1,
-    /// streams_with_mixed_classes: 0 }` against `right: DirectionStats { ..,
-    /// bytes_shaped: 16, .. }`. Note what *does not* move: the aggregate is
-    /// still 112 and the expiry is still counted once, so a one-legged
-    /// recorder passes every figure a reader would have had before the
-    /// split.
     #[test]
     fn two_legs_sharing_one_recorder_charge_their_own_side() {
         const HOLD: Duration = Duration::from_millis(50);
@@ -2524,9 +2482,6 @@ mod tests {
     ///
     /// Two causes of waiting, two counters. Conflating them is what makes
     /// head-of-line blocking read as configured shaping.
-    ///
-    /// *Ablation:* charge `note_starved` to the *head's* class instead of
-    /// the waiting unit's — the two assertions swap and both redden.
     #[test]
     fn a_unit_behind_another_class_is_counted_once_and_separately() {
         // Two classes, one bucket that grants nothing, so the head parks.
@@ -2579,9 +2534,6 @@ mod tests {
     /// Not a nicety: a declaration that outlives its stream starves every
     /// lower-priority class for the rest of the session, and the symptom is
     /// a *different* stream stalling to `max_hold`.
-    ///
-    /// *Ablation:* delete the `Drop` impl — the final `is_none` assertion
-    /// reddens with `Starved(..)`, on a stream that no longer exists.
     #[test]
     fn dropping_a_queue_withdraws_the_demand_it_declared() {
         let queue =
@@ -2652,10 +2604,6 @@ mod tests {
 
     /// The estimate is reporting; `due_at` is readiness. Conflating the two
     /// is what stranded whole streams behind a released `Hold`.
-    ///
-    /// *Ablation (run, and it fails):* in [`PendingQueue::push`], clamp
-    /// `unit.due_at` the way `unit.expected_at` is clamped. Units 1 and 2
-    /// then report the head's 300 ms deadline as their own.
     #[test]
     fn the_queues_estimate_never_rewrites_a_units_own_deadline() {
         let (mut q, _c) = queue();
@@ -2727,11 +2675,6 @@ mod tests {
     /// the queue stamped them with the hold's `max_hold` ceiling instead,
     /// one gate release wrote one object and stranded every object behind
     /// it, plus the stream's FIN, for 30 s.
-    ///
-    /// *Ablation (run, and it fails):* in [`PendingQueue::push`], write
-    /// `unit.due_at = unit.due_at.max(tail).max(Instant::now())` alongside
-    /// the `expected_at` line. Only the head pops, and `drained` is
-    /// `[4]`.
     #[test]
     fn releasing_a_gate_frees_the_whole_run_queued_behind_it() {
         let (mut q, _c) = queue();
@@ -2768,10 +2711,6 @@ mod tests {
     /// as the hold's ceiling. The unit is not due at the gate release, because
     /// its own 50 ms have not passed; it *is* due 50 ms later, rather than at
     /// the 20 s ceiling.
-    ///
-    /// *Ablation (run, and it fails):* in [`PendingQueue::push`], clamp
-    /// `unit.due_at` as well as `unit.expected_at`. The second pop at
-    /// `+60 ms` returns `None` and the unit waits out `max_hold`.
     #[test]
     fn a_delay_queued_behind_a_hold_keeps_its_own_deadline() {
         const CEILING: Duration = Duration::from_secs(20);
@@ -2935,11 +2874,6 @@ mod tests {
     /// object never reaches the peer. `a_held_object_is_never_silently_lost_at_teardown`
     /// is the same claim over real QUIC; this is the mechanism, with no
     /// scheduler in it.
-    ///
-    /// *Ablation (run, and it fails):* make
-    /// [`PendingQueue::unconfirmed_bytes`] return `self.queued_bytes`. It
-    /// reports 0 and the last assertion goes red — which is precisely the
-    /// silent loss, spelled out.
     #[tokio::test]
     async fn a_teardown_flush_reports_what_it_handed_to_a_dying_transport() {
         let (mut q, _c) = queue();
@@ -3241,19 +3175,6 @@ mod tests {
     /// it — a requested close deciding whether it may stop waiting —
     /// either stops early on bytes that are still queued, or waits out its
     /// whole window on bytes that left long ago.
-    ///
-    /// *Ablation, recorded:* drop the `self.credit(self.queued_bytes)` from
-    /// `PendingQueue`'s `Drop`. The final assertion goes red with
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a queue that goes away takes its
-    /// remainder with it, or every later close waits out its whole window
-    ///   left: 4
-    ///  right: 0
-    /// ```
-    ///
-    /// — a session total permanently above zero, on a stream that no longer
-    /// exists.
     #[tokio::test]
     async fn the_gauge_follows_every_route_bytes_leave_a_queue_by() {
         let (mut q, gauge) = gauged();
@@ -3368,17 +3289,6 @@ mod tests {
     /// and both callers reach the same `OnceLock`, so without an origin
     /// beside the pair every operator-initiated close was reported to
     /// observers as a hook's decision.
-    ///
-    /// *Ablation, recorded:* have `record` store `CloseOrigin::Hook` — the
-    /// state the type was in before this field existed, where the two
-    /// callers are indistinguishable once they have written. This test goes
-    /// red with the real message
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: Some((7, b"asked", Hook))
-    ///  right: Some((7, b"asked", ControlPlane))
-    /// ```
     #[test]
     fn recording_a_close_leaves_the_session_running() {
         let cancel = CancellationToken::new();

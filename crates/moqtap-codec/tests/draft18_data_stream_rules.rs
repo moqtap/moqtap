@@ -73,17 +73,8 @@ fn subgroup_header_bytes(header_type: u8) -> Vec<u8> {
 /// are gated by [`a_type_wider_than_one_byte_is_refused_by_what_it_is`], which
 /// has to supply whole fields rather than single bytes.
 ///
-/// # Ablation
-///
-/// Reverting `SubgroupHeader::decode` to the bit-4 test it had before —
-/// `header_type & SUBGROUP_BASE_BIT == 0` in place of the
-/// `subgroup_type_is_valid` call — was run and gives:
-///
-/// ```text
-/// thread 'a_subgroup_stream_refuses_every_type_value_the_draft_calls_invalid'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// draft-18 Section 11.4.2 lists type 0x16 as invalid, but it decoded
-/// ```
+/// Fails if the decoder accepts a type draft-18 Section 11.4.2 lists as
+/// invalid, such as 0x16, by testing bit 4 alone.
 #[test]
 fn a_subgroup_stream_refuses_every_type_value_the_draft_calls_invalid() {
     for header_type in 0x00u8..=0x7F {
@@ -121,16 +112,8 @@ fn a_subgroup_stream_refuses_every_type_value_the_draft_calls_invalid() {
 /// than the stream. Refusing before the first byte is written keeps the
 /// rejected header out of the buffer entirely.
 ///
-/// # Ablation
-///
-/// Dropping the type check from `SubgroupHeader::encode_checked` was run and
-/// gives:
-///
-/// ```text
-/// thread 'the_checked_subgroup_encoder_writes_only_what_the_decoder_accepts'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// encode_checked wrote type 0x00, which Section 11.4.2 calls invalid
-/// ```
+/// Fails if `SubgroupHeader::encode_checked` writes a type draft-18
+/// Section 11.4.2 calls invalid.
 #[test]
 fn the_checked_subgroup_encoder_writes_only_what_the_decoder_accepts() {
     for header_type in 0x00u8..=0xFF {
@@ -262,16 +245,8 @@ fn datagram_bytes(datagram_type: u8) -> Vec<u8> {
 /// Every octet the draft rules out is refused, and every octet it allows
 /// decodes.
 ///
-/// # Ablation
-///
-/// Removing the `datagram_type_is_valid` call from `DatagramHeader::decode`
-/// was run and gives:
-///
-/// ```text
-/// thread 'a_datagram_refuses_every_type_value_the_draft_calls_invalid'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// draft-18 Section 11.3.1 lists type 0x10 as invalid, but it decoded
-/// ```
+/// Fails if `DatagramHeader::decode` accepts a type draft-18 Section 11.3.1
+/// lists as invalid.
 #[test]
 fn a_datagram_refuses_every_type_value_the_draft_calls_invalid() {
     for datagram_type in 0x00u8..=0x7F {
@@ -306,20 +281,11 @@ fn a_datagram_refuses_every_type_value_the_draft_calls_invalid() {
 /// The checked encoder writes only the Type values the decoder accepts.
 ///
 /// Section 11.3.1 answers an invalid Type with "MUST close the session with a
-/// PROTOCOL_VIOLATION", so the cost of writing one is the session. The status
-/// rule `encode_checked` already applied is unaffected: this adds the type rule
-/// beside it.
+/// PROTOCOL_VIOLATION", so the cost of writing one is the session. The type
+/// rule sits beside the status rule `encode_checked` also applies.
 ///
-/// # Ablation
-///
-/// Dropping the type check from `DatagramHeader::encode_checked` was run and
-/// gives:
-///
-/// ```text
-/// thread 'the_checked_datagram_encoder_writes_only_what_the_decoder_accepts'
-/// panicked at crates\moqtap-codec\tests\draft18_data_stream_rules.rs:
-/// encode_checked wrote type 0x10, which Section 11.3.1 calls invalid
-/// ```
+/// Fails if `DatagramHeader::encode_checked` writes a type draft-18
+/// Section 11.3.1 calls invalid.
 #[test]
 fn the_checked_datagram_encoder_writes_only_what_the_decoder_accepts() {
     for datagram_type in 0x00u8..=0xFF {

@@ -23,14 +23,7 @@
 //! direct assertion on the engine's offset arithmetic.
 //!
 //! Every fixture here opens with the datagram's own type field, on all
-//! drafts. That was not always true: drafts 07-13 model the type
-//! separately from `DatagramHeader`, and for a while nothing between the
-//! fixtures and the client wrote it, so the whole family put headerless
-//! datagrams on the wire and read a peer's type octet as the first byte of
-//! its Track Alias. The fixtures were built to match, which is why this
-//! file went green over it. The splice offset moved when the codec grew
-//! the field and the fixtures moved with it, exactly as the offsets here
-//! are meant to.
+//! drafts.
 //!
 //! # Where `ReplacePayload` is refused, and why the three cases differ
 //!
@@ -618,14 +611,6 @@ async fn assert_no_datagram_for(conn: &Connection, window: Duration, what: &str)
 
 /// The datagram hook fires with **no observer attached**, and the header
 /// is decoded for it.
-///
-/// In 0.3.x the datagram path sat entirely inside `if observer_enabled`,
-/// so a hook could only ever see a datagram on a session that also had an
-/// event observer — which is not a gate any hook asked for.
-///
-/// *Ablation:* narrow the decode-and-consult gate in `forward_datagrams`
-/// back to `if ctx.observer_enabled`. Both the call count and
-/// `datagram_headers_decoded` go to zero and this test goes red twice.
 #[tokio::test]
 async fn the_datagram_hook_fires_without_an_observer() {
     common::init_crypto();
@@ -674,10 +659,6 @@ async fn the_datagram_hook_fires_without_an_observer() {
 /// The hook fires on a datagram whose header did **not** decode, with
 /// `header: None` — which is what makes `Action::Drop` on malformed
 /// traffic expressible at all.
-///
-/// *Ablation:* restore the `if let Ok(header) = AnyDatagramHeader::decode`
-/// gate around the hook call. The hook is never consulted and this test
-/// goes red.
 #[tokio::test]
 async fn the_datagram_hook_fires_on_an_undecodable_datagram() {
     common::init_crypto();
@@ -729,10 +710,6 @@ async fn the_datagram_hook_fires_on_an_undecodable_datagram() {
 /// `Precondition::WithinMaxDatagramSize` is not answerable from inside the
 /// crate — and the transport then rejected it. Neither "applied" nor
 /// "refused" would be true.
-///
-/// *Ablation:* restore the `?` on `dest.send_datagram(bytes)`. The
-/// forwarding task returns an error, the first task to finish tears the
-/// session down, and the second datagram never arrives.
 #[tokio::test]
 async fn an_oversized_replacement_does_not_kill_the_session() {
     common::init_crypto();
@@ -806,9 +783,6 @@ async fn an_oversized_replacement_does_not_kill_the_session() {
 /// used here, because nobody took an action to fail. The oversize is manufactured by capping the relay's
 /// advertised `max_datagram_frame_size`, which squeezes the proxy → relay
 /// leg while leaving client → proxy at quinn's default.
-///
-/// *Ablation:* restore the `?` on the un-hooked `dest.send_datagram(data)`.
-/// The session dies and the small datagram never arrives.
 #[tokio::test]
 async fn an_unhooked_send_failure_reports_an_impairment_and_does_not_kill_the_session() {
     common::init_crypto();
@@ -1087,13 +1061,6 @@ async fn refusal_case(draft: DraftVersion, sent: Vec<u8>, want_detail: &'static 
 /// `ReplacePayload` is refused on all three shapes with no derivable
 /// payload boundary, each with its own `detail`, and the datagram is
 /// forwarded unchanged.
-///
-/// *Ablation for this test and its twelve-draft sibling:* derive the
-/// offset as `data.len() - cursor.len()` unconditionally — that is, drop
-/// the `draft != DraftVersion::Draft14 && !is_status` terms from
-/// `Target::payload_delimited`. The draft-14 case then produces
-/// `header ++ original ++ replacement`, a longer datagram with both
-/// payloads in it, and no `ActionRefused` at all.
 #[tokio::test]
 async fn replace_payload_on_a_datagram_is_refused_where_the_payload_is_not_delimited() {
     common::init_crypto();

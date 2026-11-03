@@ -115,14 +115,6 @@ fn the_answer_arrives_on_the_subscriptions_own_stream() {
 /// this draft that is what says which request is being answered. An endpoint
 /// that took it here would accept an answer in the one place Section 9.25 does
 /// not put it.
-///
-/// Ablation: restoring the `subscribe_namespaces` arm at the top of
-/// `receive_request_ok` fails with
-///
-/// ```text
-/// a REQUEST_OK for a namespace subscription is not answered on the control
-/// stream, got Ok(())
-/// ```
 #[test]
 fn the_answer_on_the_control_stream_is_refused() {
     let (mut ep, id) = subscribing();
@@ -140,13 +132,6 @@ fn the_answer_on_the_control_stream_is_refused() {
 /// Draft-16 names the request twice over — the stream carries it and so does
 /// the message's own Request ID field — and says nothing about the two
 /// disagreeing. Neither is guessed at.
-///
-/// Ablation: making `require_same_request` return `Ok(())` unconditionally
-/// fails with
-///
-/// ```text
-/// a response naming another request must be refused, got Ok(())
-/// ```
 #[test]
 fn a_response_naming_another_request_is_refused() {
     let (mut ep, id) = subscribing();
@@ -206,13 +191,6 @@ fn the_namespaces_it_asked_for_arrive_on_the_same_stream() {
 /// place the message, so it will not act on it. Recovery is real rather than
 /// hoped for — a control message carries its own length, so the next boundary
 /// on the stream is known however this one was refused.
-///
-/// Ablation: replacing the `Namespace` arm of `receive_message` with
-/// `Ok(())` fails with
-///
-/// ```text
-/// a NAMESPACE on the control stream must be refused, got Ok(())
-/// ```
 #[test]
 fn a_namespace_on_the_control_stream_is_refused_without_closing() {
     let mut ep = active(Role::Client);
@@ -261,13 +239,6 @@ fn a_namespace_needs_a_subscription_to_belong_to() {
 /// type unless negotiated. If they do, the peer MUST close the Session with a
 /// Protocol Violation." SUBSCRIBE is a request on this draft, and still not one
 /// that may open a stream.
-///
-/// Ablation: making `receive_subscribe_namespace_on_stream` fall through to
-/// `Ok(VarInt::from_u64(0).unwrap())` for a non-SUBSCRIBE_NAMESPACE fails with
-///
-/// ```text
-/// a bidirectional stream may not begin with a SUBSCRIBE, got Ok(VarInt(0))
-/// ```
 #[test]
 fn a_bidi_stream_may_not_begin_with_another_request() {
     let mut ep = active(Role::Client);
@@ -339,13 +310,6 @@ fn the_peers_namespace_subscription_can_be_answered() {
 /// this sentence; here what matters is that a request arriving on a namespace
 /// stream reaches the same rule a request arriving on the control stream does,
 /// which is the half this stream could have lost.
-///
-/// Ablation: dropping the `validate_peer_request_id` call from
-/// `receive_subscribe_namespace_on_stream` fails with
-///
-/// ```text
-/// a Request ID from this endpoint's own half must be refused, got Ok(VarInt(1))
-/// ```
 #[test]
 fn the_peers_request_id_is_held_to_its_own_half_of_the_space() {
     let mut ep = active(Role::Server);
@@ -382,13 +346,6 @@ fn the_peers_request_id_is_held_to_its_own_half_of_the_space() {
 /// Section 6.1: "A SUBSCRIBE_NAMESPACE can be cancelled by closing the stream
 /// with either a FIN or RESET_STREAM." Draft-16 has no UNSUBSCRIBE_NAMESPACE,
 /// so this is the whole of how one ends early.
-///
-/// Ablation: making `cancel_namespace_subscription` return `Ok(())` without
-/// driving the state machine fails with
-///
-/// ```text
-/// the answer owed to a withdrawn subscription must be refused, got Ok(())
-/// ```
 #[test]
 fn a_withdrawn_subscription_refuses_its_answer() {
     let (mut ep, id) = subscribing();
@@ -404,14 +361,6 @@ fn a_withdrawn_subscription_refuses_its_answer() {
 ///
 /// The precondition Section 6.1 states is a stream to close, and the stream is
 /// open from the SUBSCRIBE_NAMESPACE that opened it.
-///
-/// Ablation: narrowing `on_request_cancelled` to accept `Active` only fails
-/// with
-///
-/// ```text
-/// a subscription can be withdrawn before it is answered, got
-/// Err(Namespace(InvalidTransition { from: "Pending", event: "on_request_cancelled" }))
-/// ```
 #[test]
 fn it_can_be_withdrawn_before_it_is_answered() {
     let (mut ep, id) = subscribing();

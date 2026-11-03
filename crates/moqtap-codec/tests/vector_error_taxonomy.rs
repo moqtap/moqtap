@@ -8,77 +8,15 @@
 //! nothing can produce, is a category no vector can use.
 //!
 //! Nothing else checks that. The corpus comparison only ever sees the
-//! categories vectors happen to claim, which is why three of the schema's names
-//! went years without a single one: a category is reachable or it is not, and
-//! the corpus cannot tell you which until someone writes the vector that finds
-//! out. This file finds out first, from bytes rather than from constructed
+//! categories vectors happen to claim, so it cannot tell whether a category
+//! is reachable. This file checks that from bytes rather than from constructed
 //! error values, because an arm that maps a variant no decoder returns is
 //! indistinguishable from one that works.
 //!
-//! # What this catches, observed by making each change and running it
-//!
-//! Deleting the parameter-scope arm, so the rule falls through to the
-//! catch-all it sat in until the corpus had a name for it:
-//!
-//! ```text
-//! thread 'a_parameter_outside_its_scope_is_its_own_category' panicked at
-//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:
-//! assertion `left == right` failed: draft-19 FETCH_OK carrying EXPIRES
-//!   left: "invalid_value"
-//!  right: "parameter_out_of_scope"
-//! ```
-//!
-//! Reporting the reserved SUBGROUP_ID_MODE as an unassigned code point, by
-//! removing that branch from draft-19's `stream_type_error`:
-//!
-//! ```text
-//! thread 'a_type_the_draft_names_as_invalid_is_not_an_unknown_one' panicked at
-//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:
-//! assertion `left == right` failed: draft-19 subgroup Type 0x16
-//!   left: "unknown_message"
-//!  right: "invalid_type"
-//! ```
-//!
-//! Misspelling one vector's category by a letter, which is the failure the
-//! corpus comparison cannot report on its own — it would say the decoder
-//! refused the bytes for the wrong reason, and name a reason that does not
-//! exist:
-//!
-//! ```text
-//! thread 'every_category_the_corpus_claims_is_one_the_schema_names' panicked at
-//! crates\moqtap-codec\tests\vector_error_taxonomy.rs:
-//! transport/draft19/codec/messages/fetch-ok.json [with-params-and-properties]
-//! claims error category "parameter_out_of_scop", which the schema does not
-//! name. Nothing can answer to it, so the vector fails whatever the decoder
-//! does.
-//! ```
-//!
-//! And the one name in the schema that no decoder answers to, by emptying
-//! [`UNREACHABLE`]:
-//!
-//! ```text
-//! thread 'every_category_the_schema_names_is_either_reachable_or_recorded'
-//! panicked at crates\moqtap-codec\tests\vector_error_taxonomy.rs:
-//! the schema names "missing_parameter" and nothing in this file produces it.
-//! Either drive a decoder to it, or add it to UNREACHABLE with the reason.
-//! ```
-//!
-//! And the other direction — a name taken out of the shipped schema while this
-//! file still drives a decoder to it, which is the shape a tidy-up takes when
-//! two of the nine names have no vector claiming them:
-//!
-//! ```text
-//! thread 'every_category_this_file_accounts_for_is_one_the_schema_names'
-//! panicked at crates\moqtap-codec\tests\vector_error_taxonomy.rs:
-//! this file drives a decoder to "payload_not_permitted" and the schema no
-//! longer names it, so no vector can claim what the decoder demonstrably
-//! produces. Restore the name, or delete the case above that reaches it.
-//! ```
-//!
-//! That last one was measured against the whole crate before the check existed.
-//! Deleting the name left 101 binaries and 1,942 assertions green — this file's
-//! other five among them, and the corpus comparison too, because a category no
-//! vector claims is one no corpus sweep can miss.
+//! Fails if a rule is filed under the wrong category, if a vector claims a
+//! category the schema does not name, if the schema names one that nothing
+//! produces and [`UNREACHABLE`] does not record, or if a category this file
+//! reaches is taken out of the schema.
 
 mod test_vectors;
 
@@ -316,11 +254,10 @@ fn draft23_names_every_invalid_type_inside_the_byte_space() {
 /// Draft-20's new LOCATION_FILTER value shape is the first thing in the corpus
 /// to claim `invalid_parameter` for a malformed filter.
 ///
-/// The two variants behind it — `SubscriptionFilterMalformed` and
-/// `FilterEndGroupOverflow` — existed before and fell through to
-/// `invalid_value`, because no vector on any draft reached either. Draft-20
-/// Section 5.1.2 rebuilt the value, and its negative vectors are the first to
-/// say what kind of complaint a malformed one is.
+/// The two variants behind it are `SubscriptionFilterMalformed` and
+/// `FilterEndGroupOverflow`. Draft-20 Section 5.1.2 rebuilt the value, and its
+/// negative vectors are the first to say what kind of complaint a malformed
+/// one is.
 #[cfg(feature = "draft20")]
 #[test]
 fn a_malformed_location_filter_is_an_invalid_parameter() {
@@ -346,11 +283,10 @@ fn a_malformed_location_filter_is_an_invalid_parameter() {
 /// Draft-20's new LOCATION_FILTER value shape is the first thing in the corpus
 /// to claim `invalid_parameter` for a malformed filter.
 ///
-/// The two variants behind it — `SubscriptionFilterMalformed` and
-/// `FilterEndGroupOverflow` — existed before and fell through to
-/// `invalid_value`, because no vector on any draft reached either. Draft-21
-/// Section 3.3.1 rebuilt the value, and its negative vectors are the first to
-/// say what kind of complaint a malformed one is.
+/// The two variants behind it are `SubscriptionFilterMalformed` and
+/// `FilterEndGroupOverflow`. Draft-21 Section 3.3.1 rebuilt the value, and its
+/// negative vectors are the first to say what kind of complaint a malformed
+/// one is.
 #[cfg(feature = "draft21")]
 #[test]
 fn a_malformed_location_filter_is_an_invalid_parameter_draft21() {
@@ -527,8 +463,8 @@ fn every_category_the_corpus_claims_is_one_the_schema_names() {
 /// The categories this crate produces, each demonstrated from bytes rather
 /// than from a constructed error value.
 ///
-/// The three cases above drive the three that nothing had produced before; the
-/// other five this crate raises in rule suites of its own.
+/// The three cases above drive three of them; the other five this crate raises
+/// in rule suites of its own.
 const REACHABLE: &[&str] = &[
     "incomplete",
     "unknown_message",

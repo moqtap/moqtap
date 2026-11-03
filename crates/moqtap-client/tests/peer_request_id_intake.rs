@@ -99,12 +99,6 @@ mod draft07 {
     /// Section 6.4: the Subscribe ID "MUST be unique and
     /// monotonically increasing within a session". Strictly increasing answers
     /// both halves, so a repeat is caught by the same comparison.
-    ///
-    /// Dropping the high-water mark fails with:
-    ///
-    /// ```text
-    /// 3 does not increase on 3: Ok(())
-    /// ```
     #[test]
     fn a_peer_id_that_does_not_increase_is_refused() {
         let mut endpoint = advertising(8);
@@ -121,12 +115,6 @@ mod draft07 {
     /// The two ceilings are different numbers. Here the peer grants a large
     /// budget and this endpoint advertises a small one; the peer is held to the
     /// small one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -142,12 +130,6 @@ mod draft07 {
     /// The wiring. A FETCH off the wire reaches the dispatcher, and the
     /// dispatcher has to apply the rule - the validator being correct is worth
     /// nothing if no arriving message ever meets it.
-    ///
-    /// Removing the dispatch arm fails with:
-    ///
-    /// ```text
-    /// a FETCH whose Subscribe ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -236,12 +218,6 @@ mod draft08 {
     /// Section 7.4: the Subscribe ID "MUST be unique and
     /// monotonically increasing within a session". Strictly increasing answers
     /// both halves, so a repeat is caught by the same comparison.
-    ///
-    /// Dropping the high-water mark fails with:
-    ///
-    /// ```text
-    /// 3 does not increase on 3: Ok(())
-    /// ```
     #[test]
     fn a_peer_id_that_does_not_increase_is_refused() {
         let mut endpoint = advertising(8);
@@ -258,12 +234,6 @@ mod draft08 {
     /// The two ceilings are different numbers. Here the peer grants a large
     /// budget and this endpoint advertises a small one; the peer is held to the
     /// small one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -279,12 +249,6 @@ mod draft08 {
     /// The wiring. A FETCH off the wire reaches the dispatcher, and the
     /// dispatcher has to apply the rule - the validator being correct is worth
     /// nothing if no arriving message ever meets it.
-    ///
-    /// Removing the dispatch arm fails with:
-    ///
-    /// ```text
-    /// a FETCH whose Subscribe ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -373,12 +337,6 @@ mod draft09 {
     /// Section 7.4: the Subscribe ID "MUST be unique and
     /// monotonically increasing within a session". Strictly increasing answers
     /// both halves, so a repeat is caught by the same comparison.
-    ///
-    /// Dropping the high-water mark fails with:
-    ///
-    /// ```text
-    /// 3 does not increase on 3: Ok(())
-    /// ```
     #[test]
     fn a_peer_id_that_does_not_increase_is_refused() {
         let mut endpoint = advertising(8);
@@ -395,12 +353,6 @@ mod draft09 {
     /// The two ceilings are different numbers. Here the peer grants a large
     /// budget and this endpoint advertises a small one; the peer is held to the
     /// small one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -416,12 +368,6 @@ mod draft09 {
     /// The wiring. A FETCH off the wire reaches the dispatcher, and the
     /// dispatcher has to apply the rule - the validator being correct is worth
     /// nothing if no arriving message ever meets it.
-    ///
-    /// Removing the dispatch arm fails with:
-    ///
-    /// ```text
-    /// a FETCH whose Subscribe ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -510,12 +456,6 @@ mod draft10 {
     /// Section 8.6: the Subscribe ID "MUST be unique and
     /// monotonically increasing within a session". Strictly increasing answers
     /// both halves, so a repeat is caught by the same comparison.
-    ///
-    /// Dropping the high-water mark fails with:
-    ///
-    /// ```text
-    /// 3 does not increase on 3: Ok(())
-    /// ```
     #[test]
     fn a_peer_id_that_does_not_increase_is_refused() {
         let mut endpoint = advertising(8);
@@ -532,12 +472,6 @@ mod draft10 {
     /// The two ceilings are different numbers. Here the peer grants a large
     /// budget and this endpoint advertises a small one; the peer is held to the
     /// small one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -553,12 +487,6 @@ mod draft10 {
     /// The wiring. A FETCH off the wire reaches the dispatcher, and the
     /// dispatcher has to apply the rule - the validator being correct is worth
     /// nothing if no arriving message ever meets it.
-    ///
-    /// Removing the dispatch arm fails with:
-    ///
-    /// ```text
-    /// a FETCH whose Subscribe ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -661,12 +589,6 @@ mod draft11 {
     /// The two ceilings are different numbers: the peer grants a large budget,
     /// this endpoint advertises a small one, and the peer is held to the small
     /// one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -680,12 +602,6 @@ mod draft11 {
     }
 
     /// The wiring, on the path a message off the wire takes.
-    ///
-    /// Removing the call from `receive_message` fails with:
-    ///
-    /// ```text
-    /// a request whose Request ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -709,16 +625,9 @@ mod draft11 {
     /// case the other two halves both miss: it has the parity of the peer's
     /// space, and it sat below the ceiling when it was accepted the first time,
     /// so it sits below it still. Only a record of what has been spent answers
-    /// it, and until that record existed a peer could open a second request
+    /// it, and without it a peer could open a second request
     /// under the id of one already open and take its place in every map keyed
     /// by Request ID.
-    ///
-    /// Ablation: dropping the `record_peer_id` call from
-    /// `validate_peer_request_id` fails with
-    ///
-    /// ```text
-    /// an id the peer has already opened a request under must be refused: Ok(())
-    /// ```
     #[test]
     fn an_id_the_peer_already_spent_is_refused() {
         let mut endpoint = advertising(8);
@@ -844,12 +753,6 @@ mod draft12 {
     /// The two ceilings are different numbers: the peer grants a large budget,
     /// this endpoint advertises a small one, and the peer is held to the small
     /// one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -863,12 +766,6 @@ mod draft12 {
     }
 
     /// The wiring, on the path a message off the wire takes.
-    ///
-    /// Removing the call from `receive_message` fails with:
-    ///
-    /// ```text
-    /// a request whose Request ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -892,16 +789,9 @@ mod draft12 {
     /// case the other two halves both miss: it has the parity of the peer's
     /// space, and it sat below the ceiling when it was accepted the first time,
     /// so it sits below it still. Only a record of what has been spent answers
-    /// it, and until that record existed a peer could open a second request
+    /// it, and without it a peer could open a second request
     /// under the id of one already open and take its place in every map keyed
     /// by Request ID.
-    ///
-    /// Ablation: dropping the `record_peer_id` call from
-    /// `validate_peer_request_id` fails with
-    ///
-    /// ```text
-    /// an id the peer has already opened a request under must be refused: Ok(())
-    /// ```
     #[test]
     fn an_id_the_peer_already_spent_is_refused() {
         let mut endpoint = advertising(8);
@@ -1026,12 +916,6 @@ mod draft13 {
     /// The two ceilings are different numbers: the peer grants a large budget,
     /// this endpoint advertises a small one, and the peer is held to the small
     /// one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -1045,12 +929,6 @@ mod draft13 {
     }
 
     /// The wiring, on the path a message off the wire takes.
-    ///
-    /// Removing the call from `receive_message` fails with:
-    ///
-    /// ```text
-    /// a request whose Request ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -1074,16 +952,9 @@ mod draft13 {
     /// case the other two halves both miss: it has the parity of the peer's
     /// space, and it sat below the ceiling when it was accepted the first time,
     /// so it sits below it still. Only a record of what has been spent answers
-    /// it, and until that record existed a peer could open a second request
+    /// it, and without it a peer could open a second request
     /// under the id of one already open and take its place in every map keyed
     /// by Request ID.
-    ///
-    /// Ablation: dropping the `record_peer_id` call from
-    /// `validate_peer_request_id` fails with
-    ///
-    /// ```text
-    /// an id the peer has already opened a request under must be refused: Ok(())
-    /// ```
     #[test]
     fn an_id_the_peer_already_spent_is_refused() {
         let mut endpoint = advertising(8);
@@ -1208,12 +1079,6 @@ mod draft14 {
     /// The two ceilings are different numbers: the peer grants a large budget,
     /// this endpoint advertises a small one, and the peer is held to the small
     /// one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -1227,12 +1092,6 @@ mod draft14 {
     }
 
     /// The wiring, on the path a message off the wire takes.
-    ///
-    /// Removing the call from `receive_message` fails with:
-    ///
-    /// ```text
-    /// a request whose Request ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -1270,16 +1129,9 @@ mod draft14 {
     /// case the other two halves both miss: it has the parity of the peer's
     /// space, and it sat below the ceiling when it was accepted the first time,
     /// so it sits below it still. Only a record of what has been spent answers
-    /// it, and until that record existed a peer could open a second request
+    /// it, and without it a peer could open a second request
     /// under the id of one already open and take its place in every map keyed
     /// by Request ID.
-    ///
-    /// Ablation: dropping the `record_peer_id` call from
-    /// `validate_peer_request_id` fails with
-    ///
-    /// ```text
-    /// an id the peer has already opened a request under must be refused: Ok(())
-    /// ```
     #[test]
     fn an_id_the_peer_already_spent_is_refused() {
         let mut endpoint = advertising(8);
@@ -1325,17 +1177,10 @@ mod draft14 {
     /// Section 9.1 lists it among the messages that step the sequence, and
     /// its shape says the same thing: it carries a Request ID **and** a
     /// separate field naming the request it modifies. Leaving it out of the set
-    /// left its own id unchecked for parity and for the ceiling as well.
+    /// would leave its own id unchecked for parity and for the ceiling as well.
     ///
     /// The update below names a request that does not exist, so it fails either
     /// way. What is measured is which rule it fails on.
-    ///
-    /// Ablation: removing the arm from `receive_request` fails with
-    ///
-    /// ```text
-    /// the update's own Request ID must be held to the peer's sequence:
-    /// Err(UnknownRequest(99))
-    /// ```
     #[test]
     fn the_update_messages_own_id_is_checked() {
         let mut endpoint = advertising(8);
@@ -1457,12 +1302,6 @@ mod draft15 {
     /// The two ceilings are different numbers: the peer grants a large budget,
     /// this endpoint advertises a small one, and the peer is held to the small
     /// one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -1476,12 +1315,6 @@ mod draft15 {
     }
 
     /// The wiring, on the path a message off the wire takes.
-    ///
-    /// Removing the call from `receive_message` fails with:
-    ///
-    /// ```text
-    /// a request whose Request ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -1515,16 +1348,9 @@ mod draft15 {
     /// case the other two halves both miss: it has the parity of the peer's
     /// space, and it sat below the ceiling when it was accepted the first time,
     /// so it sits below it still. Only a record of what has been spent answers
-    /// it, and until that record existed a peer could open a second request
+    /// it, and without it a peer could open a second request
     /// under the id of one already open and take its place in every map keyed
     /// by Request ID.
-    ///
-    /// Ablation: dropping the `record_peer_id` call from
-    /// `validate_peer_request_id` fails with
-    ///
-    /// ```text
-    /// an id the peer has already opened a request under must be refused: Ok(())
-    /// ```
     #[test]
     fn an_id_the_peer_already_spent_is_refused() {
         let mut endpoint = advertising(8);
@@ -1570,17 +1396,10 @@ mod draft15 {
     /// Section 9.1 lists it among the messages that step the sequence, and
     /// its shape says the same thing: it carries a Request ID **and** a
     /// separate field naming the request it modifies. Leaving it out of the set
-    /// left its own id unchecked for parity and for the ceiling as well.
+    /// would leave its own id unchecked for parity and for the ceiling as well.
     ///
     /// The update below names a request that does not exist, so it fails either
     /// way. What is measured is which rule it fails on.
-    ///
-    /// Ablation: removing the arm from `receive_request` fails with
-    ///
-    /// ```text
-    /// the update's own Request ID must be held to the peer's sequence:
-    /// Err(UnknownRequest(99))
-    /// ```
     #[test]
     fn the_update_messages_own_id_is_checked() {
         let mut endpoint = advertising(8);
@@ -1696,12 +1515,6 @@ mod draft16 {
     /// The two ceilings are different numbers: the peer grants a large budget,
     /// this endpoint advertises a small one, and the peer is held to the small
     /// one.
-    ///
-    /// Measuring against the budget the peer granted fails with:
-    ///
-    /// ```text
-    /// the peer's 64 is this endpoint's budget, not the peer's: Ok(())
-    /// ```
     #[test]
     fn the_ceiling_a_peer_is_held_to_is_the_one_this_endpoint_advertised() {
         let mut endpoint = advertising(4);
@@ -1715,12 +1528,6 @@ mod draft16 {
     }
 
     /// The wiring, on the path a message off the wire takes.
-    ///
-    /// Removing the call from `receive_message` fails with:
-    ///
-    /// ```text
-    /// a request whose Request ID is past the advertised ceiling must be refused: Ok(())
-    /// ```
     #[test]
     fn a_peer_request_off_the_wire_is_checked() {
         let mut endpoint = advertising(4);
@@ -1752,13 +1559,6 @@ mod draft16 {
     ///
     /// A repeat has the peer's parity and sits below the ceiling, so only a
     /// record of what has been spent catches it.
-    ///
-    /// Ablation: dropping the `record_peer_id` call from
-    /// `validate_peer_request_id` fails with
-    ///
-    /// ```text
-    /// an id the peer has already opened a request under must be refused: Ok(())
-    /// ```
     #[test]
     fn an_id_the_peer_already_spent_is_refused() {
         let mut endpoint = advertising(8);
@@ -1806,17 +1606,10 @@ mod draft16 {
     /// Section 9.1 lists it among the messages that step the sequence, and
     /// its shape says the same thing: it carries a Request ID **and** a
     /// separate field naming the request it modifies. Leaving it out of the set
-    /// left its own id unchecked for parity and for the ceiling as well.
+    /// would leave its own id unchecked for parity and for the ceiling as well.
     ///
     /// The update below names a request that does not exist, so it fails either
     /// way. What is measured is which rule it fails on.
-    ///
-    /// Ablation: removing the arm from `receive_request` fails with
-    ///
-    /// ```text
-    /// the update's own Request ID must be held to the peer's parity:
-    /// Err(UnknownRequest(99))
-    /// ```
     #[test]
     fn the_update_messages_own_id_is_checked() {
         let mut endpoint = advertising(8);

@@ -351,28 +351,6 @@ macro_rules! unsubscribe_gates {
             }
 
             /// The subscriber can end a subscription this endpoint offered.
-            ///
-            /// # What it catches
-            ///
-            /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
-            ///
-            /// ```text
-            /// the subscriber may end a subscription this endpoint publishes:
-            /// UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens twelve, on drafts 12 and 13: six of the gates here.
-            ///
-            /// The same claim on 14, 15 and 16, where the branch has to say whose
-            /// offer it is before it can take one:
-            ///
-            /// ```text
-            /// the subscriber may end a subscription this endpoint publishes:
-            /// UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             #[test]
             fn an_unsubscribe_ends_a_subscription_this_endpoint_offered() {
                 let mut ep = publishing();
@@ -383,44 +361,6 @@ macro_rules! unsubscribe_gates {
 
             /// It ends once. A second UNSUBSCRIBE names a subscription that is
             /// already over.
-            ///
-            /// # What it catches
-            ///
-            /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
-            ///
-            /// ```text
-            /// the first UNSUBSCRIBE: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens twelve, on drafts 12 and 13: six of the gates here.
-            ///
-            /// The same claim on 14, 15 and 16, where the branch has to say whose
-            /// offer it is before it can take one:
-            ///
-            /// ```text
-            /// the first UNSUBSCRIBE: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens 18 gates, six per draft on drafts 14 through 16.
-            ///
-            /// Ending the subscription by assignment rather than by transition, so
-            /// a state with no ending to give gives one anyway:
-            ///
-            /// ```text
-            /// the subscription was already over, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens four, on drafts 12 and 13: two of the gates here.
-            ///
-            /// The same on 14, 15 and 16, where the ending is an alias over the
-            /// shared step and the cut swallows its refusal:
-            ///
-            /// ```text
-            /// the subscription was already over, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens six, on drafts 14 through 16: two of the gates here.
             #[test]
             fn a_subscription_is_ended_by_one_unsubscribe() {
                 let mut ep = publishing();
@@ -434,26 +374,6 @@ macro_rules! unsubscribe_gates {
             }
 
             /// The publisher cannot end what the subscriber has already ended.
-            ///
-            /// # What it catches
-            ///
-            /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
-            ///
-            /// ```text
-            /// the subscriber ends it: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens twelve, on drafts 12 and 13: six of the gates here.
-            ///
-            /// The same claim on 14, 15 and 16, where the branch has to say whose
-            /// offer it is before it can take one:
-            ///
-            /// ```text
-            /// the subscriber ends it: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             #[test]
             fn an_ended_subscription_is_not_ended_again_by_its_publisher() {
                 let mut ep = publishing();
@@ -467,26 +387,6 @@ macro_rules! unsubscribe_gates {
             }
 
             /// The Track Alias the subscription held is free once it ends.
-            ///
-            /// # What it catches
-            ///
-            /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
-            ///
-            /// ```text
-            /// the subscriber ends it: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens twelve, on drafts 12 and 13: six of the gates here.
-            ///
-            /// The same claim on 14, 15 and 16, where the branch has to say whose
-            /// offer it is before it can take one:
-            ///
-            /// ```text
-            /// the subscriber ends it: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             #[test]
             fn the_alias_of_an_unsubscribed_offer_is_free() {
                 let mut ep = publishing();
@@ -508,51 +408,6 @@ macro_rules! unsubscribe_gates {
 
             /// An offer that has not been accepted yet is not a subscription
             /// for the subscriber to end.
-            ///
-            /// # What it catches
-            ///
-            /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
-            ///
-            /// ```text
-            /// the sentence names a subscription, and an unanswered offer is not
-            /// one yet; instead: Err(UnknownRequest(0))
-            /// ```
-            ///
-            /// It reddens twelve, on drafts 12 and 13: six of the gates here.
-            ///
-            /// The same claim on 14, 15 and 16, where the branch has to say whose
-            /// offer it is before it can take one:
-            ///
-            /// ```text
-            /// the sentence names a subscription, and an unanswered offer is not
-            /// one yet; instead: Err(UnknownRequest(0))
-            /// ```
-            ///
-            /// It reddens 18 gates, six per draft on drafts 14 through 16.
-            ///
-            /// Ending the subscription by assignment rather than by transition, so
-            /// a state with no ending to give gives one anyway:
-            ///
-            /// ```text
-            /// the sentence names a subscription, and an unanswered offer is not
-            /// one yet; instead: Ok(()) failures:
-            /// draft12::a_subscription_is_ended_by_one_unsubscribe
-            /// draft12::an_unanswered_offer_cannot_be_unsubscribed
-            /// draft13::a_subscription_is_
-            /// ```
-            ///
-            /// It reddens four, on drafts 12 and 13: two of the gates here.
-            ///
-            /// The same on 14, 15 and 16, where the ending is an alias over the
-            /// shared step and the cut swallows its refusal:
-            ///
-            /// ```text
-            /// the sentence names a subscription, and an unanswered offer is not
-            /// one yet; instead: Ok(())
-            /// ```
-            ///
-            /// It reddens six, on drafts 14 through 16: two of the gates here.
             #[test]
             fn an_unanswered_offer_cannot_be_unsubscribed() {
                 let mut ep = active();
@@ -574,29 +429,6 @@ macro_rules! unsubscribe_gates {
             /// subscriber's message. The identifier names a live subscription
             /// and is still refused, which is the whole of what this gate
             /// says.
-            ///
-            /// # What it catches
-            ///
-            /// Letting the branch reach the peer's own offers too, so the publisher
-            /// can end a subscription with the subscriber's message:
-            ///
-            /// ```text
-            /// an offer the peer made is not one this endpoint publishes, and
-            /// instead: Ok(())
-            /// ```
-            ///
-            /// It reddens two, this gate on drafts 12 and 13 and nothing else.
-            ///
-            /// Dropping the test that says whose offer it is, which on these three
-            /// is the only thing separating the two directions held in one map:
-            ///
-            /// ```text
-            /// an offer the peer made is not one this endpoint publishes, and
-            /// instead: Ok(())
-            /// ```
-            ///
-            /// It reddens three, this gate on drafts 14 through 16 and nothing
-            /// else.
             #[test]
             fn an_unsubscribe_naming_the_peers_own_offer_is_refused() {
                 let mut ep = active();
@@ -614,16 +446,6 @@ macro_rules! unsubscribe_gates {
             }
 
             /// An UNSUBSCRIBE naming nothing at all is refused.
-            /// # What it catches
-            ///
-            /// Nothing that the six cuts reach. Every one of them leaves
-            /// it green, because an identifier that names nothing is refused
-            /// by the lookup that was already here and none of them touches
-            /// it. It is kept as the control for the gate above: both assert
-            /// `UnknownRequest`, and without this one there would be no
-            /// evidence that the endpoint can still produce that answer for an
-            /// identifier naming nothing at all, rather than only for one
-            /// naming an offer it declines to end.
             #[test]
             fn an_unsubscribe_naming_nothing_is_refused() {
                 let mut ep = publishing();
@@ -637,26 +459,6 @@ macro_rules! unsubscribe_gates {
 
             /// An UNSUBSCRIBE arriving the way the control stream delivers one
             /// reaches the flow that ends the subscription.
-            ///
-            /// # What it catches
-            ///
-            /// Leaving `receive_unsubscribe` looking only at the subscriptions the
-            /// peer opened with SUBSCRIBE. On 12 and 13 that is one branch:
-            ///
-            /// ```text
-            /// the peer's UNSUBSCRIBE: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens twelve, on drafts 12 and 13: six of the gates here.
-            ///
-            /// The same claim on 14, 15 and 16, where the branch has to say whose
-            /// offer it is before it can take one:
-            ///
-            /// ```text
-            /// the peer's UNSUBSCRIBE: UnknownRequest(0)
-            /// ```
-            ///
-            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             #[test]
             fn an_unsubscribe_off_the_control_stream_reaches_the_flow() {
                 let mut ep = publishing();

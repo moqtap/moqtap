@@ -131,31 +131,6 @@ macro_rules! fetch_range_gates {
             /// the caller's, and against the group 3, object 4 start this gate
             /// asks for, an end of group 0, object 0 names a range that stops
             /// before it starts.
-            ///
-            /// # What it catches
-            ///
-            /// Sending group 0, object 0 as the end of every range, whatever
-            /// the caller asked for:
-            ///
-            /// ```text
-            /// the fetch encodes: InvalidRange(3, 4, 0, 0)
-            /// ```
-            ///
-            /// It reddens nine, every gate here on all three drafts. Two of them
-            /// read the range only through the helper that builds it, so a fetch
-            /// that cannot be built at all takes them with it; the two cuts below
-            /// are what say each field is measured on its own.
-            ///
-            /// Sending group 0, object 0 as the *start* as well. The mirror of the
-            /// first cut, and the one that says this gate reads both ends rather
-            /// than one:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: Section 8.16 makes the start the
-            /// caller's left: (0, 0) right: (3, 4)
-            /// ```
-            ///
-            /// It reddens three, this gate on all three drafts and nothing else.
             #[test]
             fn the_end_of_the_range_reaches_the_peer() {
                 let mut ep = active();
@@ -189,39 +164,6 @@ macro_rules! fetch_range_gates {
             /// Both are fields of the FETCH on these three drafts and of no
             /// later one, which is why the call takes them as arguments here
             /// and why the gate for them lives in this range alone.
-            ///
-            /// # What it catches
-            ///
-            /// Sending group 0, object 0 as the end of every range, whatever
-            /// the caller asked for:
-            ///
-            /// ```text
-            /// the fetch encodes: InvalidRange(3, 4, 0, 0)
-            /// ```
-            ///
-            /// It reddens nine, every gate here on all three drafts. Two of them
-            /// read the range only through the helper that builds it, so a fetch
-            /// that cannot be built at all takes them with it; the two cuts below
-            /// are what say each field is measured on its own.
-            ///
-            /// Filling in the subscriber priority rather than passing the caller's
-            /// through:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the subscriber priority is the
-            /// caller's to choose left: 128 right: 200
-            /// ```
-            ///
-            /// It reddens three, this gate on all three drafts and nothing else.
-            ///
-            /// Filling in the delivery order the same way:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the delivery order is the caller's
-            /// to choose left: Ascending right: Descending
-            /// ```
-            ///
-            /// It reddens three, this gate on all three drafts and nothing else.
             #[test]
             fn the_priority_and_the_order_reach_the_peer() {
                 let mut ep = active();
@@ -247,24 +189,6 @@ macro_rules! fetch_range_gates {
             /// So what this gate holds is that a default value is still
             /// reachable, and reaching it is the caller saying so rather than
             /// the crate deciding.
-            ///
-            /// # What it catches
-            ///
-            /// Sending group 0, object 0 as the end of every range, whatever
-            /// the caller asked for:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the group after the one asked for
-            /// left: 0 right: 8 failures:
-            /// draft12::a_whole_group_can_still_be_asked_for
-            /// draft12::the_end_of_the_range_reaches_the_peer
-            /// draft12::the_priority_and_the_order_reach_the_peer draft13::a_wh
-            /// ```
-            ///
-            /// It reddens nine, every gate here on all three drafts. Two of them
-            /// read the range only through the helper that builds it, so a fetch
-            /// that cannot be built at all takes them with it; the two cuts below
-            /// are what say each field is measured on its own.
             #[test]
             fn a_whole_group_can_still_be_asked_for() {
                 let mut ep = active();

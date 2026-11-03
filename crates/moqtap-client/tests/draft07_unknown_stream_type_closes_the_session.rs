@@ -106,30 +106,6 @@ fn stream_with_an_unassigned_type() -> Vec<u8> {
 /// was wrong. And the peer receives a CONNECTION_CLOSE, which is the part of
 /// "MUST close the session" that is about the wire and the part only something
 /// holding the other end can observe.
-///
-/// # What it catches, observed by making each change and running it
-///
-/// Making the decoder answer `CodecError::InvalidField` instead of the rule's
-/// own variant. It compiles, and
-/// `close_for_data_stream` declines, because `InvalidField` is not a rule:
-///
-/// ```text
-/// ---- an_unassigned_stream_type_closes_the_connection stdout ----
-///
-/// thread 'an_unassigned_stream_type_closes_the_connection' (24648) panicked at crates\moqtap-client\tests\draft07_unknown_stream_type_closes_the_session.rs:
-/// expected an unknown-stream-type refusal, got Codec(InvalidField)
-/// ```
-///
-/// Deleting `close_for_data_stream` from draft-07's connection, leaving
-/// `close_for_codec` — which only `recv_control` reaches — as the sole route to
-/// a close:
-///
-/// ```text
-/// ---- an_unassigned_stream_type_closes_the_connection stdout ----
-///
-/// thread 'an_unassigned_stream_type_closes_the_connection' (30040) panicked at crates\moqtap-client\tests\draft07_unknown_stream_type_closes_the_session.rs:
-/// Section 7 answers this with a close, but close_for_data_stream declined
-/// ```
 #[tokio::test]
 async fn an_unassigned_stream_type_closes_the_connection() {
     common::init_crypto();

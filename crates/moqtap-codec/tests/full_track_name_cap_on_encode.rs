@@ -10,16 +10,13 @@
 //!
 //! Because a writer that emits one hands a conforming peer a reason to close the
 //! session, and the sender learns of it only when the session goes. The codec
-//! already refuses it on the way out — the point of this file is that it does so
-//! on **every** message that carries a Full Track Name, not on the one that
-//! happened to get a test.
+//! refuses it on the way out, and this file checks that it does so on **every**
+//! message that carries a Full Track Name.
 //!
-//! That is the gap this file closes. `full_track_name_cap.rs` drives the decode
-//! side of SUBSCRIBE on drafts 11 through 20 and nothing else; without the cases
-//! here, every other call site — the encode side of all of them, and both sides of
-//! TRACK_STATUS, FETCH, PUBLISH, PUBLISH_BLOCKED, PUBLISH_SKIPPED and the
-//! Redirect inside REQUEST_ERROR — could have its check deleted with the suite
-//! still green.
+//! `full_track_name_cap.rs` drives the decode side of SUBSCRIBE on drafts 11
+//! through 20. The cases here cover every other call site: the encode side of
+//! all of them, and both sides of TRACK_STATUS, FETCH, PUBLISH, PUBLISH_BLOCKED,
+//! PUBLISH_SKIPPED and the Redirect inside REQUEST_ERROR.
 //!
 //! # The shape of each case
 //!
@@ -192,12 +189,8 @@ mod draft11 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -310,12 +303,8 @@ mod draft12 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -435,12 +424,8 @@ mod draft13 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -558,12 +543,8 @@ mod draft14 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -662,12 +643,8 @@ mod draft15 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -767,12 +744,8 @@ mod draft16 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -884,12 +857,8 @@ mod draft17 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -1013,12 +982,8 @@ mod draft18 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -1142,12 +1107,8 @@ mod draft19 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -1268,12 +1229,8 @@ mod draft20 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -1393,12 +1350,8 @@ mod draft21 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -1519,12 +1472,8 @@ mod draft22 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {
@@ -1646,12 +1595,8 @@ mod draft23 {
 
     /// One byte over the cap is refused, on every message that carries a name.
     ///
-    /// Ablation: removing the `check_full_track_name` call from any one arm of
-    /// this draft's `encode_payload` fails with that arm's name, as
-    ///
-    /// ```text
-    /// SUBSCRIBE: a 4,097-byte Full Track Name must be refused, got Ok(())
-    /// ```
+    /// Fails, naming the message, if any one arm of this draft's
+    /// `encode_payload` skips the `check_full_track_name` call.
     #[test]
     fn a_full_track_name_one_byte_over_the_cap_is_refused() {
         for (label, msg) in messages(namespace(4000), name(97)) {

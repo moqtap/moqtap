@@ -297,19 +297,6 @@ macro_rules! outbound_announce_gates {
             }
 
             /// This endpoint withdraws what it announced.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the publisher may stop serving what it announced: UnknownNamespace
-            /// ```
-            ///
-            /// Made by looking the announcement up among the ones the peer made
-            /// instead of this endpoint's own. It reddens 50 tests across two
-            /// files, five gates on each of the ten drafts: every gate here
-            /// that ends an announcement of this endpoint's, and the one in the
-            /// file beside this that proves the peer's cancellation left it
-            /// alone.
             #[test]
             fn this_endpoint_withdraws_the_announcement_it_made() {
                 let (mut ep, ours) = ours_accepted();
@@ -339,22 +326,6 @@ macro_rules! outbound_announce_gates {
 
             /// The peer revokes its acceptance of an announcement this endpoint
             /// made, and it arrives the way it arrives on the wire.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the peer may revoke its acceptance: UnknownNamespace
-            /// ```
-            ///
-            /// Made by reading the cancellation out of the announcements the
-            /// **peer** made rather than this endpoint's own. It reddens 20
-            /// tests, this gate and the one below it on all ten drafts.
-            ///
-            /// Cutting the dispatch arm instead does not redden this gate: a
-            /// message that reaches the fall-through is accepted and ignored,
-            /// which is what an assertion that it was accepted cannot tell from
-            /// the real thing. That cut is recorded on the gate below, which
-            /// reads the state the dispatch was supposed to move.
             #[test]
             fn the_peer_revokes_its_acceptance_of_this_endpoints_announcement() {
                 let (mut ep, ours) = ours_accepted();
@@ -372,19 +343,6 @@ macro_rules! outbound_announce_gates {
             }
 
             /// And after that this endpoint does not withdraw it.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// an announcement that has been cancelled has left the state a
-            /// withdrawal is sent from: Unannounce(Unannounce { ... })
-            /// ```
-            ///
-            /// Made by cutting the cancellation's dispatch arm, so nothing
-            /// moves when it arrives and the withdrawal after it goes out - the
-            /// state drafts 14 through 16 were in, where the message reached no
-            /// handler at all. It reddens 20 tests, this gate and the one below
-            /// it on all ten drafts.
             #[test]
             fn after_a_cancellation_this_endpoint_does_not_withdraw() {
                 let (mut ep, ours) = ours_accepted();
@@ -449,18 +407,6 @@ macro_rules! outbound_announce_gates {
             /// thing, and each end withdraws only its own. This endpoint's
             /// still being withdrawable afterwards is what proves it was not
             /// touched.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the publisher may still stop serving its own
-            /// ```
-            ///
-            /// Made by ending this endpoint's own announcements when the peer's
-            /// withdrawal arrives, which is what draft-14 did to every one of
-            /// them at once. It reddens 10 tests, one per draft, and nothing
-            /// else: every other gate holds one announcement, and this is the
-            /// only one here that holds two.
             #[test]
             fn the_peers_withdrawal_leaves_this_endpoints_own_alone() {
                 let (mut ep, ours) = ours_accepted();

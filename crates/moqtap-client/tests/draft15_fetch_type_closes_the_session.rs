@@ -2,7 +2,7 @@
 //! Draft-15 Section 9.16: "An endpoint that receives a Fetch Type other than
 //! 0x1, 0x2 or 0x3 MUST close the session with a PROTOCOL_VIOLATION."
 //!
-//! # Why a draft-14 sentence needed a gate five drafts later
+//! # Where the sentence comes from
 //!
 //! Drafts 11, 12 and 13 write the same rule as "A Fetch Type other than 0x1,
 //! 0x2 or 0x3 MUST be treated as an error", which names no code and no
@@ -10,11 +10,7 @@
 //! draft-11's own addition and drafts 07 through 10 have no such field to hold
 //! a wrong value. Draft-14 is where it became a close, in a rendering that
 //! reads "MUST be close the session with a PROTOCOL_VIOLATION", and drafts 15
-//! through 19 keep the rule with the stray word gone. Every one of the nine
-//! drafts that has the field detected the value and reported
-//! `CodecError::InvalidField` — the variant a dozen unrelated malformations
-//! share and every table sends to the no-close arm — so the six drafts that
-//! require the session to end behaved exactly like the three that do not.
+//! through 19 keep the rule with the stray word gone.
 //!
 //! # Why the message is a FETCH sent at a subscriber
 //!
@@ -96,19 +92,6 @@ fn fetch_with_an_unassigned_type() -> Vec<u8> {
 }
 
 /// An unassigned Fetch Type closes the QUIC connection with PROTOCOL_VIOLATION.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Sending `CodecError::InvalidFetchType` to the no-close arm of draft-15's
-/// `codec_session_error_code` — where the rule effectively was, reported under
-/// the shared malformed-field variant, on all the drafts that have the field:
-///
-/// ```text
-/// ---- an_unassigned_fetch_type_closes_the_quic_connection stdout ----
-///
-/// thread 'an_unassigned_fetch_type_closes_the_quic_connection' (43892) panicked at crates\moqtap-client\tests\draft15_fetch_type_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
 #[tokio::test]
 async fn an_unassigned_fetch_type_closes_the_quic_connection() {
     common::init_crypto();

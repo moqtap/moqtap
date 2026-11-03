@@ -1,11 +1,11 @@
 //! The shared harness, exercised against a live proxy session.
 //!
 //! `tests/common/mod.rs` is the shared harness every test unit in this
-//! crate is written against. None of the older test files touches its
-//! newer half — `TimedReceiver`, `FakeRelay`,
-//! `RecordingObserver`, `SpawnedProxy::counters`, `assert_no_bytes_for`,
-//! `assert_no_uni_stream_for` — so without this file those helpers would
-//! ship unrun and five units would discover their defects one at a time.
+//! crate is written against. This file runs its helpers — `TimedReceiver`,
+//! `FakeRelay`, `RecordingObserver`, `SpawnedProxy::counters`,
+//! `assert_no_bytes_for`, `assert_no_uni_stream_for` — against a live
+//! session, so a defect in one shows here rather than in every unit that
+//! uses it.
 //!
 //! What is asserted here is the *harness*, not the proxy: that a
 //! `TimedReceiver` really reports per-object bytes and the instant each
@@ -146,8 +146,8 @@ async fn the_harness_reports_objects_bytes_timing_and_counters() {
     assert_eq!(rx.wait_for_ending().await, Ending::Fin, "a clean FIN must read back as a FIN");
     assert_eq!(rx.ending().and_then(|e| e.reset_code()), None, "a FIN carries no reset code");
 
-    // Nothing more arrives after the FIN. The same helper a later unit
-    // points at a `Delay` window.
+    // Nothing more arrives after the FIN. The same helper other units point
+    // at a `Delay` window.
     common::assert_no_bytes_for(&rx, Duration::from_millis(100)).await;
 
     let objects = rx.into_objects(DRAFT);
@@ -328,10 +328,6 @@ async fn the_fake_relay_can_stop_a_stream_it_receives() {
 ///   streams in stream-ID order, which is open order, so the relay's
 ///   *accept* order is video, then audio;
 /// * the test asks for `[audio, video]`, the reverse.
-///
-/// That accept order is not assumed on faith: with the demux ablated to
-/// return accept order, this test failed with `left: Some(7)` (video)
-/// where it wanted `Some(9)` (audio) on 9 runs out of 9.
 ///
 /// A demux that handed back accept order would therefore return video
 /// where this test reads audio, and every byte assertion below would be

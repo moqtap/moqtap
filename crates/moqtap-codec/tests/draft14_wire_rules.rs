@@ -1,10 +1,9 @@
 #![cfg(feature = "draft14")]
 //! Draft-14 rules the shipped corpus does not pin down, on both sides of the wire.
 //!
-//! What these have in common is that the codec and the corpus agreed with each
-//! other and both were wrong: several of these vectors were generated from this
-//! codec, so a defect and its fixture matched byte for byte and the suite passed
-//! *because* they matched. A rule taken from the draft rather than from a
+//! What these have in common is that the codec and the corpus can agree with
+//! each other and both be wrong: a vector generated from this codec matches its
+//! defect byte for byte. A rule taken from the draft rather than from a
 //! recorded byte string is the only thing that separates the two.
 //!
 //! # A message carrying a field its draft does not define
@@ -69,16 +68,6 @@ fn vi(v: u64) -> VarInt {
 /// Both directions of a namespace handshake pass through these two messages, so
 /// the failure is symmetric: such a codec cannot accept a conforming peer's
 /// acknowledgement either.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Restoring the parameter list on PUBLISH_NAMESPACE_OK's encoder:
-///
-/// ```text
-/// assertion `left == right` failed: PUBLISH_NAMESPACE_OK must be Type, Length, Request ID and nothing else
-///   left: [7, 0, 2, 1, 0]
-///  right: [7, 0, 1, 1]
-/// ```
 #[test]
 fn the_namespace_acknowledgements_carry_only_a_request_id() {
     let mut publish = Vec::new();
@@ -126,14 +115,6 @@ fn the_namespace_acknowledgements_carry_only_a_request_id() {
 /// of payload; the Request ID accounts for one. Silently keeping the message
 /// would let two implementations disagree about a message's shape forever
 /// without either noticing.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Dropping the leftover-bytes check at the end of `ControlMessage::decode`:
-///
-/// ```text
-/// a message with a byte left over must be refused, got Ok(PublishNamespaceOk(PublishNamespaceOk { request_id: VarInt(1) }))
-/// ```
 #[test]
 fn a_control_message_with_bytes_left_over_is_refused() {
     for wire in [
@@ -173,24 +154,8 @@ fn a_control_message_with_bytes_left_over_is_refused() {
 /// can catch this. Draft-14 states no separate cap on a Track Namespace by
 /// itself, which is why the namespace decoder lets the 4,000-byte half through.
 ///
-/// A control message may be 65,535 bytes, so the unchecked ceiling was sixteen
-/// times the permitted one.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Removing the check from the decoders that read a namespace and a name
-/// together — SUBSCRIBE and TRACK_STATUS share the shape, so the two go at
-/// once — prints the whole 4,097-byte name back, elided here:
-///
-/// ```text
-/// a 4097-byte Full Track Name must be refused on decode, got Ok(Subscribe(Subscribe { request_id: VarInt(1), track_namespace: TrackNamespace([[110, 110, ... ]]), track_name: [116, 116, ... ], subscriber_priority: 128, group_order: Ascending, forward: Forward, filter_type: NextGroupStart, start_location: None, end_group: None, parameters: [] }))
-/// ```
-///
-/// Removing it from SUBSCRIBE's encoder:
-///
-/// ```text
-/// a 4097-byte Full Track Name must be refused on encode, got Ok(())
-/// ```
+/// A control message may be 65,535 bytes, so without the check the ceiling is
+/// sixteen times the permitted one.
 #[test]
 fn a_full_track_name_over_the_cap_is_refused() {
     let namespace = TrackNamespace(vec![vec![b'n'; 4000]]);
@@ -284,20 +249,6 @@ fn subgroup_header(stream_type: u8) -> SubgroupHeader {
 ///
 /// Both halves are gated together because the tempting fix for one breaks the
 /// other.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Removing the zero-length check from `DatagramObject::decode`:
-///
-/// ```text
-/// a datagram announcing extensions must carry some, got Ok(DatagramObject { datagram_type: DatagramType(1), track_alias: VarInt(1), group_id: VarInt(2), object_id: VarInt(0), publisher_priority: 128, extension_headers: [], status: None, payload: [222, 173] })
-/// ```
-///
-/// Extending that check to subgroup objects as well:
-///
-/// ```text
-/// a subgroup object with no extensions must still be accepted: InvalidField
-/// ```
 #[test]
 fn a_zero_length_extension_block_is_a_datagram_rule_only() {
     // 01 = extensions present, alias 1, group 2, object 0, priority 128,
@@ -371,20 +322,6 @@ fn a_zero_length_extension_block_is_a_datagram_rule_only() {
 ///
 /// All three carriers are here because all three pair a status with an extension
 /// block, and the rule is about the pair rather than about the carrier.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Removing the check from `DatagramObject::decode`:
-///
-/// ```text
-/// a non-existent object with extensions must be refused on the datagram, got Ok(DatagramObject { datagram_type: DatagramType(33), track_alias: VarInt(1), group_id: VarInt(2), object_id: VarInt(0), publisher_priority: 128, extension_headers: [60, 1], status: Some(ObjectDoesNotExist), payload: [] })
-/// ```
-///
-/// Widening it to every non-Normal status:
-///
-/// ```text
-/// EndOfGroup keeps its extensions: InvalidField
-/// ```
 #[test]
 fn a_non_existent_object_cannot_carry_extensions() {
     // Datagram: type 0x21 is status-bearing with extensions present.
@@ -501,21 +438,6 @@ fn a_non_existent_object_cannot_carry_extensions() {
 /// object already has — naming it asks for the same bytes as leaving it out. A
 /// Normal status with an *empty* payload keeps the explicit status form, which
 /// is the only way to send a zero-length object at all.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Giving `write_object` an `if let Some(status)` branch that takes the status
-/// and writes a payload length of 0:
-///
-/// ```text
-/// a payload beside ObjectDoesNotExist must be refused, got Ok(())
-/// ```
-///
-/// Extending the refusal to Normal as well:
-///
-/// ```text
-/// Normal beside a payload asks for an ordinary object: InvalidField
-/// ```
 #[test]
 fn a_payload_beside_a_status_is_refused_not_dropped() {
     let header = subgroup_header(0x10);
@@ -606,14 +528,6 @@ fn a_payload_beside_a_status_is_refused_not_dropped() {
 /// extension block is present. An object handed to a writer on a stream with no
 /// extension block has nowhere to put them, and writing the object anyway loses
 /// them without a word.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Removing the check from `write_object`:
-///
-/// ```text
-/// extensions on a stream that cannot carry them must be refused, got Ok(())
-/// ```
 #[test]
 fn extensions_a_stream_cannot_carry_are_refused() {
     // 0x10: no extension block anywhere on this stream.
@@ -669,26 +583,10 @@ fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
 /// If an endpoint receives a length exceeding the maximum, it MUST close the
 /// session with a PROTOCOL_VIOLATION". Section 9.4 says the same of the URI at
 /// 8,192 bytes. Both sentences are written about what an endpoint *receives*,
-/// and receiving was the direction neither was applied to: the encoders refused
-/// an over-long value on nine messages, and the decoders accepted one on all of
-/// them.
+/// so the decoders must refuse an over-long value, not only the encoders.
 ///
-/// A control message may be 65,535 bytes, so the gap was sixty-four reason
-/// phrases' worth on every error message in the protocol.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Removing the length check from `read_reason_phrase`, with the phrase elided:
-///
-/// ```text
-/// a 1025-byte reason phrase must be refused, got Ok(SubscribeError(SubscribeError { request_id: VarInt(1), error_code: VarInt(0), reason_phrase: [110, 110, ...] }))
-/// ```
-///
-/// Removing it from the GOAWAY decoder, with the URI elided the same way:
-///
-/// ```text
-/// an 8193-byte New Session URI must be refused, got Ok(GoAway(GoAway { new_session_uri: [110, 110, ...] }))
-/// ```
+/// A control message may be 65,535 bytes, so an unchecked reader would take
+/// sixty-four reason phrases' worth on every error message in the protocol.
 #[test]
 fn the_reason_phrase_and_uri_caps_bind_the_reader() {
     // SUBSCRIBE_ERROR: Request ID, Error Code, then the Reason Phrase.
@@ -738,26 +636,6 @@ fn the_reason_phrase_and_uri_caps_bind_the_reader() {
 /// followed the body; the decoder follows the discriminator. A value that
 /// disagreed with itself therefore did not survive its own round trip, and the
 /// bytes that came out were a well-formed message of a different shape.
-///
-/// # What this catches, observed by making each change and running it
-///
-/// Removing the FETCH arm from the discriminator check:
-///
-/// ```text
-/// a Standalone fetch type with a joining body must be refused, got Ok(())
-/// ```
-///
-/// Removing the SUBSCRIBE arm:
-///
-/// ```text
-/// a filter that takes no start location must not carry one, got Ok(())
-/// ```
-///
-/// Removing the SUBSCRIBE_OK arm:
-///
-/// ```text
-/// content_exists with no location must be refused, got Ok(())
-/// ```
 #[test]
 fn a_discriminator_that_disagrees_with_its_body_is_refused() {
     let joining_body = FetchPayload::Joining { joining_request_id: vi(1), joining_start: vi(0) };
@@ -861,42 +739,22 @@ fn a_discriminator_that_disagrees_with_its_body_is_refused() {
 /// Filter Type is a varint and End Of Track is a byte, as the figures write them.
 ///
 /// Figure 12 gives SUBSCRIBE a `Filter Type (i)`; Figure 39 gives FETCH_OK an
-/// `End Of Track (8)`. This codec had both the other way round. Neither showed
-/// up in a round trip, because a varint of 1 through 4 and a bare byte of 1
-/// through 4 are the same byte, and a flag of 0 or 1 is one byte either way.
+/// `End Of Track (8)`. Swapping the two does not show up in a round trip,
+/// because a varint of 1 through 4 and a bare byte of 1 through 4 are the same
+/// byte, and a flag of 0 or 1 is one byte either way.
 ///
 /// The difference is what a *peer* may send. A varint has more than one legal
 /// encoding of the same value, so `40 02` is a lawful Filter Type of 2 that a
 /// byte reader sees as 0x40 — an unassigned filter — and refuses. Nothing in
-/// this codec's own output would ever have produced it, which is why a round
-/// trip could not find it.
+/// this codec's own output produces it, which is why a round trip cannot find
+/// it.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Reading Filter Type as a byte again:
-///
-/// ```text
-/// the two-byte form of filter type 2 is lawful: InvalidField
-/// ```
-///
-/// End Of Track needs the same treatment for the same reason, but only on the
-/// reading side. Writing it as a varint again changes nothing at all — a varint
-/// of 1 is the byte `01`, so the encoder's output is identical and the byte
-/// assertion below stays green. That is worth stating plainly: the encode half
-/// of this gate documents the shape, it does not defend it. What a varint reader
-/// gets wrong is a byte the draft allows the field to hold and the flag's two
-/// values do not reach, so the gate feeds it `40` and watches the field boundary
-/// move.
-///
-/// Reading End Of Track as a varint again:
-///
-/// ```text
-/// End Of Track is one byte, so the location after it starts at 05: Kvp(VarInt(UnexpectedEnd))
-/// ```
-///
-/// The error arrives at the parameter count rather than at End Of Track itself,
-/// which is the point: every field after the mis-sized one is read from the
-/// wrong offset, and the message only falls apart once it runs out of bytes.
+/// The encode half of this gate documents End Of Track's shape but does not
+/// defend it: a varint of 1 is the byte `01`, so a varint writer's output is
+/// identical. What a varint reader gets wrong is a byte the draft allows the
+/// field to hold and the flag's two values do not reach, so the gate feeds it
+/// `40` and checks the field boundary: every field after a mis-sized one would
+/// be read from the wrong offset.
 #[test]
 fn the_field_widths_match_the_figures() {
     // SUBSCRIBE with Filter Type 2 written as a two-byte varint.

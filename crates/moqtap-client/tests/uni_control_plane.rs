@@ -16,12 +16,12 @@
 //!
 //! # The one thing draft-20 does not share
 //!
-//! Draft-20's Section 3.3 is draft-19's sentence unchanged, so the 400-line
-//! enforcing peer below needed no change at all for it and neither did 23 of
-//! the 25 gates. **FETCH is the whole of the divergence.** Section 10.13
-//! deleted the Fetch Type field, both payload structures and the joining
-//! mechanism, promoted the namespace and the track name to fields of FETCH
-//! itself, and moved the range into the `LOCATION_FILTER` parameter. So the
+//! Draft-20 Section 3.3 is draft-19's sentence unchanged, so the enforcing
+//! peer below serves it as it is. **FETCH is the whole of the divergence.**
+//! Draft-20 Section 10.13 deleted the Fetch Type field, both payload
+//! structures and the joining mechanism, promoted the namespace and the track
+//! name to fields of FETCH itself, and moved the range into the
+//! `LOCATION_FILTER` parameter. So the
 //! FETCH rendering and the fetch half of the request sweep are per-draft
 //! functions handed to the gate macro, exactly as SUBSCRIBE_NAMESPACE has been
 //! since draft-18 split it in two. Drafts 17, 18 and 19 share one body for
@@ -2135,27 +2135,6 @@ macro_rules! uni_control_plane_gates {
             /// had the SETUP arrived on a bidirectional stream, which is what
             /// makes `Active` here mean the topology was right and not merely
             /// that some peer tolerated it.
-            ///
-            /// # What it catches
-            ///
-            /// Carrying the control stream on a bidirectional stream, the way
-            /// drafts 07 through 16 carry it — `transport.open_bi()` in
-            /// `Connection::connect`, with the control plane read off that
-            /// same stream — fails every draft here. The transcript below is
-            /// drafts 17, 18 and 19; draft-20 fails it the same way, because
-            /// its Section 3.3 is the same sentence:
-            ///
-            /// ```text
-            /// draft-17: connect failed with Transport(Read("connection lost")); the peer reported Ok(ClosedBidiStream(12032))
-            /// draft-18: connect failed with Transport(Read("connection lost")); the peer reported Ok(ClosedBidiStream(12032))
-            /// draft-19: connect failed with Transport(Read("connection lost")); the peer reported Ok(ClosedBidiStream(12032))
-            /// ```
-            ///
-            /// 12032 is 0x2F00, SETUP's message type: the peer read it off a
-            /// bidirectional stream, found it was not a request message type,
-            /// and closed the session. The client's own error is quinn's
-            /// "connection lost" and says nothing about why, which is why the
-            /// peer's report is in the message too.
             #[tokio::test]
             async fn session_completes_against_an_enforcing_peer() {
                 let (conn, peer, mut seen) = connected().await;
@@ -2193,28 +2172,6 @@ macro_rules! uni_control_plane_gates {
             /// closes the session with PROTOCOL_VIOLATION if one of them is a
             /// request type, so a SUBSCRIBE_OK arriving here means the
             /// SUBSCRIBE went where Section 3.3 puts it.
-            ///
-            /// # What it catches
-            ///
-            /// Writing the request on the control stream instead of on the
-            /// bidirectional stream that was opened for it — `begin_request`
-            /// in `draft18/connection.rs` writing to `self.control_send`
-            /// rather than to the request stream's own send half — fails
-            /// draft-18's copy of this and of the three request gates below
-            /// it. All four carry the peer's own account of the session, in
-            /// one of two forms:
-            ///
-            /// ```text
-            /// draft-18: no answer to the only SUBSCRIBE: Transport(Read("connection lost")); the peer reported [SetupOnUniStream, ClosedControlStream(3)]
-            /// draft-18: no answer to the first SUBSCRIBE: Transport(Read("connection lost")); the peer reported [SetupOnUniStream, ClosedControlStream(3)]
-            /// ```
-            ///
-            /// 3 is SUBSCRIBE's message type: the peer read it off the
-            /// control stream, found a request where Section 3.3 does not
-            /// allow one, and closed the session. The client's own error is
-            /// quinn's "connection lost" and names neither the close code nor
-            /// a reason, which is why the peer's report is in the message too
-            /// — see [`answer_to`].
             #[tokio::test]
             async fn a_request_completes_on_its_own_bidirectional_stream() {
                 let (mut conn, peer, mut seen) = connected().await;
@@ -2274,10 +2231,6 @@ macro_rules! uni_control_plane_gates {
             ///   already sitting in the connection, so an implementation that
             ///   handed back whichever answer arrived first would return
             ///   [`MARK_TWO`] here.
-            ///
-            /// The ablation recorded on
-            /// [`a_request_completes_on_its_own_bidirectional_stream`] fails
-            /// this one too.
             #[tokio::test]
             async fn two_requests_are_answered_on_their_own_streams() {
                 let (mut conn, peer, mut seen) = connected().await;
@@ -2377,15 +2330,6 @@ macro_rules! uni_control_plane_gates {
             /// A gate that observed only that the session ended would pass
             /// with either, and which rule was broken is the whole of what the
             /// peer is being told.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `conflicting_alias_for_subscribe_ok` call from
-            /// `receive_subscribe_ok`:
-            ///
-            /// ```text
-            /// draft-19: the second answer reused a live track's alias and was accepted
-            /// ```
             #[tokio::test]
             async fn one_alias_for_two_tracks_closes_the_session() {
                 let (mut conn, peer, mut seen) = connected().await;
@@ -2446,11 +2390,6 @@ macro_rules! uni_control_plane_gates {
             /// [`CHOSEN_CANCEL_CODE`] is deliberately not the code a dropped
             /// handle sends: the same assertion against [`CANCELLED`] would
             /// hold even if `cancel` ignored its argument.
-            ///
-            /// The ablation recorded on
-            /// [`a_request_completes_on_its_own_bidirectional_stream`] fails
-            /// this one too: a request that never reached a bidirectional
-            /// stream has no stream to reset.
             #[tokio::test]
             async fn cancelling_a_request_resets_its_stream() {
                 let (mut conn, peer, mut seen) = connected().await;
@@ -2488,10 +2427,6 @@ macro_rules! uni_control_plane_gates {
             /// instead is a reset carrying [`CANCELLED`] — the difference
             /// between a subscription that ran its course and one the caller
             /// walked away from.
-            ///
-            /// The ablation recorded on
-            /// [`a_request_completes_on_its_own_bidirectional_stream`] fails
-            /// this one too.
             #[tokio::test]
             async fn dropping_a_request_stream_cancels_the_request() {
                 let (mut conn, peer, mut seen) = connected().await;
@@ -2897,36 +2832,6 @@ macro_rules! uni_control_plane_gates {
             /// carrying `FILL_PARAMETERS`, which is what Section 5.1.3 turned
             /// "give me what I missed" into. The set is per draft, so it lives
             /// in `$fetch_requests` rather than here.
-            ///
-            /// # What it catches
-            ///
-            /// Draft-17's `absolute_joining_fetch` left calling the
-            /// endpoint's *relative* builder. **This cut reddens nothing at
-            /// all unless the peer decodes what it was sent** — a sweep that
-            /// only counted the streams would pass with it in place:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: draft-17: the absolute joining FETCH must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
-            ///   left: Some(RequestOnBidiStream("FETCH 0x16 request id=6 fetch type=2 joining request id=0 joining start=9 parameters=1"))
-            ///  right: Some(RequestOnBidiStream("FETCH 0x16 request id=6 fetch type=3 joining request id=0 joining start=9 parameters=1"))
-            /// ```
-            ///
-            /// And draft-19's `subscribe_tracks` writing its request on the
-            /// control stream as well as on its own stream — the mistake the
-            /// rest of this file cannot see:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: draft-19: the SUBSCRIBE_TRACKS must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
-            ///   left: Some(ClosedControlStream(81))
-            ///  right: Some(RequestOnBidiStream("SUBSCRIBE_TRACKS 0x51 request id=16 prefix=uni-control-plane parameters=1"))
-            /// ```
-            ///
-            /// 81 is 0x51, SUBSCRIBE_TRACKS: the peer found a request on the
-            /// control stream and closed the session. That cut has to write
-            /// on the control stream directly, because `send_control` refuses
-            /// a request message — which is the guard
-            /// `send_control_refuses_a_request_and_writes_nothing` is about,
-            /// and the reason the obvious form of this ablation is a no-op.
             #[tokio::test]
             async fn every_request_helper_opens_its_own_stream() {
                 let (mut conn, peer, mut seen) = connected().await;
@@ -3017,29 +2922,6 @@ macro_rules! uni_control_plane_gates {
             /// checked by reading the error alone — a SUBSCRIBE is made
             /// afterwards and its answer read, and that answer can only come
             /// back on a session the peer did not close.
-            ///
-            /// # What it catches
-            ///
-            /// Deleting the `starts_a_request_stream` guard from
-            /// `send_control`, so the TRACK_STATUS reaches the control stream:
-            ///
-            /// ```text
-            /// draft-17: send_control must refuse a request message, got Ok(())
-            /// ```
-            ///
-            /// and, with the guard's error kept but moved after the write so
-            /// the bytes still go out, the session is gone by the time the
-            /// SUBSCRIBE would be answered:
-            ///
-            /// ```text
-            /// draft-17: no answer to the only SUBSCRIBE: Transport(Read("connection lost")); the peer reported [SetupOnUniStream, RequestOnBidiStream(3), ClosedControlStream(13)]
-            /// ```
-            ///
-            /// 13 is 0x0D, TRACK_STATUS: the peer took the SUBSCRIBE on its
-            /// own stream (3) and then found the TRACK_STATUS on the control
-            /// stream and closed the session. That second form is why the
-            /// error alone is not enough — it is the half of the guard that
-            /// says **nothing was written**.
             #[tokio::test]
             async fn send_control_refuses_a_request_and_writes_nothing() {
                 let (mut conn, peer, mut seen) = connected().await;
@@ -3096,20 +2978,6 @@ macro_rules! uni_control_plane_gates {
             /// The control-stream half comes from the handshake events
             /// `set_observer` replays, which are the SETUP exchange and are
             /// on the control stream by construction.
-            ///
-            /// # What it catches
-            ///
-            /// Emitting `stream_id: None` in `begin_request`:
-            ///
-            /// ```text
-            /// draft-17: the SUBSCRIBE should be reported on the stream it went out on; the observer saw [StreamOpened(Request, 0), ControlMessage(Send, None)]
-            /// ```
-            ///
-            /// Dropping the `StreamOpened` emission from `begin_request`:
-            ///
-            /// ```text
-            /// draft-17: the request stream should have been announced as a request stream; the observer saw [ControlMessage(Send, Some(0))]
-            /// ```
             #[tokio::test]
             async fn an_observer_sees_which_stream_a_control_message_used() {
                 use moqtap_client::$draft_mod::event::{ClientEvent, Direction, StreamKind};
@@ -3241,29 +3109,6 @@ macro_rules! uni_control_plane_gates {
             ///   stream this endpoint opened. A peer cannot tell "I gave up on
             ///   your request" from "I withdrew mine" if both codes are the
             ///   same number.
-            ///
-            /// # What it catches
-            ///
-            /// Making the accept path never take a peer-opened stream —
-            /// `std::future::pending::<()>().await` in place of the
-            /// `self.transport.accept_bi()` in draft-17's
-            /// `accept_request_stream` — fails this and the three responder
-            /// gates below it, and nothing else in the file:
-            ///
-            /// ```text
-            /// thread 'draft17::a_peers_request_is_answered_on_the_stream_it_arrived_on' (38500) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: the client never accepted the request the peer opened a stream with
-            /// thread 'draft17::an_inbound_request_is_served_while_an_outbound_one_is_in_flight' (13992) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: the client never accepted the peer's request while one of its own was outstanding
-            /// thread 'draft17::a_peer_request_id_with_our_own_parity_closes_the_session' (31456) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: the accept never reached a verdict
-            /// thread 'draft17::a_stream_that_opens_no_request_closes_the_session' (41532) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: the accept never reached a verdict
-            /// ```
-            ///
-            /// The line number is draft-17's macro invocation site and moves
-            /// whenever this file is edited; the messages are what identify
-            /// the failures.
             #[tokio::test]
             async fn a_peers_request_is_answered_on_the_stream_it_arrived_on() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -3407,18 +3252,6 @@ macro_rules! uni_control_plane_gates {
             /// talking to an endpoint that had silently stopped playing by the
             /// rules; only the close the peer reads off the connection says
             /// otherwise.
-            ///
-            /// # What it catches
-            ///
-            /// Deleting the `self.close_for(&err)` call from draft-17's
-            /// `accept_request_stream`, so the violation is returned to the
-            /// caller and nothing goes out — the `Err` half of this gate still
-            /// passes, and only the wire half fails:
-            ///
-            /// ```text
-            /// thread 'draft17::a_stream_that_opens_no_request_closes_the_session' (49352) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: the client refused the non-request opener but never closed the session; a returned error is not a CONNECTION_CLOSE
-            /// ```
             #[tokio::test]
             async fn a_stream_that_opens_no_request_closes_the_session() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -3491,21 +3324,6 @@ macro_rules! uni_control_plane_gates {
             /// The code is what makes this a different gate from
             /// [`a_stream_that_opens_no_request_closes_the_session`] rather
             /// than a second copy of it. Both close; they must not close alike.
-            ///
-            /// # What it catches
-            ///
-            /// Deleting the `validate_peer_id` call and its `fail_session` arm
-            /// from draft-17's `Endpoint::receive_request_on_stream`, so
-            /// nothing checks the least significant bit:
-            ///
-            /// ```text
-            /// thread 'draft17::a_peer_request_id_with_our_own_parity_closes_the_session' (60144) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: an even Request ID from a server peer must be refused, got an accepted request on stream 0
-            /// ```
-            ///
-            /// The request is simply taken, on a stream whose id collides with
-            /// the client's own first stream — see the note in
-            /// [`an_inbound_request_is_served_while_an_outbound_one_is_in_flight`].
             #[tokio::test]
             async fn a_peer_request_id_with_our_own_parity_closes_the_session() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -3574,26 +3392,6 @@ macro_rules! uni_control_plane_gates {
             /// to hear about it. The code is what makes this a different gate
             /// from [`a_stream_that_opens_no_request_closes_the_session`], which
             /// closes too and closes with PROTOCOL_VIOLATION.
-            ///
-            /// # What it catches
-            ///
-            /// Deleting the duplicate check from draft-17's
-            /// `Endpoint::receive_request_on_stream` — leaving
-            /// `self.peer_request_ids.insert(id);` with nothing testing its
-            /// answer — fails this gate and no other in this file:
-            ///
-            /// ```text
-            /// thread 'draft17::a_repeated_peer_request_id_closes_the_session' (52620) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: a Request ID the peer has already spent must be refused, got a second accepted request on stream 1
-            /// ```
-            ///
-            /// The line number is draft-17's macro invocation site and moves
-            /// whenever this file is edited; the message is what identifies the
-            /// failure.
-            ///
-            /// This gate is the only thing on the wire that sees that
-            /// deletion: the endpoint's own unit test catches it in-process,
-            /// and every other gate in this file stays green through it.
             #[tokio::test]
             async fn a_repeated_peer_request_id_closes_the_session() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -3691,10 +3489,6 @@ macro_rules! uni_control_plane_gates {
             /// [`MARK_ONE`], taken from the track name, and the inbound one is
             /// [`OTHER_PEER_REQUEST_ID`], echoed from the Request ID the peer
             /// chose.
-            ///
-            /// The ablation recorded on
-            /// [`a_peers_request_is_answered_on_the_stream_it_arrived_on`]
-            /// fails this one too.
             #[tokio::test]
             async fn an_inbound_request_is_served_while_an_outbound_one_is_in_flight() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -3841,19 +3635,6 @@ macro_rules! uni_control_plane_gates {
             /// finds nothing, and reports an unknown request. Someone reading
             /// that would go looking for a bookkeeping bug in the id
             /// allocator rather than for a stream routed to the wrong half.
-            ///
-            /// # What it catches
-            ///
-            /// Collapsing the `origin` match in `recv_on_request_stream` to
-            /// the requester arm alone — draft-17's `connection.rs`, which is
-            /// where this was actually run — fails this gate and no other in
-            /// the file. Drafts 18 and 19 kept their routing and kept passing,
-            /// which is what shows the gate is per-draft and not incidental:
-            ///
-            /// ```text
-            /// thread 'draft17::a_peers_publish_carries_a_second_message_from_the_peer' (14612) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: the PUBLISH_DONE the peer sent on its own stream came back as Endpoint(UnknownRequest(1)) instead of being dispatched as a request-side message
-            /// ```
             #[tokio::test]
             async fn a_peers_publish_carries_a_second_message_from_the_peer() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -3968,27 +3749,6 @@ macro_rules! uni_control_plane_gates {
             /// final byte, a fresh accept produces the *whole* request, with
             /// the Request ID intact. Bytes read before the cancellation had
             /// to have survived it for that to decode at all.
-            ///
-            /// # What it catches
-            ///
-            /// Making the accept never *consult* the stash — replacing
-            /// `self.take_pending_inbound()` with `None` in draft-17's
-            /// `connection.rs`, which is where this was run — fails this gate
-            /// and no other in the file:
-            ///
-            /// ```text
-            /// thread 'draft17::a_cancelled_accept_does_not_lose_the_peers_stream' (42568) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: the stream survived cancellation but the request on it never completed
-            /// ```
-            ///
-            /// Note which assertion fired. The stash is still *written* under
-            /// that ablation — the cancellation guard's `Drop` runs either
-            /// way — so `pending_inbound_count` still rises and the loop above
-            /// still breaks. What breaks is the resumption: the second accept
-            /// goes back to `accept_bi` for a stream the peer already sent,
-            /// and waits out `PATIENCE` for a request that is sitting in a
-            /// queue nobody reads. A gate that asserted only on the count
-            /// would have passed.
             #[tokio::test]
             async fn a_cancelled_accept_does_not_lose_the_peers_stream() {
                 let (mut conn, peer, mut seen, commands) = connected_with_commands().await;
@@ -4079,25 +3839,6 @@ macro_rules! uni_control_plane_gates {
             /// [`a_peers_request_is_answered_on_the_stream_it_arrived_on`]
             /// forbids. The peer must report the answer where it actually went
             /// and not where it was owed.
-            ///
-            /// # What it catches
-            ///
-            /// Stopping the peer from opening the stream at all — returning
-            /// before the `conn.open_bi()` in [`serve_peer_requests`] — fails
-            /// these three and the four responder gates, and nothing else:
-            ///
-            /// ```text
-            /// thread 'draft17::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (54980) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-17: the peer never opened a request stream
-            /// thread 'draft18::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (67764) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-18: the peer never opened a request stream
-            /// thread 'draft19::the_peer_opens_a_request_stream_and_requires_the_answer_on_it' (65256) panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// draft-19: the peer never opened a request stream
-            /// ```
-            ///
-            /// Which is the whole point of gating the peer: with it no longer
-            /// opening streams, a client with no accept path at all would sail
-            /// through the four responder gates on a timeout apiece.
             #[tokio::test]
             async fn the_peer_opens_a_request_stream_and_requires_the_answer_on_it() {
                 let (addr, peer, mut seen, commands) = raw_peer();
@@ -4300,29 +4041,6 @@ macro_rules! uni_control_plane_gates {
             /// peer's own SETUP first is what makes the TRACK_STATUS a
             /// separate message on an established control stream rather than
             /// something that might be read as part of the handshake.
-            ///
-            /// # What it catches
-            ///
-            /// Stopping `refuse_requests_on_control_stream` from acting on
-            /// the types it recognises leaves every other test in this file
-            /// passing and fails only these three, one per draft:
-            ///
-            /// ```text
-            /// thread 'draft17::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// the peer never closed the session: Elapsed(())
-            /// thread 'draft18::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// the peer never closed the session: Elapsed(())
-            /// thread 'draft19::control_stream_enforcement_closes_the_session' panicked at crates\moqtap-client\tests\uni_control_plane.rs:
-            /// the peer never closed the session: Elapsed(())
-            /// ```
-            ///
-            /// The line numbers are the macro invocation sites, which move
-            /// whenever this file is edited; the message above them is what
-            /// identifies the failure.
-            ///
-            /// Which is the whole point of this gate: with the peer no longer
-            /// enforcing, a client that had put its requests back on the
-            /// control plane would sail through everything else here.
             #[tokio::test]
             async fn control_stream_enforcement_closes_the_session() {
                 let (addr, peer, mut seen, _commands) = raw_peer();
@@ -4398,9 +4116,7 @@ macro_rules! joining_fetch_hooks {
         ///
         /// The Fetch Type is a rendered field rather than part of the message
         /// name, because a helper that sent the wrong one has written a
-        /// well-formed FETCH asking for something else — the cut recorded on
-        /// `every_request_helper_opens_its_own_stream`, which reddened nothing
-        /// until the peer decoded what it was sent.
+        /// well-formed FETCH asking for something else.
         fn $describe(m: &moqtap_codec::$draft_mod::message::Fetch) -> String {
             use moqtap_codec::$draft_mod::message::FetchPayload;
             match &m.fetch_payload {
@@ -4647,22 +4363,6 @@ fn draft23_describe_fetch(m: &moqtap_codec::draft23::message::Fetch) -> String {
 ///   in `draft20_fill_and_state_notify.rs`; what this asserts is only what
 ///   this file is about, that the request went out alone at the front of a
 ///   bidirectional stream of its own still carrying both parameters.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// The ported `+ 1` — building the ranged FETCH's filter with `range_to(0, 0,
-/// 1, 2)`, which is what a draft-19 encoder carried forward writes for a range
-/// whose last object is 1. The message is well formed, the type is right, the
-/// parameter count is right, and the FETCH asks for one object too many:
-///
-/// ```text
-/// assertion `left == right` failed: draft-20: the ranged FETCH must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
-///   left: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=0,0,1,2 parameters=2"))
-///  right: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=0,0,1,1 parameters=2"))
-/// ```
-///
-/// A rendering that stopped at `parameters=2` would print the same on both
-/// sides, which is why the filter is decoded into it.
 #[cfg(feature = "draft20")]
 async fn draft20_fetch_requests(
     conn: &mut moqtap_client::draft20::connection::Connection,
@@ -4767,22 +4467,6 @@ async fn draft20_fetch_requests(
 ///   in `draft21_fill_and_state_notify.rs`; what this asserts is only what
 ///   this file is about, that the request went out alone at the front of a
 ///   bidirectional stream of its own still carrying both parameters.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// The ported `+ 1` — building the ranged FETCH's filter with `range_to(0, 0,
-/// 1, 2)`, which is what a draft-19 encoder carried forward writes for a range
-/// whose last object is 1. The message is well formed, the type is right, the
-/// parameter count is right, and the FETCH asks for one object too many:
-///
-/// ```text
-/// assertion `left == right` failed: draft-21: the ranged FETCH must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
-///   left: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=0,0,1,2 parameters=2"))
-///  right: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=0,0,1,1 parameters=2"))
-/// ```
-///
-/// A rendering that stopped at `parameters=2` would print the same on both
-/// sides, which is why the filter is decoded into it.
 #[cfg(feature = "draft21")]
 async fn draft21_fetch_requests(
     conn: &mut moqtap_client::draft21::connection::Connection,
@@ -4888,22 +4572,6 @@ async fn draft21_fetch_requests(
 ///   in `draft22_fill_and_state_notify.rs`; what this asserts is only what
 ///   this file is about, that the request went out alone at the front of a
 ///   bidirectional stream of its own still carrying both parameters.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// The ported `+ 1` — building the ranged FETCH's filter with `range_to(0, 0,
-/// 1, 2)`, which is what a draft-19 encoder carried forward writes for a range
-/// whose last object is 1. The message is well formed, the type is right, the
-/// parameter count is right, and the FETCH asks for one object too many:
-///
-/// ```text
-/// assertion `left == right` failed: draft-22: the ranged FETCH must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
-///   left: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=type 4: 0,0,1,2 parameters=2"))
-///  right: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=type 4: 0,0,1,1 parameters=2"))
-/// ```
-///
-/// A rendering that stopped at `parameters=2` would print the same on both
-/// sides, which is why the filter is decoded into it.
 #[cfg(feature = "draft22")]
 async fn draft22_fetch_requests(
     conn: &mut moqtap_client::draft22::connection::Connection,
@@ -5009,22 +4677,6 @@ async fn draft22_fetch_requests(
 ///   in `draft23_fill_and_state_notify.rs`; what this asserts is only what
 ///   this file is about, that the request went out alone at the front of a
 ///   bidirectional stream of its own still carrying both parameters.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// The ported `+ 1` — building the ranged FETCH's filter with `range_to(0, 0,
-/// 1, 2)`, which is what a draft-19 encoder carried forward writes for a range
-/// whose last object is 1. The message is well formed, the type is right, the
-/// parameter count is right, and the FETCH asks for one object too many:
-///
-/// ```text
-/// assertion `left == right` failed: draft-23: the ranged FETCH must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
-///   left: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=type 4: 0,0,1,2 parameters=2"))
-///  right: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=type 4: 0,0,1,1 parameters=2"))
-/// ```
-///
-/// A rendering that stopped at `parameters=2` would print the same on both
-/// sides, which is why the filter is decoded into it.
 #[cfg(feature = "draft23")]
 async fn draft23_fetch_requests(
     conn: &mut moqtap_client::draft23::connection::Connection,
@@ -5518,16 +5170,6 @@ fn draft23_describe_namespace(msg: &moqtap_codec::draft23::message::ControlMessa
 /// no draft uses in every failure message this file can produce. The codec's
 /// registry is where these numbers are read against the draft, so it is what
 /// they are held to.
-///
-/// # What it catches
-///
-/// A digit wrong in one of them:
-///
-/// ```text
-/// assertion `left == right` failed: FETCH
-///   left: 22
-///  right: 23
-/// ```
 #[cfg(feature = "draft17")]
 #[test]
 fn the_numbers_the_renderings_carry_are_draft17s() {

@@ -565,7 +565,7 @@ pub enum Preset {
 /// crate compiles, and every preset test passes having examined the seven that
 /// are listed. The length assertion in the pairwise-distinctness test is the
 /// second place the count is written down, so widening this array without
-/// going to that test reddens it — enough to keep the array and the tests
+/// going to that test fails it — enough to keep the array and the tests
 /// moving together, not enough to notice a variant that reached neither.
 pub const ALL_PRESETS: [Preset; 7] = [
     Preset::Lte,

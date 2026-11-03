@@ -288,10 +288,9 @@ fn drafts_12_and_13_number_end_of_group_below_the_status_datagram() {
 
 /// A subgroup stream can be written from its first byte, not only read from it.
 ///
-/// `decode_stream` has existed on all the drafts and consumes the leading
-/// stream type; until now nothing wrote it back, so a caller opening a stream
-/// with `encode` produced bytes that `decode_stream` reads with every field one
-/// place late.
+/// `decode_stream` consumes the leading stream type on all the drafts, so the
+/// encoder has to write it: without it, a caller opening a stream with `encode`
+/// produces bytes that `decode_stream` reads with every field one place late.
 #[test]
 fn a_subgroup_stream_can_be_written_from_its_first_byte() {
     for &draft in DRAFTS {

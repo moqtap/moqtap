@@ -24,40 +24,9 @@
 //! files, a file with no vectors, and a corpus in which the field never
 //! appears.
 //!
-//! # What this catches, observed by making each change and running it
-//!
-//! Renaming the field in `TestVector` to a spelling the corpus does not use:
-//!
-//! ```text
-//! thread 'the_profile_field_is_read_and_not_merely_declared' panicked at
-//! crates\moqtap-codec\tests\vector_profiles.rs:
-//! no vector in the whole corpus parsed a `profiles` field, though 4 of them
-//! carry one in their JSON. The parser and the corpus disagree about the key
-//! name, and every vector is being treated as binding every profile.
-//! ```
-//!
-//! Marking one restated vector `["forwarder"]`, which is the shape of a vector
-//! these runners would have to leave out:
-//!
-//! ```text
-//! thread 'nothing_in_the_corpus_is_left_out_of_these_runs' panicked at
-//! crates\moqtap-codec\tests\vector_profiles.rs:
-//! assertion `left == right` failed: these runners answer "endpoint", so every
-//! vector on the left is one no suite in this crate reads. Each needs a reason
-//! recorded here, or the corpus is asserting something this crate cannot.
-//!   left: ["transport/draft19/codec/messages/fetch-ok.json [with-params-and-properties]"]
-//!  right: []
-//! ```
-//!
-//! Putting the same field on a vector that decodes:
-//!
-//! ```text
-//! thread 'a_profile_narrows_a_refusal_and_never_a_decode' panicked at
-//! crates\moqtap-codec\tests\vector_profiles.rs:
-//! transport/draft19/codec/messages/fetch-ok.json [more-data] names profiles and
-//! decodes. Bytes decode to the same value for every reader, so a profile on a
-//! positive vector claims something the corpus cannot mean.
-//! ```
+//! Fails if the parser and the corpus disagree about the `profiles` key, if a
+//! vector these runners would leave out appears without a recorded reason, or if
+//! a vector that decodes names profiles.
 
 mod test_vectors;
 

@@ -258,8 +258,7 @@ mod tests {
     /// exactly antisymmetric, has a zero median and sums to exactly zero**.
     /// Every well-orderedness and centring clause here passes against it. So
     /// those clauses on their own would be worth nothing, and what carries
-    /// this test is the pinned entries and the σ-band counts: measured, the
-    /// first assertion an all-zero table reddens is the central pair.
+    /// this test is the pinned entries and the σ-band counts.
     ///
     /// The 1σ/2σ/3σ counts are the independent anchor. 68.27%, 95.45% and
     /// 99.73% of a normal distribution lie inside one, two and three standard

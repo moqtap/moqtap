@@ -266,20 +266,6 @@ macro_rules! inbound_subscribe_gates {
             /// a SUBSCRIBE is checked for its Request ID and then dropped, and
             /// the peer waits for an answer the endpoint has no record to
             /// build one from.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Removing the `ControlMessage::Subscribe` arm from
-            /// `receive_message`:
-            ///
-            /// ```text
-            /// the SUBSCRIBE that arrived on the control stream could not be answered: UnknownRequest(1)
-            /// ```
-            ///
-            /// It reddens thirty-three tests: this gate on all five drafts, every gate
-            /// in `an_update_for_an_unknown_request_ends_the_session.rs`, which needs
-            /// the peer's subscription to exist before it can be updated, and the
-            /// draft-14 dispatch test.
             #[test]
             fn a_subscribe_off_the_control_stream_reaches_the_flow() {
                 let mut ep = active();
@@ -297,22 +283,6 @@ macro_rules! inbound_subscribe_gates {
             }
 
             /// An answer to a SUBSCRIBE that never arrived is refused.
-            ///
-            /// # What it catches
-            ///
-            /// Answering whichever subscription is outstanding instead of the
-            /// one the answer names - looking the record up by iteration
-            /// rather than by identifier:
-            ///
-            /// ```text
-            /// a SUBSCRIBE_OK was built for a request that never arrived: SubscribeOk(SubscribeOk { request_id: VarInt(9), track_alias: VarInt(7), expires: VarInt(0), group_order: Ascending, content_exists: NoLargestLocation, largest_location: None, parameters: [] })
-            /// ```
-            ///
-            /// Made by answering whichever inbound subscription is first in the map,
-            /// in both of the acceptance's lookups. It reddens twenty-two tests across
-            /// six drafts - draft-11's acceptance is written the same way and is cut
-            /// by the same edit - because the gates that answer two subscriptions and
-            /// the ones that judge an alias all need the right record.
             #[test]
             fn an_answer_to_a_subscribe_that_never_arrived_is_refused() {
                 let mut ep = subscribed();
@@ -326,20 +296,6 @@ macro_rules! inbound_subscribe_gates {
             }
 
             /// A second acceptance for one SUBSCRIBE is refused.
-            ///
-            /// # What it catches
-            ///
-            /// Building the answer without moving the record on, which is the
-            /// shape a publisher with no lifecycle has: every answer looks
-            /// like the first one.
-            ///
-            /// ```text
-            /// a second answer was sent for one SUBSCRIBE: SubscribeOk(SubscribeOk { request_id: VarInt(1), track_alias: VarInt(7), expires: VarInt(0), group_order: Ascending, content_exists: NoLargestLocation, largest_location: None, parameters: [] })
-            /// ```
-            ///
-            /// It reddens sixty tests. A subscription that never reaches Active is one
-            /// nothing else in the flow can act on, so every gate past the answer goes
-            /// with it, on all ten drafts that have this lifecycle.
             #[test]
             fn a_second_acceptance_is_refused() {
                 let mut ep = accepted();
@@ -353,19 +309,6 @@ macro_rules! inbound_subscribe_gates {
             /// The other order, and a separate input because it leaves the
             /// record in a different state: "exactly one" is one answer of
             /// either kind, not one of each.
-            ///
-            /// # What it catches
-            ///
-            /// Letting the acceptance run from the state a rejection leaves:
-            ///
-            /// ```text
-            /// a SUBSCRIBE was accepted after it had been rejected: SubscribeOk(SubscribeOk { request_id: VarInt(1), track_alias: VarInt(7), expires: VarInt(0), group_order: Ascending, content_exists: NoLargestLocation, largest_location: None, parameters: [] })
-            /// ```
-            ///
-            /// The cut is the rejection's own, not the acceptance's: leaving the record
-            /// where it was when the refusal went out reddens ten tests and only this
-            /// gate. The acceptance has a cut of its own and it reddens this gate too,
-            /// which is what two answers to one question look like.
             #[test]
             fn a_rejected_subscribe_cannot_then_be_accepted() {
                 let mut ep = subscribed();
@@ -382,21 +325,6 @@ macro_rules! inbound_subscribe_gates {
             /// The message that ends a subscription ends one that is running;
             /// one still waiting for its answer is refused instead, which is a
             /// different message and a different state.
-            ///
-            /// # What it catches
-            ///
-            /// Discarding what the record says when the message is built, so
-            /// that it ends a subscription from any state rather than from the
-            /// one the subscription exists in:
-            ///
-            /// ```text
-            /// a subscription this endpoint had not accepted was ended: SubscribeDone(SubscribeDone { request_id: VarInt(1), status_code: VarInt(0), stream_count: VarInt(0), reason_phrase: [] })
-            /// ```
-            ///
-            /// Drafts 14 through 16 send PUBLISH_DONE for the same thing and report it
-            /// under that name. It reddens forty tests: a subscription that cannot be
-            /// ended is one whose alias is never freed and whose update can still be
-            /// accepted, so the alias gate and both update files go with it.
             #[test]
             fn an_unanswered_subscribe_cannot_be_ended() {
                 let mut ep = subscribed();
@@ -416,20 +344,6 @@ macro_rules! inbound_subscribe_gates {
             /// Delivered the way the control stream delivers one, because the
             /// dispatch arm for UNSUBSCRIBE is as new as the record it lands
             /// in and nothing else would reach it.
-            ///
-            /// # What it catches
-            ///
-            /// Removing the `ControlMessage::Unsubscribe` arm from
-            /// `receive_message`, which leaves the message with nowhere to
-            /// land and the subscription running for ever:
-            ///
-            /// ```text
-            /// a subscription that was never ended accepted a second UNSUBSCRIBE: ()
-            /// ```
-            ///
-            /// It reddens five tests and no others: this gate, on all five drafts.
-            /// Nothing else here needs an UNSUBSCRIBE to arrive off the control
-            /// stream.
             #[test]
             fn an_accepted_subscribe_is_ended_by_unsubscribe() {
                 let mut ep = accepted();
@@ -450,17 +364,6 @@ macro_rules! inbound_subscribe_gates {
             /// The other end of the same subscription, and the message that
             /// carries it is one this endpoint sends rather than receives -
             /// which is a different route into the same record.
-            ///
-            /// # What it catches
-            ///
-            /// Building the closing message without moving the record on:
-            ///
-            /// ```text
-            /// a subscription this endpoint had already ended was unsubscribed: ()
-            /// ```
-            ///
-            /// The subscriber's route into the same record is a different probe in a
-            /// different method, and cutting either one leaves the other's gate green.
             #[test]
             fn an_accepted_subscribe_is_ended_by_the_publisher() {
                 let mut ep = accepted();
@@ -473,22 +376,6 @@ macro_rules! inbound_subscribe_gates {
             }
 
             /// Two subscriptions from the peer are answered independently.
-            ///
-            /// # What it catches
-            ///
-            /// Keeping one inbound record for the whole session rather than
-            /// one per request, which passes every gate above - each of them
-            /// has a single subscription outstanding:
-            ///
-            /// ```text
-            /// the first subscription could not be accepted: UnknownRequest(1)
-            /// ```
-            ///
-            /// Made by clearing the map before each insert, which is what one record
-            /// for the whole session amounts to. It reddens twenty tests: this gate and
-            /// the two alias gates below, on all ten drafts. The first subscription is
-            /// the one that goes missing, so the failure names it rather than the
-            /// second.
             #[test]
             fn two_subscriptions_from_the_peer_are_answered_apart() {
                 let mut ep = subscribed();
@@ -509,19 +396,6 @@ macro_rules! inbound_subscribe_gates {
             /// gates at `publish`, reached through the call site added here.
             /// A shared check needs one gate per caller: cutting it out
             /// of one leaves the other's gate green.
-            ///
-            /// # What it catches
-            ///
-            /// Deleting the `alias_held_elsewhere` call from
-            /// `send_subscribe_ok`:
-            ///
-            /// ```text
-            /// this endpoint gave one alias to two of the peer's tracks: SubscribeOk(SubscribeOk { request_id: VarInt(3), track_alias: VarInt(7), expires: VarInt(0), group_order: Ascending, content_exists: NoLargestLocation, largest_location: None, parameters: [] })
-            /// ```
-            ///
-            /// It reddens five tests and only this gate. Nothing that judges an alias
-            /// arriving is touched, and neither is `publish`, which is the same check
-            /// at its other call site.
             #[test]
             fn one_alias_for_two_of_the_peers_tracks_is_refused() {
                 let mut ep = subscribed();
@@ -547,20 +421,6 @@ macro_rules! inbound_subscribe_gates {
             /// The liveness the rule reads is the subscription's own state,
             /// not a second set kept beside it, so ending the subscription is
             /// all it takes to release the alias.
-            ///
-            /// # What it catches
-            ///
-            /// Reading a binding as live whatever state its subscription is
-            /// in, which is what a set of aliases with nothing to prune it
-            /// amounts to:
-            ///
-            /// ```text
-            /// an alias whose subscription had ended was still held: TrackAliasInUse { alias: 7, held: 1 }
-            /// ```
-            ///
-            /// Made by reading a binding as live whenever its record exists. It reddens
-            /// five tests and only this gate: every other alias gate here has a live
-            /// subscription behind the binding.
             #[test]
             fn an_alias_is_free_once_its_subscription_ends() {
                 let mut ep = subscribed();

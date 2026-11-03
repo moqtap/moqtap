@@ -172,9 +172,9 @@ fn parameter_may_repeat(key: u64) -> bool {
 /// Draft-20 Section 1.4.3: "The previous Type value plus the Delta Type MUST NOT
 /// be greater than 2^64 - 1. If a Delta Type is received that would be too
 /// large, the Session MUST be closed with a PROTOCOL_VIOLATION." MoQT varints
-/// span the whole 64-bit range, so a peer can drive the sum past the end: a
-/// debug build panicked on the addition and a release build wrapped the key and
-/// reported the parameter under a type its sender never wrote.
+/// span the whole 64-bit range, so a peer can drive the sum past the end: an
+/// unchecked addition panics in a debug build, and in a release build wraps the
+/// key and reports the parameter under a type its sender never wrote.
 fn add_delta(prev_key: u64, delta: u64) -> Result<u64, CodecError> {
     prev_key.checked_add(delta).ok_or(CodecError::KeyDeltaOverflow(prev_key, delta))
 }
@@ -2248,15 +2248,8 @@ mod tests {
     /// Message Body, the receiver MUST close the session with a
     /// PROTOCOL_VIOLATION."
     ///
-    /// Without the trailing-byte check in `decode` this SUBSCRIBE parses and
-    /// the two surplus bytes vanish:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: Ok(Subscribe(Subscribe { request_id: VarInt(1), track_namespace:
-    ///         TrackNamespace([[97]]), track_name: [98], parameters: [] }))
-    ///  right: Err(InvalidField)
-    /// ```
+    /// Fails if `decode` parses this SUBSCRIBE and lets the two surplus bytes
+    /// vanish.
     #[test]
     fn a_message_body_shorter_than_the_declared_length_is_refused() {
         let body = subscribe_body(&[0x00]);
@@ -2284,18 +2277,7 @@ mod tests {
     /// 1024 bytes. If an endpoint receives a length exceeding the maximum, it
     /// MUST close the session with a PROTOCOL_VIOLATION".
     ///
-    /// Without the decode-side bound the 2000-byte phrase is handed to the
-    /// application:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: Ok(RequestError(RequestError { error_code: VarInt(1),
-    ///         retry_interval: VarInt(0), reason_phrase: [120, 120, ...],
-    ///         redirect: None }))
-    ///  right: Err(ReasonPhraseTooLong)
-    /// ```
-    ///
-    /// (The 2000 repeated bytes of the phrase are elided from that transcript.)
+    /// Fails if the 2000-byte phrase is handed to the application.
     #[test]
     fn an_over_long_reason_phrase_is_refused_on_decode() {
         for (type_id, prefix) in [(0x05u64, vec![0x01, 0x00]), (0x0B, vec![0x01, 0x00])] {
@@ -2318,17 +2300,8 @@ mod tests {
     /// 8,192 bytes. If an endpoint receives a length exceeding the maximum, it
     /// MUST close the session with a PROTOCOL_VIOLATION."
     ///
-    /// Without the decode-side bound the oversized URI reaches the application
-    /// and a migrating endpoint follows it:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: Ok(GoAway(GoAway { new_session_uri: [117, 117, ...],
-    ///         timeout: VarInt(0) }))
-    ///  right: Err(GoAwayUriTooLong)
-    /// ```
-    ///
-    /// (The 9000 repeated bytes of the URI are elided from that transcript.)
+    /// Fails if the oversized URI reaches the application, where a migrating
+    /// endpoint would follow it.
     #[test]
     fn an_over_long_goaway_uri_is_refused_on_decode() {
         let over = MAX_GOAWAY_URI_LENGTH + 808;
@@ -2347,16 +2320,7 @@ mod tests {
     /// range, it MUST close the session with PROTOCOL_VIOLATION." Section
     /// 10.2.17 says the same of FORWARD with the values 0 and 1.
     ///
-    /// Without `uint8_value_in_range` the out-of-range byte is handed up as an
-    /// ordinary parameter:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: Ok(Subscribe(Subscribe { request_id: VarInt(1), track_namespace:
-    ///         TrackNamespace([[97]]), track_name: [98], parameters:
-    ///         [KeyValuePair { key: VarInt(34), value: Varint(VarInt(7)) }] }))
-    ///  right: Err(InvalidField)
-    /// ```
+    /// Fails if the out-of-range byte is handed up as an ordinary parameter.
     #[test]
     fn a_uint8_parameter_outside_its_range_is_refused() {
         // key, rejected value, accepted value
@@ -2404,14 +2368,8 @@ mod tests {
     /// two varints `0x0a` and `0x03` for Location (10, 3). A length-prefixed
     /// spelling would need a fifth byte.
     ///
-    /// With `0x09` back in the Length-prefixed arm, the decoder reads the
-    /// group varint `0x0a` as a value length of 10 and runs off the end of a
-    /// four-byte body. Both this test and
-    /// [`a_location_does_not_eat_the_block_that_follows_it`] fail with:
-    ///
-    /// ```text
-    /// spec-correct frame must decode: UnexpectedEnd
-    /// ```
+    /// Fails if `0x09` is read as Length-prefixed: the group varint `0x0a` then
+    /// reads as a value length of 10 and runs off the end of a four-byte body.
     #[test]
     fn largest_object_is_two_bare_varints() {
         let body = [0x01, 0x09, 0x0a, 0x03];
@@ -2439,20 +2397,8 @@ mod tests {
     /// a frame on the wire that `ControlMessage::decode` then refuses. One
     /// varint short and one varint long are the two ways to get it wrong.
     ///
-    /// # What it catches
-    ///
-    /// Dropping the `is_location_value` guard from this draft's encode arm,
-    /// run:
-    ///
-    /// ```text
-    /// panicked at crates\moqtap-codec\src\draft20\message.rs:
-    /// LARGEST_OBJECT of one varint must not encode: the decoder cannot read it back
-    ///
-    /// test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 108 filtered out
-    /// ```
-    ///
-    /// The sibling draft kept its guard and kept passing, which is what shows
-    /// the check is per-draft and not inherited from somewhere shared.
+    /// Fails if this draft's encode arm loses its `is_location_value` guard;
+    /// the check is per-draft, not inherited from shared code.
     #[test]
     fn a_location_value_that_is_not_two_varints_is_refused_on_encode() {
         for (label, value) in
@@ -2522,25 +2468,12 @@ mod tests {
     /// "sports") as `02 04 "live" 06 "sports"`. Sixteen body bytes; a
     /// length-prefixed spelling would need a seventeenth for the outer length.
     ///
-    /// With `0x34` back in the Length-prefixed arm the field count `0x02` is
-    /// read as an outer length of two bytes, leaving eleven bytes of namespace
-    /// unread. Draft-20's Section 10 body-length check turns that into a
-    /// refusal rather than a truncated value:
-    ///
-    /// ```text
-    /// spec-correct frame must decode: InvalidField
-    /// ```
-    ///
-    /// That check is not a safety net here. Where the surplus lands inside the
-    /// declared body — as in
-    /// [`an_empty_track_namespace_prefix_is_one_zero_byte`], whose namespace is
-    /// one byte long — the misread is silent, and that test fails instead with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: [KeyValuePair { key: VarInt(52), value: Bytes([]) }]
-    ///  right: [KeyValuePair { key: VarInt(52), value: Bytes([0]) }]
-    /// ```
+    /// Fails if `0x34` is read as Length-prefixed: the field count `0x02` then
+    /// reads as an outer length of two bytes, leaving eleven bytes of namespace
+    /// unread. Draft-20's Section 10 body-length check refuses this frame, but
+    /// where the surplus lands inside the declared body, as in
+    /// [`an_empty_track_namespace_prefix_is_one_zero_byte`], the misread is
+    /// silent.
     #[test]
     fn track_namespace_prefix_is_a_bare_track_namespace() {
         let namespace: Vec<u8> = [&[0x02, 0x04][..], b"live", &[0x06][..], b"sports"].concat();

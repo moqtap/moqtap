@@ -78,21 +78,11 @@
 //!
 //! With quinn's defaults a connection that carries nothing still sends
 //! several padded path-MTU probes, and on an idle leg they are most of
-//! what the capture holds. Measured here, by running both fixtures below
-//! with the one line that turns discovery off commented out and then
-//! restored:
-//!
-//! | path-MTU discovery | 1-RTT bytes sent forwarding 100 000 | idle |
-//! |---|---|---|
-//! | quinn's default (on) | 108 248–108 334 over 82–84 packets | 3 038 over 7 packets |
-//! | off | 103 007–103 018 over 89 packets | 323 over 5 packets |
-//!
-//! Turning it off is worth a line on any leg whose capture is going to be
-//! measured. It moves the loaded figure from 8% above the payload to 3%,
-//! which is what makes an upper bracket worth stating at all, and it drops
-//! the idle floor by a factor of nine — so the separation the pair rests
-//! on goes from 36x to 320x. Both captured legs here set
-//! `mtu_discovery_config(None)` for those two reasons.
+//! what the capture holds. Turning discovery off keeps the loaded figure
+//! close to the payload, which is what makes an upper bracket worth stating
+//! at all, and lowers the idle floor, which widens the separation the pair
+//! rests on. Both captured legs here set `mtu_discovery_config(None)` for
+//! those two reasons.
 //!
 //! # A leg that carries the spec itself
 //!
@@ -185,9 +175,8 @@ use common::{FakeRelay, SpawnedProxy};
 /// guarantees it is non-empty, which makes [`DRAFT`]'s index a compile-time
 /// fact rather than a panic.
 ///
-/// Lifted from `backpressure_window.rs` for the same reason it exists
-/// there: a hardcoded draft reddens every reduced-draft build whose draft
-/// is not that one, and nothing in this file reads a draft anyway.
+/// Not hardcoded: a hardcoded draft fails every reduced-draft build whose
+/// draft is not that one, and nothing in this file reads a draft anyway.
 const COMPILED_DRAFTS: &[DraftVersion] = &[
     #[cfg(feature = "draft07")]
     DraftVersion::Draft07,
@@ -262,13 +251,6 @@ const LIVENESS: Duration = Duration::from_secs(10);
 /// window in which none appeared. Every other wait in this file reads
 /// [`Capture::read_when_whole`] instead, which waits for the file rather
 /// than for the clock.
-///
-/// It was the wait before *every* read until 2026-08-26. What it was for
-/// is real — the capture is a plain unbuffered `std::fs::File` and one
-/// record reaches it as several small writes, so a read that raced the
-/// very last one sees a fragment and is reported as truncation — but 200 ms
-/// was a guess at how long that takes, and on a loaded box a guess that
-/// short turns a whole capture into a truncation failure.
 const SETTLE: Duration = Duration::from_millis(200);
 
 /// How often [`Capture::read_when_whole`] looks again.
@@ -310,18 +292,11 @@ impl Capture {
     /// the completion condition — an observable fact about the file, asked
     /// again every [`RE_READ`] until it holds.
     ///
-    /// What it replaces is a flat 200 ms sleep before each read. The two
-    /// agree on an idle machine and part company on a loaded one, where the
-    /// sleep expires with the last record half-written and [`Self::parse`]
-    /// reports the truncation it was put there to prevent. Giving up takes
-    /// the same path, so a capture that is *really* truncated still fails
-    /// with the message that says so rather than with a timeout.
-    ///
-    /// *Ablation:* drop the last byte of the capture between the teardown
-    /// and this call. The wait then runs its full [`LIVENESS`] and gives up
-    /// into `a record that is neither newline-terminated nor a closed
-    /// object is the tail of a truncated capture` — the fragment named in
-    /// the message, and the message this file already had.
+    /// A flat sleep before each read would expire on a loaded machine with the
+    /// last record half-written, and [`Self::parse`] would report a truncation
+    /// that is not there. Giving up takes the same path, so a capture that is
+    /// *really* truncated still fails with the message that says so rather
+    /// than with a timeout.
     async fn read_when_whole(path: &Path) -> Self {
         let deadline = tokio::time::Instant::now() + LIVENESS;
         loop {
@@ -667,27 +642,6 @@ async fn run_one_session(config: ProxySessionConfig) -> Result<(), ProxyError> {
 /// about a capture rather than about a fixture: the relay confirms every
 /// byte arrived, so a zero total below is the *capture* failing and not
 /// the proxy.
-///
-/// Observed here, over five runs: 89 1-RTT packets totalling 103 009
-/// bytes, then 89 / 103 009, 89 / 103 018, 89 / 103 016 and 89 / 103 007 —
-/// 3.0% above the payload, against an upper bracket 20% above it. Whole
-/// captures of 204 to 209 records.
-///
-/// *Ablation, and the failure this test exists for:* attach the sink to a
-/// `quinn::TransportConfig` built beside the one the leg installs, which
-/// is a two-line mistake and still produces a capture file that exists,
-/// parses and names a qlog version. The 100 000 bytes still cross the
-/// proxy and the relay still confirms them, and this fails with
-///
-/// ```text
-/// the capture cannot record fewer bytes than the leg carried: 0 bytes over 0
-/// 1-RTT packets, from a capture holding 1 record(s) in total
-/// ```
-///
-/// One record: the preamble, written when the sink was built, and nothing
-/// after it. In the same run the other three tests in this file stayed
-/// green — which is what makes the idle test a control rather than a copy
-/// of this one, and also what makes it worth its own ablation.
 #[tokio::test]
 async fn the_relay_legs_capture_counts_the_payload_the_proxy_forwarded() {
     common::init_crypto();
@@ -753,29 +707,6 @@ async fn the_relay_legs_capture_counts_the_payload_the_proxy_forwarded() {
 /// fixtures is the *size* of the 1-RTT total, and the Initial and
 /// Handshake assertions are what stop "small" from being satisfiable by a
 /// capture of nothing at all.
-///
-/// Observed here, over five runs, identically every time: 5 1-RTT packets
-/// totalling 323 bytes, from a capture whose sent packets were two
-/// Initials, one Handshake and those five. Against a ceiling of 10 000 and
-/// a loaded figure of about 103 000, so the two fixtures are separated by
-/// a factor of roughly 320.
-///
-/// *Ablation:* attaching the sink to a config this fixture does not
-/// install — the same mistake the loaded test is built around — leaves
-/// this test's size bound trivially satisfied at zero, and it is the
-/// packet-type assertions that catch it instead:
-///
-/// ```text
-/// a leg that completed a handshake sent Initial packets; a capture without them is a
-/// capture of a connection that never happened, which would satisfy every size bound
-/// below it: []
-/// ```
-///
-/// That is the reason those two assertions are here at all. Without them
-/// this test would be green against an empty capture, which is precisely
-/// the state a broken sink leaves behind — and a control that passes when
-/// the thing it controls for has happened is worse than no control, since
-/// its green would be read as evidence.
 #[tokio::test]
 async fn a_relay_leg_that_carried_nothing_captures_its_handshake_and_little_else() {
     common::init_crypto();
@@ -875,17 +806,6 @@ fn cargo_tree(extra: &[&str]) -> String {
 /// lives in does. That is not circular: it asks the resolver about the
 /// build it is not, which is the one question a process compiled one way
 /// can answer about the other.
-///
-/// *Ablation:* give the crate's `quinn` dependency `features = ["qlog"]`
-/// directly, so the capture code is compiled whether or not this crate's
-/// own feature is on — which is exactly the mistake of wiring a writer
-/// outside the switch that is supposed to gate it. Both halves fail on the
-/// default build, the first reporting
-///
-/// ```text
-/// the qlog crate writes every record of a capture; a default build that resolves it is a
-/// build carrying the whole serialiser for a feature nobody asked for
-/// ```
 #[test]
 fn with_the_feature_off_nothing_that_writes_a_capture_is_compiled() {
     let default_crates = cargo_tree(&["-e", "normal", "--prefix", "none"]);
@@ -942,25 +862,6 @@ fn with_the_feature_off_nothing_that_writes_a_capture_is_compiled() {
 /// refusal covering both would send a caller who named no file off to look
 /// at their disk. `NoWriter` and `NotStarted` are asserted against each
 /// other here for that reason.
-///
-/// *Ablation:* give the control arm a writer-less spec too — that is, put
-/// both halves in the state the refused arm is in — and the emptiness
-/// assertion above stops being able to distinguish them:
-///
-/// ```text
-/// assertion `left == right` failed: a spec that does name a writer produces a capture
-/// in the same place the refused one did not, which is what makes the emptiness above a
-/// fact about the refusal
-///   left: []
-///  right: ["relay-leg.qlog"]
-/// ```
-///
-/// *A second ablation, not run here:* dropping the validation from
-/// `QlogSpec::into_stream` and letting quinn answer a missing writer would
-/// turn the first assertion's `NoWriter` into `NotStarted` — a caller who
-/// named no file sent off to look at their disk. That mutation is in the
-/// crate's own source rather than in this file, and the unit test beside
-/// it carries the recorded run.
 #[tokio::test]
 async fn a_spec_with_no_writer_is_refused_and_its_leg_captures_nothing() {
     common::init_crypto();
@@ -1083,29 +984,8 @@ async fn a_spec_with_no_writer_is_refused_and_its_leg_captures_nothing() {
 /// Path-MTU discovery is **on** here, unlike the fixtures above, and that is
 /// forced rather than chosen: turning it off needs a `TransportProfile`, and
 /// a leg carrying one would no longer be the spec-alone case this exists to
-/// pin. Observed here over five runs: 84 1-RTT packets totalling 108 338
-/// bytes, then 83 / 108 278, 83 / 108 280, 82 / 108 244 and 82 / 108 244 —
-/// 8.3% above the payload against the same 20% upper bracket, out of whole
-/// captures of 185 to 202 records. That matches the discovery-on column of
-/// this file's header table, which is what says the extra 5% over the
-/// fixtures above is padded MTU probes rather than anything this session
-/// sent.
-///
-/// *Ablation, and the failure this test exists for:* answer a leg carrying a
-/// spec and neither transport field with "install nothing" — a one-arm
-/// change. The 100 000 bytes still cross the proxy and the relay still
-/// confirms every one, and this fails with
-///
-/// ```text
-/// no capture at C:\Users\...\Temp\moqtap-qlog-64612-spec-alone-0\relay-leg.qlog: The
-/// system cannot find the file specified. (os error 2). The preamble is written when the
-/// sink is built, so a missing file means the spec never became a sink at all
-/// ```
-///
-/// The file is missing rather than empty because the writer here creates it
-/// on its first byte; with an eagerly opened file the same build would leave
-/// a zero-length capture behind, which is why this fixture writes through
-/// [`LazyFile`].
+/// pin. The padded MTU probes are why this leg's total sits further above
+/// the payload than the fixtures above, inside the same 20% upper bracket.
 #[tokio::test]
 async fn a_relay_leg_carrying_only_a_spec_still_captures_what_it_sent() {
     common::init_crypto();
@@ -1164,8 +1044,7 @@ async fn a_relay_leg_carrying_only_a_spec_still_captures_what_it_sent() {
 /// A leg given a raw transport config *and* a spec is refused where it is
 /// built, and captures nothing anywhere.
 ///
-/// The contradiction that had no producer until each leg could carry a spec
-/// of its own. quinn accepts a capture sink through exactly one method, and
+/// quinn accepts a capture sink through exactly one method, and
 /// that method mutates a `quinn::TransportConfig`; a leg's raw config arrives
 /// as an `Arc<quinn::TransportConfig>`, which has no `Clone` and yields no
 /// mutable reference while a second handle exists. A leg holding both could
@@ -1187,25 +1066,6 @@ async fn a_relay_leg_carrying_only_a_spec_still_captures_what_it_sent() {
 /// would leave a file holding a preamble, which is indistinguishable from
 /// the capture of a connection that carried nothing — the state the idle
 /// fixture above exists to be told apart from.
-///
-/// *Ablation, the mutation this gate is built around:* accept the pair and
-/// drop the spec — one arm of `transport::resolve`, and the only behaviour
-/// available to a leg that tried to honour both. The session then dials the
-/// relay, connects, and ends where every session in this file ends, on the
-/// client's own close. The directory listing printed `[]` in that run, so
-/// the emptiness assertion below passed exactly as it does against a correct
-/// build and would have caught nothing. It is the refusal that fails, and it
-/// fails on the variant rather than on there being no error at all:
-///
-/// ```text
-/// the relay leg's contradiction has to be reported as the relay leg's, and as the
-/// config-and-spec pair rather than the config-and-profile one — the two have different
-/// fixes: transport error: connection error: closed by peer: done (code 0)
-/// ```
-///
-/// That message is the session reporting a perfectly ordinary end. Which is
-/// the whole point: a leg that accepts the pair is indistinguishable from a
-/// correct one in everything except the capture that never appears.
 #[tokio::test]
 async fn a_leg_given_both_a_raw_config_and_a_spec_is_refused_and_captures_nothing() {
     common::init_crypto();
@@ -1215,9 +1075,8 @@ async fn a_leg_given_both_a_raw_config_and_a_spec_is_refused_and_captures_nothin
 
     // A real relay, *and* something driving its accept, so that a build
     // which accepted the pair connects and runs to a clean end. Without the
-    // second half the mutation this gate is built around would be caught by
-    // the upstream connect timing out, which is a fact about the fixture
-    // rather than about the leg. Under a correct build nothing ever arrives
+    // second half such a build would fail on the upstream connect timing out,
+    // which is a fact about the fixture rather than about the leg. Under a correct build nothing ever arrives
     // here and the task is aborted below having done nothing.
     let relay = Arc::new(FakeRelay::bind(ALPN));
     let accepting = {

@@ -129,16 +129,6 @@ fn subscribe_ok_with_largest_object(value: &[u8]) -> Vec<u8> {
 /// arrived.
 ///
 /// The whole attack is **eight bytes**: `04 00 05 01 01 01 09 00`.
-///
-/// *Ablation:* read with `VarInt::decode(&mut buf).unwrap()` in
-/// `draft15/fields.rs::decode_largest_object` and this does not fail — it
-/// panics inside the function under test:
-///
-/// ```text
-/// thread 'a_draft_15_largest_object_that_is_not_two_varints_renders' panicked at
-/// crates\moqtap-codec\src\draft15\fields.rs:
-/// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
-/// ```
 #[cfg(feature = "draft15")]
 #[test]
 fn a_draft_15_largest_object_that_is_not_two_varints_renders() {
@@ -173,8 +163,6 @@ fn a_draft_15_largest_object_that_is_not_two_varints_renders() {
 /// `KNOWN_MESSAGE_PARAMETERS` admits 0x09 and `decode_parameters_in` checks
 /// duplicates, tokens, varint ranges and subscription filters — none of which
 /// is about 0x09.
-///
-/// *Ablation:* as above, in `draft16/fields.rs::decode_largest_object`.
 #[cfg(feature = "draft16")]
 #[test]
 fn a_draft_16_largest_object_that_is_not_two_varints_renders() {
@@ -278,9 +266,9 @@ fn subscribe_with_parameter_d23(parameter_type: u64, value: &[u8]) -> Vec<u8> {
 /// with the figures of Section 5.1.4. A rule that did not change is one the new
 /// draft still has to be held to.
 ///
-/// The third trigger, the delta overflow, is deliberately **not** here: it is
-/// the one whose ablation fails as an assertion rather than as a panic, and
-/// putting it in the same loop as a panicking case would let the panic mask it.
+/// The third trigger, the delta overflow, is deliberately **not** here: getting
+/// it wrong fails an assertion rather than panicking, and putting it in the same
+/// loop as a panicking case would let the panic mask it.
 #[cfg(any(
     feature = "draft19",
     feature = "draft20",
@@ -344,17 +332,6 @@ fn filter_name(parameter_type: u64) -> &'static str {
 /// entirely, so the bytes reaching `decode_range_filter` are arbitrary:
 /// `has_remaining` promises one byte, a MoQT varint may need nine, and a read
 /// that unwraps would panic.
-///
-/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
-/// parse that unwraps each varint, in
-/// `draft20/fields.rs::decode_range_filter` and this does not fail — it panics
-/// inside the function under test, in debug and in release alike:
-///
-/// ```text
-/// thread 'a_truncated_draft_20_range_filter_renders' panicked at
-/// crates\moqtap-codec\src\draft20\fields.rs:
-/// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
-/// ```
 #[cfg(feature = "draft20")]
 #[test]
 fn a_truncated_draft_20_range_filter_renders() {
@@ -393,17 +370,6 @@ fn a_truncated_draft_20_range_filter_renders() {
 /// entirely, so the bytes reaching `decode_range_filter` are arbitrary:
 /// `has_remaining` promises one byte, a MoQT varint may need nine, and a read
 /// that unwraps would panic.
-///
-/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
-/// parse that unwraps each varint, in
-/// `draft21/fields.rs::decode_range_filter` and this does not fail — it panics
-/// inside the function under test, in debug and in release alike:
-///
-/// ```text
-/// thread 'a_truncated_draft_20_range_filter_renders_draft21' panicked at
-/// crates\moqtap-codec\src\draft21\fields.rs:
-/// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
-/// ```
 #[cfg(feature = "draft21")]
 #[test]
 fn a_truncated_draft_20_range_filter_renders_draft21() {
@@ -443,17 +409,6 @@ fn a_truncated_draft_20_range_filter_renders_draft21() {
 /// entirely, so the bytes reaching `decode_range_filter` are arbitrary:
 /// `has_remaining` promises one byte, a MoQT varint may need nine, and a read
 /// that unwraps would panic.
-///
-/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
-/// parse that unwraps each varint, in
-/// `draft22/fields.rs::decode_range_filter` and this does not fail — it panics
-/// inside the function under test, in debug and in release alike:
-///
-/// ```text
-/// thread 'a_truncated_draft_20_range_filter_renders_draft22' panicked at
-/// crates\moqtap-codec\src\draft22\fields.rs:
-/// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
-/// ```
 #[cfg(feature = "draft22")]
 #[test]
 fn a_truncated_draft_20_range_filter_renders_draft22() {
@@ -516,8 +471,6 @@ fn a_truncated_draft_20_range_filter_renders_draft23() {
 }
 
 /// Draft-19, where the same two parse the same way.
-///
-/// *Ablation:* as above, in `draft19/fields.rs::decode_range_filter`.
 #[cfg(feature = "draft19")]
 #[test]
 fn a_truncated_draft_19_range_filter_renders() {
@@ -552,19 +505,6 @@ fn a_truncated_draft_19_range_filter_renders() {
 /// `tests/range_filters_draft20.rs` covers
 /// `DeltaOverflow { base: u64::MAX, delta: 2 }`. Neither reaches the renderer;
 /// this test does.
-///
-/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
-/// parse that resolves the baselines with a bare `+`, in
-/// `draft20/fields.rs::decode_range_filter`. In debug it panics with
-/// `attempt to add with overflow`; in release it fails as an assertion:
-///
-/// ```text
-/// assertion `left == right` failed: an overflowing delta is not a range
-///   left: Some(Map(FieldMap { entries: [("set_id", Uint(0)),
-///         ("ranges", Array([Map(FieldMap { entries: [("start",
-///         Uint(18446744073709551615)), ("end", Uint(0))] })]))] }))
-///  right: Some(Bytes([0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1]))
-/// ```
 #[cfg(feature = "draft20")]
 #[test]
 fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap() {
@@ -596,19 +536,6 @@ fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap() {
 /// `tests/range_filters_draft21.rs` covers
 /// `DeltaOverflow { base: u64::MAX, delta: 2 }`. Neither reaches the renderer;
 /// this test does.
-///
-/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
-/// parse that resolves the baselines with a bare `+`, in
-/// `draft21/fields.rs::decode_range_filter`. In debug it panics with
-/// `attempt to add with overflow`; in release it fails as an assertion:
-///
-/// ```text
-/// assertion `left == right` failed: an overflowing delta is not a range
-///   left: Some(Map(FieldMap { entries: [("set_id", Uint(0)),
-///         ("ranges", Array([Map(FieldMap { entries: [("start",
-///         Uint(18446744073709551615)), ("end", Uint(0))] })]))] }))
-///  right: Some(Bytes([0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1]))
-/// ```
 #[cfg(feature = "draft21")]
 #[test]
 fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap_draft21() {
@@ -641,19 +568,6 @@ fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap_draft21(
 /// `tests/range_filters_draft22.rs` covers
 /// `DeltaOverflow { base: u64::MAX, delta: 2 }`. Neither reaches the renderer;
 /// this test does.
-///
-/// *Ablation:* replace the `RangeFilter::decode_moqt_structure` call with a
-/// parse that resolves the baselines with a bare `+`, in
-/// `draft22/fields.rs::decode_range_filter`. In debug it panics with
-/// `attempt to add with overflow`; in release it fails as an assertion:
-///
-/// ```text
-/// assertion `left == right` failed: an overflowing delta is not a range
-///   left: Some(Map(FieldMap { entries: [("set_id", Uint(0)),
-///         ("ranges", Array([Map(FieldMap { entries: [("start",
-///         Uint(18446744073709551615)), ("end", Uint(0))] })]))] }))
-///  right: Some(Bytes([0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1]))
-/// ```
 #[cfg(feature = "draft22")]
 #[test]
 fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap_draft22() {
@@ -690,8 +604,6 @@ fn a_draft_20_range_filter_delta_off_the_end_of_the_space_does_not_wrap_draft23(
 }
 
 /// The same, on draft-19.
-///
-/// *Ablation:* as above, in `draft19/fields.rs::decode_range_filter`.
 #[cfg(feature = "draft19")]
 #[test]
 fn a_draft_19_range_filter_delta_off_the_end_of_the_space_does_not_wrap() {
@@ -719,8 +631,8 @@ fn a_draft_19_range_filter_delta_off_the_end_of_the_space_does_not_wrap() {
 /// validates the nested block's framing and its nested LOCATION_FILTERs; it
 /// says nothing about a nested Range Filter's value.
 ///
-/// *Ablation:* as above. This one is worth keeping separate because a fix
-/// applied to the top-level call site alone would leave it panicking.
+/// Kept separate because a fix applied to the top-level call site alone would
+/// leave it panicking.
 #[cfg(feature = "draft20")]
 #[test]
 fn a_malformed_range_filter_nested_in_fill_parameters_renders() {
@@ -770,8 +682,8 @@ fn a_malformed_range_filter_nested_in_fill_parameters_renders() {
 /// validates the nested block's framing and its nested LOCATION_FILTERs; it
 /// says nothing about a nested Range Filter's value.
 ///
-/// *Ablation:* as above. This one is worth keeping separate because a fix
-/// applied to the top-level call site alone would leave it panicking.
+/// Kept separate because a fix applied to the top-level call site alone would
+/// leave it panicking.
 #[cfg(feature = "draft21")]
 #[test]
 fn a_malformed_range_filter_nested_in_fill_parameters_renders_draft21() {
@@ -822,8 +734,8 @@ fn a_malformed_range_filter_nested_in_fill_parameters_renders_draft21() {
 /// validates the nested block's framing and its nested LOCATION_FILTERs; it
 /// says nothing about a nested Range Filter's value.
 ///
-/// *Ablation:* as above. This one is worth keeping separate because a fix
-/// applied to the top-level call site alone would leave it panicking.
+/// Kept separate because a fix applied to the top-level call site alone would
+/// leave it panicking.
 #[cfg(feature = "draft22")]
 #[test]
 fn a_malformed_range_filter_nested_in_fill_parameters_renders_draft22() {
@@ -1155,9 +1067,6 @@ fn a_range_filter_with_no_final_end_renders_a_start_and_no_end_draft23() {
 /// both: a reader that refuses the value falls back to a hex dump, hiding the
 /// offending number inside the bytes at exactly the moment someone is looking
 /// for it. Split, the field rendering and the rule report are both available.
-///
-/// *Ablation:* call `decode_moqt` from `draft20/fields.rs` instead and this
-/// fails with `got Bytes([0, 129, 44])` — the value, unrendered.
 #[cfg(feature = "draft20")]
 #[test]
 fn a_priority_filter_above_the_field_renders_its_fields_and_names_the_rule() {
@@ -1206,9 +1115,6 @@ fn a_priority_filter_above_the_field_renders_its_fields_and_names_the_rule() {
 /// both: a reader that refuses the value falls back to a hex dump, hiding the
 /// offending number inside the bytes at exactly the moment someone is looking
 /// for it. Split, the field rendering and the rule report are both available.
-///
-/// *Ablation:* call `decode_moqt` from `draft21/fields.rs` instead and this
-/// fails with `got Bytes([0, 129, 44])` — the value, unrendered.
 #[cfg(feature = "draft21")]
 #[test]
 fn a_priority_filter_above_the_field_renders_its_fields_and_names_the_rule_draft21() {
@@ -1258,9 +1164,6 @@ fn a_priority_filter_above_the_field_renders_its_fields_and_names_the_rule_draft
 /// both: a reader that refuses the value falls back to a hex dump, hiding the
 /// offending number inside the bytes at exactly the moment someone is looking
 /// for it. Split, the field rendering and the rule report are both available.
-///
-/// *Ablation:* call `decode_moqt` from `draft22/fields.rs` instead and this
-/// fails with `got Bytes([0, 129, 44])` — the value, unrendered.
 #[cfg(feature = "draft22")]
 #[test]
 fn a_priority_filter_above_the_field_renders_its_fields_and_names_the_rule_draft22() {
@@ -1565,16 +1468,6 @@ const EVERY_DRAFT: std::ops::RangeInclusive<u8> = 7..=22;
 /// The rest are the other places a Token runs out: after the Alias Type, and
 /// after the Alias on the two forms that carry a Type behind it. `0x01` is
 /// REGISTER, the longest form and so the one with the most places to stop.
-///
-/// *Ablation:* read with `VarInt::decode(&mut buf).unwrap()` in
-/// `draft13/fields.rs::auth_token_to_json` and this does not fail — it panics
-/// inside the function under test:
-///
-/// ```text
-/// thread 'a_token_value_that_runs_out_never_panics_a_renderer' panicked at
-/// crates\moqtap-codec\src\draft13\fields.rs:
-/// called `Result::unwrap()` on an `Err` value: UnexpectedEnd
-/// ```
 #[test]
 fn a_token_value_that_runs_out_never_panics_a_renderer() {
     for value in [

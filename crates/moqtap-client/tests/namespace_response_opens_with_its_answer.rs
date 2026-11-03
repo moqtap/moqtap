@@ -72,13 +72,6 @@ mod draft18 {
     /// this very stream, and the endpoint accepts it there once the answer has
     /// arrived. What the draft refuses is the order, and the order is the whole
     /// of the rule.
-    ///
-    /// Ablation: dropping the `require_the_first_response_first` call from
-    /// `receive_response_on_stream` fails with
-    ///
-    /// ```text
-    /// a NAMESPACE before the REQUEST_OK must close the session: Ok(())
-    /// ```
     #[test]
     fn a_namespace_before_the_answer_closes_the_session() {
         let mut endpoint = active();

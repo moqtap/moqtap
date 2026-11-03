@@ -94,29 +94,6 @@ fn subscribe_ok_with_group_order_zero() -> Vec<u8> {
 
 /// A Group Order outside the range closes the QUIC connection with
 /// PROTOCOL_VIOLATION.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Removing `check_parameter_value_ranges` from draft-16's
-/// `decode_parameters_in` — the state the codec was in, where nothing read the
-/// value at all and the parameter reached the application as ordinary traffic:
-///
-/// ```text
-/// ---- a_group_order_outside_its_range_closes_the_quic_connection stdout ----
-///
-/// thread 'a_group_order_outside_its_range_closes_the_quic_connection' (74772) panicked at crates\moqtap-client\tests\draft16_parameter_value_range_closes_the_session.rs:
-/// a Group Order outside its range must be refused: SubscribeOk(SubscribeOk { request_id: VarInt(0), track_alias: VarInt(4), parameters: [KeyValuePair { key: VarInt(34), value: Varint(VarInt(0)) }], track_extensions: [] })
-/// ```
-///
-/// Sending `CodecError::ParameterValueOutOfRange` to the `None` arm of
-/// draft-16's `codec_session_error_code` instead — which is where drafts 17, 18
-/// and 19 effectively had it, reporting the same rule as `InvalidField` — leaves
-/// the decoder refusing the frame and the session open:
-///
-/// ```text
-/// thread 'a_group_order_outside_its_range_closes_the_quic_connection' (89880) panicked at crates\moqtap-client\tests\draft16_parameter_value_range_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
 #[tokio::test]
 async fn a_group_order_outside_its_range_closes_the_quic_connection() {
     common::init_crypto();

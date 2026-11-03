@@ -139,8 +139,7 @@
 //! either kind resolves to nothing — and an unresolved intra-doc link is an
 //! error under the documentation build, not a warning. Both are written in
 //! plain code font instead, so the prose can still name the thing it is
-//! describing without breaking that build. Turning one back into a link is
-//! what reddens it.
+//! describing without breaking that build.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -2065,17 +2064,6 @@ mod tests {
     /// mark. Without it every ended session would be reported as one that never
     /// existed, and a control plane driven from a timeline could not tell a
     /// session that finished early from a typo.
-    ///
-    /// *Ablation, recorded:* delete the `high_water` arm from
-    /// `ControlPlane::reach`, leaving a lookup miss to answer
-    /// `NoSuchSession`. This test goes red with
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a session this proxy ran and has
-    /// finished is a race, not a mistake
-    ///   left: NoSuchSession(SessionId(2))
-    ///  right: SessionEnded(SessionId(2))
-    /// ```
     #[test]
     fn an_ended_session_and_an_id_that_never_ran_are_different_answers() {
         let plane = ControlPlane::new(LegSetup::default());
@@ -2161,10 +2149,6 @@ mod tests {
     /// A registered stream is waitable; ending it releases the gate a waiter
     /// already took, and the entry goes away so the *next* asker is told
     /// there is nothing to wait for.
-    ///
-    /// *Ablation:* drop the `gate.release()` from `StreamRegistry::end` —
-    /// the `is_released` assertion goes red, which is the `max_hold` stall
-    /// this whole mechanism exists to avoid.
     #[test]
     fn ending_a_stream_releases_the_gate_a_waiter_already_took() {
         let registry = Arc::new(StreamRegistry::new());

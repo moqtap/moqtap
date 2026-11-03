@@ -571,10 +571,6 @@ async fn objects_on_a_fill_stream_resolve_where_the_deltas_put_them() {
 /// Group 10 and Group 11 under Ascending. Both readings parse; only one is the
 /// one the subscription asked for. Nothing on the data stream distinguishes
 /// them, which is why the parameter has to reach the reader.
-///
-/// Ablation: `Connection::accept_fill_stream` starts the reader with
-/// `GroupOrder::Ascending` instead of the resolved order — `a Group ID Delta
-/// counts downward under Descending`.
 #[tokio::test]
 async fn a_nested_group_order_is_the_order_the_fill_stream_is_read_in() {
     common::init_crypto();

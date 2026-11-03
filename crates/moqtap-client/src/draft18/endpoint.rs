@@ -3403,13 +3403,6 @@ mod responder_tests {
     /// close is observable twice over — the endpoint stops accepting requests,
     /// and the code the connection layer will put on the wire is the one the
     /// section names.
-    ///
-    /// Deleting the `validate_peer_id` call from `receive_request_on_stream`
-    /// fails with:
-    ///
-    /// ```text
-    /// called `Result::unwrap_err()` on an `Ok` value: VarInt(2)
-    /// ```
     #[test]
     fn a_peer_id_with_our_own_parity_closes_the_session() {
         let mut ep = active_client();
@@ -3443,15 +3436,6 @@ mod responder_tests {
     /// Draft-18 Section 3.3 gives a different code for a different rule: a
     /// bidirectional stream that begins with the wrong message type is a
     /// PROTOCOL_VIOLATION, not an INVALID_REQUEST_ID.
-    ///
-    /// Mapping `NotARequest` to `InvalidRequestId` in `session_error_code`
-    /// fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: Some(InvalidRequestId)
-    ///  right: Some(ProtocolViolation)
-    /// ```
     #[test]
     fn a_stream_that_opens_no_request_closes_the_session_with_protocol_violation() {
         let mut ep = active_client();
@@ -3515,13 +3499,6 @@ mod responder_tests {
     /// Draft-17 had PUBLISH_OK as a message of its own here, which is the port
     /// this most easily gets wrong: a REQUEST_OK arm that does not probe
     /// `publishes` leaves a peer's PUBLISH unanswerable.
-    ///
-    /// Removing the `publishes` probe from the `RequestOk` arm of
-    /// `send_response_on_stream` fails with:
-    ///
-    /// ```text
-    /// called `Result::unwrap()` on an `Err` value: UnknownRequest(1)
-    /// ```
     #[test]
     fn a_peers_publish_is_accepted_with_request_ok_on_this_draft() {
         let mut ep = active_client();
@@ -3582,20 +3559,6 @@ mod responder_tests {
     /// sending NAMESPACE on the SUBSCRIBE_NAMESPACE stream that asked for it
     /// would have its announcement dropped, which makes SUBSCRIBE_NAMESPACE
     /// unusable end to end.
-    ///
-    /// Adding control-stream arms (`Namespace(ref m) =>
-    /// self.receive_namespace(m)` and its two siblings) fails this test at the
-    /// second half with:
-    ///
-    /// ```text
-    /// NAMESPACE must be refused on the control stream: Ok(())
-    /// ```
-    ///
-    /// and removing the request-stream arms fails it at the first half with:
-    ///
-    /// ```text
-    /// NAMESPACE belongs on a request stream: ResponseOnControlStream
-    /// ```
     #[test]
     fn namespace_and_publish_blocked_arrive_on_a_request_stream() {
         /// A message name paired with a way to build a fresh one, since each
@@ -3675,12 +3638,6 @@ mod responder_tests {
     ///
     /// Neither ends the subscription: it is still Active afterwards, which is
     /// what lets a second namespace follow.
-    ///
-    /// Letting `on_namespace_sent` accept any state fails with:
-    ///
-    /// ```text
-    /// a NAMESPACE was accepted on a namespace subscription that was never answered
-    /// ```
     #[test]
     fn namespaces_are_reported_on_the_subscribe_namespace_request_stream() {
         let mut ep = active_client();

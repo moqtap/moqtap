@@ -31,17 +31,13 @@
 //! locally-opened unidirectional stream to the peer until the first frame
 //! referencing it — a STREAM frame or a RESET_STREAM — so a stream that has
 //! been opened and never written cannot be accepted, and there is no
-//! [`common::TimedReceiver`] to run `assert_no_bytes_for` against. Measured
-//! directly against quinn 0.11.9 through this crate's own harness: a client
-//! that calls `open_uni()` and writes nothing is not accepted by the peer
-//! within 300 ms.
+//! [`common::TimedReceiver`] to run `assert_no_bytes_for` against.
 //!
 //! So the negative half is asserted with
 //! [`common::assert_no_uni_stream_for`] on the relay's *connection*, after
 //! the target stream's own destination has already been accepted. That
 //! claims strictly more than a zero-bytes assertion would — no stream **and**
-//! no byte for the held stream — and it reddens under the same ablation,
-//! which is the only property a gate owes.
+//! no byte for the held stream.
 //!
 //! # Which assertions are load-independent, and why
 //!
@@ -87,7 +83,7 @@
 //!    |---|---|---|---|
 //!    | the three `SerializeAfter` accepts | [`RESUME_WINDOW`] 500 ms | [`MAX_HOLD`] 2 s (`EgressConfig`) | 4x |
 //!    | [`a_starved_class_resumes_and_loses_nothing`] | [`RESUME_WINDOW`] | [`STARVED_HOLD`] 5 s (`QueueConfig`) | 10x |
-//!    | [`teardown_bypasses_the_pacer`] | [`RESUME_WINDOW`] | the paced drain, measured at 2.3 s | 4.6x |
+//!    | [`teardown_bypasses_the_pacer`] | [`RESUME_WINDOW`] | the paced drain, ~2.3 s | 4.6x |
 //!    | [`a_zero_rate_class_starves_and_the_other_flows`] and [`starve_video_while_audio_flows_from_config_alone`] | the sample instant, tens of ms | [`STARVED_HOLD`] 5 s | ~100x |
 //!
 //!    Each carries the mandated comment at its site: *widen this, do not
@@ -126,17 +122,12 @@
 //! A fifth omission is the odd one out: the 13-draft sweep behind
 //! [`an_unmatchable_rule_says_so_on_both_sides_of_the_partition`] is not
 //! load-dependent at all, it is *budget*-dependent — thirteen QUIC sessions
-//! measure 4.7-5.0 s, eight times the per-gate budget. The gate runs the two
-//! drafts that bracket the partition; a build that adds a draft re-derives
-//! the partition by hand. Measured by hand as a stand-in: this whole
-//! binary is 28/28 green under each of `--features draft07`, `draft14`,
-//! `draft15` and `draft19` in 0.45-0.69 s, which is both ends of the
-//! 07-14/15-19 split and both ends of the compiled range.
+//! are several times the per-gate budget. The gate runs the two drafts that
+//! bracket the partition; a build that adds a draft re-derives the
+//! partition by hand.
 //!
-//! **This file therefore ships zero `#[ignore]`d tests, and that is an audit
-//! result rather than an omission.** Every row above was checked against the
-//! four groups and none needed to become calibration. If a future row does,
-//! it takes the verbatim ignore string from `actions_timing.rs:828-829`
+//! This file ships no `#[ignore]`d tests. A row that needs to become
+//! calibration takes the verbatim ignore string from `actions_timing.rs:828-829`
 //! ("calibration measurement: asserts timing accuracy, which is not
 //! measurable on a loaded box — run with --ignored on a quiet machine"),
 //! which is the same string `release_timer.rs` uses, so that
@@ -144,30 +135,15 @@
 //!
 //! ## The gate budget
 //!
-//! ≤ 600 ms per gate. All 28 rows measured one process at a time,
-//! worst first: [`serialize_after_holds_a_stream_until_its_target_ends`]
-//! 0.36 s, [`open_after_delays_the_peer_stream`] 0.34 s,
-//! [`shape_stats_are_zero_without_a_profile_and_move_with_one`] 0.33 s,
-//! [`a_shape_profile_arms_without_a_hook`] 0.31 s, and the remaining 24 at
-//! or under 0.28 s — the acceptance row itself is 0.03 s, and the fastest,
-//! [`reset_stream_overflow_abandons_the_stream`], is 0.02 s. Every row is
-//! inside the budget by at least a factor of 1.7 and most by more than ten.
-//! The whole binary is ~0.47 s for all 28 in parallel.
+//! ≤ 600 ms per gate.
 //!
-//! One green row exceeds the budget, and it is named rather than rounded
-//! down: [`an_oversized_object_names_the_class_whose_rate_it_escaped`], 0.97
-//! s. It has to move an object past
-//! `FramerConfig::max_buffered_object_bytes` — 4 MiB, the shipped default —
-//! through a real QUIC session, and that size is the thing under test rather
-//! than a number the fixture picked, so there is nothing to trim without
-//! testing something else. The whole binary is still under a second in
-//! parallel, because this row is bounded by one stream's bytes and not by a
-//! wait.
-//!
-//! The only *other* run that exceeds the budget is a broken one: ablation (a)
-//! in [`starve_video_while_audio_flows_from_config_alone`] reddens at the
-//! harness's 10 s accept ceiling. A failure path is allowed to be slow; a
-//! green one is not.
+//! One row exceeds the budget:
+//! [`an_oversized_object_names_the_class_whose_rate_it_escaped`]. It has to
+//! move an object past `FramerConfig::max_buffered_object_bytes` — 4 MiB,
+//! the shipped default — through a real QUIC session, and that size is the
+//! thing under test rather than a number the fixture picked, so there is
+//! nothing to trim without testing something else. It is bounded by one
+//! stream's bytes and not by a wait.
 //!
 //! ## Where the ceilings are pinned
 //!
@@ -193,9 +169,8 @@
 //!
 //! # Which draft this file speaks
 //!
-//! Derived, not named — the same shape and for the same measured reason as
-//! `actions_timing.rs:130-149`: a hardcoded `DraftVersion::Draft19` gives
-//! 0 passed / 13 failed on every single-draft row that is not draft-19,
+//! Derived, not named, as in `actions_timing.rs:130-149`: a hardcoded
+//! `DraftVersion::Draft19` fails every single-draft row that is not draft-19,
 //! because the fixture's header bytes decode against the draft the session
 //! was configured with. Nothing here reads a draft — a subgroup stream is a
 //! subgroup stream — so the newest compiled one is used and the fixture is
@@ -554,11 +529,6 @@ fn serialize_unknowns(observer: &RecordingObserver) -> Vec<(StreamKey, StreamKey
 /// bytes and has not FINed, so the only thing that ends it is the test
 /// calling `finish()`. That makes the negative window a claim about the gate
 /// and not about a race with the lead stream's own teardown.
-///
-/// *Ablation:* return `StreamAction::Open` for the second stream instead of
-/// `SerializeAfter`. Recorded: the second destination stream is accepted
-/// **inside** the 300 ms window and `assert_no_uni_stream_for` panics with
-/// "a unidirectional stream was opened within 300ms".
 #[tokio::test]
 async fn serialize_after_holds_a_stream_until_its_target_ends() {
     common::init_crypto();
@@ -635,12 +605,6 @@ async fn serialize_after_holds_a_stream_until_its_target_ends() {
 ///
 /// Both halves matter and neither implies the other: proceeding without the
 /// report is a silent no-op, and the report without proceeding is a stall.
-///
-/// *Ablations, both recorded:* (a) drop the `report.impairment(..)` from
-/// `await_serialize_target`'s `None` arm — the "exactly one" assertion goes
-/// red with an empty vector; (b) make the `None` arm wait on `max_hold`
-/// instead of returning — the stream arrives at 2 s and the
-/// [`RESUME_WINDOW`] timeout goes red.
 #[tokio::test]
 async fn serialize_after_an_unknown_stream_proceeds_and_says_so() {
     common::init_crypto();
@@ -695,14 +659,6 @@ async fn serialize_after_an_unknown_stream_proceeds_and_says_so() {
 /// The window is [`RESUME_WINDOW`] against [`MAX_HOLD`] pinned in
 /// [`shaping_config`]: a 4x separation from the defect. Widen this, do not
 /// delete it.
-///
-/// *Ablation:* release the gate only on a clean end — in `forward_uni_streams`'s
-/// spawned task, `match pipe_data(..).await { Ok(()) => drop(guard), Err(e)
-/// => { std::mem::forget(guard); … } }`. Recorded: the held stream is not
-/// accepted within 500 ms and this test panics with "the held stream resumed
-/// after its target was reset";
-/// [`serialize_after_holds_a_stream_until_its_target_ends`], whose target
-/// FINs, stays green — which is what makes this the *reset* path's own gate.
 #[tokio::test]
 async fn serialize_after_survives_its_targets_reset() {
     common::init_crypto();
@@ -778,10 +734,6 @@ const OPEN_AFTER_WINDOW: Duration = Duration::from_millis(150);
 /// distinguishes `OpenAfter` from `SerializeAfter`: the latter opens
 /// immediately and merely writes nothing, which over QUIC is unobservable
 /// from the peer.
-///
-/// *Ablation:* return `StreamAction::Open`. Recorded: the peer stream is
-/// accepted immediately and `assert_no_uni_stream_for` panics with "a
-/// unidirectional stream was opened within 150ms".
 #[tokio::test]
 async fn open_after_delays_the_peer_stream() {
     common::init_crypto();
@@ -854,11 +806,6 @@ const HEADER_REJECT_CODE: u64 = 0x11;
 /// stream **exists** and is reset having carried zero bytes, which is
 /// `reject_at_the_stream_header_forwards_no_header_bytes`'s claim,
 /// re-asserted on the topology that moved.
-///
-/// *Ablation:* open the deferred stream lazily — move `dest.open_uni()`
-/// below `pipe_data`'s first read instead of above it. Recorded: the relay
-/// never accepts a stream, `wait_for_ending` times out, and this test panics
-/// at "the deferred peer stream exists by the header decision".
 #[tokio::test]
 async fn a_deferred_open_still_reaches_the_header_reject_site() {
     common::init_crypto();
@@ -1125,23 +1072,17 @@ async fn a_shape_profile_arms_without_a_hook() {
 /// "An unshaped session's `shape_stats()` is `ShapeStats::default()`" is,
 /// on its own, unfalsifiable: it is also what a `shape_stats()` that always
 /// returned `default()` would report, and what a recorder with no writer
-/// anywhere would report. A standalone row asserting that zero was deleted
-/// for exactly this reason, as was the `shape_stats()` half of a row in
-/// `interest_none.rs`, where
-/// `shape: None` makes every ablation invisible. So the zero is asserted
-/// **beside** a non-zero taken from the same fixture with one field
-/// changed.
+/// anywhere would report. So the zero is asserted **beside** a non-zero
+/// taken from the same fixture with one field changed.
 ///
 /// The middle arm — `shape: None` but **framing armed by an observer** —
-/// is what makes the *gate* measurable rather than merely written down, and
-/// it is the honest form of what that deleted row was reaching for. Under
-/// `Interest::NONE` with no observer the framed pipe never runs, so the
-/// recording call site is unreachable and removing its
+/// is what makes the *gate* measurable rather than merely written down.
+/// Under `Interest::NONE` with no observer the framed pipe never runs, so
+/// the recording call site is unreachable and removing its
 /// `if ctx.shaping_enabled` guard changes nothing anyone can see. With an
 /// observer, framing is on for a reason that is not a profile, the call
 /// site *is* reached, and the guard is the only thing keeping the stats at
-/// zero. Measured: without that arm, the guard-removal ablation below is
-/// green across the whole suite.
+/// zero.
 ///
 /// That claim also stands on its own merits. It is the same asymmetry
 /// `object_hook` has and for the same reason: attaching an event observer
@@ -1283,8 +1224,7 @@ const ADMIT_DEPTH: usize = 4;
 
 /// The payload every admission fixture's objects carry.
 ///
-/// **This number is load-bearing and the reason is arithmetic, not taste.
-/// It was chosen by a failed ablation, not by eye.**
+/// **This number is load-bearing and the reason is arithmetic, not taste.**
 ///
 /// `Overflow::Block` stops the *read* branch, but `pipe_data_framed` drains
 /// the framer of everything one read delivered before it consults
@@ -1298,11 +1238,10 @@ const ADMIT_DEPTH: usize = 4;
 /// floor((S - 1 + B) / S)  =  1 + floor((B - 1) / S)
 /// ```
 ///
-/// objects. A bound of `depth_objects + 1` allows that overshoot, and
-/// **measured, such a bound cannot detect an off-by-one**: at `S = 5004`
-/// the formula gives 2 objects per read, so a
-/// correct queue and one built with `q.len() <= depth` are both `<= 5` and
-/// the ablation "off-by-one the object test" ran green.
+/// objects. A bound of `depth_objects + 1` allows that overshoot, and such a
+/// bound cannot detect an off-by-one: at `S = 5004` the formula gives 2
+/// objects per read, so a correct queue and one built with `q.len() <= depth`
+/// are both `<= 5`.
 ///
 /// So `S` is chosen **above `B`**, where the formula gives exactly one
 /// object per read and the overshoot is zero. The bound below is then
@@ -1540,30 +1479,15 @@ async fn admission_run(overflow: Overflow) -> AdmissionRun {
 ///
 /// # Why the count and not the per-object claim
 ///
-/// This row was first drafted as "the hook is not shown `i + 1` until `i`'s
-/// bytes reached the destination". That is not what the mechanism guarantees:
-/// `can_read` false means `send.write_all(i)` **returned**, and between that
-/// and the relay's `read()` sit a loopback round trip and the reader task's
-/// scheduling. `delay_is_not_backpressure` records that exact hazard as
-/// measured ("the test passes on a coin flip"). The count form is a hard
-/// upper bound, and load can only shrink it.
+/// "The hook is not shown `i + 1` until `i`'s bytes reached the destination"
+/// is not what the mechanism guarantees: `can_read` false means
+/// `send.write_all(i)` **returned**, and between that and the relay's
+/// `read()` sit a loopback round trip and the reader task's scheduling. The
+/// count form is a hard upper bound, and load can only shrink it.
 ///
-/// The bound is `depth_objects` **exactly**, not `depth_objects + 1`.
-/// The `+ 1` was slack for the framer's read buffer; [`ADMIT_PAYLOAD`]
-/// removes the slack instead of asserting around it, and the recorded
-/// ablation there is why.
-///
-/// *Ablation, recorded:* drop the `within_shape_depth` term from
-/// `PendingQueue::accepts_more`. The read branch never closes, the hook
-/// races through all twelve objects and the bound reddens:
-///
-/// ```text
-/// assertion failed: Overflow::Block must stop the read branch: the hook was shown
-/// 12 objects against a depth of 4
-/// ```
-///
-/// `blocked_episodes` goes to 0 in the same run, which is the second half
-/// of the same fault.
+/// The bound is `depth_objects` **exactly**, not `depth_objects + 1`:
+/// [`ADMIT_PAYLOAD`] removes the framer's read-buffer slack instead of
+/// asserting around it.
 #[tokio::test]
 async fn block_loses_nothing_and_stalls_the_reader() {
     let run = admission_run(Overflow::Block).await;
@@ -1613,10 +1537,9 @@ async fn block_loses_nothing_and_stalls_the_reader() {
 /// you wait.
 ///
 /// The narrow companion to [`block_loses_nothing_and_stalls_the_reader`]:
-/// that row's ablation is the depth term missing
-/// from `accepts_more` altogether, and this one's is the depth term being
-/// *wrong by one*. They are different defects and a suite carrying only the
-/// first would ship the second.
+/// that row catches the depth term missing from `accepts_more` altogether,
+/// and this one catches it being *wrong by one*. They are different defects
+/// and a suite carrying only the first would ship the second.
 ///
 /// The claim is a hard upper bound on a count, so load can only satisfy it
 /// more easily — which is why the anchor above it waits for the count to
@@ -1624,19 +1547,8 @@ async fn block_loses_nothing_and_stalls_the_reader() {
 /// at all would pass.
 ///
 /// **This test is why [`ADMIT_PAYLOAD`] is what it is.** With a
-/// `depth_objects + 1` bound and a payload smaller than the read buffer,
-/// the off-by-one ablation below ran **green** — a correct queue and one
-/// admitting five units both fit under five. The fixture was changed until
-/// the ablation reddened, rather than the ablation being written down as
-/// though it had.
-///
-/// *Ablation, recorded:* off-by-one the object test in
-/// `PendingQueue::accepts_more` — `self.q.len() <= depth.objects` instead of
-/// `<`. The queue admits a fifth unit and the bound reddens:
-///
-/// ```text
-/// assertion failed: Block admits depth_objects units and no more: 5 > 4
-/// ```
+/// `depth_objects + 1` bound and a payload smaller than the read buffer, a
+/// correct queue and one admitting five units both fit under five.
 #[tokio::test]
 async fn block_admits_at_most_depth_objects() {
     let run = admission_run(Overflow::Block).await;
@@ -1737,17 +1649,6 @@ async fn block_reports_backpressure_once() {
 /// — so on a build compiled for those drafts alone this row is a regression
 /// check rather than a gate. `DRAFT` is the newest compiled draft, so the
 /// standing suite runs it where it bites.
-///
-/// *Ablation, recorded:* skip `framer.note_elided(&meta)` on the drop. The
-/// eight elided objects leave the framer owing nothing, object 12's delta
-/// stays `0`, and every survivor after the gap decodes one-per-drop low:
-///
-/// ```text
-/// assertion `left == right` failed: DropTail leaves a gap in absolute object IDs,
-/// never a shift
-///   left: [0, 1, 2, 3, 4, 5, 6]
-///  right: [0, 1, 2, 3, 12, 13, 14]
-/// ```
 #[tokio::test]
 async fn drop_tail_discards_exactly_the_overflow() {
     let mut run = admission_run(Overflow::DropTail).await;
@@ -1806,24 +1707,6 @@ async fn drop_tail_discards_exactly_the_overflow() {
 /// latency, and a caller picks between them by reading two numbers.
 /// If both signatures could be produced by one policy, the choice would be
 /// decoration.
-///
-/// *Ablation, recorded:* make `DropTail` also block — return the depth from
-/// `Scheduler::blocking_depth` for every overflow. The DropTail row inverts
-/// into the Block row and this test reddens on the first half of it:
-///
-/// ```text
-/// DropTail discards: ClassStats { name: "all", .., objects_dropped: 0,
-///                                 blocked_episodes: 1, .. }
-/// ```
-///
-/// Both halves are wrong in that run — the read branch closed, so nothing
-/// arrived to drop *and* the reader stalled — which is the point: the two
-/// signatures are not independently settable, so a policy cannot have one
-/// without the other. `drop_tail_discards_exactly_the_overflow`,
-/// `reset_stream_overflow_abandons_the_stream` and
-/// `a_datagram_rule_says_so_instead_of_matching_nothing` redden in the same
-/// run, and `shape::scheduler::tests::only_block_installs_a_blocking_depth`
-/// is the unit-level detector.
 #[tokio::test]
 async fn block_and_drop_tail_have_orthogonal_signatures() {
     let blocking = admission_run(Overflow::Block).await;
@@ -1866,12 +1749,6 @@ const OVERFLOW_RESET_CODE: u64 = 0x37;
 /// promised: quinn discards the local send buffer on `reset()`, so "the
 /// prefix still arrives" is false whenever the reset and the write land in
 /// the same step.
-///
-/// *Ablations, both recorded:* (a) make `Overflow::ResetStream` answer
-/// `Admission::Admit` — the stream never ends, `wait_for_ending` runs out
-/// the harness timeout and the test panics at "stream terminated";
-/// (b) drop the `note_stream_reset_by_shaping()` call — the stream is still
-/// reset and the count assertion reddens, `left: 0, right: 1`.
 #[tokio::test]
 async fn reset_stream_overflow_abandons_the_stream() {
     let run = admission_run(Overflow::ResetStream { code: OVERFLOW_RESET_CODE }).await;
@@ -1935,24 +1812,6 @@ async fn reset_stream_overflow_abandons_the_stream() {
 /// [`a_datagram_class_polices_what_its_bucket_cannot_cover`] is the other
 /// half and has to be read beside this one: without it, a class that
 /// claimed *nothing at all* would satisfy every assertion here.
-///
-/// *Ablation (measured):* delete the `stream_kind` comparison from
-/// `Matcher::claims`.
-///
-/// ```text
-/// ---- a_datagram_class_does_not_claim_a_framed_object stdout ----
-/// assertion `left == right` failed: a datagram-aimed rule claims no subgroup
-/// object, so the overflow is charged to the default row: ShapeStats { classes:
-/// [ClassStats { name: "all", bytes_dropped: 72024, objects_dropped: 8, .. }],
-/// default_class: ClassStats { objects_dropped: 0, .. }, .. }
-///   left: 0
-///  right: 8
-/// ```
-///
-/// The class row in that dump is the finding rather than decoration: the
-/// eight overflowed objects went to the datagram class, which is what a
-/// `stream_kind` key that stopped being read looks like from the accounting
-/// side.
 #[tokio::test]
 async fn a_datagram_class_does_not_claim_a_framed_object() {
     common::init_crypto();
@@ -2061,14 +1920,6 @@ async fn a_datagram_class_does_not_claim_a_framed_object() {
 /// prevent, and its `Policed` outcome is a different word from
 /// `ShapeOutcome::Dropped` because it is a different decision — no queue
 /// was involved and no overflow policy was read.
-///
-/// *Ablation (measured):* have `forward_datagrams` skip the `acquire` call
-/// and admit unconditionally.
-///
-/// ```text
-/// ---- a_datagram_class_polices_what_its_bucket_cannot_cover stdout ----
-/// timed out waiting for the datagram to be policed
-/// ```
 #[tokio::test]
 async fn a_datagram_class_polices_what_its_bucket_cannot_cover() {
     common::init_crypto();
@@ -2144,19 +1995,6 @@ async fn a_datagram_class_polices_what_its_bucket_cannot_cover() {
 /// This is what stops the row above from passing for the wrong reason. A
 /// policer that discarded everything it could not classify would satisfy
 /// every assertion there and would silently delete a peer's traffic here.
-///
-/// *Ablation (measured):* have the `None` arm of the classification answer
-/// `Class::Default` instead of `Class::Unshapeable`. Both are unpaced, so
-/// the datagram still crosses — and the accounting moves, which is what the
-/// row after the equality catches.
-///
-/// ```text
-/// ---- a_datagram_whose_header_did_not_decode_is_not_policed stdout ----
-/// assertion `left == right` failed: an unclassifiable datagram is charged to
-/// the row named for it, not to the row that means "no rule claimed it"
-///   left: 0
-///  right: 26
-/// ```
 #[tokio::test]
 async fn a_datagram_whose_header_did_not_decode_is_not_policed() {
     common::init_crypto();
@@ -2265,22 +2103,6 @@ fn spawn_datagram_policing_proxy(
 /// would honour the instant, and every assertion in the row above would go on
 /// passing while this one broke — which is precisely why the decision needs a
 /// gate of its own rather than a paragraph.
-///
-/// *Ablation (measured):* honour `Acquire::Later` on the datagram path —
-/// sleep until the instant and send — which is the smallest form of the queue
-/// this row rejects. Nothing is charged as dropped, so this never reaches its
-/// assertions:
-///
-/// ```text
-/// ---- a_datagram_over_a_live_rate_is_dropped_rather_than_deferred stdout ----
-/// timed out waiting for the second datagram to be refused by the rate
-/// ```
-///
-/// **It is the only thing in the workspace that catches it.** Run whole under
-/// that ablation, the suite reports one failure out of 289 binaries and 5,764
-/// other assertions pass — the row above among them, on the bucket that never
-/// refills. A decision this cheap to reverse silently is a decision that needs
-/// a gate rather than a paragraph.
 #[tokio::test]
 async fn a_datagram_over_a_live_rate_is_dropped_rather_than_deferred() {
     common::init_crypto();
@@ -2681,21 +2503,6 @@ async fn two_class_run(profile: ShapeProfile, objects: u64) -> TwoClassRun {
 /// ordering and is not media. Asserting `is_empty` would be asserting that
 /// unshapeable bytes are paced, which they are not and which the code says
 /// they are not.
-///
-/// *Ablation, recorded:* give the video bucket `rate_bps: None` instead of
-/// `Some(0)` — one field, one line. Video's objects flow and the header-only
-/// assertion reddens:
-///
-/// ```text
-/// assertion failed: the video destination stream must hold its header and
-/// nothing else while its bucket is dry, but it holds 6485 bytes
-/// ```
-///
-/// The previous revision's ablation — "set `Discipline::Fifo`" — could not
-/// redden this at all: a zero-rate bucket grants nothing under any
-/// discipline. That is why
-/// [`strict_priority_decides_who_gets_a_shared_bucket`] exists as a separate
-/// row.
 #[tokio::test]
 async fn a_zero_rate_class_starves_and_the_other_flows() {
     const OBJECTS: u64 = 8;
@@ -2755,15 +2562,13 @@ async fn a_zero_rate_class_starves_and_the_other_flows() {
 ///
 /// # Why the bucket is rate-limited rather than unlimited
 ///
-/// Measured, and it is the whole reason this fixture looks the way it does.
 /// With an *unlimited* shared bucket the high class's queue drains in a
 /// single release pass, so whether the low class ever observes the high
 /// class's demand at all is a question about task interleaving: on a
-/// current-thread runtime the high stream finished before the low stream's
-/// task ran once, the low class was never parked, and
-/// `starved_behind_other_class` came out **0**. A gate whose subject may or
-/// may not happen is not a gate — and worse, its ablation could not redden,
-/// because there was no park for a missing wake to strand.
+/// current-thread runtime the high stream can finish before the low
+/// stream's task runs once, the low class is never parked, and
+/// `starved_behind_other_class` comes out **0**. A gate whose subject may
+/// or may not happen is not a gate.
 ///
 /// A rate-limited bucket removes the question. The high class holds demand
 /// for as long as it takes to pace 8 objects, the low class cannot escape
@@ -2780,16 +2585,6 @@ async fn a_zero_rate_class_starves_and_the_other_flows() {
 /// late. "It arrived" cannot distinguish a working release from a broken
 /// one; only the window can. Load pushes this bound in the red direction and
 /// the margin is what absorbs that. **Widen this, do not delete it.**
-///
-/// *Ablation, recorded:* delete the `wake_bucket` call from
-/// `Scheduler::withdraw_demand`, so nothing releases a starved class's gate.
-/// The video stream arrives at its `max_hold` clamp instead, and the window
-/// assertion reddens:
-///
-/// ```text
-/// assertion failed: the low class must resume when its blocker drains, not
-/// at max_hold: 4.99s after the high class finished, against a 500ms window
-/// ```
 #[tokio::test]
 async fn a_starved_class_resumes_and_loses_nothing() {
     const OBJECTS: u64 = 8;
@@ -2904,7 +2699,6 @@ async fn the_high_class_is_served_first() {
 ///
 /// The `starved_behind_other_class` assertion beside it is not decoration: it
 /// is the only half of this row that `Discipline::Fifo` can be told apart by.
-/// See the second ablation.
 #[tokio::test]
 async fn strict_priority_decides_who_gets_a_shared_bucket() {
     const OBJECTS: u64 = 8;
@@ -2941,7 +2735,7 @@ async fn strict_priority_decides_who_gets_a_shared_bucket() {
     );
     // The half that tells `StrictPriority` from `Fifo`. `Fifo` arbitrates
     // nothing and parks nobody, so this counter is 0 under it however the
-    // token race is decided — see ablation (b) above.
+    // token race is decided.
     assert!(
         run.class(VIDEO_CLASS).starved_behind_other_class > 0,
         "the low class must have been held back by the *discipline*, not merely \
@@ -2975,14 +2769,6 @@ async fn strict_priority_decides_who_gets_a_shared_bucket() {
 /// hands out `weight` grants per class, so the totals are exact only on a
 /// round boundary, and the burst hands one free object to whichever class
 /// asks first. `2x` still separates 3:1 from 1:1 by a factor of three.
-///
-/// *Ablation, recorded:* give both classes weight 1 — the counts come out
-/// within one of each other and the ratio assertion reddens:
-///
-/// ```text
-/// assertion failed: weights 3:1 must give the heavy class at least twice the
-/// count: audio 13, video 12
-/// ```
 #[tokio::test]
 async fn weighted_round_robin_shares_by_weight() {
     const OBJECTS: u64 = 40;
@@ -3155,16 +2941,14 @@ fn one_class_profile(
 ///
 /// The subgroup **stream header** goes first, on its own, and the receiver is
 /// spawned before a single object is offered. That ordering is what makes
-/// [`common::TimedReceiver::started`] a sound zero point for a rate ceiling,
-/// and it was arrived at by a measured failure rather than by taste.
+/// [`common::TimedReceiver::started`] a sound zero point for a rate ceiling.
 ///
 /// Written in one call, the proxy grants the first object out of the burst
 /// while the relay's `accept_uni` is still completing its loopback round
 /// trip. Those bytes are counted in the cumulative total — their read returns
 /// after `started()` — but the elapsed time they were granted in is not, so
-/// the ceiling is breached by whatever accrued in the gap. Measured: **object
-/// 1 at 406 bytes against an allowance of 397**, on an implementation that
-/// paces correctly.
+/// the ceiling is breached by whatever accrued in the gap, even on an
+/// implementation that paces correctly.
 ///
 /// With the header alone written first, quinn surfaces the stream to the peer
 /// (a locally-opened uni stream is invisible until its first frame), the
@@ -3246,21 +3030,6 @@ async fn paced_run_of(profile: ShapeProfile, stream: Vec<u8>) -> PacedRun {
 /// where a chunk is whatever quinn happened to coalesce. Same claim, no
 /// framing noise, and the subgroup stream header — which carries no
 /// `ObjectMeta`, charges no bucket and is not media — drops out of both sides.
-///
-/// *Ablation, recorded:* give the bucket `rate_bps: None`. The whole stream
-/// is released at once and the breach is never at object 0 — the first
-/// object is bounded by the writer, and it is the accumulated
-/// over-delivery that crosses. **Re-measured, 5/5 runs:** the breach lands
-/// at index **2 or 3**, at 609 or 812 bytes against an allowance of
-/// 406-622. The index and the byte figures move with the box; the direction
-/// of the claim — never index 0, always within the first handful — does
-/// not, which is why the transcript below is quoted for its *shape* and the
-/// two numbers in it are the ones a re-measurement will disagree with:
-///
-/// ```text
-/// assertion failed: object 2 broke the bucket ceiling: 609 bytes released
-/// 1.3ms after the reader started, against an allowance of rate*dt + burst = 419
-/// ```
 #[tokio::test]
 async fn a_bucket_never_delivers_above_its_ceiling() {
     const OBJECTS: u64 = 24;
@@ -3471,7 +3240,7 @@ fn fin_profile(on_expiry: Expiry) -> ShapeProfile {
 ///
 /// Note that [`paced_run`] deliberately leaves `send` open — which is why
 /// every other shaping gate here exercises only the second path, and why a
-/// FIN drain that reported nothing survived a green suite.
+/// FIN drain that reported nothing would pass all of them.
 async fn fin_leg(profile: ShapeProfile, fin: bool) -> PacedRun {
     let mut run = paced_run(profile, FIN_OBJECTS).await;
     if fin {
@@ -3522,8 +3291,7 @@ async fn shaping_reports_do_not_depend_on_a_fin() {
         fin_leg(fin_profile(Expiry::Deliver), true)
     );
 
-    // The shaping happened, identically, on both legs — this is the half
-    // the ablation above leaves green.
+    // The shaping happened, identically, on both legs.
     for (label, run) in [("source stays open", &open), ("source FINs", &finished)] {
         assert_eq!(
             run.rx.wait_for_bytes(run.stream.len()).await,
@@ -3634,51 +3402,22 @@ async fn expiry_reports_do_not_depend_on_a_fin() {
 /// written still arrive" is zero bytes by construction and the row is
 /// unfalsifiable. A non-zero rate puts a real prefix on the wire first.
 ///
-/// # The disjunction, and why it is honest
+/// # The residue
 ///
-/// Which arm holds depends on whether the reset raced the flush, and **both
-/// are correct**: quinn discards the local send buffer on `reset()`, so a
-/// drain that completed into a dying transport delivers nothing it can vouch
-/// for. So the assertion is "the prefix was delivered **or** exactly one
-/// `QueuedBytesAtTeardown` accounts for it", never both-and.
-///
-/// **The disjunction above is gone, and this is why.** It read
-/// `before > header_len() || stranded.len() == 1`, with `before` sampled on
-/// the line *after* `wait_until(|| rx.len() > header_len(), ..)`. Since
-/// `TimedReceiver::len()` only ever grows, the anchor three lines above
-/// made the first arm true by construction and the second unreachable —
-/// demonstrated, not argued: forcing `stranded.len() == 1` to `false` left
-/// the row passing 3/3. The rustdoc's "which arm holds depends on whether
-/// the reset raced the flush" described a race this fixture had already
-/// decided, because bytes at the *relay* cannot be un-delivered.
-///
-/// What replaces it is the claim the row can actually make. The residue
-/// assertion (`<= 1`) was live all along but said nothing unless there
-/// **was** a residue, so the missing half is the non-vacuity anchor: the
-/// source offers 24 objects at ten a second and is reset within
-/// milliseconds, so most of the stream must still be unsent when the
-/// teardown runs. That is a fixture fact worth asserting — if a future edit
-/// made this run complete before the reset, every residue claim below it
-/// would go quietly vacuous, which is the same failure in a different
-/// place.
+/// quinn discards the local send buffer on `reset()`, so a drain that
+/// completed into a dying transport delivers nothing it can vouch for. The
+/// residue is reported by one owner, once (`<= 1`), and that says nothing
+/// unless there **is** a residue, so the fixture anchors it: the source
+/// offers 24 objects at ten a second and is reset within milliseconds, so
+/// most of the stream must still be unsent when the teardown runs. If an
+/// edit made this run complete before the reset, every residue claim below
+/// it would go quietly vacuous.
 ///
 /// # The window
 ///
 /// The residue is 23 objects at ~10 objects a second: pacing it would take
 /// **2.3 s**, against a [`RESUME_WINDOW`] of 500 ms — a 4.6x separation, in a
 /// direction load can only push red. Widen this, do not delete it.
-///
-/// *Ablation, recorded:* route `propagate_reset`'s drain through
-/// `drain_honouring_release_times` instead of `drain_ignoring_release_times`,
-/// so the teardown flush asks the bucket. Neither arm of the disjunction
-/// holds — nothing is delivered *and* nothing is reported, because the drain
-/// never completes inside the window — and the mirror assertion times out
-/// first:
-///
-/// ```text
-/// assertion failed: an upstream reset must reach the peer without waiting on
-/// a token bucket: 2.31s against a 500ms window
-/// ```
 #[tokio::test]
 async fn teardown_bypasses_the_pacer() {
     const OBJECTS: u64 = 24;
@@ -3742,11 +3481,6 @@ async fn teardown_bypasses_the_pacer() {
 /// `propagate_stop` reports `queued_bytes()` while the other four teardown
 /// paths report `unconfirmed_bytes()`, and a stream must not be counted by
 /// two of them.
-///
-/// *Ablation, recorded:* report from two owners — add a `report_unconfirmed`
-/// call to the cancel branch beside the one already there. The `<= 1`
-/// assertion reddens with two entries for one stream, which is the
-/// double-count that would make a residue figure useless.
 #[tokio::test]
 async fn a_shaped_session_still_reports_stranded_bytes() {
     const OBJECTS: u64 = 6;
@@ -3973,27 +3707,6 @@ const CONS_DEPTH: usize = 6;
 ///
 /// No timing claim anywhere: every wait is for a monotone quantity a correct
 /// implementation always reaches, so load makes this slower and never wrong.
-///
-/// *Ablation, recorded:* empty the body of
-/// `ShapeRecorder::note_unshapeable_seen`, so the `unshapeable` row is still
-/// charged on release but its bytes never enter `bytes_shaped`. Every
-/// non-zero assertion still passes — the row is still written, and the
-/// header-count equality above is about *delivery*, which the ablation does
-/// not touch — and only the identity reddens, which is the point: the defect
-/// is not a missing counter, it is a counter with nothing on the other side
-/// of the equals sign.
-///
-/// ```text
-/// assertion `left == right` failed: every byte the shaper saw is charged to
-/// exactly one row: ShapeStats { .., unshapeable: ClassStats { ..,
-/// bytes_delivered: 25, .., objects_delivered: 5, .. }, .., bytes_shaped: 108438, .. }
-///   left: 108463
-///  right: 108438
-/// ```
-///
-/// The 25-byte shortfall is the whole of it: three five-byte subgroup stream
-/// headers, a two-byte fetch header and an eight-byte passthrough chunk —
-/// five units, and every one of them a unit no rule could have claimed.
 #[tokio::test]
 async fn bytes_are_conserved_across_classes() {
     common::init_crypto();
@@ -4167,13 +3880,12 @@ fn named_row(stats: &ShapeStats, name: &str) -> ClassStats {
 const MIXED_ALIAS: u64 = 31;
 /// Track alias of the single-object stream that fixture opens **first**.
 ///
-/// It exists to make the `StreamKey` assertion discriminating. Measured: with
-/// the mixed stream alone, its key is the session's first and its id is `0`,
-/// so an implementation that reported a fabricated
-/// `StreamKey { side, id: 0 }` passed the equality — the ablation was run and
-/// came back green. One stream ahead of it moves the id off the default and
-/// the same ablation reddens. A key assertion on the first stream of a
-/// session is not an assertion.
+/// It exists to make the `StreamKey` assertion discriminating. With the
+/// mixed stream alone, its key is the session's first and its id is `0`, so
+/// an implementation that reported a fabricated `StreamKey { side, id: 0 }`
+/// would pass the equality. One stream ahead of it moves the id off the
+/// default. A key assertion on the first stream of a session is not an
+/// assertion.
 ///
 /// One object, so it resolves to one class and reports no disagreement of its
 /// own: `mixed.len() == 1` below stays a claim about the mixed stream.
@@ -4276,7 +3988,7 @@ impl ProxyHook for MixedClassHook {
 ///   the number that distinguishes "somebody else was in front of me" from
 ///   "my own bucket was dry".
 ///
-/// # The orthogonality assertion, and why it is the ablation target
+/// # The orthogonality assertion
 ///
 /// The tail class is asserted to have `tokens_exhausted_episodes == 0` and
 /// the head class `starved_behind_other_class == 0`. Two causes of waiting,
@@ -4306,45 +4018,6 @@ impl ProxyHook for MixedClassHook {
 ///
 /// No timing claim: the gate is released by the test, not by a clock, and
 /// [`STARVED_HOLD`] is the stated ceiling if it never were.
-///
-/// *Ablations, both recorded.*
-///
-/// **(a) Attribute head-of-line waiting to the wrong counter.** In
-/// `PendingQueue::note_starved_behind`, call `stats.note_tokens_exhausted`
-/// instead of `stats.note_starved`. The first half of the row — the report
-/// and its key — is untouched and still green. The second half inverts, in
-/// 0.02 s rather than on a timeout, which is what the anchor above is for:
-///
-/// ```text
-/// assertion `left == right` failed: eleven units waited behind a class that
-/// was not theirs, and each is charged once: ShapeStats { classes: [
-///   ClassStats { name: "head", .., tokens_exhausted_episodes: 1, starved_behind_other_class: 0, .. },
-///   ClassStats { name: "tail", .., tokens_exhausted_episodes: 11, starved_behind_other_class: 0, .. }], .. }
-///   left: 0
-///  right: 11
-/// ```
-///
-/// The `tail` row in that dump is the defect stated in one line: eleven
-/// exhausted-bucket episodes on a class whose bucket is `rate_bps: None` and
-/// was never asked a question.
-///
-/// **(b) Report a key that is not the stream's.** In `pipe_data_framed`,
-/// emit `ClassChangedMidStream { key: StreamKey { side, id: 0 }, stream_id }`
-/// — the shape a WebTransport-blind implementation degenerates to, where
-/// every stream reports the same identity:
-///
-/// ```text
-/// assertion `left == right` failed: the report names the stream the hook was
-/// shown, which is the only identity that survives the WebTransport arm
-///   left: StreamKey { side: ClientToProxy, id: 0 }
-///  right: StreamKey { side: ClientToProxy, id: 1 }
-/// ```
-///
-/// **Measured twice, and the first run is the reason the decoy stream
-/// exists**: with the mixed stream alone this exact ablation ran **green**,
-/// because the stream under test was the session's first and its id really
-/// was `0`. A gate that cannot distinguish the right answer from a constant
-/// is not a gate. See [`MIXED_DECOY_ALIAS`].
 #[tokio::test]
 async fn a_mixed_class_stream_says_so() {
     common::init_crypto();
@@ -4457,8 +4130,8 @@ async fn a_mixed_class_stream_says_so() {
     // The anchor is "the tail class was charged for its wait", **whichever
     // counter the implementation chose** — which is deliberately not the
     // counter under test. Anchoring on `starved_behind_other_class` alone
-    // would turn ablation (a) into a five-second timeout on the wait instead
-    // of a one-line inversion on the assertion, and a gate whose failure mode
+    // would turn a misattributed wait into a five-second timeout instead of
+    // a one-line inversion on the assertion, and a gate whose failure mode
     // is a timeout does not say what it measured.
     let tail_charged = || {
         let row = named_row(&proxy.shape_stats(), MIXED_TAIL_CLASS);
@@ -4642,8 +4315,8 @@ async fn priority_class_run(
 ///
 /// # Two drafts, not all of them
 ///
-/// A 13-draft QUIC sweep measures 4.7-5.0 s, eight times the 600 ms
-/// per-gate budget. The full sweep belongs in a calibration run on a quiet
+/// A 13-draft QUIC sweep is several times the 600 ms per-gate budget. The
+/// full sweep belongs in a calibration run on a quiet
 /// machine; this row gates the two drafts
 /// that bracket the partition, which is what a regression would have to
 /// cross.
@@ -4651,25 +4324,6 @@ async fn priority_class_run(
 /// Each half is skipped when its side of the partition compiled empty, and
 /// the test then asserts that **at least one** ran — a build that exercised
 /// neither would otherwise report a green row for a claim it never made.
-///
-/// *Ablation, recorded:* treat an absent key as the encoder's default. In
-/// `Matcher::matches`, replace the priority arm's `Some(p) if ...` /
-/// `_ => return false` pair with
-/// `if !range.contains(&meta.publisher_priority.unwrap_or(128))`. The 07-14
-/// half is unaffected — its key is present — and the 15-20 half reddens
-/// twice over: the class claims every object, so the default row is empty,
-/// and the impairment never fires. It reports the second first, because the
-/// report is what an author would have read:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-19] a rule keyed on a field this
-/// header omitted reports exactly once per session per (class, field), naming both
-///   left: []
-///  right: [ShapeRuleUnmatchable { class: "priority-keyed", field: Priority, draft: Draft19 }]
-/// ```
-///
-/// That empty vector is the failure mode in one line: the profile did
-/// something other than what it said, and the run reported success.
 #[tokio::test]
 async fn an_unmatchable_rule_says_so_on_both_sides_of_the_partition() {
     let mut ran = 0;
@@ -4783,13 +4437,6 @@ const ACCEPTANCE_OBJECTS: u64 = 8;
 /// with `|| shaping_enabled` removed. This one does not, which is the whole
 /// reason it exists.
 ///
-/// That is measured, not argued: with the term deleted, **exactly three of
-/// this file's 28 rows redden** — [`a_shape_profile_arms_without_a_hook`],
-/// [`shape_stats_are_zero_without_a_profile_and_move_with_one`] and this
-/// one. Every other shaping gate here, including the two that share this
-/// row's profile shape, stays green, because every one of them carries a
-/// hook that arms framing on its own account.
-///
 /// The profile is written out **inline** rather than behind a fixture
 /// helper. "Expressible in config alone" is a claim about what a reader has
 /// to write, so what a reader has to write is on the screen: two buckets,
@@ -4832,9 +4479,7 @@ const ACCEPTANCE_OBJECTS: u64 = 8;
 ///   unshaped session produces.
 /// * **(3) alone** — the stats name video with zero — is what a recorder
 ///   with no writer produces. `bytes_delivered == 0` is that field's default
-///   value, and ablation (b) below is the measurement that says so: under it
-///   the whole `video` row reads back all-zero and that one assertion stays
-///   **green** while every other assertion in this test goes red.
+///   value.
 ///
 /// Together, with the video row's `tokens_exhausted_episodes > 0` beside
 /// them, they say: the video objects reached the shaper, the shaper refused
@@ -5011,9 +4656,8 @@ const BLOCKED_HOLD: Duration = Duration::from_secs(30);
 /// How long [`a_peer_reset_is_mirrored_while_the_queue_is_blocked`] gives
 /// the mirror before it reports the claim it was waiting on.
 ///
-/// A failure ceiling, not a deadline, and the run never spends it: measured
-/// arrival is sub-millisecond under both overflow policies. Safe to widen
-/// anywhere well below [`BLOCKED_HOLD`]; see that constant for the factor.
+/// A failure ceiling, not a deadline; a correct run never spends it. Safe to
+/// widen anywhere well below [`BLOCKED_HOLD`]; see that constant for the factor.
 const BLOCKED_MIRROR_WINDOW: Duration = Duration::from_millis(1_500);
 
 /// A profile whose one catch-all class is charged to a **dry** bucket, with
@@ -5154,7 +4798,7 @@ async fn blocked_run(overflow: Overflow) -> BlockedRun {
 
 /// **A peer's `RESET_STREAM` is mirrored while the queue is blocked.**
 ///
-/// The failure mode, exactly, and the ablation below reproduces it: let the
+/// The failure mode, exactly: let the
 /// read branch be the only observer of the source. `pipe_data_framed`
 /// computes `let can_read = pending.accepts_more()` and spends it as that
 /// branch's precondition, `result = recv.read(&mut buf), if can_read`, and a
@@ -5162,8 +4806,7 @@ async fn blocked_run(overflow: Overflow) -> BlockedRun {
 /// branch shut the reset goes unobserved and `propagate_reset` is
 /// unreachable. Under `Overflow::Block` — the `QueueConfig` default — a dry
 /// bucket holds the queue at its depth until `max_hold`, so that posture
-/// delays a mirrored reset by up to **30 s**: measured at
-/// `QueueConfig::default()`, 29.80 s. Nothing else in the `select!` covers
+/// delays a mirrored reset by up to **30 s**. Nothing else in the `select!` covers
 /// it: `StopWatcher` watches the *destination's* `stopped()`, the release
 /// branch watches this proxy's own clock, and `cancel` is session teardown.
 ///
@@ -5196,21 +4839,6 @@ async fn blocked_run(overflow: Overflow) -> BlockedRun {
 /// drain is still buffered locally. So the delivered prefix is legitimately
 /// anywhere from the header to the whole queue, and a prefix claim is the
 /// strongest true statement about it.
-///
-/// *Ablation, recorded:* restore the defect by deleting the
-/// `received_reset()` observer — make `observe_source`'s `!can_read` path
-/// `std::future::pending().await` unconditionally. Run: **29 passed, 1
-/// failed, 0 ignored, 0 filtered out**. The `DropTail` leg stays green,
-/// [`a_blocked_reader_still_refuses_to_read`] stays green (it is the other
-/// half and this ablation does not touch it), and the `Block` leg reddens:
-///
-/// ```text
-/// thread 'a_peer_reset_is_mirrored_while_the_queue_is_blocked' panicked at
-/// crates\moqtap-proxy\tests\actions_shaping.rs:
-/// a peer reset must be mirrored whatever the queue is doing, and under Block
-/// it was not: nothing ended the destination stream within 1.5s, against a
-/// 30s max_hold
-/// ```
 #[tokio::test]
 async fn a_peer_reset_is_mirrored_while_the_queue_is_blocked() {
     for overflow in [Overflow::Block, Overflow::DropTail] {
@@ -5299,24 +4927,6 @@ async fn a_peer_reset_is_mirrored_while_the_queue_is_blocked() {
 /// The second assertion is what makes the first mean "blocked" rather than
 /// "drained promptly": a dry bucket delivers the unshapeable header and not
 /// one object byte, so the queue that filled is still full.
-///
-/// *Ablation, recorded:* the naive fix — make `observe_source` call
-/// `recv.read` unconditionally, ignoring `can_read`. Run: **27 passed, 3
-/// failed, 0 ignored, 0 filtered out**;
-/// [`a_peer_reset_is_mirrored_while_the_queue_is_blocked`] stays green,
-/// which is exactly the point — it cannot tell a fix from a deletion. The
-/// other two casualties are [`block_loses_nothing_and_stalls_the_reader`]
-/// ("the hook was shown 12 objects against a depth of 4") and
-/// [`block_admits_at_most_depth_objects`] ("Block admits depth_objects units
-/// and no more: 12 > 4"), so the deletion is caught three times over:
-///
-/// ```text
-/// thread 'a_blocked_reader_still_refuses_to_read' panicked at
-/// crates\moqtap-proxy\tests\actions_shaping.rs:
-/// a reset observer must not read the source: with the drain shut by a dry
-/// bucket the shaper may see at most the 4 objects the queue has room for,
-/// and it saw 12 of 12 offered
-/// ```
 #[tokio::test]
 async fn a_blocked_reader_still_refuses_to_read() {
     let run = blocked_run(Overflow::Block).await;
@@ -5399,8 +5009,7 @@ const BURST_HOLD: Duration = Duration::from_millis(150);
 /// `burst_bytes` below one object means the configured `rate_bps` never
 /// binds at all: every unit is refused, waits out `max_hold` and leaves at
 /// the clamp, and the throughput that results is `queue depth / max_hold` —
-/// a figure the configuration never mentions. Measured here at 1 MB/s with a
-/// 100-byte burst: every object left at exactly the clamp.
+/// a figure the configuration never mentions.
 ///
 /// It cannot be rejected when the profile is built. `ShapeProfile::try_new`
 /// has the burst and not the object sizes, and it is the comparison of the
@@ -5430,27 +5039,12 @@ const BURST_HOLD: Duration = Duration::from_millis(150);
 ///
 /// # What this row does **not** gate, stated rather than implied
 ///
-/// The report's once-per-session-per-class deduplication. Measured: with the
-/// dedup removed — `Scheduler::claim_burst_report` always answering `Some` —
-/// this row stays green, because the whole stream is queued in one write and
-/// so every unit behind the head is already past its clamp by the time the
-/// head clears. Only the head is ever put to a bucket, so only one refusal
-/// happens whatever the dedup does. `shape::scheduler`'s
+/// The report's once-per-session-per-class deduplication. The whole stream
+/// is queued in one write, so every unit behind the head is already past its
+/// clamp by the time the head clears; only the head is ever put to a bucket,
+/// so only one refusal happens whatever the dedup does. `shape::scheduler`'s
 /// `a_burst_below_one_unit_is_separable_from_a_stopped_or_a_slow_class` is
-/// where the second call is asserted to answer `None`, and it reddens with
-/// `left: Some("v") / right: None` under exactly that ablation.
-///
-/// *Ablation, recorded:* fold the two unreachable answers back together in
-/// `shape::charge` — `if rate == 0 || need > cap { Grant::Never }`, which is
-/// the behaviour this row closes. Leg (a)'s equality reddens with
-/// `left: []` against `right: [("video", 100, 203)]`, and every other
-/// assertion in the body stays green, so the failure is attributable to the
-/// report and not to the fixture. Three unit rows go with it —
-/// `shape::bucket`'s `a_unit_larger_than_the_burst_is_refused_as_a_burst_problem`,
-/// `shape::scheduler`'s
-/// `a_burst_below_one_unit_is_separable_from_a_stopped_or_a_slow_class`, and
-/// `egress`'s `an_unbounded_shaping_wait_reports_no_request_at_all` — so the
-/// collapse is caught four times over, at every layer it passes through.
+/// where the second call is asserted to answer `None`.
 #[tokio::test]
 async fn a_burst_smaller_than_one_object_is_reported_distinctly() {
     let offered = subgroup_stream(LEAD_ALIAS, BURST_OBJECTS, PACED_PAYLOAD);
@@ -5596,10 +5190,10 @@ fn unaddressable_streams(run: &PacedRun) -> Vec<u64> {
 /// object too large for the framer to buffer has none — the framer streams
 /// it through rather than measuring it — so no rule claims it, no bucket
 /// charges it, and the release seam grants it unconditionally. One object
-/// therefore crosses a configured rate whole. Measured here against a class
+/// therefore crosses a configured rate whole. This row runs it against a class
 /// holding a bucket configured at **zero bytes per second**, which is the
 /// strongest possible statement of the breach: the bucket that should let
-/// nothing through lets a whole 4 MiB object through, in around 800 ms.
+/// nothing through lets a whole 4 MiB object through.
 ///
 /// # What is asserted, and why the report alone would not do
 ///
@@ -5626,16 +5220,6 @@ fn unaddressable_streams(run: &PacedRun) -> Vec<u64> {
 /// ordinary objects only. Without it a report emitted for every stream would
 /// pass everything above, so the assertion that this run says *nothing*
 /// carries as much of the row as the equality does.
-///
-/// *Ablation, recorded:* report a fixed class — `class: String::new()`, the
-/// label the unnamed rows carry — and the equality reddens with
-/// `left: "" / right: "video"`.
-///
-/// *Second ablation, recorded:* delete the report and leave
-/// `ObjectNotAddressable` alone, which is the behaviour this row closes.
-/// `reports.len()` reddens with `left: 0 / right: 1`, and every assertion
-/// above it stays green — the breach itself is unchanged, which is the point:
-/// nothing about the wire said whose rate had gone.
 #[tokio::test]
 async fn an_oversized_object_names_the_class_whose_rate_it_escaped() {
     let offered = stream_with_an_oversized_object();

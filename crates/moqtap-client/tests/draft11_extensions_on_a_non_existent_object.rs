@@ -129,35 +129,6 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// and would leave the caller unable to act. And the peer receives a
 /// CONNECTION_CLOSE carrying Protocol Violation, which is the only part of the
 /// rule that is about the wire.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Decoding with `ObjectHeader::decode`, which is
-/// `decode_with_extensions(false, ..)`, so `read_subgroup_object` ignores the
-/// stream Type. The four extension bytes are then read as the payload
-/// length and what follows, and the object that comes back is not the one on the
-/// wire:
-///
-/// ```text
-/// ---- a_non_existent_object_with_extensions_is_refused_and_closes stdout ----
-///
-/// thread 'a_non_existent_object_with_extensions_is_refused_and_closes' (43812) panicked at crates\moqtap-client\tests\draft11_extensions_on_a_non_existent_object.rs:
-/// a non-existent object carrying extension headers must be refused: SubgroupObject { header: ObjectHeader { object_id: VarInt(0), extension_headers_length: VarInt(0), extensions: [], payload_length: VarInt(4), object_status: Normal }, payload: [1, 2, 3, 4] }
-/// ```
-///
-/// Note what came back rather than that something did: the four extension bytes
-/// as a payload, on an object reported Normal. Nothing is refused, and nothing
-/// downstream has any way to know.
-///
-/// And with `read_subgroup_object` left alone but the codec reporting the rule as
-/// `CodecError::InvalidField`:
-///
-/// ```text
-/// ---- a_non_existent_object_with_extensions_is_refused_and_closes stdout ----
-///
-/// thread 'a_non_existent_object_with_extensions_is_refused_and_closes' (24272) panicked at crates\moqtap-client\tests\draft11_extensions_on_a_non_existent_object.rs:
-/// expected an extensions-on-a-non-existent-object refusal, got Codec(InvalidField)
-/// ```
 #[tokio::test]
 async fn a_non_existent_object_with_extensions_is_refused_and_closes() {
     common::init_crypto();

@@ -109,21 +109,9 @@ fn subgroup_type_is_valid(header_type: u8) -> bool {
 /// that accidentally refused a whole range would not pass by refusing those
 /// sixteen among the rest.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Deleting the `validate_subgroup_type(header_type)?` call from
-/// `SubgroupHeader::decode`:
-///
-/// ```text
-/// type 0x00 was accepted; draft-20 Section 11.4.2 lists it as invalid
-/// ```
-///
-/// Keeping the form check but dropping only the reserved-mode arm, so a
-/// mode-3 header is read as though it carried no Subgroup ID field:
-///
-/// ```text
-/// type 0x16 was accepted; draft-20 Section 11.4.2 lists it as invalid
-/// ```
+/// Fails if `SubgroupHeader::decode` skips `validate_subgroup_type`, or reads
+/// a reserved-mode header as though it carried no Subgroup ID field;
+/// draft-20 Section 11.4.2 lists both Types as invalid.
 #[test]
 fn subgroup_header_types_outside_the_drafts_lists_are_refused() {
     for header_type in 0u8..=0x7F {
@@ -185,21 +173,8 @@ fn subgroup_header_types_outside_the_drafts_lists_are_refused() {
 /// synonym for `encode`, and so that the raw encoder's documented willingness
 /// to write anything stays true.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Replacing the body of `SubgroupHeader::encode_checked` with a call to
-/// `encode` followed by `Ok(())`:
-///
-/// ```text
-/// encode_checked wrote type 0x00, which decode refuses
-/// ```
-///
-/// Dropping only the reserved-mode arm of `validate_subgroup_type`, which
-/// takes the check out of both halves at once:
-///
-/// ```text
-/// encode_checked wrote type 0x16, which decode refuses
-/// ```
+/// Fails if `encode_checked` writes a Type that `decode` refuses, a
+/// reserved-mode one included.
 #[test]
 fn the_checked_subgroup_encoder_refuses_a_type_the_decoder_refuses() {
     for header_type in 0u8..=0xFF {
@@ -361,20 +336,9 @@ fn assert_refusal(ty: u64, got: &CodecError, want: Refusal) {
 /// datagram has to consume its whole header and give its fields back; an
 /// invalid one has to be refused before any of that.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Deleting the `validate_datagram_type(datagram_type)?` call from
-/// `DatagramHeader::decode`:
-///
-/// ```text
-/// type 0x10 was accepted; draft-20 Section 11.3.1 lists it as invalid
-/// ```
-///
-/// Keeping the form check but dropping the STATUS-with-END_OF_GROUP arm:
-///
-/// ```text
-/// type 0x22 was accepted; draft-20 Section 11.3.1 lists it as invalid
-/// ```
+/// Fails if `DatagramHeader::decode` skips `validate_datagram_type`, or accepts
+/// STATUS with END_OF_GROUP; draft-20 Section 11.3.1 lists both Types as
+/// invalid.
 #[test]
 fn datagram_types_outside_the_drafts_lists_are_refused() {
     for datagram_type in 0u8..=0x7F {
@@ -434,21 +398,8 @@ fn datagram_types_outside_the_drafts_lists_are_refused() {
 /// refused is the Type: the pre-existing lossy-status rule this method also
 /// applies has nothing to fire on.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Deleting the `validate_datagram_type(self.datagram_type)?` line from
-/// `DatagramHeader::encode_checked`:
-///
-/// ```text
-/// encode_checked wrote type 0x10, which decode refuses
-/// ```
-///
-/// Dropping the STATUS-with-END_OF_GROUP arm of `validate_datagram_type`,
-/// which takes the check out of both halves at once:
-///
-/// ```text
-/// encode_checked wrote type 0x22, which decode refuses
-/// ```
+/// Fails if `encode_checked` writes a datagram Type that `decode` refuses,
+/// STATUS with END_OF_GROUP included.
 #[test]
 fn the_checked_datagram_encoder_refuses_a_type_the_decoder_refuses() {
     for datagram_type in 0u8..=0xFF {
@@ -506,17 +457,9 @@ fn the_checked_datagram_encoder_refuses_a_type_the_decoder_refuses() {
 /// case left for Section 3.4, and it is what keeps
 /// [`CodecError::UnknownStreamType`] reachable at all on this draft.
 ///
-/// # What this catches, observed by making the change and running it
-///
-/// Narrowing the decoded Type to its low octet in `SubgroupHeader::decode`
-/// instead of judging the whole value — the shape that lets a peer spell any
-/// Type it likes, since 0x2F00's low octet is 0x00 and 0x132B3E28's is 0x28:
-///
-/// ```text
-/// SETUP is a Type Table 3 assigns, so a subgroup reader must refuse it without
-/// naming the unknown-stream-type rule that would end the session, got
-/// InvalidStreamTypeValue { raw: 0, detail: "bit 4 must be 1 for SUBGROUP_HEADER" }
-/// ```
+/// Fails if `SubgroupHeader::decode` judges the Type by its low octet, which
+/// lets a peer spell any Type it likes: 0x2F00's low octet is 0x00 and
+/// 0x132B3E28's is 0x28.
 #[test]
 fn a_type_wider_than_one_byte_is_judged_by_its_value() {
     fn varint(v: u64) -> Vec<u8> {
@@ -598,13 +541,7 @@ fn a_type_wider_than_one_byte_is_judged_by_its_value() {
 /// Draft-19 refused every wide spelling, and this is the one place the two
 /// drafts' decoders answer differently on bytes both call well-formed.
 ///
-/// # What this catches, observed by making the change and running it
-///
-/// Substituting draft-19's up-front refusal of a wide Type:
-///
-/// ```text
-/// a non-minimal spelling of the assigned Type 0x10 must decode: InvalidField
-/// ```
+/// Fails if a wide spelling of an assigned Type is refused up front.
 #[test]
 fn a_non_minimal_type_flags_value_is_accepted_on_receive() {
     let non_minimal = [0x80u8, 0x10, TRACK_ALIAS, GROUP_ID, PRIORITY];
@@ -698,26 +635,10 @@ fn one_object_stream(status: ObjectStatus, payload: &[u8]) -> Vec<u8> {
 /// it permits, the encoder must accept one. An accessor that reported the
 /// column correctly while the encoder disagreed would fail here.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Making `SubgroupObjectMeta::payload_permission` answer `None` when the
-/// framing carries no status field — the reading in which an absent status
-/// means "unknown" rather than the Normal the encoding elides:
-///
-/// ```text
-/// assertion `left == right` failed: a payload-bearing object's status is Normal, which Table 16 permits a payload
-///   left: None
-///  right: Some(Permitted)
-/// ```
-///
-/// Making it report `Permitted` for every assigned status, which is what
-/// moving a row into the permitting column would look like from here:
-///
-/// ```text
-/// assertion `left == right` failed: status 0x3 reports the wrong Table 16 column
-///   left: Some(Permitted)
-///  right: Some(Forbidden)
-/// ```
+/// Fails if `SubgroupObjectMeta::payload_permission` answers `None` when the
+/// framing carries no status field (an absent status is the Normal the
+/// encoding elides, not "unknown"), or reports the wrong Table 16 column for
+/// any assigned status.
 #[test]
 fn a_framing_only_read_reports_the_registrys_payload_column() {
     let header = SubgroupHeader::decode(&mut &[0x10u8, 0x01, 0x00, PRIORITY][..]).unwrap();
@@ -780,17 +701,8 @@ fn a_framing_only_read_reports_the_registrys_payload_column() {
 /// status across from a draft that numbers the set differently can hold one,
 /// and draft-20 has nothing to say about it.
 ///
-/// # What this catches, observed by making the change and running it
-///
-/// Making `payload_permission` fall back to Normal's row for an unrecognised
-/// code — `unwrap_or(ObjectStatus::Normal)`, the shape used elsewhere in the
-/// module for the status the *encoding* elides:
-///
-/// ```text
-/// assertion `left == right` failed: status 0x1 has no row in Table 16, so there is no permission to report
-///   left: Some(Permitted)
-///  right: None
-/// ```
+/// Fails if `payload_permission` falls back to Normal's row for a code with no
+/// row in Table 16.
 #[test]
 fn a_status_the_registry_does_not_list_has_no_payload_permission() {
     for code in [0x1u64, 0x2, 0x5, 0xFF, u64::MAX] {
@@ -860,27 +772,8 @@ fn fetch_object(flags: u64) -> FetchObjectHeader {
 /// reading one field too few would be caught by the leftover count rather than
 /// running off the end.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Swapping the Subgroup ID and Object ID Delta reads in
-/// `FetchObjectHeader::decode`, so the fields come off the wire in the wrong
-/// order:
-///
-/// ```text
-/// assertion `left == right` failed: flags 0x7 did not survive a round trip
-///   left: FetchObjectHeader { serialization_flags: VarInt(7), group_id_delta: None, subgroup_id: Some(VarInt(2)), object_id_delta: Some(VarInt(7)), publisher_priority: None, properties: None, payload_length: VarInt(4) }
-///  right: FetchObjectHeader { serialization_flags: VarInt(7), group_id_delta: None, subgroup_id: Some(VarInt(7)), object_id_delta: Some(VarInt(2)), publisher_priority: None, properties: None, payload_length: VarInt(4) }
-/// ```
-///
-/// Ignoring the Datagram bit when deciding whether an explicit Subgroup ID is
-/// present, so 0x40 stops suppressing the field. The refusal comes from the
-/// encoder rather than the round trip, because the shape this test builds is
-/// the one the draft describes and the ablated codec no longer agrees it
-/// exists:
-///
-/// ```text
-/// flags 0x43 could not be encoded: InvalidField
-/// ```
+/// Fails if `FetchObjectHeader::decode` reads the fields in the wrong order, or
+/// if the Datagram bit stops suppressing the Subgroup ID field.
 #[test]
 fn every_fetch_object_shape_the_flags_name_round_trips() {
     const PAYLOAD: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
@@ -923,14 +816,8 @@ fn every_fetch_object_shape_the_flags_name_round_trips() {
 /// that masked instead of validating would consume a plausible number of bytes
 /// and carry on.
 ///
-/// # What this catches, observed by making the change and running it
-///
-/// Masking the flags to their low seven bits in `FetchObjectHeader::layout`
-/// instead of refusing values above 0x7F:
-///
-/// ```text
-/// flags 0x80 are undefined but decode accepted them
-/// ```
+/// Fails if `FetchObjectHeader::layout` masks the flags to their low seven bits
+/// instead of refusing values above 0x7F.
 #[test]
 fn fetch_serialization_flags_the_draft_does_not_define_are_refused() {
     for &flags in UNDEFINED_FLAGS {
@@ -976,21 +863,8 @@ fn fetch_serialization_flags_the_draft_does_not_define_are_refused() {
 /// it re-homes the Object into the previous Object's group, and the stream
 /// still parses.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Deleting the presence comparison from `FetchObjectHeader::encode`, leaving
-/// it to write whichever fields the flags call for:
-///
-/// ```text
-/// flags 0x0: an extra group_id_delta was written out rather than refused
-/// ```
-///
-/// Ignoring the Datagram bit in the layout, so a flags value that suppresses
-/// the Subgroup ID field starts calling for one:
-///
-/// ```text
-/// flags 0x43: an extra subgroup_id was written out rather than refused
-/// ```
+/// Fails if `FetchObjectHeader::encode` writes whichever fields the flags call
+/// for without comparing presence, or if the layout ignores the Datagram bit.
 #[test]
 fn a_fetch_object_header_that_contradicts_its_flags_is_refused() {
     for flags in (0u64..=0x7F).chain(END_OF_RANGE_FLAGS.iter().map(|(v, _)| *v)) {
@@ -1047,21 +921,8 @@ fn a_fetch_object_header_that_contradicts_its_flags_is_refused() {
 /// relay uses when its `FILL_TIMEOUT` budget ran out, which draft-19 had no way
 /// to distinguish from an unknown status at all.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Making `end_of_range` answer `NonExistent` for all three values:
-///
-/// ```text
-/// assertion `left == right` failed: flags 0x10c is End of Unknown Range
-///   left: Some(NonExistent)
-///  right: Some(Unknown)
-/// ```
-///
-/// Leaving `0x20C` out of the match, as a draft-19 codec does:
-///
-/// ```text
-/// flags 0x20c could not be decoded: InvalidField
-/// ```
+/// Fails if `end_of_range` collapses any two of the three values, or if `0x20C`
+/// does not decode.
 #[test]
 fn the_three_end_of_range_indicators_are_distinguished() {
     for &(flags, marker) in END_OF_RANGE_FLAGS {
@@ -1101,16 +962,8 @@ fn the_three_end_of_range_indicators_are_distinguished() {
 /// ID and Object ID and nothing else, and an Object after it inherits its
 /// Subgroup ID and priority from across the marker.
 ///
-/// # What this catches, observed by making the change and running it
-///
-/// Substituting draft-19's absolute reading, which resolves the marker's Group ID
-/// Delta of 0 to group 0 rather than to the group after the Object's:
-///
-/// ```text
-/// assertion `left == right` failed: a marker after an Object resolves its Group ID against that Object
-///   left: 0
-///  right: 6
-/// ```
+/// Fails if the marker's fields are read as absolute: its Group ID Delta of 0
+/// then resolves to group 0 rather than to the group after the Object's.
 #[test]
 fn an_end_of_range_marker_resolves_against_the_object_before_it() {
     use moqtap_codec::draft20::data_stream::{FetchObjectReader, GroupOrder};

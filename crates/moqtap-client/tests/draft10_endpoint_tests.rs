@@ -70,12 +70,6 @@ fn endpoint_connect_transitions_to_setup_exchange() {
 /// observed through what the endpoint will accept afterwards rather than by
 /// reading it back: this module encodes one draft, and a SERVER_SETUP naming
 /// another draft's version is refused whether or not the client offered it.
-///
-/// Dropping the version binding fails with:
-///
-/// ```text
-/// this module speaks one draft, and 0xff000003 is not it
-/// ```
 #[test]
 fn endpoint_receive_server_setup_activates_session() {
     let ep = make_active_client();
@@ -426,12 +420,6 @@ fn endpoint_unknown_track_status_rejected() {
 /// than the URI being read back: "The endpoint MUST terminate the session with
 /// a Protocol Violation ... if it receives multiple GOAWAY messages", and a
 /// second one has nowhere to go from Draining.
-///
-/// Letting a second GOAWAY through fails with:
-///
-/// ```text
-/// a session can only be told to go away once
-/// ```
 #[test]
 fn endpoint_goaway_transitions_to_draining() {
     let mut ep = make_active_client();
@@ -488,13 +476,6 @@ fn endpoint_receive_max_subscribe_id_raises_limit() {
 /// become this endpoint's own advertised ceiling: if the handler had folded it
 /// in, 100 would already be spent and advertising it would be refused for not
 /// being an increase.
-///
-/// Folding it in fails with:
-///
-/// ```text
-/// the peer's report is not a ceiling this endpoint has already advertised:
-/// SubscribeId(Decreased(100, 100))
-/// ```
 #[test]
 fn endpoint_receive_subscribes_blocked_is_not_a_grant() {
     let mut ep = make_active_client();

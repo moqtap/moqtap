@@ -36,23 +36,6 @@
 //! asserts an exact `Vec` equality over what it produced. A stream the proxy
 //! never took off the transport shows up as the empty sequence, with the
 //! assertion naming which direction was dropped.
-//!
-//! # The three cuts
-//!
-//! One per direction, and one for the predicate that feeds both:
-//!
-//! * the client-to-relay branch of `forward_control_stream`'s `select!`
-//!   replaced by a pending future — the direction where the control stream
-//!   and the request streams share one transport;
-//! * the relay-to-client accept loop dropped from the session wiring — the
-//!   direction nothing accepted at all before;
-//! * `bidi_streams_carry_requests` narrowed back to the drafts whose control
-//!   plane is unidirectional, which is the whole change reverted.
-//!
-//! The third loses both directions and is still not a substitute for the
-//! first two: it fails on the earlier of the two claims and never reaches the
-//! later one, so the direction it stops short of would be measured by
-//! nothing. Each message is recorded on the gate below.
 
 #![cfg(feature = "draft16")]
 
@@ -388,42 +371,12 @@ async fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
 ///    with its own MAX_REQUEST_ID untouched — the rewrite was one message,
 ///    not one type;
 /// 3. a **second** client-initiated bidirectional stream reaches the relay
-///    carrying its SUBSCRIBE_NAMESPACE, unrewritten;
+///    carrying its SUBSCRIBE_NAMESPACE, unrewritten, because
+///    draft-16 Section 3.3 gives SUBSCRIBE_NAMESPACE a stream of its own;
 /// 4. the answer draft-16 Section 6.1 requires comes back to the client on that same
 ///    stream, so the request stream is forwarded in both of its directions;
-/// 5. a **relay-initiated** bidirectional stream reaches the client, which is
-///    the direction nothing accepted at all before.
-///
-/// # What it catches, observed by making each change and running it
-///
-/// Dropping the client-to-relay loop — the
-/// `request_streams_beside_the_control_stream` branch of
-/// `forward_control_stream`'s `select!` replaced by a pending future — stops
-/// the stream before claim 3 has anything to compare:
-///
-/// ```text
-/// the client's second bidirectional stream never reached the relay: draft-16 Section 3.3
-/// gives SUBSCRIBE_NAMESPACE a stream of its own, and a proxy that accepts only
-/// the control stream never takes it off the transport
-/// ```
-///
-/// Dropping the relay-to-client `forward_request_streams` spawn from the
-/// session wiring leaves claims 1 to 4 green and stops at claim 5:
-///
-/// ```text
-/// the relay's bidirectional stream never reached the client: draft-16 Section 6.1 lets
-/// either endpoint be the subscriber, so a proxy that accepts bidirectional
-/// streams from the client alone drops every subscription the relay makes
-/// ```
-///
-/// # Why the coarse cut is not enough on its own
-///
-/// Narrowing `bidi_streams_carry_requests` back to the drafts whose control
-/// plane is unidirectional reverts the whole change and loses both
-/// directions — but it fails with the *first* of the two messages above and
-/// stops there, so it never reaches the claim about the relay's direction. A
-/// single predicate feeding two call sites needs one cut per call site, or
-/// the second is measured by nothing.
+/// 5. a **relay-initiated** bidirectional stream reaches the client, because
+///    draft-16 Section 5.1 lets either endpoint be the subscriber.
 #[tokio::test]
 async fn the_first_bidi_is_the_control_stream_and_the_rest_are_requests() {
     common::init_crypto();
@@ -534,7 +487,7 @@ async fn the_first_bidi_is_the_control_stream_and_the_rest_are_requests() {
 
     // ── the relay's own namespace subscription ──
     //
-    // Draft-16 Section 6.1 gives the subscriber role to either endpoint, so this is
+    // Draft-16 Section 5.1 gives the subscriber role to either endpoint, so this is
     // the same rule read from the other end — and it is the direction in
     // which nothing accepted a bidirectional stream at all.
     let relays = subscribe_namespace(RELAY_REQUEST, b"cdn-edge");
@@ -547,7 +500,7 @@ async fn the_first_bidi_is_the_control_stream_and_the_rest_are_requests() {
             .unwrap_or_else(|_| {
                 panic!(
                     "the relay's bidirectional stream never reached the client: draft-16 \
-                     Section 6.1 lets either endpoint be the subscriber, so a proxy that \
+                     Section 5.1 lets either endpoint be the subscriber, so a proxy that \
                      accepts bidirectional streams from the client alone drops every \
                      subscription the relay makes"
                 )

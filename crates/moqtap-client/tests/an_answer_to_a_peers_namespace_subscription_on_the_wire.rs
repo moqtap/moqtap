@@ -8,8 +8,7 @@
 //! a route to the wire, and only a peer can see which bytes came out.
 //!
 //! Drafts 07 through 11 have no loopback harness here, so the nine
-//! `Connection`s are covered by four gates. A cut in the write reaches all nine
-//! and is visible on these four, which is what the recorded ablation measures.
+//! `Connection`s are covered by four gates.
 
 mod common;
 
@@ -88,20 +87,6 @@ macro_rules! namespace_answer_wire_gates {
             }
 
             /// The answer to the peer's request reaches the peer.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the client was asked for a namespace and never answered: Elapsed(())
-            /// ```
-            ///
-            /// Made by building the answer and dropping it instead of writing
-            /// it. The cut reaches all nine `Connection`s and reddens 7 tests:
-            /// the four here, and three more in other files, because on
-            /// draft-15 the method it lands in is `request_ok`, which also
-            /// carries the answer to an announcement and to a track status. In
-            /// process the endpoint's own record moves either way, so nothing
-            /// but a peer can see the difference.
             #[tokio::test]
             async fn an_answer_reaches_the_peer() {
                 crate::common::init_crypto();

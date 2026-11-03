@@ -565,21 +565,8 @@ mod tests {
     /// payload", so Normal is the status every payload-bearing object already
     /// has, and naming it asks for the same bytes as leaving it out.
     ///
-    /// # What this catches, observed by making each change and running it
-    ///
-    /// Dropping the check from `encode_checked`, leaving the payload length to
-    /// decide on its own:
-    ///
-    /// ```text
-    /// encode_checked must refuse ObjectDoesNotExist beside a payload; got Ok(())
-    /// ```
-    ///
-    /// Widening the check to refuse every payload-bearing header, Normal
-    /// included:
-    ///
-    /// ```text
-    /// encode_checked refused a Normal object carrying a payload: InvalidField
-    /// ```
+    /// Fails if `encode_checked` lets the payload length decide on its own, or
+    /// refuses a Normal object carrying a payload.
     #[test]
     fn encode_checked_refuses_a_status_a_payload_hides() {
         for &status in ObjectStatus::ALL {

@@ -175,13 +175,6 @@ macro_rules! mid_draft_gates {
         /// message unless the parameter definition explicitly allows multiple
         /// instances of that type to be sent in a single message." DELIVERY
         /// TIMEOUT's definition says nothing of the sort.
-        ///
-        /// Dropping the sender check fails with:
-        ///
-        /// ```text
-        /// one message cannot state a named type twice:
-        /// Ok([3, 0, 17, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 1, 2, 2, 2, 11, 2, 12])
-        /// ```
         #[test]
         fn a_sender_may_not_repeat_a_named_parameter_type() {
             let result = encode(&subscribe(vec![
@@ -201,13 +194,8 @@ macro_rules! mid_draft_gates {
         /// copy it meets first, so one frame carrying two values for one type is
         /// read differently by two conforming implementations.
         ///
-        /// Giving the sender the receiver's tolerance for unknown types fails
-        /// with:
-        ///
-        /// ```text
-        /// the sender rule has no exception for types it cannot name:
-        /// Ok([3, 0, 17, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 1, 2, 2, 50, 11, 50, 12])
-        /// ```
+        /// Fails if the sender is given the receiver's tolerance for unknown
+        /// types.
         #[test]
         fn a_sender_may_not_repeat_an_extension_defined_parameter_type() {
             let result =
@@ -224,18 +212,6 @@ macro_rules! mid_draft_gates {
         /// Section 8.2: "Receivers SHOULD check that there are no unauthorized
         /// duplicate parameters and close the session as a 'Protocol Violation'
         /// if found."
-        ///
-        /// Dropping the receiver check fails with:
-        ///
-        /// ```text
-        /// a repeated named type is not two parameters: Ok(Subscribe(Subscribe {
-        /// request_id: VarInt(1), track_alias: VarInt(4), track_namespace:
-        /// TrackNamespace([[110, 115]]), track_name: [116], subscriber_priority: 5,
-        /// group_order: Ascending, forward: Forward, filter_type: VarInt(2),
-        /// start_group: None, start_object: None, end_group: None, parameters:
-        /// [KeyValuePair { key: VarInt(2), value: Varint(VarInt(11)) }, KeyValuePair
-        /// { key: VarInt(2), value: Varint(VarInt(12)) }] }))
-        /// ```
         #[test]
         fn a_receiver_refuses_a_repeated_named_parameter_type() {
             let buf = encode(&subscribe(vec![
@@ -258,11 +234,7 @@ macro_rules! mid_draft_gates {
         /// extension defined, and refusing it closes a session over traffic the
         /// draft requires an endpoint to accept.
         ///
-        /// Mirroring the sender's check onto the read side fails with:
-        ///
-        /// ```text
-        /// an unknown type may repeat on the wire: DuplicateParameter(50)
-        /// ```
+        /// Fails if the sender's check is mirrored onto the read side.
         #[test]
         fn a_receiver_carries_a_repeated_extension_defined_parameter_type() {
             let buf = encode(&subscribe(vec![param(EXTENSION_A, 11), param(EXTENSION_B, 12)]))
@@ -287,12 +259,6 @@ macro_rules! mid_draft_gates {
         /// within a message." The number this draft gives it is not the number
         /// its neighbours give it, so this gate fails both if the carve-out is
         /// dropped and if it is applied to the wrong type.
-        ///
-        /// Dropping the carve-out fails with:
-        ///
-        /// ```text
-        /// this type is allowed more than one instance: DuplicateParameter(1)
-        /// ```
         #[test]
         fn an_authorization_token_may_be_repeated() {
             let message = subscribe(vec![
@@ -316,13 +282,6 @@ macro_rules! mid_draft_gates {
         /// AUTHORIZATION TOKEN among Version Specific Parameters, so a codec
         /// holding one exemption list for both namespaces lets a CLIENT_SETUP
         /// state PATH twice.
-        ///
-        /// Sharing one exemption list across the two namespaces fails with:
-        ///
-        /// ```text
-        /// a setup message cannot state PATH twice:
-        /// Ok([32, 0, 16, 1, 192, 0, 0, 0, 255, 0, 0, 11, 2, 1, 1, 97, 1, 1, 98])
-        /// ```
         #[test]
         fn a_repeated_path_is_refused_in_a_setup_message() {
             let result =
@@ -361,12 +320,6 @@ macro_rules! mid_draft_gates {
         /// filter and a standalone FETCH both carry an ordering MUST, and
         /// neither spells its end the way this message does, so extending
         /// either check here refuses every open subscription update.
-        ///
-        /// Applying the plain ordering check to SUBSCRIBE_UPDATE fails with:
-        ///
-        /// ```text
-        /// zero is an open end, not a bound: InvalidRange(42, 0, 0, 0)
-        /// ```
         #[test]
         fn an_open_ended_update_is_not_a_range_that_ends_at_group_zero() {
             let message = subscribe_update(GROUP, 0, 0);
@@ -385,12 +338,6 @@ macro_rules! mid_draft_gates {
         ///
         /// Section 8.10: "Like SUBSCRIBE, End Group MUST be greater than or
         /// equal to the Group specified in Start."
-        ///
-        /// Dropping the check fails with:
-        ///
-        /// ```text
-        /// a bounded update cannot end before it starts: Ok([2, 0, 7, 1, 42, 0, 7, 3, 1, 0])
-        /// ```
         #[test]
         fn a_bounded_update_is_still_held_to_its_order() {
             let result = encode(&subscribe_update(GROUP, 0, 7));
@@ -405,12 +352,8 @@ macro_rules! mid_draft_gates {
         /// the reader takes the stated length and then expects the Object
         /// Payload Length at the byte after the block.
         ///
-        /// Writing the field instead of measuring the block fails with:
-        ///
-        /// ```text
-        /// the encoder must not state a length its own reader cannot satisfy:
-        /// UnexpectedEnd
-        /// ```
+        /// Fails if the encoder writes the field instead of measuring the
+        /// block.
         #[test]
         fn an_object_header_states_the_length_of_the_block_it_carries() {
             let header = moqtap_codec::$draft::data_stream::ObjectHeader {
@@ -442,12 +385,8 @@ macro_rules! mid_draft_gates {
         /// so the length of the extension block decides where the payload
         /// begins. The bytes appended below stand in for that payload.
         ///
-        /// Writing the field instead of measuring the block fails with:
-        ///
-        /// ```text
-        /// the encoder must not state a length its own reader cannot satisfy:
-        /// UnexpectedEnd
-        /// ```
+        /// Fails if the encoder writes the field instead of measuring the
+        /// block.
         #[test]
         fn a_datagram_header_states_the_length_of_the_block_it_carries() {
             let header = moqtap_codec::$draft::data_stream::DatagramHeader {
@@ -476,12 +415,8 @@ macro_rules! mid_draft_gates {
         /// So does a datagram status header, whose Object Status sits directly
         /// after the block.
         ///
-        /// Writing the field instead of measuring the block fails with:
-        ///
-        /// ```text
-        /// the encoder must not state a length its own reader cannot satisfy:
-        /// UnexpectedEnd
-        /// ```
+        /// Fails if the encoder writes the field instead of measuring the
+        /// block.
         #[test]
         fn a_datagram_status_header_states_the_length_of_the_block_it_carries() {
             let header = moqtap_codec::$draft::data_stream::DatagramStatusHeader {
@@ -513,12 +448,8 @@ macro_rules! mid_draft_gates {
         /// And so does an object header on a fetch stream, which writes its
         /// block unconditionally.
         ///
-        /// Writing the field instead of measuring the block fails with:
-        ///
-        /// ```text
-        /// the encoder must not state a length its own reader cannot satisfy:
-        /// UnexpectedEnd
-        /// ```
+        /// Fails if the encoder writes the field instead of measuring the
+        /// block.
         #[test]
         fn a_fetch_object_header_states_the_length_of_the_block_it_carries() {
             let header = moqtap_codec::$draft::data_stream::FetchObjectHeader {
@@ -620,13 +551,6 @@ mod draft11 {
     /// So the exemption cannot be a set of numbers consulted without asking
     /// which namespace the number was read in. A codec holding one list for
     /// both would send a CLIENT_SETUP stating PATH twice.
-    ///
-    /// Giving the setup namespace the message namespace's carve-out fails with:
-    ///
-    /// ```text
-    /// this number is PATH here, and PATH does not repeat:
-    /// Ok([32, 0, 20, 1, 192, 0, 0, 0, 255, 0, 0, 11, 2, 1, 3, 111, 110, 101, 1, 3, 116, 119, 111])
-    /// ```
     #[test]
     fn one_type_number_repeats_in_a_subscribe_and_not_in_a_setup() {
         assert_eq!(
@@ -713,11 +637,7 @@ mod draft12 {
     /// establishment." So this namespace has a carve-out where draft-11's had
     /// none, and it is the same number the message namespace uses.
     ///
-    /// Leaving the setup namespace without its carve-out fails with:
-    ///
-    /// ```text
-    /// a setup message may carry more than one token: DuplicateParameter(3)
-    /// ```
+    /// Fails if the setup namespace is left without its carve-out.
     #[test]
     fn a_setup_message_may_carry_more_than_one_authorization_token() {
         let message = client_setup(vec![
@@ -795,11 +715,7 @@ mod draft13 {
     /// more tokens in CLIENT_SETUP or SERVER_SETUP that the peer can use to
     /// authorize MOQT session establishment."
     ///
-    /// Leaving the setup namespace without its carve-out fails with:
-    ///
-    /// ```text
-    /// a setup message may carry more than one token: DuplicateParameter(3)
-    /// ```
+    /// Fails if the setup namespace is left without its carve-out.
     #[test]
     fn a_setup_message_may_carry_more_than_one_authorization_token() {
         let message = client_setup(vec![

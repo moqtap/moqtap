@@ -176,14 +176,8 @@ fn encode_fetch_stream(objects: &[DecodedFetchObject]) -> Result<Vec<u8>, CodecE
 /// "Subgroup ID present" bit, or that carries the previous Subgroup ID forward
 /// whenever no field appears, gets three of the four wrong.
 ///
-/// Observed by making `SubgroupIdEncoding::from_flags` answer `SameAsPrior` for
-/// the `Zero` pattern, which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: resolved subgroup ids
-///   left: [7, 7, 8, 8]
-///  right: [7, 7, 8, 0]
-/// ```
+/// Fails if `SubgroupIdEncoding::from_flags` answers `SameAsPrior` for the
+/// `Zero` pattern.
 #[test]
 fn the_subgroup_id_mode_is_a_two_bit_field_not_two_flags() {
     let stream = fetch_stream(&[
@@ -224,14 +218,8 @@ fn the_subgroup_id_mode_is_a_two_bit_field_not_two_flags() {
 /// ID and Priority to be inherited, the Object ID to be the prior one's plus
 /// one, and the Subgroup ID to be zero.
 ///
-/// Observed by making the reader inherit the prior Object ID unchanged instead
-/// of adding one, which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: the second object states no field of its own
-///   left: FetchObjectHeader { serialization_flags: 0, group_id: VarInt(9), subgroup_id: VarInt(0), object_id: VarInt(4), publisher_priority: 200, extension_headers: [], payload_length: VarInt(2), object_status: None }
-///  right: FetchObjectHeader { serialization_flags: 0, group_id: VarInt(9), subgroup_id: VarInt(0), object_id: VarInt(5), publisher_priority: 200, extension_headers: [], payload_length: VarInt(2), object_status: None }
-/// ```
+/// Fails if the reader inherits the prior Object ID unchanged instead of adding
+/// one.
 #[test]
 fn a_fetch_object_inherits_every_field_its_flags_omit() {
     let stream = fetch_stream(&[
@@ -270,14 +258,7 @@ fn a_fetch_object_inherits_every_field_its_flags_omit() {
 /// assign, exactly four are legal on a first object. The same sixty-four are
 /// swept again behind a legal first object, where all of them are.
 ///
-/// Observed by having the reader fall back to a zeroed prior object instead of
-/// refusing, which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: flags 0x0 on a first object: Ok([DecodedFetchObject { header: FetchObjectHeader { serialization_flags: 0, group_id: VarInt(0), subgroup_id: VarInt(0), object_id: VarInt(1), publisher_priority: 0, extension_headers: [], payload_length: VarInt(1), object_status: None }, payload: [170] }])
-///   left: true
-///  right: false
-/// ```
+/// Fails if the reader falls back to a zeroed prior object instead of refusing.
 #[test]
 fn the_first_fetch_object_may_not_reference_a_prior_one() {
     let mut legal_first = Vec::new();
@@ -315,12 +296,7 @@ fn the_first_fetch_object_may_not_reference_a_prior_one() {
 /// sweep passes under either reading, since a misparsed object usually runs
 /// past the end of the buffer and fails for that reason instead.
 ///
-/// Observed by decoding the flags with `VarInt::decode` instead of `get_u8`,
-/// which fails this with:
-///
-/// ```text
-/// assertion failed: 0x40 disguised as the two-byte varint for 0x1c: expected a refusal, got Ok([DecodedFetchObject { header: FetchObjectHeader { serialization_flags: 28, group_id: VarInt(0), subgroup_id: VarInt(0), object_id: VarInt(0), publisher_priority: 128, extension_headers: [], payload_length: VarInt(1), object_status: None }, payload: [170] }])
-/// ```
+/// Fails if the flags are decoded with `VarInt::decode` instead of `get_u8`.
 #[test]
 fn the_unassigned_serialization_flag_bits_are_refused() {
     for flags in 0x40u8..=0xff {
@@ -353,14 +329,8 @@ fn the_unassigned_serialization_flag_bits_are_refused() {
 /// one-byte varint range, so it includes the gap inside the assigned set (0x2)
 /// and the code a later draft added (0x5).
 ///
-/// Observed by having the reader accept any status code rather than only the
-/// assigned ones, which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: status 0x2 on a fetch object: Ok([DecodedFetchObject { header: FetchObjectHeader { serialization_flags: 31, group_id: VarInt(1), subgroup_id: VarInt(0), object_id: VarInt(2), publisher_priority: 128, extension_headers: [], payload_length: VarInt(0), object_status: Some(Normal) }, payload: [] }])
-///   left: true
-///  right: false
-/// ```
+/// Fails if the reader accepts any status code rather than only the assigned
+/// ones.
 #[test]
 fn a_fetch_object_states_a_status_only_where_it_has_no_payload() {
     for code in 0x00u64..=0x3f {
@@ -399,14 +369,7 @@ fn a_fetch_object_states_a_status_only_where_it_has_no_payload() {
 /// A fetch object's extensions block is the byte-length-prefixed blob of
 /// Section 10.2.1.2, and it is present only when the flags say so.
 ///
-/// Observed by having the reader return the block with its length prefix still
-/// attached, which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: the extensions blob excludes its length prefix
-///   left: [2, 60, 1]
-///  right: [60, 1]
-/// ```
+/// Fails if the reader returns the block with its length prefix still attached.
 #[test]
 fn a_fetch_object_carries_its_extensions_block_verbatim() {
     let mut object = FetchObject::explicit(0, 0, 0, 0x80).flags(0x3f);
@@ -439,12 +402,7 @@ fn a_fetch_object_carries_its_extensions_block_verbatim() {
 /// non-zero status on an object with a payload is a pair Section 10.2.1.1 says
 /// does not exist.
 ///
-/// Observed by dropping the Subgroup ID checks from `write_object_header`,
-/// which fails this with:
-///
-/// ```text
-/// assertion failed: subgroup id 5 under the mode that means zero: expected a refusal, wrote [20, 1, 128, 1]
-/// ```
+/// Fails if `write_object_header` drops its Subgroup ID checks.
 #[test]
 fn writing_refuses_a_fetch_header_its_flags_cannot_carry() {
     // The state every case below is written against: group 0, subgroup 7,
@@ -545,12 +503,8 @@ fn prior_header(object: &FetchObject) -> FetchObjectHeader {
 /// A fetch object reader is bound to one stream: restarting it resolves the
 /// objects that follow onto whatever the stream's first object states.
 ///
-/// Observed by making `FetchObjectReader::new` carry a zeroed prior object
-/// rather than none, which fails this with:
-///
-/// ```text
-/// assertion failed: a restarted reader accepted an inheriting object
-/// ```
+/// Fails if `FetchObjectReader::new` carries a zeroed prior object rather than
+/// none.
 #[test]
 fn a_restarted_fetch_reader_has_nothing_to_inherit_from() {
     let stream = fetch_stream(&[
@@ -604,14 +558,8 @@ const SUBGROUP_VECTORS: &[&str] = &[
 /// than restated. The corpus carries End of Group and End of Track objects, so
 /// both halves have work to do.
 ///
-/// Observed by making `PayloadPermission::for_status` answer `Permitted` for
-/// End of Group, which fails this with:
-///
-/// ```text
-/// assertion `left == right` failed: [100105800004deadbeef000003] object 1 permits a payload but the draft forbids it for status Some(3)
-///   left: true
-///  right: false
-/// ```
+/// Fails if `PayloadPermission::for_status` answers `Permitted` for End of
+/// Group.
 #[test]
 fn every_vector_object_agrees_with_its_payload_permission() {
     let mut forbidden_seen = 0;
@@ -659,15 +607,8 @@ fn every_vector_object_agrees_with_its_payload_permission() {
 /// reader taught to accept an unassigned code would have to teach the accessor
 /// an answer for it as well.
 ///
-/// Observed by having `payload_permission` fall back to
-/// `PayloadPermission::Forbidden` for an unrecognised code, which fails this
-/// with:
-///
-/// ```text
-/// assertion `left == right` failed: status 0x2 is unassigned, so it has no payload rule
-///   left: Some(Forbidden)
-///  right: None
-/// ```
+/// Fails if `payload_permission` falls back to `PayloadPermission::Forbidden`
+/// for an unrecognised code.
 #[test]
 fn an_unassigned_status_has_no_payload_permission() {
     let header = SubgroupHeader::decode(&mut &hex("100100800004deadbeef")[..]).expect("header");
@@ -724,12 +665,7 @@ fn an_unassigned_status_has_no_payload_permission() {
 /// inferred from bits carrying no meaning, so an undefined type produces a
 /// header that looks well formed.
 ///
-/// *Ablation:* delete the `datagram_type_is_assigned` call from
-/// `DatagramHeader::decode`, and this fails with:
-///
-/// ```text
-/// draft-15 accepted undefined datagram type 0x10: DatagramHeader { datagram_type: 16, track_alias: VarInt(1), group_id: VarInt(2), object_id: VarInt(3), publisher_priority: Some(128), extension_headers: [], object_status: None }
-/// ```
+/// Fails if `DatagramHeader::decode` stops calling `datagram_type_is_assigned`.
 #[test]
 fn undefined_datagram_types_are_refused() {
     use moqtap_codec::draft15::data_stream::DatagramHeader;
@@ -775,17 +711,11 @@ fn undefined_datagram_types_are_refused() {
 
 /// A type varint outside one byte must be refused, not narrowed into one.
 ///
-/// The decoder read the type with `VarInt::decode(..).into_inner() as u8`, so
-/// `0x100` became `0x00` and a datagram this draft does not define was parsed
-/// as an ordinary object rather than closing the session. The same held for
-/// subgroup streams, where `0x110` became `0x10`.
-///
-/// *Ablation:* restore the `as u8` narrowing in either decoder, and this fails
-/// with:
-///
-/// ```text
-/// draft-15 narrowed datagram type 0x100 onto a valid one instead of refusing it
-/// ```
+/// A decoder that reads the type with `VarInt::decode(..).into_inner() as u8`
+/// turns `0x100` into `0x00`, and parses a datagram this draft does not define
+/// as an ordinary object rather than closing the session. The same holds for
+/// subgroup streams, where `0x110` becomes `0x10`. Fails if either decoder
+/// narrows the type that way.
 #[test]
 fn out_of_range_type_varints_do_not_alias_onto_valid_types() {
     use moqtap_codec::draft15::data_stream::{DatagramHeader, SubgroupHeader};
@@ -811,16 +741,11 @@ fn out_of_range_type_varints_do_not_alias_onto_valid_types() {
 /// the bytes its fields consume is a PROTOCOL_VIOLATION.
 ///
 /// The over-long half is the one that reads as success. The declared length
-/// keeps the outer stream in sync, so trailing bytes no field consumed were
+/// keeps the outer stream in sync, so trailing bytes no field consumed would be
 /// dropped without a word — and a peer emitting a field this codec does not
-/// know about looked exactly like a peer sending nothing extra.
+/// know about would look exactly like a peer sending nothing extra.
 ///
-/// *Ablation:* remove the `payload.has_remaining()` check from
-/// `ControlMessage::decode`, and this fails with:
-///
-/// ```text
-/// draft-15 accepted an UNSUBSCRIBE with 3 trailing bytes inside its declared length: Unsubscribe(Unsubscribe { request_id: VarInt(7) })
-/// ```
+/// Fails if `ControlMessage::decode` stops checking `payload.has_remaining()`.
 #[test]
 fn a_control_message_longer_than_its_fields_is_refused() {
     use moqtap_codec::draft15::message::ControlMessage;

@@ -486,7 +486,7 @@ async fn a_transport_config_on_a_webtransport_upstream_is_dropped() {
     }
 }
 
-/// The ablation: the identical profile against a raw-QUIC upstream, where it
+/// The control: the identical profile against a raw-QUIC upstream, where it
 /// is installed, stops the forwarded payload dead.
 ///
 /// This is not a test of quinn. It is what makes
@@ -499,13 +499,6 @@ async fn a_transport_config_on_a_webtransport_upstream_is_dropped() {
 /// matters: `send_window` bounds unacknowledged *stream* data, so a leg that
 /// honours it still connects. A run that failed to connect would satisfy
 /// "nothing arrived" for a reason that has nothing to do with the profile.
-///
-/// Ablation, recorded: dropping the profile from this run and leaving
-/// everything else alone reddens it with
-/// `the forwarded stream arrived at a QUIC upstream configured with a zero
-/// send window`, and the payload was there in 0.02 s — against the
-/// [`DELIVERY_WINDOW`] of five seconds that the profiled run waits out in
-/// full. The window is not close to anything.
 #[tokio::test]
 async fn the_same_profile_stops_a_quic_upstream_dead() {
     let run = run_over_quic(Some(zero_send_window())).await;

@@ -4,8 +4,8 @@
 //! The failure this file gates is the crate's cardinal one: a rule arms,
 //! matches nothing, and reports success. `ShapeProfile::try_new` cannot
 //! catch it — that constructor validates the configuration alone and has no
-//! draft — so until `Capabilities::admit_profile` existed the only signal
-//! was `Impairment{ShapeRuleUnmatchable}`, which needs a session, traffic of
+//! draft — and without `Capabilities::admit_profile` the only signal
+//! is `Impairment{ShapeRuleUnmatchable}`, which needs a session, traffic of
 //! the right shape, and somebody reading the report afterwards.
 //!
 //! Every row below is anchored to **observed framer output** rather than to
@@ -20,8 +20,7 @@
 //! panics first, so a mutation that broke the refusal *and* the predicate
 //! would only ever be seen as a predicate failure, and one that broke the
 //! refusal alone would be invisible until the day the predicate happened to
-//! be right. Each claim is its own `#[test]` and each one reddens on its
-//! own, which is what the recorded ablations below show.
+//! be right. Each claim is its own `#[test]`.
 //!
 //! # Why the file is gated on two named drafts
 //!
@@ -295,31 +294,16 @@ fn fetch_track_alias_rule() -> Matcher {
 }
 
 // ============================================================
-// No key is dead on a draft any more
+// No key is dead on a draft
 // ============================================================
 
 /// **A `subgroup_id` rule aimed at fetch is admitted on every draft, and
 /// draft-19 really builds the units it claims.**
 ///
-/// It was once refused on drafts 18 and 19, and the refusal was right while
-/// it stood: their fetch objects write a Group ID as a difference
-/// whose sign the fetch's Group Order settles, nothing carried that order to
-/// the framer, and so no `ObjectMeta` was ever built for such a rule to see.
-/// The session reads the order off the FETCH now, so the rule is an ordinary
-/// working one and refusing it would reject a class that shapes traffic.
-///
 /// The reality half is the point. A predicate that says `true` and a framer
 /// that produces nothing would be the same failure the predicate exists to
 /// prevent, so the same draft-19 fetch stream is framed twice: once by a
 /// framer that was told the order, and once by one that was not.
-///
-/// *Ablation, recorded:* restore the `!kind.is_matchable_on(draft)` refusal
-/// to `supports_matcher` for `Fetch` on drafts 18 and 19:
-///
-/// ```text
-/// a draft-19 fetch object carries a subgroup ID like any other, so a rule
-/// keyed on one is an ordinary working rule
-/// ```
 #[test]
 fn a_fetch_key_is_carried_on_every_draft() {
     for draft in [DraftVersion::Draft14, DraftVersion::Draft18, DraftVersion::Draft19] {
@@ -336,7 +320,7 @@ fn a_fetch_key_is_carried_on_every_draft() {
         );
     }
 
-    // Reality, on the draft that needed the fix. The order the session would
+    // Reality, on draft-19. The order the session would
     // have read off the FETCH is handed to the framer here directly, which
     // is the same value by a shorter road.
     let stream = delta_fetch_stream();
@@ -376,13 +360,6 @@ fn a_fetch_key_is_carried_on_every_draft() {
 /// One row per `MatcherKey`, each keyed on the value the framer actually
 /// reported for that object, on both drafts, so the sweep covers the whole
 /// axis rather than the one key the tests above use.
-///
-/// *Ablation, recorded:* replace `supports_matcher`'s body with `false` —
-/// every row reddens, the first at the very first key:
-///
-/// ```text
-/// track_alias is carried on draft-14 subgroup streams
-/// ```
 #[test]
 fn every_key_the_predicate_admits_claims_a_real_object() {
     for draft in [DraftVersion::Draft14, DraftVersion::Draft19] {
@@ -456,18 +433,6 @@ fn every_key_the_predicate_admits_claims_a_real_object() {
 /// The `group_id` control on the same fetch objects is what makes the
 /// negative attributable to the key: without it the row would also pass if
 /// the fetch fixture had framed nothing at all.
-///
-/// *Ablation, recorded:* replace `supports_matcher`'s body with `true`:
-///
-/// ```text
-/// a fetch header carries a request ID instead, on every draft that frames one
-/// ```
-///
-/// and with `false`, which the subgroup half catches:
-///
-/// ```text
-/// a subgroup header carries a track alias
-/// ```
 #[test]
 fn track_alias_is_carried_by_site_and_not_by_draft() {
     let draft = DraftVersion::Draft14;
@@ -514,21 +479,6 @@ fn track_alias_is_carried_by_site_and_not_by_draft() {
 /// on any draft carries a track alias. The same key aimed at the other site
 /// is admitted in the same body, so the refusal cannot be passing because
 /// `track_alias` is refused outright.
-///
-/// *Ablation, recorded:* replace `supports_matcher`'s body with `true`:
-///
-/// ```text
-/// no fetch object carries a track alias, so this rule can never claim one: ()
-/// ```
-///
-/// and with `false`, where the subgroup control is what catches it:
-///
-/// ```text
-/// assertion `left == right` failed
-///   left: Err(UnsupportedMatcherKey { class: "video", draft: Draft14,
-///              kind: Some(Subgroup), key: TrackAlias })
-///  right: Ok(())
-/// ```
 #[test]
 fn a_fetch_aimed_track_alias_rule_is_refused() {
     let draft = DraftVersion::Draft14;
@@ -574,14 +524,6 @@ fn a_fetch_aimed_track_alias_rule_is_refused() {
 /// same rule with the key removed claims it. Without that second half the
 /// first would pass for a matcher that had stopped claiming datagrams
 /// altogether, which is a different bug with the same table entry.
-///
-/// *Ablation (measured):* drop the `kind == MatchKind::Datagram && field ==
-/// MatcherKey::SubgroupId` clause from `supports_matcher`.
-///
-/// ```text
-/// ---- a_datagram_aimed_subgroup_id_rule_is_refused stdout ----
-/// no datagram carries a subgroup ID, so this rule can never claim one: ()
-/// ```
 #[test]
 fn a_datagram_aimed_subgroup_id_rule_is_refused() {
     // A datagram carrying every key one can carry. Built here rather than
@@ -651,18 +593,6 @@ fn a_datagram_aimed_subgroup_id_rule_is_refused() {
 /// are per-unit facts, reported during the run as
 /// `Impairment{ShapeRuleUnmatchable}`, and refusing them here would kill
 /// rules that work.
-///
-/// *Ablation, recorded:* replace `supports_matcher`'s body with `false` —
-/// the over-refusal is what ships, and the `left` is the working profile
-/// that would have been rejected at startup:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-14] a track_alias rule that names no
-/// stream kind still claims every subgroup unit
-///   left: Err(UnsupportedMatcherKey { class: "video", draft: Draft14, kind: None,
-///              key: TrackAlias })
-///  right: Ok(())
-/// ```
 #[test]
 fn a_rule_that_can_still_fire_somewhere_is_admitted() {
     for draft in [DraftVersion::Draft14, DraftVersion::Draft19] {
@@ -721,17 +651,7 @@ fn a_rule_that_can_still_fire_somewhere_is_admitted() {
 /// one thing under test.
 ///
 /// The dead key is `track_alias` at a fetch site rather than anything
-/// draft-shaped, because no key is dead on a *draft* any more: the one that
-/// was — `subgroup_id` aimed at fetch on drafts 18 and 19 — is an ordinary
-/// working rule now that the session carries the fetch's Group Order.
-///
-/// *Ablation, recorded:* with the `admit_profile` call disabled in
-/// `run_with_transport`, the dead-keyed arm dials like any other session and
-/// the first assertion panics at this file with `the relay must never be
-/// dialled for a session whose only class is dead on draft-19`. The relay
-/// accepted the connection the refusal was supposed to prevent, and the
-/// control arm below stayed green throughout — which is what makes the
-/// failure attributable to the refusal rather than to the fixture.
+/// draft-shaped, because no key is dead on a *draft*.
 #[tokio::test]
 async fn a_dead_keyed_profile_stops_the_session_before_it_opens_the_relay_leg() {
     common::init_crypto();

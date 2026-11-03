@@ -117,19 +117,6 @@ macro_rules! fetch_parameter_gates {
             }
 
             /// The parameters a fetch is given reach the peer.
-            ///
-            /// # What it catches
-            ///
-            /// Sending an empty list whatever the caller passed:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, not the empty list a call that
-            /// ignores its argument sends left: 0 right: 1
-            /// ```
-            ///
-            /// It reddens three, this gate on each draft in the range and
-            /// nothing else in the client or the proxy.
             #[test]
             fn the_parameters_a_fetch_is_given_reach_the_peer() {
                 let mut ep = active();
@@ -168,12 +155,6 @@ macro_rules! fetch_parameter_gates {
             }
 
             /// A fetch with nothing attached still carries nothing.
-            ///
-            /// # What it catches
-            ///
-            /// Nothing the cut reaches, which is what a control is for. The cut
-            /// sends an empty list whatever it is given, which is what this
-            /// gate asserts, so it stays green under it.
             #[test]
             fn a_fetch_given_no_parameters_carries_none() {
                 let mut ep = active();
@@ -205,21 +186,6 @@ macro_rules! fetch_parameter_gates {
             /// field, and the same three registered parameters to put in it.
             /// Nothing about naming the range through a subscription rather
             /// than outright changes what may be attached to the request.
-            ///
-            /// # What it catches
-            ///
-            /// A joining fetch that sends an empty list whatever the caller
-            /// passed:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: a Joining Fetch is a FETCH,
-            /// and the parameter the caller attached must reach the peer
-            ///   left: 0
-            ///  right: 1
-            /// ```
-            ///
-            /// It reddens one, this gate on draft-14, because the cut is a
-            /// draft-14 sender.
             #[test]
             fn the_parameters_a_joining_fetch_is_given_reach_the_peer() {
                 let mut ep = active();

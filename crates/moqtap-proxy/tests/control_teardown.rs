@@ -556,32 +556,6 @@ impl Run {
 /// default `(0, b"proxy session ended")` — a fixture that asked for the
 /// default could not tell a close that carried the request from one that
 /// fell back to it.
-///
-/// *Ablation, recorded, and it takes two — one per half of the claim.*
-///
-/// Replace `let (close_code, close_reason) = closer.close_args();` in
-/// `run_with_transport` with the proxy's hard-coded default pair, so a
-/// requested close is recorded and then ignored. This row fails with
-///
-/// ```text
-/// assertion `left == right` failed: the client leg closes with the code and
-/// reason the call named, not the proxy's own default
-///   left: (0, [112, 114, 111, 120, 121, 32, 115, 101, 115, 115, 105, 111, 110, 32, 101, 110, 100, 101, 100])
-///  right: (42, [116, 104, 101, 32, 99, 111, 110, 116, 114, 111, 108, 32, 112, 108, 97, 110, 101, 32, 97, 115, 107, 101, 100])
-/// ```
-///
-/// Delete the `relay.close(close_code, &close_reason);` line instead, so
-/// only the client leg is closed explicitly. The relay leg then ends when
-/// the proxy's last handle on it is dropped, which quinn reports as an
-/// implicit close — code 0, empty reason — and this row fails with
-///
-/// ```text
-/// assertion `left == right` failed: the relay leg closes with the same pair:
-/// a requested close ends both legs, not the one the caller happens to be
-/// watching
-///   left: (0, [])
-///  right: (42, [116, 104, 101, 32, 99, 111, 110, 116, 114, 111, 108, 32, 112, 108, 97, 110, 101, 32, 97, 115, 107, 101, 100])
-/// ```
 #[tokio::test]
 async fn a_requested_close_carries_its_code_and_reason_to_both_peers() {
     let run = Run::start(Arc::new(NoOpHook), Duration::from_millis(100)).await;
@@ -626,21 +600,6 @@ const GENEROUS_DRAIN: Duration = Duration::from_secs(6);
 /// direction that looks right: a close that cancelled immediately would
 /// still close both legs with the right code, and every assertion about the
 /// close itself would pass while the queued objects vanished.
-///
-/// *Ablation, recorded:* pass `Duration::ZERO` instead of `drain` at
-/// `close_after_draining`'s call site in `serve_session_commands`, so a
-/// requested close gives the queues no window whatever the session was
-/// configured with. This row fails with
-///
-/// ```text
-/// assertion `left == right` failed: a drain window three times the hold
-/// delivers every object that was queued when the close was requested
-///   left: 5
-///  right: 401
-/// ```
-///
-/// — five bytes being the stream header, which is written inline and is
-/// never in the queue at all, and 396 the six objects that were.
 #[tokio::test]
 async fn a_drain_with_time_delivers_what_was_queued() {
     let run = Run::start(HoldingHook::new(DELIVERED_HOLD, DELIVERED_HOLD), GENEROUS_DRAIN).await;
@@ -705,16 +664,6 @@ const ABANDONED_HOLD: Duration = Duration::from_secs(6);
 /// abandoned rather than flushed, deliberately — a flush into a connection
 /// about to send `CONNECTION_CLOSE` is neither confirmably delivered nor
 /// confirmably lost — and the count is the proxy saying exactly what went.
-///
-/// *Ablation, recorded:* make `close_after_draining` read a zero window as
-/// unbounded, `wait_idle(if drain.is_zero() { Duration::from_secs(60) }
-/// else { drain })`. This row fails with
-///
-/// ```text
-/// a drain window of zero is a bound, not a licence to wait: the close had
-/// not reached the client 2s after it was requested, with a 6s hold still
-/// outstanding
-/// ```
 #[tokio::test]
 async fn a_zero_drain_window_closes_at_once_and_names_what_it_abandoned() {
     let run = Run::start(HoldingHook::new(ABANDONED_HOLD, ABANDONED_HOLD), Duration::ZERO).await;
@@ -799,27 +748,9 @@ const SPLIT_DRAIN: Duration = Duration::from_secs(2);
 /// end-of-stream drain, which honours release times with no window at all
 /// and would deliver the eight-second objects regardless of the close.
 ///
-/// *Ablation, recorded, and what it shows is the point of stating this
-/// separately:* forcing the window to `Duration::ZERO` at
-/// `close_after_draining`'s call site — the mutation the delivery gate
-/// records — reddens this row's **premise** rather than its equality, with
-///
-/// ```text
-/// assertion `left == right` failed: the object whose release fell inside
-/// the window reached the relay
-///   left: 0
-///  right: 66
-/// ```
-///
-/// The equality itself still held under that mutation, because a proxy that
-/// drains nothing strands everything and the arithmetic closes at
-/// `0 + 396 == 396`. That is the identity behaving as an identity should:
-/// it survives a proxy that drains too little and one that drains too much,
-/// and fails only for a proxy that loses bytes without saying so. The
-/// assertions after the close are ordered so the split reports before the
-/// equality — a run in which nothing was released at all is a fixture that
-/// stopped splitting the queue, and reading that as a conservation failure
-/// would send the next reader to the wrong place.
+/// The assertions after the close are ordered so the split reports before
+/// the equality: a run in which nothing was released at all is a fixture
+/// that stopped splitting the queue, not a conservation failure.
 #[tokio::test]
 async fn delivered_plus_stranded_equals_what_was_queued() {
     let run = Run::start(HoldingHook::new(RELEASED_HOLD, STRANDED_HOLD), SPLIT_DRAIN).await;
@@ -903,23 +834,6 @@ const SECOND_REASON: &[u8] = b"a later caller";
 /// [`GENEROUS_DRAIN`], three times [`PROMPT`], and the hold outlasts the
 /// window, so load can only make the session slower to close and never
 /// quicker.
-///
-/// *Ablation, recorded:* delete the `if !handle.closer.record(..)` guard from
-/// `ProxyControl::close_session` in `src/control.rs`, leaving the losing
-/// record ignored and the request handed over as it was before. The second
-/// call is then taken, its `SessionCommand::Close` is queued behind a session
-/// task that never comes back for it, and this row fails with
-///
-/// ```text
-/// thread 'a_second_close_inside_the_drain_window_is_refused_and_the_first_pair_stands'
-/// panicked at crates\moqtap-proxy\tests\control_teardown.rs:
-/// a session already draining under one close does not take a second: ()
-/// ```
-///
-/// The `()` is the `Ok(())` the mutated call handed back — a close accepted,
-/// reported as applied, and reaching neither peer, which is what the guard
-/// exists to prevent. The four gates above stayed green in that same run
-/// (`4 passed; 1 failed`), so nothing else in this file sees the case.
 #[tokio::test]
 async fn a_second_close_inside_the_drain_window_is_refused_and_the_first_pair_stands() {
     let run = Run::start(HoldingHook::new(STRANDED_HOLD, STRANDED_HOLD), GENEROUS_DRAIN).await;

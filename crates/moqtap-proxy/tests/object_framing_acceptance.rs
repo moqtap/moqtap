@@ -9,7 +9,7 @@
 //!    the wrong side of it.
 //! 2. **Streams the framer does not address still arrive intact.** Fetch
 //!    streams on drafts 18 and 19 are not addressable, on the explicit
-//!    promise that no fidelity is lost. Nothing tested that promise.
+//!    promise that no fidelity is lost.
 //! 3. **The three drafts in between are addressable and their frames are
 //!    not all objects.** Drafts 15, 16 and 17 let a fetch object leave a
 //!    field off and take the previous object's, and 16 and 17 add frames
@@ -633,22 +633,6 @@ fn omitting_fetch_stream(draft: DraftVersion) -> Vec<u8> {
 /// Group ID and one never states an Object ID; a framer that reported the
 /// wire's own values would produce `(7, 0)`, `(0, 1)`, `(8, 0)` and the
 /// middle group would be a group nobody published.
-///
-/// *Ablation (measured):* put drafts 15, 16 and 17 back under
-/// `capability::fetch_group_order_is_needed`, so their streams are given up
-/// for want of an order nothing hands over:
-///
-/// ```text
-/// [draft-15] chunk 1: this stream is addressable, so nothing is bypassed
-/// ```
-///
-/// Exactly two tests redden — this one and
-/// [`a_fetch_frame_with_no_subgroup_of_its_own_reports_none`] — while the
-/// drafts 07-14 and 18-22 gates stay green, so the cut is attributable to
-/// the three drafts it names. It also shows why byte identity is not on its
-/// own a measurement of anything: the byte-identity assertion above the
-/// bypass one passes under the ablation, because a bypassed stream is
-/// forwarded perfectly.
 #[test]
 #[cfg(any(feature = "draft15", feature = "draft16", feature = "draft17"))]
 fn fetch_streams_that_omit_fields_are_framed() {
@@ -743,11 +727,6 @@ fn unsubgrouped_fetch_stream(draft: DraftVersion) -> Vec<u8> {
 /// would be claimed by a shaping rule keyed on subgroup zero; and an End of
 /// Range indicator counted among the objects makes every count of them
 /// wrong.
-///
-/// *Ablation (measured):* restore `subgroup_id: Some(m.subgroup_id)` in
-/// `ObjectFramer::object_meta`. Fails on both drafts with
-/// `left: [Some(2), Some(0), Some(0)]`, `right: [Some(2), None, None]` — the
-/// placeholder arriving as subgroup zero.
 #[test]
 #[cfg(any(feature = "draft16", feature = "draft17"))]
 fn a_fetch_frame_with_no_subgroup_of_its_own_reports_none() {

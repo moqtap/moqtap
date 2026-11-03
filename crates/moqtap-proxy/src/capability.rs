@@ -1230,11 +1230,10 @@ pub const fn draft_is_compiled(draft: DraftVersion) -> bool {
 /// Every draft this build could take as a default, in the order it would take
 /// them.
 ///
-/// Draft-14 first, because that is the value this had before the build's own
-/// draft list was consulted and a full build should not change; then the newest
-/// draft downwards, because a build that trimmed its drafts kept the ones it
-/// means to speak and the newest of those is the likeliest thing meant by
-/// naming none.
+/// Draft-14 first, so a full build keeps draft-14 as its default; then the
+/// newest draft downwards, because a build that trimmed its drafts kept the
+/// ones it means to speak and the newest of those is the likeliest thing meant
+/// by naming none.
 const DEFAULT_DRAFT_ORDER: [DraftVersion; DraftVersion::ALL.len()] = default_draft_order();
 
 /// [`DEFAULT_DRAFT_ORDER`], built from [`DraftVersion::ALL`] rather than
@@ -1286,20 +1285,6 @@ const fn default_draft_order() -> [DraftVersion; DraftVersion::ALL.len()] {
 /// once per draft a round and its tests are run none — and a reduced-draft
 /// build is the only kind that can have this defect. A const assertion fails
 /// the compile, which is the one thing those rows do look at.
-///
-/// # Ablated, and the numbers are the account of why this survived
-///
-/// Putting the old value back — draft-14 chosen without consulting the build:
-///
-/// ```text
-/// error[E0080]: evaluation panicked: the default draft is one this build did not compile
-/// error: could not compile `moqtap-proxy` (lib) due to 1 previous error
-/// ```
-///
-/// **Exit 101 under `--no-default-features --features draft07`, exit 101 under
-/// the same with draft19, and exit 0 under `--all-features`.** The build every
-/// round runs first cannot see this defect at all, and the drafts that can
-/// are compiled and never run.
 pub const DEFAULT_DRAFT: DraftVersion = default_draft();
 
 const fn default_draft() -> DraftVersion {
@@ -1399,19 +1384,11 @@ pub(crate) const fn fetch_group_order_is_needed(draft: DraftVersion) -> bool {
 /// Subgroup ID is the Object ID of the first Object transmitted in this
 /// Subgroup". Different prose, one stream: `0x12` on both sides of the change.
 ///
-/// Draft-15's absence here was not a narrower guard but a silent one. Skipping
-/// the block admitted the elide instead of refusing it, so a hook removing
-/// index 0 of a draft-15 first-object stream handed the receiver a stream
-/// whose subgroup ID had become the second object's. The draft list the tests
-/// sweep carried the same omission, so no run ever asked.
-///
 /// **Nothing that checks this list may read it.** Two places state the same
 /// partition independently and are what a narrowing here contradicts: the
 /// `a_first_object_carrier_exists` in this module's tests, which names every
 /// draft in an exhaustive match, and the copy in `tests/action_matrix.rs`,
-/// transcribed from the drafts and driving end-to-end probes. Both cuts have
-/// been run — dropping draft-15, and narrowing to 17-19 — and each is caught
-/// by both. A test that took the fact from *here* instead passed under both.
+/// transcribed from the drafts and driving end-to-end probes.
 ///
 /// The restatement discipline above and the exhaustive match below answer two
 /// different failures and neither substitutes for the other: restatement
@@ -2069,10 +2046,9 @@ mod tests {
 
     /// The object site on a fetch stream: every cell, on every draft.
     ///
-    /// One column now, where there were two. A fetch stream is addressable on
-    /// every draft this build compiled, and the drafts that need the fetch's
-    /// Group Order to read one get it from the session rather than from the
-    /// table — see [`fetch_group_order_is_needed`].
+    /// A fetch stream is addressable on every draft this build compiled, and
+    /// the drafts that need the fetch's Group Order to read one get it from the
+    /// session rather than from the table — see [`fetch_group_order_is_needed`].
     #[test]
     fn object_site_on_fetch_streams_matches_the_published_table() {
         for draft in DRAFTS {
@@ -2571,19 +2547,6 @@ mod tests {
     /// - Drafts 15-23 encode the carrier in two bits with a fourth
     ///   combination none of them assigns, so a header can determine no
     ///   Subgroup ID for either reason and the mode is what separates them.
-    ///
-    /// *Ablation (measured):* return to naming only drafts 17, 18 and 19 in
-    /// `subgroup_id_mode_must_be_consulted`, which is the set it held while the
-    /// codec still resolved the fourth combination on 15 and 16:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: Draft15
-    ///   left: No(WouldRedefineSubgroupId)
-    ///  right: No(ReservedHeaderMode { mode: 3 })
-    /// ```
-    ///
-    /// The test above passes under that same ablation, which is why this one
-    /// is here.
     #[test]
     fn a_reserved_mode_is_answered_as_itself_wherever_a_header_can_carry_one() {
         for draft in compiled_drafts_where(|_| true) {
@@ -2624,17 +2587,10 @@ mod tests {
     /// A header that determines its own Subgroup ID frees index 0 on **every**
     /// draft, first-object carrier or not.
     ///
-    /// This swept only the drafts with no such carrier, taken from the
-    /// predicate under test, and asserted the one thing that is true of them —
-    /// which made it two tests' worth of blind spot for one test's worth of
-    /// claim. Narrowing the predicate narrowed the loop rather than failing a
-    /// row, and the drafts it added to the loop answered `Yes` anyway, because
-    /// a resolved Subgroup ID satisfies the guard on every draft that has one.
-    ///
-    /// That last sentence is the claim worth making, so the sweep is every
-    /// draft and the expected answer is one value. The contrast — refused
-    /// where the carrier exists, allowed where it does not — is
-    /// [`the_first_object_subgroup_guard_turns_on_the_stream_kind`], which
+    /// A resolved Subgroup ID satisfies the guard on every draft that has one,
+    /// so the sweep is every draft and the expected answer is one value. The
+    /// contrast — refused where the carrier exists, allowed where it does not
+    /// — is [`the_first_object_subgroup_guard_turns_on_the_stream_kind`], which
     /// states it per draft.
     #[test]
     fn a_resolved_subgroup_id_frees_the_first_object_on_every_draft() {
@@ -2668,18 +2624,7 @@ mod tests {
     ///
     /// The subgroup half takes which drafts have a first-object carrier from
     /// [`a_first_object_carrier_exists`] rather than from the predicate
-    /// `classify` consults. Reading it from that predicate made this test
-    /// agree with it whatever it said.
-    ///
-    /// *Ablation (measured):* narrow `has_implicit_subgroup_id_mode` to drafts
-    /// 17, 18 and 19. With the fact taken independently, this now fails on the
-    /// first draft that lost the guard:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: Draft11 subgroup
-    ///   left: Yes
-    ///  right: No(WouldRedefineSubgroupId)
-    /// ```
+    /// `classify` consults, so the test cannot agree with it whatever it says.
     #[test]
     fn the_first_object_subgroup_guard_turns_on_the_stream_kind() {
         for draft in compiled_drafts_where(|_| true) {
@@ -2795,9 +2740,7 @@ mod tests {
     ///
     /// The draft rows are written out rather than derived, so the claim is
     /// made against the draft numbers and not against the function under
-    /// test. *Ablation:* return anything but `Support::Yes` from
-    /// `classify_control` for the drafts named below and every one of
-    /// their rows goes red.
+    /// test.
     #[test]
     fn the_control_site_is_honoured_on_every_draft() {
         const UNI_CONTROL_PLANE: &[DraftVersion] = &[
@@ -2897,31 +2840,10 @@ mod tests {
     /// frame on the stream and `ProxyHook::on_control_message` is never
     /// offered one.
     ///
-    /// This cell published [`Support::Yes`] until the run had something
-    /// truthful to point at. It is the shape of documented lie this module
-    /// exists to prevent, and the reason it survived is worth keeping: the
-    /// honest verdict needs [`Support::Unreachable`]'s `instead`, and until
-    /// [`ImpairmentKind::ControlFrameNotDecodable`](crate::event::ImpairmentKind::ControlFrameNotDecodable)
-    /// existed there was nothing to put there.
-    ///
     /// Vacuous under `--all-features` and load-bearing under a reduced
     /// build, exactly like its sibling: `cargo test -p moqtap-proxy
     /// --no-default-features --features draft07 --lib capability::` is
     /// where every row but draft-07's takes the assertion.
-    ///
-    /// *Ablation (measured):* delete the `Site::Control` guard from
-    /// [`classify`]. Green under `--all-features`, and under
-    /// `--features draft07`:
-    ///
-    /// ```text
-    /// ---- capability::tests::the_control_site_is_unreachable_on_a_draft_this_build_did_not_compile stdout ----
-    /// assertion `left == right` failed: Draft08
-    ///   left: Yes
-    ///  right: Unreachable { refusal: ControlFrameNotDecodable, instead: ControlFrameNotDecodable }
-    /// ```
-    ///
-    /// `Yes` for a site this build cannot reach, on the first of the twelve
-    /// drafts it left out.
     #[test]
     fn the_control_site_is_unreachable_on_a_draft_this_build_did_not_compile() {
         for draft in DRAFTS {
@@ -2964,12 +2886,7 @@ mod tests {
     /// ones — `cargo test -p moqtap-proxy --no-default-features --features
     /// draft07 --lib capability::` is where every row but draft-07's takes
     /// the `else` branch. It is deliberately not vacuous in the all-drafts
-    /// build either: there it asserts that every row stayed `Yes`, which is
-    /// the claim that this fix changed nothing in the shipped default.
-    ///
-    /// *Ablation:* drop the `draft_is_compiled` guard from
-    /// [`object_framing_bypass`]. Green under `--all-features`, red under
-    /// `--features draft07` on all twelve uncompiled drafts.
+    /// build either: there it asserts that every row stayed `Yes`.
     ///
     /// `ProxySessionConfig::default().draft` is `Draft14` and nothing
     /// validates it against the compiled set, so the draft-14 row is the
@@ -3006,13 +2923,7 @@ mod tests {
     /// non-empty set. "Non-empty" is simply false under
     /// `--no-default-features`, which is a supported configuration — the
     /// codec compiles with no draft, CI has a row for it, and a consumer
-    /// vendoring one draft depends on that machinery — so a test asserting
-    /// it was asserting a defect into a row that has none. Stated as
-    /// agreement it runs, and bites, in all rows.
-    ///
-    /// *Ablation:* replace `draft_is_compiled`'s body with `false` — red in
-    /// the rows that compile a draft. With `true` — red in the
-    /// zero-draft row, which the previous wording could not reach at all.
+    /// vendoring one draft depends on that machinery.
     #[test]
     fn the_compiled_draft_set_agrees_with_the_enabled_features() {
         let compiled: Vec<DraftVersion> =
@@ -3045,7 +2956,7 @@ mod tests {
         );
     }
 
-    /// And the shipped default really is all of them, so the fix above is
+    /// And the shipped default really is all of them, so the guard above is
     /// inert in the configuration the acceptance suite runs under.
     #[cfg(feature = "all-drafts")]
     #[test]

@@ -28,33 +28,6 @@
 //! was of the announcement that is now over. Without that, a namespace
 //! cancelled once could never be announced and subscribed to again in the same
 //! session, which no draft asks for.
-//!
-//! # Ablations, measured
-//!
-//! Three cuts, each run against the two crates a change to `moqtap-client`
-//! can reach and then reverted. They partition the five gates one apiece,
-//! with nothing outside this file reddened and the other 167 binaries green.
-//!
-//! Removing the check, so a subscription for a cancelled namespace is taken:
-//!
-//! ```text
-//! the peer cancelled this namespace and then subscribed to it: ()
-//! ```
-//!
-//! Judging by the announcement's state machine instead of the record, so
-//! this endpoint's own UNANNOUNCE refuses the next subscription too:
-//!
-//! ```text
-//! Section 6.11 is about a cancel the peer sent, not a withdrawal this
-//! endpoint made: SubscribeAfterAnnounceCancel
-//! ```
-//!
-//! Never retiring the record, so a namespace announced again stays refused:
-//!
-//! ```text
-//! the cancel was of the announcement that is now over:
-//! SubscribeAfterAnnounceCancel
-//! ```
 
 use moqtap_client::draft07::endpoint::{Endpoint, EndpointError, Role};
 use moqtap_client::draft07::session::state::SessionState;
@@ -121,14 +94,6 @@ fn subscribe(id: u64, namespace: TrackNamespace) -> Subscribe {
 }
 
 /// A SUBSCRIBE for a cancelled namespace ends the session.
-///
-/// # What it catches
-///
-/// A SUBSCRIBE that is never judged against the cancel:
-///
-/// ```text
-/// the peer cancelled this namespace and then subscribed to it: ()
-/// ```
 #[test]
 fn a_subscribe_after_an_announce_cancel_closes_the_session() {
     let mut ep = announced();

@@ -228,17 +228,7 @@ mod draft17 {
     /// Section 9.3.8 names SUBSCRIBE_OK, PUBLISH, PUBLISH_OK and REQUEST_OK, and
     /// SUBSCRIBE is none of them.
     ///
-    /// # What it catches, observed by making the change and running it
-    ///
-    /// Returning `true` from every arm of draft-17's `parameter_in_scope`, which
-    /// is the state the codec was in before the table existed:
-    ///
-    /// ```text
-    /// ---- draft17::an_out_of_scope_parameter_ends_the_session stdout ----
-    ///
-    /// thread 'draft17::an_out_of_scope_parameter_ends_the_session' (8140) panicked at crates\moqtap-codec\tests\parameter_scope.rs:
-    /// EXPIRES is not named for SUBSCRIBE: Subscribe(Subscribe { request_id: VarInt(2), required_request_id_delta: VarInt(0), track_namespace: TrackNamespace([[108, 105, 118, 101]]), track_name: [118, 105, 100, 101, 111], parameters: [KeyValuePair { key: VarInt(8), value: Varint(VarInt(30)) }] })
-    /// ```
+    /// Fails if draft-17's `parameter_in_scope` returns `true` from every arm.
     #[test]
     fn an_out_of_scope_parameter_ends_the_session() {
         let carried = encoded(&subscribe(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));

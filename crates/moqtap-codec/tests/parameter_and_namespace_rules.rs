@@ -10,11 +10,6 @@
 //! that truncates a uint8 parameter — would show up in all three at once. A
 //! single file makes a draft that drifts out of line visible as a missing row
 //! rather than as a test nobody wrote.
-//!
-//! # What breaking each rule does, observed by making the change and running
-//!
-//! The observed output for each is in the docstring of the test that catches
-//! it; they are not predictions.
 
 #![cfg(all(
     feature = "draft17",
@@ -499,9 +494,9 @@ fn the_encoder_refuses_a_namespace_the_decoder_would_refuse() {
 /// Draft-16 says "between 1 and 32" instead, which is where the old lower
 /// bound came from and why the pre-17 decoder still applies it.
 ///
-/// Refusing it was also an encode/decode disagreement: `encode_moqt` writes a
-/// zero field count without complaint, so the codec emitted a namespace it would
-/// not read.
+/// Refusing it would also be an encode/decode disagreement: `encode_moqt` writes
+/// a zero field count without complaint, so the codec would emit a namespace it
+/// would not read.
 #[test]
 fn a_namespace_of_zero_fields_is_accepted_on_drafts_17_and_later() {
     // draft-18 SUBSCRIBE with a zero-field namespace.

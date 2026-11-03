@@ -327,10 +327,6 @@ fn leading_varint_len(draft: DraftVersion, raw: &[u8]) -> usize {
 /// An object re-emitted after the object it originally followed must come
 /// out byte-identical, on every draft: the absolute drafts never touch the
 /// ID field and the delta drafts recompute the same delta.
-///
-/// *Ablation:* delete the `encoded == &raw[..id_bytes_before]` short-circuit
-/// in `reemit_subgroup_object` so the rewrite path always runs; drafts 14-23
-/// must fail on the returned `Reemit`.
 fn reemit_is_verbatim_without_an_elide(header: &AnySubgroupHeader) {
     let draft = header.draft();
     let objects = objects(&[], None);
@@ -354,10 +350,6 @@ fn reemit_is_verbatim_without_an_elide(header: &AnySubgroupHeader) {
 /// Drafts 14-23 only: on 07-13 the ID field is absolute and an elide costs
 /// nothing at all, which is what `reemit_is_verbatim_without_an_elide`
 /// already pins there.
-///
-/// *Ablation:* make `reemit_subgroup_object` copy `raw` verbatim on drafts
-/// 14-20 as well; the reconstructed stream decodes to `[0, 1, 2, 4]` instead
-/// of `[0, 1, 3, 4]` and the test must fail.
 #[allow(dead_code)]
 fn reemit_rewrites_the_leading_varint(header: &AnySubgroupHeader) {
     let draft = header.draft();
@@ -412,15 +404,6 @@ fn reemit_rewrites_the_leading_varint(header: &AnySubgroupHeader) {
 /// prefix of an object provided the whole leading Object ID field is there;
 /// everything after it is copied byte-for-byte and no length field is ever
 /// read, let alone checked against `raw.len()`.
-///
-/// *Ablation:* the obvious form — `if raw.len() < wire_len { return
-/// Err(..) }` — is not expressible here, because
-/// `reemit_subgroup_object` is handed no `wire_len`. The form actually run
-/// is therefore the completeness walk a mistaken
-/// implementer would write instead: after the ID field, read each following
-/// varint as a byte count and require that many bytes to be present. Ran it;
-/// all 13 `reemit_accepts_a_prefix_of_the_object` tests failed and nothing
-/// else did.
 fn reemit_accepts_a_prefix(header: &AnySubgroupHeader) {
     let draft = header.draft();
     let objects = wide_objects();
@@ -471,13 +454,10 @@ fn reemit_accepts_a_prefix(header: &AnySubgroupHeader) {
 /// Two objects on a subgroup stream can never share an ID, so no valid
 /// re-emission exists for one that does not advance.
 ///
-/// *Ablation:* delete the `object_id <= prev` guard at the top of
-/// `reemit_subgroup_object`. Ran it; drafts 07-13 failed. It is a **no-op on
-/// drafts 14-23**, and deliberately so: there the delta is `id - prev - 1`,
-/// so a repeated or decreasing ID underflows `checked_sub` and the same
-/// `InvalidField` comes back from the arithmetic. The guard is load-bearing
-/// only on the seven absolute drafts, which is exactly where the ablation
-/// bites.
+/// On drafts 07-13 the `object_id <= prev` guard in `reemit_subgroup_object`
+/// refuses it. On drafts 14-23 the delta is `id - prev - 1`, so a repeated or
+/// decreasing ID underflows `checked_sub` and the same `InvalidField` comes
+/// back from the arithmetic.
 fn reemit_rejects_non_increasing(header: &AnySubgroupHeader) {
     let draft = header.draft();
     let objects = objects(&[], None);
@@ -499,17 +479,6 @@ fn reemit_rejects_non_increasing(header: &AnySubgroupHeader) {
 /// wire framing, on every draft. Nothing follows it, so a caller that has
 /// `wire_len` and `payload_length` can locate the payload without a
 /// per-draft offset table — the invariant a payload replacement rests on.
-///
-/// This is an invariant pin rather than a regression fence, so no ablation
-/// was prescribed for it. Two were run. Subtracting `payload_length` from
-/// the reported `wire_len` fails this test but also fails `stream_framing`
-/// on every draft it touches, so it does not show the test measures anything
-/// new. The discriminating one does: give draft-07's glue a one-byte
-/// trailing field after the payload — written by `write_object`, consumed by
-/// both readers — and the encode/decode round trip, `wire_len` and
-/// `read_object_meta` all stay self-consistent while the payload stops being
-/// the trailing bytes. Ran it; `draft07::stream_framing` passed and only
-/// `draft07::the_payload_is_the_trailing_payload_length_bytes` failed.
 fn payload_is_the_trailing_bytes(header: &AnySubgroupHeader, objects: &[AnySubgroupObject]) {
     let draft = header.draft();
     let (wire, metas) = framed(header, objects);
@@ -1148,18 +1117,8 @@ fn read_fetch_stream(header: &AnyFetchHeader, wire: &[u8]) -> Vec<AnyFetchObject
 /// zero payload length, so the status has to survive the trip through the
 /// dispatch layer as well as the identities.
 ///
-/// Reporting `Normal` for every status object instead of the code the wire
-/// carried — `header.object_status.map(|_| ObjectStatus::Normal.as_u64())` in
-/// `fo15::read_object`, in `src/data_dispatch.rs` — fails with:
-///
-/// ```text
-/// assertion `left == right` failed: draft-15 fetch objects must resolve to absolute identities and keep their status
-///   left: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: Some(0), end_of_range: None, payload: [] }, AnyFetchObject { group_id: 2, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: Some(0), end_of_range: None, payload: [] }]
-///  right: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: Some(3), end_of_range: None, payload: [] }, AnyFetchObject { group_id: 2, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: Some(0), end_of_range: None, payload: [] }]
-/// ```
-///
-/// Only the second object moves: the third's status is Normal already, which
-/// is why the stream carries two status objects rather than one.
+/// Fails if the dispatch layer reports `Normal` for every status object
+/// instead of the code the wire carried.
 #[cfg(feature = "draft15")]
 #[test]
 fn fetch_objects_draft15_resolve_against_the_prior_object() {
@@ -1425,19 +1384,10 @@ fn fetch_objects_draft18_resolve_deltas_against_the_prior_object() {
 /// Draft-19 Section 11.4.4.1: "If the Group Order is Ascending, the Group ID is
 /// the prior Object's Group ID plus the Group ID Delta + 1."
 ///
-/// Dropping that `+ 1` from the Ascending arm of `fo19::State::resolve`, in
-/// `src/data_dispatch.rs`, leaves the third object in the group it was meant to
-/// leave and fails with:
-///
-/// ```text
-/// assertion `left == right` failed: draft-19 fetch objects must resolve their deltas to absolute identities
-///   left: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }]
-///  right: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }, AnyFetchObject { group_id: 2, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }]
-/// ```
-///
-/// The byte pin above is what makes that a wrong answer rather than a different
-/// question: the same third object on draft-17 states its group outright and is
-/// unaffected, which is the whole reason these two drafts get separate tests.
+/// Fails if the Ascending arm of `fo19::State::resolve` drops that `+ 1`,
+/// which leaves the third object in the group it was meant to leave. On
+/// draft-17 the same third object states its group outright, which is why
+/// these drafts get separate tests.
 #[cfg(feature = "draft19")]
 #[test]
 fn fetch_objects_draft19_resolve_deltas_against_the_prior_object() {
@@ -1504,19 +1454,10 @@ fn fetch_objects_draft19_resolve_deltas_against_the_prior_object() {
 /// Draft-19 Section 11.4.4.1: "If the Group Order is Ascending, the Group ID is
 /// the prior Object's Group ID plus the Group ID Delta + 1."
 ///
-/// Dropping that `+ 1` from the Ascending arm of `fo19::State::resolve`, in
-/// `src/data_dispatch.rs`, leaves the third object in the group it was meant to
-/// leave and fails with:
-///
-/// ```text
-/// assertion `left == right` failed: draft-20 fetch objects must resolve their deltas to absolute identities
-///   left: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }]
-///  right: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }, AnyFetchObject { group_id: 2, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }]
-/// ```
-///
-/// The byte pin above is what makes that a wrong answer rather than a different
-/// question: the same third object on draft-17 states its group outright and is
-/// unaffected, which is the whole reason these drafts get separate tests.
+/// Fails if the Ascending arm of `fo19::State::resolve` drops that `+ 1`,
+/// which leaves the third object in the group it was meant to leave. On
+/// draft-17 the same third object states its group outright, which is why
+/// these drafts get separate tests.
 /// Draft-20 keeps draft-19's fetch object layout unchanged, so the same bytes
 /// and the same answer stand for it — which is a claim worth a test rather
 /// than an assumption, since the FETCH *message* around them was rewritten.
@@ -1585,19 +1526,10 @@ fn fetch_objects_draft20_resolve_deltas_against_the_prior_object() {
 /// Draft-19 Section 11.4.4.1: "If the Group Order is Ascending, the Group ID is
 /// the prior Object's Group ID plus the Group ID Delta + 1."
 ///
-/// Dropping that `+ 1` from the Ascending arm of `fo19::State::resolve`, in
-/// `src/data_dispatch.rs`, leaves the third object in the group it was meant to
-/// leave and fails with:
-///
-/// ```text
-/// assertion `left == right` failed: draft-21 fetch objects must resolve their deltas to absolute identities
-///   left: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }]
-///  right: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }, AnyFetchObject { group_id: 2, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }]
-/// ```
-///
-/// The byte pin above is what makes that a wrong answer rather than a different
-/// question: the same third object on draft-17 states its group outright and is
-/// unaffected, which is the whole reason these drafts get separate tests.
+/// Fails if the Ascending arm of `fo19::State::resolve` drops that `+ 1`,
+/// which leaves the third object in the group it was meant to leave. On
+/// draft-17 the same third object states its group outright, which is why
+/// these drafts get separate tests.
 /// Draft-21 keeps draft-19's fetch object layout unchanged, so the same bytes
 /// and the same answer stand for it — which is a claim worth a test rather
 /// than an assumption, since the FETCH *message* around them was rewritten.
@@ -1667,19 +1599,10 @@ fn fetch_objects_draft21_resolve_deltas_against_the_prior_object() {
 /// Draft-19 Section 11.4.4.1: "If the Group Order is Ascending, the Group ID is
 /// the prior Object's Group ID plus the Group ID Delta + 1."
 ///
-/// Dropping that `+ 1` from the Ascending arm of `fo19::State::resolve`, in
-/// `src/data_dispatch.rs`, leaves the third object in the group it was meant to
-/// leave and fails with:
-///
-/// ```text
-/// assertion `left == right` failed: draft-22 fetch objects must resolve their deltas to absolute identities
-///   left: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }]
-///  right: [AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 3, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [202, 254] }, AnyFetchObject { group_id: 1, subgroup_id: 2, has_subgroup_id: true, object_id: 4, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }, AnyFetchObject { group_id: 2, subgroup_id: 2, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [] }]
-/// ```
-///
-/// The byte pin above is what makes that a wrong answer rather than a different
-/// question: the same third object on draft-17 states its group outright and is
-/// unaffected, which is the whole reason these drafts get separate tests.
+/// Fails if the Ascending arm of `fo19::State::resolve` drops that `+ 1`,
+/// which leaves the third object in the group it was meant to leave. On
+/// draft-17 the same third object states its group outright, which is why
+/// these drafts get separate tests.
 /// Draft-22 keeps draft-19's fetch object layout unchanged, so the same bytes
 /// and the same answer stand for it — which is a claim worth a test rather
 /// than an assumption, since the FETCH *message* around them was rewritten.

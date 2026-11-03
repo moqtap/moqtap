@@ -39,14 +39,6 @@ macro_rules! allocator_suite {
             ///
             /// Four IDs rather than one, because a step of one is right about
             /// the first ID on both sides and wrong about every one after it.
-            ///
-            /// Stepping by one instead fails with:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: a client allocates the even IDs
-            ///   left: [0, 1, 2, 3]
-            ///  right: [0, 2, 4, 6]
-            /// ```
             #[test]
             fn each_role_allocates_its_own_half_of_the_id_space() {
                 let mut client = granted(Role::Client);
@@ -64,15 +56,6 @@ macro_rules! allocator_suite {
             /// against a hand-written list, so a parity inverted in both the
             /// allocator and the validator at once - which would let an
             /// implementation talk to itself and to nothing else - still fails.
-            ///
-            /// Inverting the expected parity in `validate_peer_id` fails
-            /// with:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: a Client refused 1, which a Server allocates
-            ///   left: Err(WrongParity(1, Server))
-            ///  right: Ok(())
-            /// ```
             #[test]
             fn each_role_accepts_only_the_ids_the_other_role_allocates() {
                 for (role, peer_role) in
@@ -115,14 +98,6 @@ macro_rules! ceiling_suite {
             /// request ID "equal to or larger than this" closes the session
             /// with Too Many Requests. So a ceiling of 4 leaves a client the
             /// two IDs 0 and 2, and 4 itself is the first it may not send.
-            ///
-            /// Making the comparison inclusive fails with:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: 4 is the ceiling itself, which the draft refuses
-            ///   left: Ok(4)
-            ///  right: Err(Blocked)
-            /// ```
             #[test]
             fn the_ceiling_is_exclusive() {
                 let mut alloc = RequestIdAllocator::new(Role::Client);
@@ -151,12 +126,6 @@ macro_rules! ceiling_suite {
             /// session. The ceiling starts at 0, so 0 is not a legal first
             /// advertisement either - there is no opening case in which a
             /// repeat is allowed.
-            ///
-            /// Exempting the opening value from the check fails with:
-            ///
-            /// ```text
-            /// 0 is the value the ceiling already has
-            /// ```
             #[test]
             fn an_advertised_ceiling_must_strictly_increase_from_the_first_message() {
                 let mut endpoint = Endpoint::new(Role::Client);
@@ -175,18 +144,6 @@ macro_rules! ceiling_suite {
             /// endpoint advertised, never the one the peer granted us. The two
             /// are different numbers, and an endpoint that has advertised
             /// nothing refuses every peer ID.
-            ///
-            /// Measuring against the allocator's own `max_id` instead fails
-            /// with:
-            ///
-            /// ```text
-            /// 1 is below the ceiling
-            /// ```
-            ///
-            /// which is the second assertion rather than the first: an
-            /// allocator that was never granted anything also has a ceiling of
-            /// 0, so swapping the two numbers still refuses everything at the
-            /// start and only diverges once one of them moves.
             #[test]
             fn peer_ids_are_measured_against_what_this_endpoint_advertised() {
                 let mut endpoint = Endpoint::new(Role::Client);
@@ -224,12 +181,6 @@ macro_rules! subscribe_id_ceiling_suite {
             /// and receipt of a MAX_SUBSCRIBE_ID message with an equal or
             /// smaller Subscribe ID value is a 'Protocol Violation'." The
             /// starting value is 0, so 0 is not a legal first advertisement.
-            ///
-            /// Exempting the opening value from the check fails with:
-            ///
-            /// ```text
-            /// 0 is the value the ceiling already has
-            /// ```
             #[test]
             fn an_advertised_ceiling_must_strictly_increase_from_the_first_message() {
                 // Built through `Default` rather than `new`, because these four

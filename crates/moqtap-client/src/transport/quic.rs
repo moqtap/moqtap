@@ -533,10 +533,8 @@ pub enum DialError {
 /// # The caller cannot supply this itself
 ///
 /// It knows which *call* it made, not which stage inside the call died — and
-/// the four stages above live inside one call. A probe recording "handshake"
-/// for every failure of `dial_quic_to` is not being careless; it has nothing
-/// finer to say until this exists. The one thing it does know that this cannot
-/// is which transport it was dialling, which is why
+/// the four stages above live inside one call. The one thing it does know that
+/// this cannot is which transport it was dialling, which is why
 /// [`Handshake`](Self::Handshake) does not distinguish a QUIC handshake from a
 /// WebTransport CONNECT: both are a peer answering, and only the caller knows
 /// which it asked.
@@ -838,8 +836,7 @@ pub async fn dial_quic_to(
     // Bind in the target's address family. A socket bound to `0.0.0.0` cannot
     // send to a v6 peer, and quinn reports that as `invalid remote address` —
     // which reads like the address was malformed when it was only unreachable
-    // from the socket we opened. Measured against a dual-stack relay whose
-    // first resolved address was v6.
+    // from the socket we opened.
     let bind: SocketAddr = match server_addr {
         SocketAddr::V4(_) => (Ipv4Addr::UNSPECIFIED, 0).into(),
         SocketAddr::V6(_) => (Ipv6Addr::UNSPECIFIED, 0).into(),
@@ -867,8 +864,7 @@ pub async fn dial_quic_to(
 
 /// Resolve `addr` and dial the first address that answers.
 ///
-/// Keeps the signature every draft module's `connect_quic` already calls, so
-/// every draft module reaches this resolution without any of them being touched.
+/// Keeps the signature every draft module's `connect_quic` calls.
 ///
 /// Why it resolves rather than parses: `addr.parse::<SocketAddr>()` accepts
 /// numeric literals and nothing else, so every hostname fails with `invalid

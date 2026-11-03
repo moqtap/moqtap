@@ -41,9 +41,7 @@
 //!
 //! The set of registries is compared too. Each draft's list below is required
 //! to name every registry its extraction carries, so a revision that adds one
-//! cannot arrive with nothing comparing it — which is the shape this gate was
-//! in for drafts 07 through 16, whose extractions existed and were read by
-//! nothing.
+//! cannot arrive with nothing comparing it.
 //!
 //! # Names are compared too, and the drafts do not spell them the same way
 //!
@@ -167,12 +165,12 @@ const DRAFTS: [u64; 17] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 
 /// variant just past the end would go unseen.
 ///
 /// It bounds the sweep and nothing else. Each registry also declares its own
-/// set as an `ALL` const, and the two claims that could once only be sampled
-/// are made against that: a declaration above the ceiling stops the test rather
-/// than being swept past, and the greasing range is answered by arithmetic over
-/// every declared code point rather than by looking a few members up. What is
-/// left outside is one shape — a `from_u64` arm above the ceiling that no `ALL`
-/// declares, undeclared and out of the sweep's reach at once.
+/// set as an `ALL` const, and two claims are made against that: a declaration
+/// above the ceiling stops the test rather than being swept past, and the
+/// greasing range is answered by arithmetic over every declared code point
+/// rather than by looking a few members up. What is left outside is one shape —
+/// a `from_u64` arm above the ceiling that no `ALL` declares, undeclared and
+/// out of the sweep's reach at once.
 const CEILING: u64 = 0xFFFF;
 
 // ── The extracted draft ───────────────────────────────────────
@@ -335,8 +333,8 @@ fn reserved_greasing_row(reg: &Value) {
 /// drafts' reserved rows — would let a reservation appear in an extraction with
 /// no test either enforcing it or refusing it.
 ///
-/// Its ablation is [`greasing_era`]'s second one: moving the boundary up sends
-/// a draft that does reserve the range down this path.
+/// Fails if [`greasing_era`]'s boundary moves up: a draft that does reserve the
+/// range is then sent down this path.
 fn no_reserved_rows(draft: u64, reg: &Value) {
     let rows = reg["rows"].as_array().expect("registry has no rows array");
     let reserved: Vec<String> = rows
@@ -1081,7 +1079,7 @@ fn the_extracted_drafts_are_distinguishable_from_each_other() {
 /// the normalization is of the reason text. Both are compared the same way, so
 /// nothing above can tell which it got.
 ///
-/// That is worth pinning, because the degradation it protects against is
+/// That is worth pinning, because the failure it protects against is
 /// silent: an extraction that stopped taking the names from draft-19's
 /// definition list would fall back to normalizing prose, and the two agree
 /// today on every row — `INTERNAL_ERROR` the symbol and `Internal Error` the

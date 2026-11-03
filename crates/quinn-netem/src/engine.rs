@@ -679,8 +679,8 @@ const fn stream_ids(direction: Direction) -> [u64; 6] {
 /// silently-broken impairer produces. It is safe here for two reasons and only
 /// these two. No production path constructs a `Decision` by `Default`:
 /// [`Impairer::decide`] returns one by value on every branch. And a fixture
-/// blessed from a defaulting engine is what a coverage precondition over the
-/// verdicts reddens on, before any behaviour is compared.
+/// blessed from a defaulting engine fails a coverage precondition over the
+/// verdicts, before any behaviour is compared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Decision {
     /// What happened to the datagram.

@@ -918,14 +918,6 @@ fn endpoint_mixed_flows_allocate_distinct_even_ids() {
 /// the range it was given. The gate drives the message all the way to bytes,
 /// because the claim is not that the helper returned `Ok`, it is that a peer
 /// can read what it returned.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Dropping the guard from `Endpoint::subscribe`:
-///
-/// ```text
-/// AbsoluteStart names a start location this call cannot carry: Ok((VarInt(0), Subscribe(Subscribe { request_id: VarInt(0), track_namespace: TrackNamespace([[110, 115]]), track_name: [116], subscriber_priority: 0, group_order: Publisher, forward: Forward, filter_type: AbsoluteStart, start_location: None, end_group: None, parameters: [] })))
-/// ```
 #[test]
 fn endpoint_subscribe_refuses_a_filter_it_cannot_carry() {
     for filter in [FilterType::AbsoluteStart, FilterType::AbsoluteRange] {

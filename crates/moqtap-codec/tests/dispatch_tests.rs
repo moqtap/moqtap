@@ -266,32 +266,9 @@ fn any_subgroup_header_draft07_round_trip() {
 /// elide the first object of it. Drafts 17-23 answer `None` for the same
 /// combination, so it would also split the answer across drafts that agree on
 /// the bytes.
-///
-/// *Ablation (measured):* drop the unassigned arm, so both drafts reach
-/// `Some(0)` again:
-///
-/// ```text
-/// assertion `left == right` failed: draft-15 determines no Subgroup ID from a type Table 6 does not assign
-///   left: Some(0)
-///  right: None
-/// ```
-///
-/// *Ablation (measured, and since made unreproducible — recorded for what it
-/// caught):* keep the arm but test it after `has_explicit_subgroup_id()`
-/// instead of before. When this test was written draft-15 passed and draft-16
-/// did not, because draft-16 read its two mode bits one at a time and so
-/// answered `true` for `0x16`, where draft-15 read them together and answered
-/// `false`:
-///
-/// ```text
-/// assertion `left == right` failed: draft-16 determines no Subgroup ID from its reserved SUBGROUP_ID_MODE
-///   left: Some(0)
-///  right: None
-/// ```
-///
-/// Draft-16 now reads the pair, so both orders pass and the ordering is no
-/// longer load-bearing. What that ablation showed is still the reason to keep
-/// this test two drafts wide: the two drafts describe one wire format in
+/// The test stays two drafts wide because the two drafts describe one wire
+/// format in different words, and a gate on either alone stops checking that
+/// they agree.
 /// different words, and a gate on either alone stops checking that they agree.
 #[cfg(any(feature = "draft15", feature = "draft16"))]
 #[test]
@@ -661,8 +638,8 @@ fn check_header_refused(version: DraftVersion, what: &str, header_type: u8) {
 /// Drafts 07-10: the subgroup ID is always an explicit varint, and the
 /// stream type (0x04) precedes the header body.
 ///
-/// *Ablation:* return `None` from `subgroup_id()` on these drafts, or read
-/// `group_id` where `track_alias` belongs; must fail.
+/// Fails if `subgroup_id()` returns `None` on these drafts, or if `group_id`
+/// is read where `track_alias` belongs.
 macro_rules! legacy_accessor_tests {
     ($name:ident, $feat:literal, $variant:ident) => {
         #[cfg(feature = $feat)]
@@ -703,8 +680,8 @@ legacy_accessor_tests!(subgroup_accessors_draft10, "draft10", Draft10);
 /// first object's ID, and an explicit varint. The three type bytes moved
 /// between draft-11 and draft-12, so they are parameters.
 ///
-/// *Ablation:* drop the first-object arm from `subgroup_id()` so it reports
-/// the decoder's placeholder zero; must fail.
+/// Fails if `subgroup_id()` drops the first-object arm and reports the
+/// decoder's placeholder zero.
 macro_rules! stream_typed_accessor_tests {
     ($name:ident, $feat:literal, $variant:ident, $zero:expr, $first:expr, $explicit:expr) => {
         #[cfg(feature = $feat)]
@@ -758,9 +735,8 @@ stream_typed_accessor_tests!(subgroup_accessors_draft13, "draft13", Draft13, 0x1
 /// object on the stream — and bit 1 only means anything when bit 2 is
 /// clear, which is the guard the uniform accessor imposes on every draft.
 ///
-/// *Ablation:* key `subgroup_id()` off bit 1 alone, ignoring bit 2; the
-/// `first object's id` case still passes, so ablate by swapping the
-/// explicit and first-object arms — the `explicit` case must fail.
+/// The `explicit` case fails if `subgroup_id()` swaps the explicit and
+/// first-object arms.
 #[cfg(feature = "draft14")]
 mod subgroup_accessors_draft14 {
     use super::*;
@@ -821,14 +797,8 @@ mod subgroup_accessors_draft14 {
 /// first-object mode, where the ID is not on the wire and `subgroup_id()` must
 /// answer `None`; `0x18` is the end-of-group type.
 ///
-/// *Ablation:* read the end-of-group marker at `0x02`; the `first object`
-/// case reports `Some(0)` where it must report `None`, and fails with:
-///
-/// ```text
-/// assertion `left == right` failed: Draft15 [first object]: subgroup_id
-///   left: Some(0)
-///  right: None
-/// ```
+/// Fails if the end-of-group marker is read at `0x02`: the `first object`
+/// case then reports `Some(0)` where it must report `None`.
 #[cfg(feature = "draft15")]
 mod subgroup_accessors_draft15 {
     use super::*;
@@ -909,21 +879,10 @@ mod subgroup_accessors_draft15 {
     /// `0x3F` name no stream. Section 10 requires closing the session on a
     /// stream type the draft does not define.
     ///
-    /// Accepting one was not inert, and the observed ablation shows why more
-    /// clearly than the argument does. Mode `0b11` is neither explicit nor
-    /// first-object, so the decoder reads no Subgroup ID field and then takes
-    /// the *next* byte as the publisher priority — the byte the sender wrote as
-    /// the Subgroup ID. Every field after it is off by one.
-    ///
-    /// *Ablation:* drop the mode check from `subgroup_type_is_assigned`, and
-    /// this fails with:
-    ///
-    /// ```text
-    /// draft-15 reserved subgroup type 0x16 was accepted: Ok(SubgroupHeader { header_type: 22, track_alias: VarInt(7), group_id: VarInt(9), subgroup_id: VarInt(0), publisher_priority: Some(42) })
-    /// ```
-    ///
-    /// `subgroup_id` is 0 and `publisher_priority` is 42 — the 42 was written
-    /// as the Subgroup ID.
+    /// Accepting one is not inert. Mode `0b11` is neither explicit nor
+    /// first-object, so a decoder that accepts it reads no Subgroup ID field
+    /// and then takes the *next* byte as the publisher priority — the byte the
+    /// sender wrote as the Subgroup ID. Every field after it is off by one.
     #[test]
     fn reserved_subgroup_id_mode_is_refused() {
         use moqtap_codec::draft15::data_stream::SubgroupHeader;
@@ -955,23 +914,12 @@ mod subgroup_accessors_draft15 {
     /// only way to hold it, and a caller holding one is the case this accessor
     /// exists for.
     ///
-    /// *Ablation (measured):* answer `None` from the drafts 15-16 arm of
-    /// `subgroup_id_mode` — that is, put the two drafts in the arm that
-    /// reports nothing:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the first-object carrier must be distinguishable from the combination the draft assigns nothing
-    ///   left: None
-    ///  right: Some(1)
-    /// ```
-    ///
-    /// Four tests fail under it, not one: the case tables above fail too, on
-    /// the first mode they state. They are the wider fence and this is the
-    /// sharper one — a table row says the accessor reports the mode it should,
-    /// and this says the report is what separates two headers that would
-    /// otherwise be one. Neither implies the other, because a case table can
-    /// only name types the decoder returns, and the type this test needs is
-    /// one it refuses.
+    /// Fails if `subgroup_id_mode` answers `None` on drafts 15-16. The case
+    /// tables above are the wider fence and this is the sharper one — a table
+    /// row says the accessor reports the mode it should, and this says the
+    /// report is what separates two headers that would otherwise be one.
+    /// Neither implies the other, because a case table can only name types the
+    /// decoder returns, and the type this test needs is one it refuses.
     #[test]
     fn the_mode_separates_the_two_headers_that_determine_no_subgroup_id() {
         use moqtap_codec::draft15::data_stream::SubgroupHeader;
@@ -1030,20 +978,11 @@ mod subgroup_accessors_draft15 {
 /// regression in it: refusals say nothing about what a valid header reports,
 /// and the case list cannot name a type the decoder will not return.
 ///
-/// *Ablation:* drop the reserved-mode arm from `subgroup_type_is_valid`, so
-/// mode `0b11` decodes again. The refusal sweep fails on the first of the
-/// eight:
-///
-/// ```text
-/// Draft16 [reserved subgroup ID mode]: header type 0x16 written as [16, 07, 09, 80] must be refused as a Type the draft lists as invalid, got Err(VarInt(UnexpectedEnd))
-/// ```
-///
-/// The shape of that failure is the reason the arm exists. Mode `0b11` states
-/// no Subgroup ID and gives no rule for deriving one, and draft-16's decoder
-/// reads an explicit one when bit 2 is set — which `0x16` sets — so it takes
-/// the next byte, the publisher priority, as a field the header never carried.
-/// Every field after it shifts, and the header runs off the end of a fixture
-/// that was complete.
+/// The refusal sweep fails if `subgroup_type_is_valid` lets mode `0b11`
+/// decode. Mode `0b11` states no Subgroup ID and gives no rule for deriving
+/// one, and draft-16's decoder reads an explicit one when bit 2 is set — which
+/// `0x16` sets — so it takes the next byte, the publisher priority, as a field
+/// the header never carried, and every field after it shifts.
 #[cfg(feature = "draft16")]
 mod subgroup_accessors_draft16 {
     use super::*;
@@ -1169,22 +1108,13 @@ mod subgroup_accessors_draft16 {
 /// deriving one, so decoding it can only invent a value; refusing it is what
 /// keeps `subgroup_id()`'s `Some(0)` meaning a zero the header stands behind.
 ///
-/// *Ablation:* drop the reserved-mode arm of the per-draft type check, so
-/// `0x16` and its fellows decode again. Run on all three drafts, this gives:
+/// The refusal sweep fails if the per-draft type check lets `0x16` and its
+/// fellows decode: each draft then hands up `subgroup_id: VarInt(0)` from four
+/// bytes of header with no Subgroup ID among them, a zero a caller cannot tell
+/// from the zero mode 0 states outright.
 ///
-/// ```text
-/// Draft17 [reserved subgroup ID mode]: header type 0x16 written as [16, 07, 09, 80] must be refused as a Type the draft lists as invalid, got Ok(Draft17(SubgroupHeader { header_type: 22, track_alias: VarInt(7), group_id: VarInt(9), subgroup_id: VarInt(0), publisher_priority: Some(128) }))
-/// Draft18 [reserved subgroup ID mode]: header type 0x16 written as [16, 07, 09, 80] must be refused as a Type the draft lists as invalid, got Ok(Draft18(SubgroupHeader { header_type: 22, track_alias: VarInt(7), group_id: VarInt(9), subgroup_id: VarInt(0), publisher_priority: Some(128) }))
-/// Draft19 [reserved subgroup ID mode]: header type 0x16 written as [16, 07, 09, 80] must be refused as a Type the draft lists as invalid, got Ok(Draft19(SubgroupHeader { header_type: 22, track_alias: VarInt(7), group_id: VarInt(9), subgroup_id: VarInt(0), publisher_priority: Some(128) }))
-/// ```
-///
-/// The `subgroup_id: VarInt(0)` in each is the whole point: four bytes of
-/// header, no Subgroup ID among them, and a zero handed up regardless — one
-/// a caller cannot tell from the zero mode 0 states outright.
-///
-/// *Second ablation:* return `None` from `subgroup_id_mode()` on these
-/// drafts — that is, leave the per-draft accessor unwritten and the
-/// module-private mask unreadable; every mode case must fail.
+/// Every mode case fails if `subgroup_id_mode()` answers `None` on these
+/// drafts.
 macro_rules! modal_accessor_tests {
     ($name:ident, $feat:literal, $variant:ident, [$($reserved:expr),+ $(,)?]) => {
         #[cfg(feature = $feat)]

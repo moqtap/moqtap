@@ -4512,21 +4512,6 @@ mod tests {
 
     /// Draft-22 Table 5 gives REQUEST_UPDATE the Stream value "Request", and
     /// Section 9.5 has it sent "on the same bidi stream as the request".
-    ///
-    /// Before the placement was corrected the control stream accepted it and
-    /// the request stream refused it. Routing the request-stream case back
-    /// through the catch-all arm produces, at the first call below:
-    ///
-    /// ```text
-    /// called `Result::unwrap()` on an `Err` value: ResponseOnControlStream
-    /// ```
-    ///
-    /// and leaving the control-stream arm in place produces, at the assertion
-    /// after it:
-    ///
-    /// ```text
-    /// assertion failed: matches!(err, EndpointError::RequestUpdateOnControlStream)
-    /// ```
     #[test]
     fn a_request_update_belongs_on_its_request_stream_and_not_the_control_stream() {
         let mut ep = active(Role::Client);
@@ -4559,20 +4544,6 @@ mod tests {
     /// stream and refuses them on the request stream, so a conforming peer
     /// sending NAMESPACE on the SUBSCRIBE_NAMESPACE stream that asked for it
     /// would have its announcement dropped.
-    ///
-    /// Adding control-stream arms (`Namespace(ref m) =>
-    /// self.receive_namespace(m)` and its two siblings) fails this test at the
-    /// second half with:
-    ///
-    /// ```text
-    /// NAMESPACE must be refused on the control stream: Ok(())
-    /// ```
-    ///
-    /// and removing the request-stream arms fails it at the first half with:
-    ///
-    /// ```text
-    /// NAMESPACE belongs on a request stream: ResponseOnControlStream
-    /// ```
     #[test]
     fn namespace_and_publish_skipped_belong_on_a_request_stream() {
         /// A message name paired with a way to build a fresh one, since each
@@ -4636,14 +4607,6 @@ mod tests {
     /// other than in the two cases above MUST close the session with a
     /// PROTOCOL_VIOLATION." Section 9.13 names TRACK_STATUS as one such case:
     /// "the subscriber cannot send REQUEST_UPDATE."
-    ///
-    /// A handler that consulted only `subscriptions`, answering both of these
-    /// with a recoverable per-request error that leaves the session running,
-    /// gives at the first assertion below:
-    ///
-    /// ```text
-    /// unknown request ID: 40
-    /// ```
     #[test]
     fn a_request_update_naming_a_non_updatable_request_closes_the_session() {
         // An id nothing was ever issued under.
@@ -4664,20 +4627,6 @@ mod tests {
     /// sender of a request (SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE,
     /// SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS) can later send a REQUEST_UPDATE
     /// on the same bidi stream as the request to modify it."
-    ///
-    /// # What it catches
-    ///
-    /// Removing the five-map lookup, so that only a SUBSCRIBE resolves:
-    ///
-    /// ```text
-    /// request 3 should be updatable: REQUEST_UPDATE for request 3, which is
-    /// not an updatable outstanding request
-    /// ```
-    ///
-    /// That cut is not evidence for this gate on its own. It reddens
-    /// twenty-eight tests across the crate, because every update on a fetch or
-    /// a namespace request comes through the same lookup — which makes it a
-    /// poor ablation and a fair measure of how much rests on the line.
     #[test]
     fn an_update_from_the_requester_resolves_against_every_request_kind() {
         let mut ep = active(Role::Client);
@@ -4729,20 +4678,6 @@ mod tests {
     /// nothing said about the answer, and five of the six kinds it names are
     /// not subscriptions at all. Both halves are here so that the asymmetry is
     /// the thing asserted rather than a side effect of one of them.
-    ///
-    /// # What it catches
-    ///
-    /// Asking only whether the request exists, which is all the map on its own
-    /// can answer: it holds a PUBLISH from the moment it is sent, and the
-    /// peer's answer is what makes it a subscription.
-    ///
-    /// ```text
-    /// a PUBLISH still waiting for its answer is not an established one: ()
-    /// ```
-    ///
-    /// It reddens this gate and nothing else in the client or the proxy, and
-    /// the gate's second half stays green under it — which is what that
-    /// half is for. A cut that tightened both cases would redden it too.
     #[test]
     fn only_an_established_publication_may_be_updated_by_its_subscriber() {
         // Case two, before the answer: the subscription is not established.
@@ -4769,20 +4704,6 @@ mod tests {
     /// endpoint made. Those are modified by the endpoint that made them, which
     /// is this one, and an update arriving on one came from the side that has
     /// no say over it.
-    ///
-    /// # What it catches
-    ///
-    /// Reading the Request ID's map and not the direction the update came
-    /// from, which is what this draft did: all five request kinds this
-    /// endpoint can make were updatable by whoever asked.
-    ///
-    /// ```text
-    /// an update on a request this endpoint made is neither case: ()
-    /// ```
-    ///
-    /// It reddens this gate and nothing else in the client or the proxy. The
-    /// `()` is the `Ok` the call returned, which is the whole defect: the
-    /// update was applied and the session carried on.
     #[test]
     fn an_update_on_a_request_this_endpoint_made_closes_the_session() {
         for which in 0..5 {
@@ -4820,13 +4741,6 @@ mod tests {
     /// SUBSCRIBE_NAMESPACE_OK and PUBLISH_NAMESPACE_OK. If an endpoint
     /// receives Track Properties in one of these messages it MUST close the
     /// session with a PROTOCOL_VIOLATION."
-    ///
-    /// Binding the message as `_msg` in `receive_request_ok`, so its Track
-    /// Properties go unread, gives:
-    ///
-    /// ```text
-    /// called `Result::unwrap_err()` on an `Ok` value: ()
-    /// ```
     #[test]
     fn track_properties_on_a_request_ok_that_is_not_a_track_status_close_the_session() {
         let properties = vec![KeyValuePair { key: v(0x04), value: KvpValue::Varint(v(1000)) }];
@@ -4854,13 +4768,6 @@ mod tests {
     /// to initiate migration of that individual request." Table 5 gives GOAWAY
     /// the Stream value "Control, Request".
     ///
-    /// Without the `GoAway` arm in `receive_response_on_stream` the message
-    /// falls through to the catch-all:
-    ///
-    /// ```text
-    /// called `Result::unwrap()` on an `Err` value: ResponseOnControlStream
-    /// ```
-    ///
     /// The session must survive it — only the one request is being moved.
     #[test]
     fn a_goaway_on_a_request_stream_migrates_that_request_and_not_the_session() {
@@ -4882,13 +4789,6 @@ mod tests {
     /// Draft-22 Section 9.2: "If a server receives a GOAWAY with a non-zero
     /// New Session URI Length it MUST close the session with a
     /// PROTOCOL_VIOLATION."
-    ///
-    /// Without the role check the URI is stored and a server-role endpoint
-    /// will follow a redirect it should have refused:
-    ///
-    /// ```text
-    /// called `Result::unwrap_err()` on an `Ok` value: ()
-    /// ```
     #[test]
     fn a_server_refuses_a_goaway_carrying_a_new_session_uri() {
         let mut ep = active(Role::Server);
@@ -4914,15 +4814,6 @@ mod tests {
     /// Draft-22 Section 9.11 gives FETCH no `Fetch Type` field and no location
     /// fields, so a FETCH names a track the way a SUBSCRIBE does and the range
     /// travels in a parameter: Location Filter Type 0x04, then its four fields.
-    ///
-    /// Substituting draft-19's `+ 1` on the end object — which is what a port
-    /// that kept the arithmetic would do — fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: [4, 10, 0, 0, 6]
-    ///  right: [4, 10, 0, 0, 5]
-    /// ```
     #[test]
     fn a_fetch_carries_its_range_in_an_inclusive_location_filter() {
         let mut ep = active(Role::Client);
@@ -4947,13 +4838,6 @@ mod tests {
     /// subscription that carries FILL_PARAMETERS is answered with a
     /// unidirectional stream whose FETCH_HEADER carries **the subscription's**
     /// Request ID.
-    ///
-    /// Without the `note_fill_requested` call in `subscribe`, the stream is
-    /// unattributable and the open is refused:
-    ///
-    /// ```text
-    /// called `Result::unwrap()` on an `Err` value: UnrequestedFillStream(0)
-    /// ```
     #[test]
     fn a_subscription_that_asks_for_a_fill_can_account_for_its_stream() {
         let mut ep = active(Role::Client);

@@ -129,13 +129,7 @@ const PUBLISH_OK_TWO_PARAMETERS_ABSOLUTE: &str = "1e000703022040402201";
 /// Draft-16 Section 1.4.2: "Key-Value-Pairs encode a Type value as a delta from
 /// the previous Type value, or from 0 if there is no previous Type value."
 ///
-/// Writing absolute Types instead fails with:
-///
-/// ```text
-/// assertion `left == right` failed: two parameters must be delta-encoded
-///   left: "1e000703022040402201"
-///  right: "1e000703022040400201"
-/// ```
+/// Fails if the encoder writes absolute Types.
 #[test]
 fn a_second_parameter_type_is_written_as_a_delta_from_the_first() {
     let buf = encode(&publish_ok(vec![param(0x20, 64), param(0x22, 1)]))
@@ -149,13 +143,7 @@ fn a_second_parameter_type_is_written_as_a_delta_from_the_first() {
 
 /// And a frame a conforming peer sent comes back as the Types that peer meant.
 ///
-/// Reading absolute Types instead fails with:
-///
-/// ```text
-/// assertion `left == right` failed: a delta of 0x02 after 0x20 is GROUP_ORDER
-///   left: [32, 2]
-///  right: [32, 34]
-/// ```
+/// Fails if the decoder reads absolute Types.
 #[test]
 fn a_delta_encoded_frame_decodes_to_the_types_its_sender_meant() {
     let message = decode(&hex(PUBLISH_OK_TWO_PARAMETERS)).expect("a conforming frame");
@@ -166,7 +154,7 @@ fn a_delta_encoded_frame_decodes_to_the_types_its_sender_meant() {
     );
 }
 
-/// The two encodings are distinguishable, which is what made the defect a wire
+/// The two encodings are distinguishable, so mixing them up is a wire
 /// incompatibility rather than a cosmetic one.
 ///
 /// The committed vector's bytes name Types 0x20 and 0x42 under this draft's
@@ -180,14 +168,7 @@ fn a_delta_encoded_frame_decodes_to_the_types_its_sender_meant() {
 /// ordinary parameters, where a draft-16 codec ends the session. The failure is
 /// visible from the far end of the connection, not just in a decoded struct.
 ///
-/// Reading absolute Types instead fails with:
-///
-/// ```text
-/// assertion `left == right` failed: 0x20 + 0x22 is 0x42, which this draft
-/// defines nothing for
-///   left: Ok(PublishOk(..))
-///  right: Err(UnknownMessageParameter(66))
-/// ```
+/// Fails if the decoder reads absolute Types.
 #[test]
 fn the_absolute_encoding_no_longer_names_the_types_it_used_to() {
     let refusal = decode(&hex(PUBLISH_OK_TWO_PARAMETERS_ABSOLUTE));
@@ -279,19 +260,8 @@ fn every_parameter_carrying_message_round_trips_two_types() {
 /// across them writes the first extension's Type as a difference from the last
 /// parameter's, which the peer resolves to something else entirely.
 ///
-/// Seeding the extensions run with the last parameter's Type fails with:
-///
-/// ```text
-/// ascending lists are legal: ParametersOutOfOrder(34, 2)
-/// ```
-///
-/// and writing the run's Types absolutely fails with:
-///
-/// ```text
-/// assertion `left == right` failed: the extensions run restarts the delta
-///   left: [2, 5, 14, 9]
-///  right: [2, 5, 12, 9]
-/// ```
+/// Fails if the extensions run is seeded with the last parameter's Type, or if
+/// its Types are written absolutely.
 #[test]
 fn a_track_extensions_run_restarts_the_delta() {
     let publish = ControlMessage::Publish(Publish {
@@ -332,15 +302,6 @@ fn a_track_extensions_run_restarts_the_delta() {
 /// The delta is an unsigned difference. Encoding a descending pair anyway wraps
 /// the subtraction and emits a nine-byte delta the peer resolves to an
 /// unrelated Type.
-///
-/// Wrapping the subtraction into the varint range instead fails with:
-///
-/// ```text
-/// a descending list has no delta encoding: Ok([30, 0, 14, 3, 2, 34, 1, 255,
-/// 255, 255, 255, 255, 255, 255, 254, 64, 64])
-/// ```
-///
-/// — a frame whose second parameter is announced by a nine-byte delta.
 #[test]
 fn a_descending_parameter_list_never_reaches_the_wire() {
     let result = encode(&publish_ok(vec![param(0x22, 1), param(0x20, 64)]));
@@ -358,20 +319,11 @@ fn a_descending_parameter_list_never_reaches_the_wire() {
 /// delta a varint can spell. Resolving the second wraps a `u64` in a release
 /// build and panics the addition in a debug one.
 ///
-/// Wrapping the sum into the varint range instead fails with:
+/// Fails if the sum wraps into the varint range: the second parameter then
+/// arrives under a Type *smaller* than the first, which no ascending run can
+/// produce.
 ///
-/// ```text
-/// a delta past the end of the Type space is refused: Ok(PublishOk(PublishOk {
-/// request_id: VarInt(1), parameters: [KeyValuePair { key:
-/// VarInt(4611686018427387902), value: Varint(VarInt(0)) }, KeyValuePair { key:
-/// VarInt(4611686018427387900), value: Varint(VarInt(0)) }] }))
-/// ```
-///
-/// — the second parameter arriving under a Type *smaller* than the first, which
-/// no ascending run can produce.
-///
-/// Of the two halves of the guard it is the varint range that fires on this
-/// draft: replacing the checked add alone with a wrapping one still refuses the
+/// On this draft the varint range is the half of the guard that refuses this
 /// frame, because a sum above the varint maximum has no draft-16 spelling. The
 /// checked add covers the case the varint range cannot, a running sum that
 /// wraps past 2^64 after enough pairs.
@@ -459,22 +411,17 @@ fn datagram_bytes(datagram_type: u8) -> Vec<u8> {
     hex(&s)
 }
 
-/// A subgroup header Type wider than one byte no longer aliases onto a valid
-/// one.
+/// A subgroup header Type wider than one byte does not alias onto a valid one.
 ///
-/// The Type was read as a full varint and narrowed to `u8`. The two-byte varint
-/// `41 10` holds 0x110, which truncated to 0x10 — a valid header — so an
-/// out-of-range Type was parsed as a stream rather than refused, and every byte
-/// behind it was read under framing its sender never asked for.
+/// Read as a full varint and narrowed to `u8`, the two-byte varint `41 10`
+/// holds 0x110, which truncates to 0x10 — a valid header — so an out-of-range
+/// Type would be parsed as a stream rather than refused, and every byte behind
+/// it read under framing its sender never asked for.
 ///
 /// Every Type Section 10.4.2 permits is below 0x40 and so is a one-byte varint,
 /// which is what lets the Type be read as a single octet and checked.
 ///
-/// Narrowing a decoded varint instead fails with:
-///
-/// ```text
-/// a two-byte Type must not alias onto 0x10: 4110
-/// ```
+/// Fails if the Type is read as a varint and narrowed.
 #[test]
 fn a_subgroup_type_wider_than_one_byte_is_refused() {
     for spelling in ["4110", "80000110", "c000000000000110"] {
@@ -494,18 +441,6 @@ fn a_subgroup_type_wider_than_one_byte_is_refused() {
 /// The mode is not merely unassigned — the other three modes each say whether a
 /// Subgroup ID follows the Group ID, and 0b11 says nothing, so reading one
 /// shifts every later field by the width of that varint.
-///
-/// Dropping the reserved-mode check fails with:
-///
-/// ```text
-/// reserved SUBGROUP_ID_MODE 0b11: type 0x16
-/// ```
-///
-/// Dropping the form check fails on the first out-of-form Type with:
-///
-/// ```text
-/// outside the form 0b00X1XXXX: type 0x00
-/// ```
 #[test]
 fn the_subgroup_types_the_draft_lists_as_invalid_are_refused() {
     let reserved = [0x16u8, 0x17, 0x1e, 0x1f, 0x36, 0x37, 0x3e, 0x3f];
@@ -531,12 +466,6 @@ fn the_subgroup_types_the_draft_lists_as_invalid_are_refused() {
 /// Without it the two halves disagree about which streams exist: a
 /// reserved-mode header this codec wrote could not be read back by the same
 /// codec.
-///
-/// Dropping the encode-side check fails with:
-///
-/// ```text
-/// type 0x00 has no encoding: Ok(())
-/// ```
 #[test]
 fn the_checked_subgroup_encoder_refuses_what_the_decoder_would() {
     for t in 0x00u16..=0xff {
@@ -579,18 +508,6 @@ fn the_checked_subgroup_encoder_refuses_what_the_decoder_would() {
 /// whatever the `Option` holds, which is what keeps an infallible encoder from
 /// emitting an unparseable stream — and `encode_checked` refuses it, because
 /// the caller who set the wrong half is the only one who can fix it.
-///
-/// Driving `encode` off the `Option` fails with:
-///
-/// ```text
-/// type 0x10 with None round-trips: Err(UnexpectedEnd)
-/// ```
-///
-/// Dropping the `encode_checked` agreement check fails with:
-///
-/// ```text
-/// type 0x10 with None is not what it says: Ok(())
-/// ```
 #[test]
 fn a_subgroup_priority_byte_that_disagrees_with_its_type_is_refused() {
     for t in valid_subgroup_types() {
@@ -632,20 +549,7 @@ fn a_subgroup_priority_byte_that_disagrees_with_its_type_is_refused() {
 ///
 /// The section forbids the eight values setting both STATUS (0x20) and
 /// END_OF_GROUP (0x02) — "an object status message cannot signal end of group"
-/// — and everything outside the form 0b00X0XXXX. That leaves 24 of 256, where
-/// 232 were accepted before.
-///
-/// Dropping the validator fails with:
-///
-/// ```text
-/// outside the form 0b00X0XXXX: type 0x10
-/// ```
-///
-/// Dropping only the STATUS-plus-END_OF_GROUP half fails with:
-///
-/// ```text
-/// STATUS and END_OF_GROUP together: type 0x22
-/// ```
+/// — and everything outside the form 0b00X0XXXX. That leaves 24 of 256.
 #[test]
 fn the_datagram_types_the_draft_lists_as_invalid_are_refused() {
     let both_bits = [0x22u8, 0x23, 0x26, 0x27, 0x2a, 0x2b, 0x2e, 0x2f];
@@ -666,16 +570,12 @@ fn the_datagram_types_the_draft_lists_as_invalid_are_refused() {
     }
 }
 
-/// A datagram Type wider than one byte no longer aliases onto a valid one.
+/// A datagram Type wider than one byte does not alias onto a valid one.
 ///
-/// The same defect as on the subgroup header, and the same fix: every valid
-/// datagram Type is below 0x40.
+/// As on the subgroup header, every valid datagram Type is below 0x40, so the
+/// Type is read as a single octet.
 ///
-/// Narrowing a decoded varint instead fails with:
-///
-/// ```text
-/// a wide Type must not alias onto 0x01: 4101
-/// ```
+/// Fails if the Type is read as a varint and narrowed.
 #[test]
 fn a_datagram_type_wider_than_one_byte_is_refused() {
     for spelling in ["4101", "4001", "80000001"] {
@@ -791,18 +691,6 @@ fn extensions_on_a_normal_object_are_carried() {
 /// writing one has no such excuse — a conforming peer answers with a
 /// PROTOCOL_VIOLATION, so emitting it costs the session and not merely the
 /// datagram.
-///
-/// Making the decoder refuse the frame fails with:
-///
-/// ```text
-/// a well-formed datagram must parse: InvalidField
-/// ```
-///
-/// Dropping the encode check fails with:
-///
-/// ```text
-/// a status datagram with extensions has no encoding: Ok(())
-/// ```
 #[test]
 fn extensions_on_a_status_datagram_parse_but_are_not_written() {
     // Type 0x21: STATUS bit and EXTENSIONS bit together.
@@ -831,15 +719,8 @@ fn extensions_on_a_status_datagram_parse_but_are_not_written() {
 ///
 /// Section 10.3.1: "If an endpoint receives a datagram with the EXTENSIONS bit
 /// set and an Extension Headers Length of 0, it MUST close the session with a
-/// PROTOCOL_VIOLATION." The reader already refused such a datagram; the writer
-/// spelled one happily, so this codec could emit a datagram it would then
-/// decline to read.
-///
-/// Dropping the check fails with:
-///
-/// ```text
-/// an empty block under a set EXTENSIONS bit has no encoding: Ok(())
-/// ```
+/// PROTOCOL_VIOLATION." The reader refuses such a datagram, so a writer that
+/// spelled one would emit a datagram this codec then declines to read.
 #[test]
 fn a_datagram_announcing_extensions_over_an_empty_block_never_reaches_the_wire() {
     let header = DatagramHeader {
@@ -887,13 +768,6 @@ fn a_datagram_carrying_extensions_under_the_bit_round_trips() {
 /// byte is fixed for the whole stream, so an Object with no extensions has no
 /// other way to say so — a zero-length block there is the encoding, not a
 /// violation.
-///
-/// Applying the datagram rule to subgroups fails with:
-///
-/// ```text
-/// a zero-length block is how a subgroup object says it has none:
-/// Err(InvalidField)
-/// ```
 #[test]
 fn a_subgroup_object_may_carry_a_zero_length_extension_block() {
     let stream = subgroup_stream("", "04deadbeef");
@@ -961,19 +835,8 @@ fn joining_payload() -> FetchPayload {
 /// a name belong, and comes back as a fetch of a track named after two
 /// integers.
 ///
-/// Dropping the check fails with:
-///
-/// ```text
-/// a Standalone type over a joining body has no encoding: Ok([22, 0, 5, 2, 1,
-/// 2, 3, 0])
-/// ```
-///
-/// and in the other direction with:
-///
-/// ```text
-/// a joining type over a standalone body has no encoding: Ok([22, 0, 19, 2, 2,
-/// 1, 4, 108, 105, 118, 101, 5, 118, 105, 100, 101, 111, 0, 0, 10, 0, 0])
-/// ```
+/// The other direction is refused too: a joining type over a standalone body
+/// has no encoding either.
 #[test]
 fn a_fetch_whose_type_disagrees_with_its_body_never_reaches_the_wire() {
     let result = encode(&fetch(FetchType::Standalone, joining_payload()));
@@ -1018,18 +881,8 @@ fn a_fetch_whose_type_matches_its_body_is_carried() {
 /// namespace is legal — it is the prefix that matches every namespace, which is
 /// how a subscriber asks for all of them.
 ///
-/// Holding the prefix to a one-field minimum on the encode side fails with:
-///
-/// ```text
-/// a zero-field prefix is what asks for every namespace:
-/// InvalidNamespaceTupleSize(0)
-/// ```
-///
-/// and on the decode side with:
-///
-/// ```text
-/// and the reader takes it back: InvalidNamespaceTupleSize(0)
-/// ```
+/// Fails if the prefix is held to a one-field minimum on either the encode or
+/// the decode side.
 #[test]
 fn a_subscribe_namespace_carries_a_zero_field_prefix() {
     let message = ControlMessage::SubscribeNamespace(SubscribeNamespace {
@@ -1051,12 +904,6 @@ fn a_subscribe_namespace_carries_a_zero_field_prefix() {
 /// byte. If an endpoint receives a Track Namespace Field with a Track Namespace
 /// Field Length of 0, it MUST close the session with a PROTOCOL_VIOLATION."
 /// Relaxing the field *count* to zero must not relax the field *length*.
-///
-/// Relaxing both together fails with:
-///
-/// ```text
-/// a zero-length field has no encoding
-/// ```
 #[test]
 fn a_zero_length_namespace_field_in_a_prefix_is_still_refused() {
     let message = ControlMessage::SubscribeNamespace(SubscribeNamespace {
@@ -1089,19 +936,7 @@ fn a_zero_length_namespace_field_in_a_prefix_is_still_refused() {
 /// behind it. Values below 0x40 cannot tell the two encodings apart, and 0x40
 /// itself round-trips by coincidence, so the gate needs a value above it.
 ///
-/// Reading it as a varint fails with:
-///
-/// ```text
-/// and read back as one: VarInt(UnexpectedEnd)
-/// ```
-///
-/// and writing it as one fails with:
-///
-/// ```text
-/// assertion `left == right` failed: End Of Track is written as one octet
-///   left: 64
-///  right: 255
-/// ```
+/// Fails if End Of Track is read or written as a varint.
 #[test]
 fn fetch_ok_end_of_track_occupies_exactly_one_byte() {
     let message = ControlMessage::FetchOk(FetchOk {
@@ -1140,13 +975,6 @@ const UNKNOWN_TYPE: u64 = 0x40;
 ///
 /// This is the half that fails if someone makes the rule symmetric by narrowing
 /// the encoder to match the decoder.
-///
-/// Narrowing the encoder to the receiver's rule fails with:
-///
-/// ```text
-/// a sender may not repeat even an unknown type: Ok([17, 0, 12, 1, 1, 2, 110,
-/// 115, 0, 2, 64, 64, 11, 0, 12])
-/// ```
 #[test]
 fn a_sender_may_not_repeat_even_a_type_this_codec_cannot_name() {
     let result =
@@ -1163,13 +991,6 @@ fn a_sender_may_not_repeat_even_a_type_this_codec_cannot_name() {
 ///
 /// This is the half that fails if someone makes the rule symmetric by widening
 /// the decoder to match the encoder.
-///
-/// Widening the decoder to the sender's rule fails with:
-///
-/// ```text
-/// a receiver must carry a repeat of a type it cannot name:
-/// Err(DuplicateParameter(64))
-/// ```
 #[test]
 fn a_receiver_carries_a_repeat_of_a_type_it_cannot_name() {
     // CLIENT_SETUP, two parameters, both type 0x40: a delta of 0x40 then a
@@ -1190,14 +1011,6 @@ fn a_receiver_carries_a_repeat_of_a_type_it_cannot_name() {
 /// that scans a parameter list for a key takes whichever copy it meets first,
 /// so one frame carrying two values for one type is read two ways by two
 /// conforming implementations.
-///
-/// Dropping the receiver check fails with:
-///
-/// ```text
-/// a repeated MAX_REQUEST_ID is not two parameters: Ok(ClientSetup(ClientSetup
-/// { parameters: [KeyValuePair { key: VarInt(2), value: Varint(VarInt(11)) },
-/// KeyValuePair { key: VarInt(2), value: Varint(VarInt(12)) }] }))
-/// ```
 #[test]
 fn a_receiver_refuses_a_repeat_of_a_type_the_draft_names() {
     // CLIENT_SETUP, two parameters, both MAX_REQUEST_ID (0x02).
@@ -1218,12 +1031,6 @@ fn a_receiver_refuses_a_repeat_of_a_type_the_draft_names() {
 /// after resolving any aliases." Resolving aliases needs a session's token
 /// cache, which a codec does not have, so both copies are carried and the
 /// caller decides.
-///
-/// Removing the exemption fails with:
-///
-/// ```text
-/// an AUTHORIZATION TOKEN may repeat: DuplicateParameter(3)
-/// ```
 #[test]
 fn an_authorization_token_may_be_repeated() {
     let message = subscribe_namespace(vec![
@@ -1262,13 +1069,6 @@ fn an_authorization_token_may_be_repeated() {
 /// all. Drafts 11 through 15 carry unknown parameters in both; draft-16 narrows
 /// "Receivers MUST allow duplicates of unknown parameters" to "unknown Setup
 /// Parameters" and adds the close in the same paragraph.
-///
-/// Merging the two registries fails with:
-///
-/// ```text
-/// 0x01 is not a Message Parameter type this draft defines:
-/// Err(DuplicateParameter(1))
-/// ```
 #[test]
 fn the_setup_and_message_parameter_namespaces_are_kept_apart() {
     // PUBLISH_OK with type 0x01 twice: unknown in this namespace, refused as
@@ -1335,34 +1135,20 @@ fn a_subgroup_stream_still_reads_its_objects() {
 /// GROUP_ORDER as a Message Parameter and DEFAULT_PUBLISHER_GROUP_ORDER as an
 /// Extension Header.
 ///
-/// The Message Parameter renderer had three names too many, inherited from
-/// draft-15 where those numbers really were Message Parameters. They were worse
-/// than unused. Section 9.2 makes an unknown Message Parameter a session close
-/// and `decode_parameters` applies it, so no decoded message can carry one of
-/// the three — the names were reachable only for a parameter the same file had
-/// already refused. The first half of this gate ties the two together: a type
-/// the renderer names has to be a type a frame can actually arrive carrying.
+/// The Message Parameter renderer must not name the three numbers that were
+/// Message Parameters on draft-15. Section 9.2 makes an unknown Message
+/// Parameter a session close and `decode_parameters` applies it, so no decoded
+/// message can carry one of the three. The first half of this gate ties the two
+/// together: a type the renderer names has to be a type a frame can actually
+/// arrive carrying.
 ///
-/// The Track Extension renderer had three names too few — 0x0B, 0x22 and 0x30,
-/// which is the whole of the Immutable Extensions block plus both extensions
-/// draft-16 gives a value range to, and therefore both of the two this codec
-/// closes the session over. The parameter a trace could not name was the one
-/// most worth naming.
+/// The Track Extension renderer must name 0x0B, 0x22 and 0x30, which is the
+/// whole of the Immutable Extensions block plus both extensions draft-16 gives
+/// a value range to, and therefore both of the two this codec closes the
+/// session over.
 ///
 /// 0x3C and 0x3E are not asserted: Table 9 scopes them to Object, and this
 /// renderer answers for a `track_extensions` field.
-///
-/// Dropping the trim fails with:
-///
-/// ```text
-/// renderer names 0x4, decode_parameters refuses it
-/// ```
-///
-/// Dropping the three added Track Extension names fails with:
-///
-/// ```text
-/// draft-16 Table 9 scopes 0xb to Track, so the renderer names it
-/// ```
 #[test]
 fn the_renderer_tables_are_the_two_registries_draft_16_assigns() {
     /// A value of the shape its Type defines.

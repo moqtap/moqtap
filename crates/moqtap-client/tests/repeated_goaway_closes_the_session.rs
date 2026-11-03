@@ -122,14 +122,6 @@ macro_rules! repeated_goaway_gates {
 
             /// The peer says it is going away twice, and the client closes the
             /// QUIC connection.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `RepeatedGoAway` arm from `session_error_code`:
-            ///
-            /// ```text
-            /// the client refused the second GOAWAY but never closed the connection: Elapsed(())
-            /// ```
             #[tokio::test]
             async fn a_second_goaway_closes_the_quic_connection() {
                 crate::common::init_crypto();
@@ -207,17 +199,6 @@ macro_rules! repeated_goaway_gates {
             /// The first GOAWAY leaves the session Draining, which is the
             /// state the rule is measured from, so `Closed` here can only have
             /// come from the second.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Dropping the `fail_session` call from `receive_goaway`:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the violation was reported but
-            /// the session was left running: Draining
-            ///   left: Draining
-            ///  right: Closed
-            /// ```
             #[test]
             fn a_second_goaway_ends_the_endpoints_session() {
                 let mut endpoint = active_client();
@@ -495,14 +476,6 @@ macro_rules! uni_repeated_goaway_gates {
 
             /// The peer says it is going away twice on its control stream, and
             /// the client closes the QUIC connection.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `RepeatedGoAway` arm from `session_error_code`:
-            ///
-            /// ```text
-            /// the client refused the second GOAWAY but never closed the connection: Elapsed(())
-            /// ```
             #[tokio::test]
             async fn a_second_goaway_closes_the_quic_connection() {
                 crate::common::init_crypto();
@@ -591,17 +564,6 @@ macro_rules! uni_repeated_goaway_gates {
 
             /// The violation ends the endpoint's own session and not only the
             /// connection carrying it.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Dropping the `fail_session` call from `receive_goaway`:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the violation was reported but
-            /// the session was left running: Draining
-            ///   left: Draining
-            ///  right: Closed
-            /// ```
             #[test]
             fn a_second_goaway_ends_the_endpoints_session() {
                 let mut endpoint = active_client();
@@ -757,15 +719,6 @@ macro_rules! request_stream_goaway_gates {
             /// than per stream would refuse the second request's migration
             /// too, and would be ending sessions over traffic the sentence
             /// above the rule permits.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Replacing the per-stream set with the session state - the shape
-            /// the control-stream half uses:
-            ///
-            /// ```text
-            /// a GOAWAY migrating a different request is not a repeat: RepeatedGoAwayOnRequestStream(2)
-            /// ```
             #[test]
             fn the_count_is_per_stream() {
                 let mut endpoint = active_client();
@@ -808,14 +761,6 @@ macro_rules! request_stream_goaway_gates {
             /// separately: draft-18 refused the first GOAWAY here outright,
             /// which dropped a conforming relay's migration on the floor, and
             /// neither draft counted the second.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Removing the GOAWAY arm from `receive_on_peer_request_stream`:
-            ///
-            /// ```text
-            /// a GOAWAY migrating the peer's own request must be accepted: UnexpectedOnPeerRequestStream(GoAway)
-            /// ```
             #[test]
             fn a_peer_opened_request_stream_counts_the_same_way() {
                 let mut endpoint = active_client();

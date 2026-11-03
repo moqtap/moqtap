@@ -157,19 +157,6 @@ fn subgroup_stream_bytes() -> Vec<u8> {
 /// consumed the wrong number of bytes doing so, leaves every following object
 /// on the stream unreadable or silently misnumbered. Reading `NEXT_PAYLOAD`
 /// back at [`NEXT_OBJECT_ID`] is what says the refusal cost the stream nothing.
-///
-/// # What it catches
-///
-/// Deleting the `properties_permitted` check from draft-19's
-/// `FramedRecvStream::read_subgroup_object`, so the object is handed to the
-/// caller like any other:
-///
-/// ```text
-/// ---- an_object_with_properties_on_a_non_normal_status_is_refused stdout ----
-///
-/// thread 'an_object_with_properties_on_a_non_normal_status_is_refused' (66196) panicked at crates\moqtap-client\tests\draft19_properties_on_non_normal_status.rs:
-/// properties on End of Group must be refused: SubgroupObject { object_id: VarInt(0), extension_headers: [1, 2, 3, 4], payload_length: VarInt(0), object_status: Some(EndOfGroup), payload: [] }
-/// ```
 #[tokio::test]
 async fn an_object_with_properties_on_a_non_normal_status_is_refused() {
     common::init_crypto();
@@ -264,10 +251,9 @@ const PROTOCOL_VIOLATION: u64 = 0x3;
 ///
 /// The test above proves the client *detects* the violation. That is not the
 /// rule: Section 11.2.1.2 says "it MUST close the session with a
-/// PROTOCOL_VIOLATION", which is a statement about the wire, and until now
-/// nothing in this crate could carry it there. The violation is raised on a
-/// data stream, and `accept_subgroup_stream` hands the caller a
-/// `FramedRecvStream` holding no connection, so the reader that finds the
+/// PROTOCOL_VIOLATION", which is a statement about the wire. The violation
+/// is raised on a data stream, and `accept_subgroup_stream` hands the caller
+/// a `FramedRecvStream` holding no connection, so the reader that finds the
 /// violation is not the object that can act on it.
 ///
 /// `close_for_data_stream` is where the caller joins the two, and this asserts

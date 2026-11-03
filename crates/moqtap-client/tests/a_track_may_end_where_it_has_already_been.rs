@@ -88,8 +88,7 @@
 //! written down about the track afterwards. A rule of this shape is reached by
 //! resolving an object's alias to the track a live subscription gave it to, so
 //! an alias no binding names settles nothing — and a gate that never bound one
-//! would go on passing after somebody added the rule here. The ablation below is
-//! what says this one can fail.
+//! would go on passing after somebody added the rule here.
 //!
 //! # Two topologies, one assertion
 //!
@@ -111,48 +110,6 @@
 //! used a subgroup stream is refused there by that rule before this one is
 //! reached.
 //! A track's record is only ever fed by one framing.
-//!
-//! # Ablation, measured
-//!
-//! The cut is the commit this file exists to stop: the end-of-track placement
-//! record drafts 08 through 13 carry, wired into a draft from each topology
-//! exactly as they wire it — draft-15's endpoint and both of its readers, and
-//! draft-18's. One draft from each, because a peer is only proved by a draft it
-//! serves. Applied to the working tree, run, and reverted with every file
-//! compared byte for byte afterwards; `scratchpad/r84_ablate.py` runs it, and
-//! `scratchpad/r85_ablate.py` runs the same cut against draft-07.
-//!
-//! Draft-07, where the wiring is carried back one draft rather than forward six,
-//! and `object_role` reads 0x4 the way drafts 11 through 13 read it:
-//!
-//! ```text
-//! Section 7.1.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 4, object: 0, placement: GroupBehind { largest_group: 5 } })
-//! Section 7.1.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 5, object: 2, placement: ObjectBehind { largest_object: 2 } })
-//! Section 7.1.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 4, object: 0, placement: GroupBehind { largest_group: 5 } })
-//! ```
-//!
-//! Draft-15: the Group ID half of the withdrawn condition, then the Object ID
-//! half, then the same track carried by datagrams.
-//!
-//! ```text
-//! Section 10.2.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 4, object: 0, placement: GroupBehind { largest_group: 5 } })
-//! Section 10.2.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 5, object: 2, placement: ObjectBehind { largest_object: 2 } })
-//! Section 10.2.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 4, object: 0, placement: GroupBehind { largest_group: 5 } })
-//! ```
-//!
-//! Draft-18, the same three against the other peer:
-//!
-//! ```text
-//! Section 11.2.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 4, object: 0, placement: GroupBehind { largest_group: 5 } })
-//! Section 11.2.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 5, object: 2, placement: ObjectBehind { largest_object: 2 } })
-//! Section 11.2.1.1 states no condition on where an end-of-track object sits, so one naming a group the track has already carried is legal here: Endpoint(EndOfTrackOutOfPlace { alias: 7, group: 4, object: 0, placement: GroupBehind { largest_group: 5 } })
-//! ```
-//!
-//! Every one of the nine names alias 7, which is the alias the SUBSCRIBE's
-//! answer bound — on draft-07 too, where the SUBSCRIBE carries the alias itself
-//! and the answer is what establishes the subscription that keeps it live. That is the other half of the ablation: a rule reached by resolving an
-//! alias to a track can only report one it resolved, so a gate that had skipped
-//! the answer would have stayed green under the same cut.
 
 mod common;
 
@@ -220,8 +177,7 @@ impl Traffic {
 ///
 /// `allow(dead_code)` rather than a `cfg` naming those drafts. Only the
 /// `unidirectional_control_gates!` invocations below use it, and a second list
-/// of the same drafts is one nothing checks: it was `draft17`–`draft19` when
-/// draft-20 joined them, and the build broke on the draft nobody added here.
+/// of the same drafts is one nothing checks.
 /// Nothing in this type is draft-specific — `AnyControlMessage::decode` takes
 /// the draft as an argument — so it compiles wherever it is left standing.
 #[allow(dead_code)]

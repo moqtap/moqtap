@@ -230,7 +230,7 @@ fn session_cannot_close_from_connecting() {
 /// corresponding peer MUST close the session with VERSION_NEGOTIATION_FAILED".
 ///
 /// The same close is asserted on the other drafts in
-/// `close_during_setup.rs`, which is where the ablation for it lives.
+/// `close_during_setup.rs`.
 #[test]
 fn session_closes_from_setup_exchange() {
     let mut sm = SessionStateMachine::new();

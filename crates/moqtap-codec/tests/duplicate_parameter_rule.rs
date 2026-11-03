@@ -42,10 +42,6 @@
 //! either way: the drafts 11 through 16 checks pass without ever putting the
 //! carve-out's question, so their passing is no evidence about it. An edit that
 //! reads that green as coverage of the carve-out puts the gap back.
-//!
-//! The failure messages recorded below are draft-09's. Every draft fails the
-//! same way; the frames differ because the field lists in front of the
-//! parameters are not the same on any two of them.
 
 #![allow(clippy::items_after_test_module)]
 
@@ -159,13 +155,6 @@ mod draft07 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -173,14 +162,6 @@ mod draft07 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -259,13 +240,6 @@ mod draft08 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -273,14 +247,6 @@ mod draft08 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -359,13 +325,6 @@ mod draft09 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -373,14 +332,6 @@ mod draft09 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -459,13 +410,6 @@ mod draft10 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -473,14 +417,6 @@ mod draft10 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -561,13 +497,6 @@ mod draft11 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -575,14 +504,6 @@ mod draft11 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -662,13 +583,6 @@ mod draft12 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -676,14 +590,6 @@ mod draft12 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -763,13 +669,6 @@ mod draft13 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -777,14 +676,6 @@ mod draft13 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -863,13 +754,6 @@ mod draft14 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -877,14 +761,6 @@ mod draft14 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -957,13 +833,6 @@ mod draft15 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -971,14 +840,6 @@ mod draft15 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1056,13 +917,6 @@ mod draft16 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -1070,14 +924,6 @@ mod draft16 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1151,13 +997,6 @@ mod draft17 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -1165,14 +1004,6 @@ mod draft17 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1203,12 +1034,6 @@ mod draft17 {
     /// a message as long as the combination of Token Type and Token Value are
     /// unique after resolving any aliases." A check that refused every repeat would refuse this, which is
     /// what makes the carve-out worth a gate of its own.
-    ///
-    /// Dropping the carve-out fails with:
-    ///
-    /// ```text
-    /// this type is allowed more than one instance: DuplicateParameter(3)
-    /// ```
     #[test]
     fn an_authorization_token_may_be_repeated() {
         let token = |value: &[u8]| KeyValuePair {
@@ -1269,13 +1094,6 @@ mod draft18 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -1283,14 +1101,6 @@ mod draft18 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1321,12 +1131,6 @@ mod draft18 {
     /// a message as long as the combination of Token Type and Token Value are
     /// unique after resolving any aliases." A check that refused every repeat would refuse this, which is
     /// what makes the carve-out worth a gate of its own.
-    ///
-    /// Dropping the carve-out fails with:
-    ///
-    /// ```text
-    /// this type is allowed more than one instance: DuplicateParameter(3)
-    /// ```
     #[test]
     fn an_authorization_token_may_be_repeated() {
         let token = |value: &[u8]| KeyValuePair {
@@ -1387,13 +1191,6 @@ mod draft19 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -1401,14 +1198,6 @@ mod draft19 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1439,12 +1228,6 @@ mod draft19 {
     /// a message as long as the combination of Token Type and Token Value are
     /// unique after resolving any aliases." A check that refused every repeat would refuse this, which is
     /// what makes the carve-out worth a gate of its own.
-    ///
-    /// Dropping the carve-out fails with:
-    ///
-    /// ```text
-    /// this type is allowed more than one instance: DuplicateParameter(3)
-    /// ```
     #[test]
     fn an_authorization_token_may_be_repeated() {
         let token = |value: &[u8]| KeyValuePair {
@@ -1505,13 +1288,6 @@ mod draft20 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -1519,14 +1295,6 @@ mod draft20 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1557,12 +1325,6 @@ mod draft20 {
     /// a message as long as the combination of Token Type and Token Value are
     /// unique after resolving any aliases." A check that refused every repeat would refuse this, which is
     /// what makes the carve-out worth a gate of its own.
-    ///
-    /// Dropping the carve-out fails with:
-    ///
-    /// ```text
-    /// this type is allowed more than one instance: DuplicateParameter(3)
-    /// ```
     #[test]
     fn an_authorization_token_may_be_repeated() {
         let token = |value: &[u8]| KeyValuePair {
@@ -1622,13 +1384,6 @@ mod draft21 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -1636,14 +1391,6 @@ mod draft21 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1674,12 +1421,6 @@ mod draft21 {
     /// long as the combination of Token Type and Token Value are
     /// unique after resolving any aliases." A check that refused every repeat would refuse this, which is
     /// what makes the carve-out worth a gate of its own.
-    ///
-    /// Dropping the carve-out fails with:
-    ///
-    /// ```text
-    /// this type is allowed more than one instance: DuplicateParameter(3)
-    /// ```
     #[test]
     fn an_authorization_token_may_be_repeated() {
         let token = |value: &[u8]| KeyValuePair {
@@ -1740,13 +1481,6 @@ mod draft22 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -1754,14 +1488,6 @@ mod draft22 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1792,12 +1518,6 @@ mod draft22 {
     /// long as the combination of Token Type and Token Value are
     /// unique after resolving any aliases." A check that refused every repeat would refuse this, which is
     /// what makes the carve-out worth a gate of its own.
-    ///
-    /// Dropping the carve-out fails with:
-    ///
-    /// ```text
-    /// this type is allowed more than one instance: DuplicateParameter(3)
-    /// ```
     #[test]
     fn an_authorization_token_may_be_repeated() {
         let token = |value: &[u8]| KeyValuePair {
@@ -1857,13 +1577,6 @@ mod draft23 {
     }
 
     /// A repeated Parameter Type has no encoding.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// one message cannot state a type twice:
-    /// Ok([3, 18, 1, 4, 1, 2, 110, 115, 1, 116, 5, 1, 2, 2, 2, 1, 11, 2, 1, 12])
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_never_reaches_the_wire() {
         let result = encode(&subscribe(vec![param(FIRST, 11), param(FIRST, 12)]));
@@ -1871,14 +1584,6 @@ mod draft23 {
     }
 
     /// And one that arrives anyway is refused rather than carried inwards.
-    ///
-    /// Dropping the check fails with:
-    ///
-    /// ```text
-    /// a repeated type is not two parameters: Ok(Subscribe(Subscribe {
-    /// subscribe_id: VarInt(1), ..., parameters: [KeyValuePair { key: VarInt(2),
-    /// value: Bytes([11]) }, KeyValuePair { key: VarInt(2), value: Bytes([12]) }] }))
-    /// ```
     #[test]
     fn a_message_repeating_a_parameter_type_is_refused_on_decode() {
         let buf = encode(&subscribe(vec![param(FIRST, 11), param(SECOND, 12)]))
@@ -1909,12 +1614,6 @@ mod draft23 {
     /// long as the combination of Token Type and Token Value are
     /// unique after resolving any aliases." A check that refused every repeat would refuse this, which is
     /// what makes the carve-out worth a gate of its own.
-    ///
-    /// Dropping the carve-out fails with:
-    ///
-    /// ```text
-    /// this type is allowed more than one instance: DuplicateParameter(3)
-    /// ```
     #[test]
     fn an_authorization_token_may_be_repeated() {
         let token = |value: &[u8]| KeyValuePair {

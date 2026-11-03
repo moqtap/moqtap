@@ -8,10 +8,8 @@
 //!
 //! Six drafts state this rule, in two vocabularies — 15 and 16 say "extension
 //! headers", 17 through 20 say "properties" — and the client carries six
-//! separate copies of the check, one per draft module. Copies drift. The rule
-//! was raised on draft-19 alone until recently, which is exactly how that drift
-//! looks from inside the process: every layer agrees, and nothing notices that
-//! four of the five never ask the question.
+//! separate copies of the check, one per draft module. Copies drift, so each
+//! draft's copy has a gate of its own.
 //!
 //! Draft-16 sits between the two shapes the other gates cover. It shares
 //! draft-15's vocabulary and its bidirectional control stream, and it shares

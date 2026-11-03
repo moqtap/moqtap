@@ -113,29 +113,10 @@ macro_rules! kvp_value_maximum_gates {
         /// answers truthfully and unhelpfully: the message is indeed too long,
         /// and the caller is left to work out which of the parameters did it.
         ///
-        /// # What it catches
-        ///
-        /// Both places the rule has to hold, each observed by making the change
-        /// and running it. Pointing drafts 11 through 15's parameter encoders
-        /// at the unchecked list form:
-        ///
-        /// ```text
-        /// a value past the maximum must be refused as a value, got Err(MessageTooLong(65554))
-        /// ```
-        ///
-        /// And taking the maximum back out of drafts 17 through 19's Message
-        /// Parameter encoder:
-        ///
-        /// ```text
-        /// a value past the maximum must be refused as a value, got Err(MessageTooLong(65549))
-        /// ```
-        ///
-        /// Both counts are the same 65,536-byte value seen through the message
-        /// rule instead of the value rule, and the difference between them is
-        /// the framing each draft's SUBSCRIBE puts around it. That the payload
-        /// is over its own limit in both is the module doc's arithmetic, and it
-        /// is why reporting the message rule is never *wrong* — only less
-        /// specific than the layering the drafts state.
+        /// Fails if drafts 11 through 15's parameter encoders, or drafts 17
+        /// through 19's Message Parameter encoder, stop applying the value
+        /// maximum: the refusal then names the message rule instead. That is
+        /// never *wrong*, only less specific than the layering the drafts state.
         #[test]
         fn a_value_past_the_maximum_is_refused_by_the_rule_it_broke() {
             let message = $carrier(vec![opaque(super::PAST_THE_MAXIMUM)]);
@@ -157,15 +138,9 @@ macro_rules! kvp_value_maximum_gates {
         /// refused by the *other* rule — which is the clearest statement there
         /// is that the two are separate and that the codec applies both.
         ///
-        /// # What it catches
-        ///
-        /// The off-by-one that would swallow the distinction: comparing the
-        /// length with `>=` rather than `>` makes the value rule reach a length
-        /// the drafts permit, and the two rules stop being separable.
-        ///
-        /// ```text
-        /// a value at the maximum breaks the message rule and not the value rule, got Err(Kvp(ValueTooLong(65535)))
-        /// ```
+        /// Fails if the length is compared with `>=` rather than `>`: the value
+        /// rule would then reach a length the drafts permit, and the two rules
+        /// stop being separable.
         #[test]
         fn the_maximum_itself_is_refused_by_the_message_rule_instead() {
             let message = $carrier(vec![opaque(super::AT_THE_MAXIMUM)]);
@@ -186,20 +161,10 @@ macro_rules! kvp_value_maximum_gates {
         /// The neighbouring namespace answers the same way, which on these three
         /// drafts is a claim about two different encoders rather than one.
         ///
-        /// Setup Options take their value shape from the type's parity and have
-        /// bounded the value since they were written; Message Parameters take
-        /// theirs from a table and did not. A codec that fixed one and left the
-        /// other is the state this pair of gates exists to refuse, and the gate
-        /// above is the half that was failing.
-        ///
-        /// # What it catches
-        ///
-        /// Taking the maximum out of the Setup Option encoder, which is the half
-        /// that already had it:
-        ///
-        /// ```text
-        /// a value past the maximum must be refused as a value here as well, got Err(MessageTooLong(65540))
-        /// ```
+        /// Setup Options take their value shape from the type's parity; Message
+        /// Parameters take theirs from a table. A codec that bounds the value in
+        /// one and not the other is the state this pair of gates exists to
+        /// refuse. Fails if the Setup Option encoder stops applying the maximum.
         #[test]
         fn a_value_past_the_maximum_is_refused_in_the_other_namespace_too() {
             let message = $setup(vec![opaque(super::PAST_THE_MAXIMUM)]);

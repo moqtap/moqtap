@@ -2429,22 +2429,8 @@ mod tests {
     /// `None` is checked too — without it the encoder emits an object whose
     /// declared payload length promises a status field that never arrives.
     ///
-    /// Made `write_object` encode a constant `ObjectStatus::Normal` instead of
-    /// the object's own status, ran it, and got:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: subgroup object status
-    ///   left: Some(Normal)
-    ///  right: Some(EndOfGroup)
-    /// ```
-    ///
-    /// The same change to `DatagramHeader::encode` gives:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: datagram object status
-    ///   left: Some(Normal)
-    ///  right: Some(EndOfGroup)
-    /// ```
+    /// Fails if `write_object` or `DatagramHeader::encode` writes a status
+    /// other than the object's own.
     #[test]
     fn every_assigned_status_survives_a_round_trip() {
         let header = SubgroupHeader::decode(&mut &hex("100100800004deadbeef")[..]).unwrap();
@@ -2501,46 +2487,11 @@ mod tests {
     /// sites — and no `ObjectStatus` exists to hand the encoder, so the frame
     /// has no way to be produced in the first place.
     ///
-    /// # What this catches, observed by making each change and running it
+    /// Fails if either encoder writes a status other than the one it was
+    /// handed, or if the decoder accepts a code outside `ObjectStatus::ALL`.
     ///
-    /// Encoding a constant `ObjectStatus::Normal` in `write_object` instead of
-    /// the object's own status:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the encoder must produce the frame the decoder accepted for status 0x3
-    ///   left: [16, 1, 0, 128, 0, 0, 0]
-    ///  right: [16, 1, 0, 128, 0, 0, 3]
-    /// ```
-    ///
-    /// The same change in `DatagramHeader::encode`:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the encoder must produce the datagram the decoder accepted for status 0x3
-    ///   left: [32, 1, 0, 0, 128, 0]
-    ///  right: [32, 1, 0, 0, 128, 3]
-    /// ```
-    ///
-    /// The decoder drifting away from `ALL` — adding `0x2` to
-    /// `ObjectStatus::from_u64`, so a code the draft does not assign starts
-    /// decoding:
-    ///
-    /// ```text
-    /// subgroup read_object accepted status 0x2, which the draft does not assign
-    /// ```
-    ///
-    /// # The encode-side refusal is a type, not an assertion
-    ///
-    /// Once `object_status` is typed there is no runtime path that offers the
-    /// encoder a `0x2`, so no test here can watch one be refused. Reverting
-    /// `DatagramHeader::object_status` to `Option<u8>` with an `unwrap_or(0)`
-    /// encoder does not make this test fail — it makes it stop compiling,
-    /// which is the guarantee:
-    ///
-    /// ```text
-    /// error[E0308]: mismatched types
-    ///     = note: expected enum `Option<u8>`
-    ///                found enum `Option<draft18::types::ObjectStatus>`
-    /// ```
+    /// The encode-side refusal is a type, not an assertion: `object_status` is
+    /// typed, so there is no runtime path that offers the encoder a `0x2`.
     #[test]
     fn the_encoder_writes_exactly_the_frames_the_decoder_accepts() {
         for code in 0x00u64..=0x3f {
@@ -2632,27 +2583,9 @@ mod tests {
     /// has, and naming it asks for the same bytes as leaving it out — which is
     /// the last assertion here.
     ///
-    /// # What this catches, observed by making each change and running it
-    ///
-    /// Dropping the check from `encode_checked`, leaving the type byte to
-    /// decide on its own:
-    ///
-    /// ```text
-    /// encode_checked must refuse EndOfGroup under a type byte with no STATUS bit; got Ok(())
-    /// ```
-    ///
-    /// Testing the status instead of the type byte — refusing every non-Normal
-    /// status, which also rejects the status datagrams that exist to carry one:
-    ///
-    /// ```text
-    /// encode_checked refused EndOfGroup on a datagram whose type byte carries a status: InvalidField
-    /// ```
-    ///
-    /// Widening the check to refuse a payload datagram whose status is Normal:
-    ///
-    /// ```text
-    /// encode_checked refused a Normal status under a payload type byte: InvalidField
-    /// ```
+    /// Fails if `encode_checked` accepts a non-Normal status under a type byte
+    /// with no STATUS bit, refuses one on a datagram whose type byte carries a
+    /// status, or refuses a Normal status under a payload type byte.
     #[test]
     fn encode_checked_refuses_a_status_the_type_byte_hides() {
         for &status in ObjectStatus::ALL {

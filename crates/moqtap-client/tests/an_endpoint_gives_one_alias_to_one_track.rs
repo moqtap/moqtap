@@ -186,20 +186,6 @@ macro_rules! sender_alias_gates {
             }
 
             /// One alias for two tracks is refused before the message exists.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `alias_held_elsewhere` call from `publish`:
-            ///
-            /// ```text
-            /// this endpoint gave one alias to two tracks: (VarInt(2), Publish(Publish { request_id: VarInt(2), track_namespace: TrackNamespace([[99, 111, 110, 102, 111, 114, 109, 97, 110, 99, 101]]), track_name: [98, 101, 116, 97], track_alias: VarInt(7), parameters: [] }))
-            /// ```
-            ///
-            /// It reddens twenty tests: this gate and the identifier gate
-            /// below on all eight drafts, and two more on drafts 12 and 13 in
-            /// `a_publish_this_endpoint_makes_has_a_lifecycle.rs`, where the
-            /// same check is what stops an offer taking an alias the peer's
-            /// own offer is using and what frees one when a subscription ends.
             #[test]
             fn one_alias_for_two_tracks_is_refused() {
                 let mut ep = active();
@@ -220,15 +206,6 @@ macro_rules! sender_alias_gates {
             }
 
             /// The same track under the same alias is not a conflict.
-            ///
-            /// # What it catches
-            ///
-            /// Comparing only the alias and not the track it names, which
-            /// stops an endpoint offering a track it has already offered:
-            ///
-            /// ```text
-            /// a second offer of the same track under the same alias was refused: TrackAliasInUse { alias: 7, held: 0 }
-            /// ```
             #[test]
             fn the_same_track_under_the_same_alias_is_not_a_conflict() {
                 let mut ep = active();
@@ -240,16 +217,6 @@ macro_rules! sender_alias_gates {
             }
 
             /// An alias is free again once the offer holding it ends.
-            ///
-            /// # What it catches
-            ///
-            /// Answering `binding_is_in_use` with `true`, which holds an alias
-            /// for the rest of the session and refuses the next, conforming,
-            /// use of it:
-            ///
-            /// ```text
-            /// an alias whose offer had been refused was still held: TrackAliasInUse { alias: 7, held: 0 }
-            /// ```
             #[test]
             fn an_alias_is_free_once_its_offer_ends() {
                 let mut ep = active();
@@ -262,16 +229,6 @@ macro_rules! sender_alias_gates {
             }
 
             /// A refused PUBLISH spends no Request ID.
-            ///
-            /// # What it catches
-            ///
-            /// Judging the alias after allocating the Request ID:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: a refused PUBLISH spent a Request ID
-            ///   left: 4
-            ///  right: 2
-            /// ```
             #[test]
             fn a_refused_publish_spends_no_request_id() {
                 let mut ep = active();

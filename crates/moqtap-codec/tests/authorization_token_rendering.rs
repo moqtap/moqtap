@@ -230,14 +230,8 @@ macro_rules! every_draft {
 /// The Alias Type says so — "There is an Alias, a Type and a Value" — and an
 /// unconditional two-varint read disagrees on all three counts at once.
 ///
-/// *Ablation:* make `draft11/fields.rs::auth_token_to_json` read two varints
-/// without branching on the Alias Type and this fails with:
-///
-/// ```text
-/// draft-11: REGISTER's second varint is the Token Alias
-///   left: None
-///  right: Some(Uint(7))
-/// ```
+/// Fails if `auth_token_to_json` reads two varints without branching on the
+/// Alias Type.
 #[test]
 fn a_register_token_renders_its_alias_and_its_type_apart() {
     for (draft, rendered) in every_draft!(REGISTER) {

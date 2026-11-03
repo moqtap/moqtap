@@ -130,23 +130,8 @@ fn typed_status_datagram(datagram_type: u8, body: &[u8]) -> Vec<u8> {
 
 /// Build the pair of gates for one draft.
 ///
-/// # What this catches, observed by removing the check and running it
-///
-/// ```text
-/// a non-existent object on a subgroup stream cannot carry extensions, got Ok(ObjectHeader { object_id: VarInt(1), extension_headers_length: VarInt(2), extensions: [170, 170], payload_length: VarInt(0), object_status: ObjectDoesNotExist })
-/// ```
-///
-/// for the fetch stream:
-///
-/// ```text
-/// a non-existent object on a fetch stream cannot carry extensions, got Ok(FetchObjectHeader { group_id: VarInt(1), subgroup_id: VarInt(0), object_id: VarInt(2), publisher_priority: 128, extension_headers_length: VarInt(2), extensions: [170, 170], payload_length: VarInt(0), object_status: ObjectDoesNotExist })
-/// ```
-///
-/// and for the datagram:
-///
-/// ```text
-/// a non-existent object in a status datagram cannot carry extensions, got Ok(DatagramStatusHeader { track_alias: VarInt(1), group_id: VarInt(2), object_id: VarInt(3), publisher_priority: 128, extension_headers_length: VarInt(2), extensions: [170, 170], object_status: ObjectDoesNotExist })
-/// ```
+/// Each gate fails if a non-existent object carries extensions on a subgroup
+/// stream, on a fetch stream or in a status datagram.
 macro_rules! non_existent_object_gate {
     ($fname:ident, $feat:literal, $draft:ident) => {
         #[cfg(feature = $feat)]
@@ -214,28 +199,8 @@ non_existent_object_gate!(draft13_refuses_extensions_on_a_non_existent_object, "
 /// the type byte, where `0x21` is the status datagram that announces them and
 /// `0x20` the one that does not.
 ///
-/// # What this catches, observed by removing the check and running it
-///
-/// All three carriers reach one shared check here, which makes this three
-/// ablations rather than one: removing the check outright stops at the first
-/// assertion and leaves the other two carriers unmeasured. Removed from the
-/// subgroup object alone:
-///
-/// ```text
-/// a non-existent object on a subgroup stream cannot carry extensions, got Ok(SubgroupObject { object_id: VarInt(1), extension_headers: [170, 170], status: Some(ObjectDoesNotExist), payload: [] })
-/// ```
-///
-/// from the fetch object alone:
-///
-/// ```text
-/// a non-existent object on a fetch stream cannot carry extensions, got Ok(FetchObject { group_id: VarInt(1), subgroup_id: VarInt(0), object_id: VarInt(2), publisher_priority: 128, extension_headers: [170, 170], status: Some(ObjectDoesNotExist), payload: [] })
-/// ```
-///
-/// and from the datagram alone:
-///
-/// ```text
-/// a non-existent object in a status datagram cannot carry extensions, got Ok(DatagramObject { datagram_type: DatagramType(33), track_alias: VarInt(1), group_id: VarInt(2), object_id: VarInt(3), publisher_priority: 128, extension_headers: [170, 170], status: Some(ObjectDoesNotExist), payload: [] })
-/// ```
+/// All three carriers reach one shared check here. The test fails if any one of
+/// them accepts extensions on a non-existent object.
 #[cfg(feature = "draft14")]
 #[test]
 fn draft14_refuses_extensions_on_a_non_existent_object() {

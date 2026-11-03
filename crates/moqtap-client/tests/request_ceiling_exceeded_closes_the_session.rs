@@ -157,14 +157,6 @@ macro_rules! ceiling_exceeded_gates {
 
             /// The peer spends a granted ID, then one at the ceiling, and the
             /// client closes the QUIC connection.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `ExceedsMax` arm from `session_error_code`:
-            ///
-            /// ```text
-            /// the client refused the request at the ceiling but never closed the connection: Elapsed(())
-            /// ```
             #[tokio::test]
             async fn a_request_at_the_ceiling_closes_the_quic_connection() {
                 crate::common::init_crypto();
@@ -251,17 +243,6 @@ macro_rules! ceiling_exceeded_gates {
             /// `Closed` is reachable from nowhere else here: the endpoint is
             /// asserted `Active` before the first request, and the first
             /// request is legal.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Dropping the `fail_session` call from `validate_peer_*`:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the violation was reported but
-            /// the session was left running: Active
-            ///   left: Active
-            ///  right: Closed
-            /// ```
             #[test]
             fn a_request_at_the_ceiling_ends_the_endpoints_session() {
                 let mut endpoint = active_client();

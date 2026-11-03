@@ -116,15 +116,8 @@ fn publish_ok_payload(group_order: u8) -> Vec<u8> {
 /// bytes and nothing weaker. An AbsoluteRange filter is the case that
 /// distinguishes them: it announces a Start Location and an End Group, and a
 /// reader that stops at the Filter Type runs into the parameter count where a
-/// Start Group belongs.
-///
-/// # What this catches, observed by making the change and running it
-///
-/// Dropping the Start Location and End Group from the TRACK_STATUS decode arm:
-///
-/// ```text
-/// a TRACK_STATUS body is a SUBSCRIBE body, got Err(Kvp(UnexpectedEnd))
-/// ```
+/// Start Group belongs. Fails if the TRACK_STATUS decode arm drops the Start
+/// Location and End Group.
 #[test]
 fn draft13_track_status_carries_the_fields_its_filter_announces() {
     let payload = subscribe_payload(&[0x00], &[0x01], FILTER_ABSOLUTE_RANGE);
@@ -160,18 +153,9 @@ fn draft13_track_status_carries_the_fields_its_filter_announces() {
 
 /// TRACK_STATUS refuses a Filter Type the draft does not assign.
 ///
-/// "A filter type other than the above MUST be treated as error." The SUBSCRIBE
-/// arm already refused these; the TRACK_STATUS arm read the field and never
-/// looked at it, so the same four values were an error on one type ID and a
-/// stored integer on the other.
-///
-/// # What this catches, observed by making the change and running it
-///
-/// Reading the Filter Type as a bare varint without validating it:
-///
-/// ```text
-/// TRACK_STATUS must refuse filter type 0, got Ok(TrackStatus(TrackStatus { request_id: VarInt(1), track_namespace: TrackNamespace([[108]]), track_name: [118], subscriber_priority: 128, group_order: Publisher, forward: Forward, filter_type: NextGroupStart, start_group: None, start_object: None, end_group: None, parameters: [] }))
-/// ```
+/// "A filter type other than the above MUST be treated as error." Fails if the
+/// TRACK_STATUS arm reads the Filter Type as a bare varint without validating
+/// it, which would make values the SUBSCRIBE arm refuses a stored integer here.
 #[test]
 fn draft13_track_status_refuses_an_unassigned_filter_type() {
     for filter in [0x00u8, 0x05, 0x63] {
@@ -193,15 +177,8 @@ fn draft13_track_status_refuses_an_unassigned_filter_type() {
 /// which a varint reader accepts as Ascending. Read as the draft draws it, the
 /// first byte is `0x40` = 64, which is larger than 0x2 and so a protocol error;
 /// the point is that the two readings disagree about a byte string, not that
-/// this particular one is legal.
-///
-/// # What this catches, observed by making the change and running it
-///
-/// Reading Group Order with `VarInt::decode` again:
-///
-/// ```text
-/// Group Order is one byte: a two-byte varint must not pass, got Ok(Subscribe(Subscribe { request_id: VarInt(1), track_namespace: TrackNamespace([[108]]), track_name: [118], subscriber_priority: 128, group_order: Ascending, forward: Forward, filter_type: LargestObject, start_group: None, start_object: None, end_group: None, parameters: [] }))
-/// ```
+/// this particular one is legal. Fails if Group Order is read with
+/// `VarInt::decode`.
 #[test]
 fn draft13_reads_its_single_byte_fields_as_single_bytes() {
     let payload = subscribe_payload(&[0x40, 0x01], &[0x01], FILTER_LARGEST_OBJECT);
@@ -237,21 +214,8 @@ fn draft13_reads_its_single_byte_fields_as_single_bytes() {
 /// TRACK_STATUS_OK inherits it by being "identical to the SUBSCRIBE_OK
 /// message". A shared reader that accepts `0x0` everywhere lets a subscriber be
 /// told nothing, and one that refuses it everywhere refuses the most common
-/// SUBSCRIBE in the corpus.
-///
-/// # What this catches, observed by making the change and running it
-///
-/// Pointing the five response arms at the request reader:
-///
-/// ```text
-/// SUBSCRIBE_OK must refuse Group Order 0, got Ok(SubscribeOk(SubscribeOk { request_id: VarInt(2), track_alias: VarInt(1), expires: VarInt(0), group_order: Publisher, content_exists: NoLargestLocation, largest_location: None, parameters: [] }))
-/// ```
-///
-/// and pointing the request arms at the response reader:
-///
-/// ```text
-/// SUBSCRIBE must accept Group Order 0, got Err(InvalidField)
-/// ```
+/// SUBSCRIBE in the corpus. Fails if the response arms use the request reader,
+/// or the request arms the response reader.
 #[test]
 fn draft13_group_order_zero_is_a_request_only_value() {
     let requests: [(&str, u8, Vec<u8>); 3] = [
@@ -298,15 +262,8 @@ fn draft13_group_order_zero_is_a_request_only_value() {
 ///
 /// All three sentences are unconditional — "Values larger than 0x2 are a
 /// protocol error", "Any other value is a protocol error and MUST terminate the
-/// session with a Protocol Violation" — and none of the three was checked.
-///
-/// # What this catches, observed by making the change and running it
-///
-/// Returning the raw byte from `read_forward` without matching on it:
-///
-/// ```text
-/// Forward 7 must be refused, got Ok(Subscribe(Subscribe { request_id: VarInt(1), track_namespace: TrackNamespace([[108]]), track_name: [118], subscriber_priority: 128, group_order: Ascending, forward: Forward, filter_type: LargestObject, start_group: None, start_object: None, end_group: None, parameters: [] }))
-/// ```
+/// session with a Protocol Violation". Fails if `read_forward` returns the raw
+/// byte without matching on it.
 #[test]
 fn draft13_refuses_values_the_draft_calls_protocol_errors() {
     let payload = subscribe_payload(&[0x05], &[0x01], FILTER_LARGEST_OBJECT);
@@ -340,18 +297,10 @@ fn draft13_refuses_values_the_draft_calls_protocol_errors() {
 /// does not carry hands its own reader the parameter count where a Group ID
 /// belongs.
 ///
-/// The Group Order case is the same defect one layer along: the decoders now
+/// The Group Order case is the same defect one layer along: the decoders
 /// refuse `0x0` on a response, so an encoder that writes one produces a frame
-/// nothing can read, including itself.
-///
-/// # What this catches, observed by making the change and running it
-///
-/// Dropping the `check_discriminators` and `check_group_order` calls from the
-/// head of `encode`:
-///
-/// ```text
-/// a SUBSCRIBE_OK that announces a location it does not carry must be refused, got Ok(())
-/// ```
+/// nothing can read, including itself. Fails if `encode` skips
+/// `check_discriminators` or `check_group_order`.
 #[test]
 fn draft13_encode_refuses_a_message_that_contradicts_itself() {
     let namespace = TrackNamespace(vec![b"l".to_vec()]);
@@ -457,30 +406,15 @@ fn draft13_encode_refuses_a_message_that_contradicts_itself() {
 ///
 /// Sections 2.4.1 and 8.28: "If an endpoint receives a Track Namespace tuple
 /// with an N of 0 or more than 32, it MUST close the session with a Protocol
-/// Violation." The reader enforced it and the writer did not, so this codec
-/// emitted namespaces it would refuse to read back — the sentence is about a
-/// receiver, and the peer is the receiver.
+/// Violation." A writer that skips the check emits namespaces this codec would
+/// refuse to read back — the sentence is about a receiver, and the peer is the
+/// receiver.
 ///
 /// The rule is written once and applied at nine separate call sites, so the
 /// gate drives all three field names a site can carry — the plain namespace, the
 /// prefix, and the one nested inside a standalone FETCH. Removing the check from
 /// any single site leaves the other eight standing, which is how eight of nine
 /// would still look right.
-///
-/// # What this catches, observed by making the change and running it
-///
-/// Removing the validation from all nine namespace encode sites:
-///
-/// ```text
-/// a 0-field Track Namespace in ANNOUNCE must be refused on encode, got Ok(())
-/// ```
-///
-/// and removing it from the nested FETCH site alone, which is the one a gate
-/// driving a single message would have missed:
-///
-/// ```text
-/// a 0-field Track Namespace in FETCH must be refused on encode, got Ok(())
-/// ```
 #[test]
 fn draft13_holds_a_namespace_to_its_bounds_in_both_directions() {
     fn announce(namespace: TrackNamespace) -> ControlMessage {

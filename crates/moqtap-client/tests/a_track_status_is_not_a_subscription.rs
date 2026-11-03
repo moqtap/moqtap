@@ -299,16 +299,6 @@ macro_rules! control_stream_gates {
             }
 
             /// An update naming a track status the peer asked for is refused.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// Section 8.20 says the subscriber cannot update a track status: ()
-            /// ```
-            ///
-            /// Made by putting the track statuses back among the requests whose
-            /// identifier has existed, which is where all four drafts had them. It
-            /// reddens 8 tests, this gate and the one after it on each of the four.
             #[test]
             fn an_update_naming_a_track_status_the_peer_asked_for_is_refused() {
                 let mut ep = asked();
@@ -329,16 +319,6 @@ macro_rules! control_stream_gates {
             /// And one naming a track status this endpoint asked for is refused
             /// the same way: the sentence is about the request kind, not about
             /// which end opened it.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a track status cannot be updated whichever end asked for it: ()
-            /// ```
-            ///
-            /// The other half of the same cut: the sentence is about the request
-            /// kind, so a guard that reads only the peer's record would let this
-            /// one through.
             #[test]
             fn an_update_naming_this_endpoints_own_track_status_is_refused() {
                 let mut ep = active();
@@ -355,19 +335,6 @@ macro_rules! control_stream_gates {
 
             /// An UNSUBSCRIBE naming a track status is refused too, which is
             /// the other half of the same sentence.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the refusal should say what the identifier names; got
-            /// UnknownRequest(1)
-            /// ```
-            ///
-            /// Made by cutting the guard in the withdrawal's own handler, which
-            /// leaves the message refused for the wrong reason: the identifier does
-            /// name a request this session is carrying. It reddens 4 tests, this
-            /// gate on each of the four. One shared sentence, two handlers, so the
-            /// update's cut does not reach here.
             #[test]
             fn an_unsubscribe_naming_a_track_status_is_refused() {
                 let mut ep = asked();
@@ -388,18 +355,6 @@ macro_rules! control_stream_gates {
             /// The refusal reaches no further than the one request kind: an
             /// update naming a request the draft does allow one for is still
             /// accepted.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// an advertisement is one of the kinds an update may modify:
-            /// NotASubscription(0)
-            /// ```
-            ///
-            /// Made by widening the guard to the advertisements as well. It reddens
-            /// 6 tests, this gate on all six drafts, and it is the reason the guard
-            /// names one request kind rather than everything that is not a
-            /// subscription.
             #[test]
             fn an_update_naming_a_request_that_may_be_updated_is_still_accepted() {
                 let mut ep = active();
@@ -492,17 +447,6 @@ macro_rules! stream_gates {
             }
 
             /// An update arriving on the peer's track status stream is refused.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// Section 9.16 says the subscriber cannot send REQUEST_UPDATE for a
-            /// track status: ()
-            /// ```
-            ///
-            /// Made by putting the track statuses back among the request kinds an
-            /// update may modify, which is where both drafts had them written out.
-            /// It reddens 4 tests, this gate and the one after it on both.
             #[test]
             fn an_update_naming_a_track_status_the_peer_asked_for_is_refused() {
                 let mut ep = asked();
@@ -526,15 +470,6 @@ macro_rules! stream_gates {
 
             /// And one naming a track status this endpoint asked for is refused
             /// the same way.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a track status cannot be updated whichever end asked for it: ()
-            /// ```
-            ///
-            /// The other half of the same cut. One map holds both ends' requests
-            /// here, so the guard cannot tell them apart and does not need to.
             #[test]
             fn an_update_naming_this_endpoints_own_track_status_is_refused() {
                 let mut ep = active();
@@ -560,16 +495,6 @@ macro_rules! stream_gates {
             }
 
             /// The refusal reaches no further than the one request kind.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// an advertisement is one of the kinds an update may modify:
-            /// NotASubscription(0)
-            /// ```
-            ///
-            /// Made by widening the guard to the advertisements as well. It reddens
-            /// 6 tests across the six drafts in this file.
             #[test]
             fn an_update_naming_a_request_that_may_be_updated_is_still_accepted() {
                 let mut ep = active();

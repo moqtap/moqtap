@@ -2136,14 +2136,7 @@ mod tests {
     /// Every status the type can hold reaches the wire as its own code and
     /// comes back unchanged, through both subgroup readers and the datagram.
     ///
-    /// Observed by making `write_object` encode `ObjectStatus::Normal` instead
-    /// of the object's own status, which fails this with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: EndOfGroup on the subgroup wire
-    ///   left: [0, 0, 0]
-    ///  right: [0, 0, 3]
-    /// ```
+    /// Fails if `write_object` writes Normal in place of the object's own status.
     #[test]
     fn assigned_statuses_round_trip() {
         let header = plain_header();
@@ -2187,18 +2180,8 @@ mod tests {
     /// field, because the flag is what puts the field on the wire — an unset
     /// `object_status` writes Normal rather than nothing.
     ///
-    /// Observed by putting back the `if let Some(s) = &self.object_status`
-    /// with no `else`, which emits a datagram that stops before its status
-    /// field and fails this with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed
-    ///   left: [32, 1, 2, 3, 128]
-    ///  right: [32, 1, 2, 3, 128, 0]
-    /// ```
-    ///
-    /// and, with the byte comparison removed, fails the decode of its own
-    /// output with `own output refused: VarInt(UnexpectedEnd)`.
+    /// Fails if a datagram with the status flag and no `object_status` stops
+    /// before its status field.
     #[test]
     fn a_status_datagram_without_a_status_encodes_normal() {
         let mut bytes = Vec::new();
@@ -2218,16 +2201,8 @@ mod tests {
     /// expected set is read from [`ObjectStatus::ALL`] rather than written out
     /// here, so reassigning a code moves both halves of the test at once.
     ///
-    /// Observed by teaching `ObjectStatus::from_u64` to answer `Some` for 0x1
-    /// again — the code draft-15 assigned to Object Does Not Exist and
-    /// draft-16 dropped, mapped onto a surviving variant since draft-16 has no
-    /// variant of its own for it — which fails this with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: subgroup read_object on status 0x1: Ok(SubgroupObject { object_id: VarInt(0), extension_headers: [], payload_length: VarInt(0), object_status: Some(Normal), payload: [] })
-    ///   left: true
-    ///  right: false
-    /// ```
+    /// Fails if `ObjectStatus::from_u64` accepts 0x1, the code draft-15
+    /// assigned to Object Does Not Exist and draft-16 dropped.
     #[test]
     fn the_wire_accepts_exactly_what_the_type_can_hold() {
         let header = plain_header();

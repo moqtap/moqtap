@@ -159,17 +159,8 @@ const MODE_FIELD_DRAFTS: &[DraftVersion] = &[
 /// The pairing is why this is a list of tuples rather than of drafts: draft-11
 /// spells it `0x0A` and every draft after it spells it `0x12`.
 ///
-/// # It lives up here for a reason
-///
-/// This was an array written inline in the one test that reads it, eight
-/// hundred lines down, and it was the only per-draft enumeration in this file
-/// that was not a named constant beside its siblings. It was also the only one
-/// with holes in it. Draft-15 was missing, though draft-15 Section 10.4.2 Table
-/// 6 assigns `0x12` to a first-object stream exactly as its neighbours do, and
-/// draft-20 was missing because the port that added `DraftVersion::Draft20` to
-/// the four constants above never reached a literal that far from them.
-///
-/// Neither omission could fail. A draft left out of a sweep is a draft the
+/// Draft-15 Section 10.4.2 Table 6 assigns `0x12` to a first-object stream
+/// exactly as its neighbours do. A draft left out of this list is a draft the
 /// sweep says nothing about, and a test that says nothing passes.
 const FIRST_OBJECT_SUBGROUP_STREAMS: &[(DraftVersion, u8)] = &[
     #[cfg(feature = "draft11")]
@@ -905,16 +896,6 @@ fn implicit_subgroup_id_is_reported_as_unresolved() {
 /// present, so the bytes after the type field are laid out exactly as the
 /// mode-1 header in the test above — only the mode differs, which is what
 /// attributes the outcome to the mode.
-///
-/// *Ablation, measured:* clear the buffer alongside latching the bypass, so
-/// the bytes the framer could not read are dropped rather than released
-/// uninterpreted:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-17] chunk 1: a reserved-mode header costs addressability, not bytes
-///   left: [1, 0, 128, 100, 101, 97, 100, 98, 101, 101, 102]
-///  right: [22, 1, 0, 128, 100, 101, 97, 100, 98, 101, 101, 102]
-/// ```
 #[test]
 fn a_reserved_mode_header_is_refused_and_every_byte_still_forwarded() {
     for &draft in MODE_FIELD_DRAFTS {

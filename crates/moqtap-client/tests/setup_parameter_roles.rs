@@ -63,12 +63,6 @@ mod draft07 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -85,12 +79,6 @@ mod draft07 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup =
@@ -148,12 +136,6 @@ mod draft08 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -170,12 +152,6 @@ mod draft08 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { selected_version: varint(0xff000008), parameters: vec![path()] };
@@ -232,12 +208,6 @@ mod draft09 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -254,12 +224,6 @@ mod draft09 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { selected_version: varint(0xff000009), parameters: vec![path()] };
@@ -316,12 +280,6 @@ mod draft10 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -338,12 +296,6 @@ mod draft10 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { selected_version: varint(0xff00000a), parameters: vec![path()] };
@@ -400,12 +352,6 @@ mod draft11 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -422,12 +368,6 @@ mod draft11 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { selected_version: varint(0xff00000b), parameters: vec![path()] };
@@ -484,12 +424,6 @@ mod draft12 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -506,12 +440,6 @@ mod draft12 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { selected_version: varint(0xff00000c), parameters: vec![path()] };
@@ -568,12 +496,6 @@ mod draft13 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -590,12 +512,6 @@ mod draft13 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { selected_version: varint(0xff00000d), parameters: vec![path()] };
@@ -650,12 +566,6 @@ mod draft14 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -672,12 +582,6 @@ mod draft14 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { selected_version: varint(0xff00000e), parameters: vec![path()] };
@@ -731,12 +635,6 @@ mod draft15 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -753,12 +651,6 @@ mod draft15 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { parameters: vec![path()] };
@@ -812,12 +704,6 @@ mod draft16 {
 
     /// A canonical CLIENT_SETUP from this repository's own corpus, carrying the
     /// parameter that grants the peer a budget.
-    ///
-    /// Refusing key 0x02 in `validate_client_setup` again fails with:
-    ///
-    /// ```text
-    /// a CLIENT_SETUP that grants a budget must be accepted: Err(WrongParameterRole(2))
-    /// ```
     #[test]
     fn a_client_setup_may_grant_the_peer_a_budget() {
         let setup = client_setup_from_corpus();
@@ -834,12 +720,6 @@ mod draft16 {
     /// validation. The error is pinned rather than merely being an error: on
     /// the drafts that require other parameters, "some error" would pass on the
     /// wrong one.
-    ///
-    /// Dropping the check from `validate_server_setup` fails with:
-    ///
-    /// ```text
-    /// a SERVER_SETUP carrying PATH must be refused for being a PATH: Ok(())
-    /// ```
     #[test]
     fn a_server_setup_may_not_carry_path() {
         let setup = ServerSetup { parameters: vec![path()] };
@@ -883,12 +763,6 @@ mod draft17 {
     /// This draft merges the two setup messages into one, so nothing in the
     /// message says which end sent it and the sender is an argument. The rule
     /// is unchanged: a server may not send PATH, a client may.
-    ///
-    /// Dropping the role check from `validate_setup` fails with:
-    ///
-    /// ```text
-    /// a SETUP from a server carrying PATH must be refused
-    /// ```
     #[test]
     fn a_setup_from_a_server_may_not_carry_path() {
         let setup = Setup { options: vec![path()] };
@@ -936,12 +810,6 @@ mod draft18 {
     /// This draft merges the two setup messages into one, so nothing in the
     /// message says which end sent it and the sender is an argument. The rule
     /// is unchanged: a server may not send PATH, a client may.
-    ///
-    /// Dropping the role check from `validate_setup` fails with:
-    ///
-    /// ```text
-    /// a SETUP from a server carrying PATH must be refused
-    /// ```
     #[test]
     fn a_setup_from_a_server_may_not_carry_path() {
         let setup = Setup { options: vec![path()] };
@@ -1178,12 +1046,6 @@ mod draft19 {
     /// This draft merges the two setup messages into one, so nothing in the
     /// message says which end sent it and the sender is an argument. The rule
     /// is unchanged: a server may not send PATH, a client may.
-    ///
-    /// Dropping the role check from `validate_setup` fails with:
-    ///
-    /// ```text
-    /// a SETUP from a server carrying PATH must be refused
-    /// ```
     #[test]
     fn a_setup_from_a_server_may_not_carry_path() {
         let setup = Setup { options: vec![path()] };

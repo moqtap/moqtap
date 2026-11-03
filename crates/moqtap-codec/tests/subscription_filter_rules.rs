@@ -235,16 +235,7 @@ fn an_unassigned_filter_type_is_reported_as_a_filter_type() {
 /// disobeys — unlike the Filter Type two bullets above it, which names
 /// PROTOCOL_VIOLATION outright.
 ///
-/// # What it catches, observed by making the change and running it
-///
-/// Adding `if end < start.group { return Err(...) }` to the decoder:
-///
-/// ```text
-/// ---- an_end_before_the_start_is_carried_where_no_draft_answers_it stdout ----
-///
-/// thread 'an_end_before_the_start_is_carried_where_no_draft_answers_it' (76568) panicked at crates\moqtap-codec\tests\subscription_filter_rules.rs:
-/// no draft states a consequence for a backwards range; refusing one closes sessions over a sentence that is not there: Err(SubscriptionFilterMalformed { detail: "its End Group is before its Start Location" })
-/// ```
+/// Fails if the decoder refuses an End Group before the Start Location.
 #[test]
 fn an_end_before_the_start_is_carried_where_no_draft_answers_it() {
     let got = SubscriptionFilter::decode(&quic_filter(&[ABSOLUTE_RANGE, 9, 0, 4]));
@@ -347,16 +338,8 @@ fn drafts_15_and_16_read_the_filter_inside_the_parameter() {
 /// makes a filter this codec cannot read a message that ends the session, so
 /// writing one is not a way to send it.
 ///
-/// # What it catches
-///
-/// Dropping the `check_subscription_filters` call from a draft's parameter
-/// encoder, which is where all five had it missing. The frame in the message is
-/// the whole SUBSCRIBE the writer produced, ending in the parameter: type 0x21,
-/// a value one byte long, and the byte 5:
-///
-/// ```text
-/// draft-15 wrote an unassigned Filter Type: Ok([3, 0, 11, 1, 1, 2, 110, 115, 1, 116, 1, 33, 1, 5])
-/// ```
+/// Fails if a draft's parameter encoder skips `check_subscription_filters` and
+/// writes an unassigned Filter Type.
 #[test]
 fn an_unassigned_filter_type_is_one_the_writer_will_not_write() {
     let quic = filter_parameter(quic_filter(&[0x05]));
@@ -397,17 +380,8 @@ fn an_unassigned_filter_type_is_one_the_writer_will_not_write() {
 /// and a draft-18 endpoint must close the session over. Draft-17 introduced the
 /// delta and wrote no sentence about the sum; draft-18 added one.
 ///
-/// # What it catches, observed by making the change and running it
-///
-/// Calling `last_group()` in draft-17's `check_subscription_filters`, which is
-/// what applying the draft-18 rule to all three drafts looks like:
-///
-/// ```text
-/// ---- the_overflow_rule_starts_at_draft_18 stdout ----
-///
-/// thread 'the_overflow_rule_starts_at_draft_18' (45272) panicked at crates\moqtap-codec\tests\subscription_filter_rules.rs:
-/// draft-17 states no rule about the sum, so refusing one closes sessions a conforming peer may open: Err(FilterEndGroupOverflow { start_group: 18446744073709551615, delta: 1 })
-/// ```
+/// Fails if draft-17's `check_subscription_filters` applies the draft-18 rule
+/// by calling `last_group()`.
 #[test]
 fn the_overflow_rule_starts_at_draft_18() {
     use moqtap_codec::draft17::message::ControlMessage as D17;
@@ -465,22 +439,9 @@ fn the_overflow_rule_starts_at_draft_18() {
 /// other would either refuse a message draft-17 permits or emit one draft-18
 /// closes over.
 ///
-/// # What it catches
-///
-/// Both halves, each observed by making the change and running it. Dropping the
-/// `check_subscription_filters` call from draft-18's `encode_parameters`:
-///
-/// ```text
-/// draft-18 wrote a sum that leaves the range: Ok([3, 0, 22, 1, 1, 2, 110, 115, 1, 116, 1, 33, 12, 4, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 1])
-/// ```
-///
-/// And calling `last_group()` in draft-17's `check_subscription_filters`, which
-/// is what applying draft-18's sentence to the draft that does not state it
-/// looks like:
-///
-/// ```text
-/// draft-17 states no rule about the sum, so refusing to write one refuses a message a conforming peer may send: Err(FilterEndGroupOverflow { start_group: 18446744073709551615, delta: 1 })
-/// ```
+/// Fails if draft-18's `encode_parameters` skips `check_subscription_filters`,
+/// or if draft-17's `check_subscription_filters` applies draft-18's sentence by
+/// calling `last_group()`.
 #[test]
 fn the_writer_follows_the_same_line_between_draft_17_and_draft_18() {
     let over_18 = filter_parameter(moqt_filter::<Moqt18>(&[ABSOLUTE_RANGE, u64::MAX, 0, 1]));
@@ -562,12 +523,8 @@ fn a_legal_filter_is_carried_on_every_draft_that_has_the_parameter() {
 ///
 /// Both drafts that carry the filter as a parameter with the QUIC integer
 /// encoding, and both sides of each. The encoder has to reach the setup-namespace
-/// path, which leaves the version-specific value rules out; pointing a SETUP arm
-/// at the message-namespace encoder fails here with:
-///
-/// ```text
-/// a setup 0x21 is not the filter parameter: InvalidFilterType(5)
-/// ```
+/// path, which leaves the version-specific value rules out; the test fails if a
+/// SETUP arm points at the message-namespace encoder.
 #[test]
 fn the_filter_rule_does_not_reach_into_a_setup() {
     let unassigned = filter_parameter(quic_filter(&[0x05]));

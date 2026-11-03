@@ -647,9 +647,8 @@ mod tests {
     /// The empty fill is one byte, and that byte is the count: `Length = 1`
     /// carrying `0x00`, not `Length = 0`.
     ///
-    /// Encoding it as `Length = 0` instead fails with a decode error from the
-    /// codec, because a block with no count is a block whose first parameter
-    /// count is missing.
+    /// The codec refuses `Length = 0`, because a block with no count is a
+    /// block whose first parameter count is missing.
     #[test]
     fn an_empty_fill_is_a_single_zero_byte() {
         let p = FillParameters::inherited().parameter().unwrap();

@@ -418,13 +418,9 @@ fn endpoint_joining_fetch_allocates_and_tracks() {
 ///
 /// Which of the two a call writes is settled by which call it is. There is no
 /// Fetch Type to hand the endpoint, so this gate is what says the two calls
-/// have not become one.
-///
-/// Cut and measured: this builder left reaching the relative type gives
-/// `left: 2` against `right: 3` here, and reddens
-/// `every_request_helper_asks_for_what_it_was_told` on this draft as well,
-/// because the connection helper above it has nothing left of its own to get
-/// right.
+/// have not become one. It fails if this builder writes the relative type, as
+/// does `every_request_helper_asks_for_what_it_was_told` on this draft, because
+/// the connection helper above it has nothing of its own to get right.
 #[test]
 fn endpoint_absolute_joining_fetch_names_the_group_it_starts_at() {
     let mut ep = make_active_client();

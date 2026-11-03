@@ -3424,20 +3424,15 @@ fn record_not_attemptable(draft: DraftVersion, sw: &mut Sweep) {
 /// are prose: `the_capability_table_matches_observed_behaviour` never reads
 /// a key, so a `key()` that minted a fresh id per site would sweep green —
 /// and `SerializeAfter` would then name a stream that no site can hand
-/// back. Ablation: replacing `st.key` with a fresh `ctx.mint_key(side)` at
-/// the `StreamEnd` site reddens the "one key must reach open, header and
-/// end" assertion below.
+/// back.
 ///
 /// **What it deliberately does not gate**, so the claim is not
 /// over-read: the third half of that rustdoc — *not the transport stream
 /// id* — is **invisible here**. This runs over QUIC, where transport
 /// stream ids are already distinct per stream and stable across the three
 /// sites, so a `key()` returning `stream_id` passes every assertion below.
-/// Measured: with `key()` rewritten to `StreamKey { side, id: stream_id }`
-/// this file stays 8/8 green and only
-/// `hook_api::the_hook_trait_is_dyn_compatible` goes red, which is where
-/// that half is gated (a `StreamCtx` built with `stream_id: 4` and
-/// `id: 9`, asserted unequal). The case the distinction actually exists for
+/// That half is gated in `hook_api::the_hook_trait_is_dyn_compatible` (a
+/// `StreamCtx` built with `stream_id: 4` and `id: 9`, asserted unequal). The case the distinction actually exists for
 /// — WebTransport, where every stream reports id `0` — has no test in this
 /// tree at all.
 ///
@@ -3497,24 +3492,6 @@ async fn a_streams_key_is_stable_across_its_three_sites() {
 /// where they live and what `cargo test --doc -p moqtap-proxy` must report,
 /// so a future edit that moves one into a test file has somewhere to fail.
 ///
-/// **Measured**:
-///
-/// ```text
-/// $ cargo test --doc -p moqtap-proxy
-/// running 9 tests
-/// test crates\moqtap-proxy\src\egress.rs - egress (line 19) ... ignored
-/// test crates\moqtap-proxy\src\action.rs - action::DropMode (line 375) - compile fail ... ok
-/// test crates\moqtap-proxy\src\event.rs - event::ProxyEvent (line 48) ... ok
-/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 220) ... ok
-/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 211) ... ok
-/// test crates\moqtap-proxy\src\action.rs - action::DropMode (line 385) ... ok
-/// test crates\moqtap-proxy\src\capability.rs - capability::ActionKind::OpenAfter (line 239) ... ok
-/// test crates\moqtap-proxy\src\transport.rs - transport::TransportProfile (line 129) ... ok
-/// test crates\moqtap-proxy\src\action.rs - action::Interest::STREAMS (line 52) ... ok
-///
-/// test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.75s
-/// ```
-///
 /// The three `ActionKind::OpenAfter` entries carry **no** `- compile fail`
 /// suffix, and that suffix is the whole difference: two of them construct
 /// the shipped variants and the third asserts their verdicts, so all three
@@ -3549,7 +3526,7 @@ async fn a_streams_key_is_stable_across_its_three_sites() {
 /// this row reddens rather than the doc-test total quietly changing by one.
 ///
 /// It cannot *run* the blocks — nothing in `tests/*.rs` can — so this is a
-/// bookkeeping gate over the transcript above, and nothing more.
+/// bookkeeping gate, and nothing more.
 #[test]
 fn the_no_constructor_proofs_are_doc_tests_on_src_items() {
     // (proof name, the `src/` item its rustdoc hangs on)

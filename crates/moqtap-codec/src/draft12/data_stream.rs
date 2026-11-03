@@ -1070,33 +1070,6 @@ mod tests {
     /// that can express one, so leaving the payload datagram unchecked loses
     /// nothing; if a status could ride this header, the check being skipped
     /// here would be the check drafts 07 and 18 need.
-    ///
-    /// # What this catches, observed by making each change and running it
-    ///
-    /// Making `encode_checked` refuse unconditionally, as an over-eager copy of
-    /// the drafts that do need a check would:
-    ///
-    /// ```text
-    /// draft-12's payload datagram has no status to refuse: InvalidField
-    /// ```
-    ///
-    /// Making `encode_checked` return `Ok(())` without writing anything:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the fallible encode must write exactly what `encode` writes
-    ///   left: []
-    ///  right: [1, 0, 7, 128]
-    /// ```
-    ///
-    /// Making `DatagramStatusHeader::encode_with_extensions` write a constant
-    /// `ObjectStatus::Normal` instead of the header's own status, so the
-    /// message that is supposed to carry a status stops doing so:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: ObjectDoesNotExist must survive on the message that carries a status
-    ///   left: Normal
-    ///  right: ObjectDoesNotExist
-    /// ```
     #[test]
     fn a_payload_datagram_has_no_status_to_refuse() {
         let header = payload_datagram();

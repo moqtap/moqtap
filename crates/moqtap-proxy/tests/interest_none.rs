@@ -23,39 +23,22 @@
 //! another thread cannot spoil the assertion and no `#[ignore]` pressure
 //! ever builds up.
 //!
-//! # The three claims, and the ablation that falsifies each
+//! # The three claims
 //!
-//! | Test | Claim | Ablation that must turn it red |
-//! |---|---|---|
-//! | [`interest_none_touches_no_slow_path`] | no framer, no parser, no decoder, no release thread | `session.rs`: `objects_enabled = true` unconditionally |
-//! | [`interest_none_allocates_no_control_parser`] | `control_parsers_created == 0` | `session.rs`: drop `ctx.control_parse &&` from `pipe_control_passthrough`'s parser construction |
-//! | [`an_observer_does_not_turn_on_the_object_hook`] | framing gate ≠ hook gate | `session.rs`: gate `on_object` on `objects_enabled` instead of `object_hook` |
-//!
-//! The first ablation is the argument for counters existing at all: it
-//! must turn *this* file red while the byte-equality tests stay green,
-//! and the contrast is the proof. Measured, on the tree this file landed
-//! on: under `objects_enabled = true`, `framer_tests` (16),
-//! `object_framing_acceptance` (7), `proxy_forward` (1), `proxy_hook_rewrite`
-//! (1), `proxy_reset` (5) and `common_harness` (4) all stayed green and
-//! only `interest_none_touches_no_slow_path` went red on its counters.
-//!
-//! One test in `proxy_objects.rs` goes red too, and it is the exception
-//! that states the rule: `byte_pump_path_forwards_unchanged_without_an_observer`
-//! deliberately FINs nothing and stops ten bytes short of the end, so the
-//! byte pump forwards a half-object the framed path would still be
-//! holding. It is a *path detector* built out of the one input on which
-//! the two paths are not byte-identical, not a byte-equality test — and
-//! constructing that input is precisely the contortion these counters
-//! exist to make unnecessary.
+//! | Test | Claim |
+//! |---|---|
+//! | [`interest_none_touches_no_slow_path`] | no framer, no parser, no decoder, no release thread |
+//! | [`interest_none_allocates_no_control_parser`] | `control_parsers_created == 0` |
+//! | [`an_observer_does_not_turn_on_the_object_hook`] | framing gate ≠ hook gate |
 //!
 //! # `moqt-19` is load-bearing
 //!
 //! `session.rs`'s `draft_is_fixed` is derived from the client ALPN, and
 //! the control parser is built only when the draft is fixed. A session
 //! whose ALPN does not resolve — `moq-00`, which
-//! [`common::spawn_proxy`] defaults to — builds no parser *even in the
-//! ablated build*, so `control_parsers_created == 0` would hold for the
-//! wrong reason and the ablation would come back green.
+//! [`common::spawn_proxy`] defaults to — builds no parser whatever the
+//! gate does, so `control_parsers_created == 0` would hold for the wrong
+//! reason.
 //! [`the_pinned_alpn_resolves_to_a_draft`] pins that precondition
 //! directly rather than leaving it to a comment.
 //!
@@ -537,7 +520,7 @@ fn the_fixtures_are_real_draft19_wire_bytes() {
 /// and the control parser is built only when the draft is fixed. If this
 /// ALPN ever stopped resolving,
 /// [`interest_none_allocates_no_control_parser`] would keep passing while
-/// measuring nothing at all — its ablation would build no parser either.
+/// measuring nothing at all.
 #[test]
 fn the_pinned_alpn_resolves_to_a_draft() {
     assert_eq!(
@@ -616,11 +599,6 @@ async fn no_slow_path_case(hook: Arc<dyn ProxyHook>) {
 /// The headline claim of this file: a session that moved a subgroup stream,
 /// a fetch stream, four datagrams and a SETUP/SUBSCRIBE exchange under
 /// `Interest::NONE` delivered every byte and left every counter at zero.
-///
-/// *Ablation:* in `session.rs`, make `objects_enabled` unconditionally
-/// `true`. This test must fail on `framers_created` / `framer_header_polls`
-/// / `framer_object_polls` while every byte-equality assertion in the
-/// suite — including the ones in this very test — still passes.
 #[tokio::test]
 async fn interest_none_touches_no_slow_path() {
     // Case 1: no hook worth the name, and a non-event observer.
@@ -648,10 +626,6 @@ async fn interest_none_touches_no_slow_path() {
 /// tasks have entered their loops by the time the counter is read — a
 /// parser is built at function entry, before any byte is examined, so a
 /// direction that never started would hide the allocation.
-///
-/// *Ablation:* in `session.rs`, drop the `ctx.control_parse &&` term from
-/// `pipe_control_passthrough`'s parser construction, restoring the
-/// `draft_is_fixed`-only form. This test must fail.
 #[tokio::test]
 async fn interest_none_allocates_no_control_parser() {
     let (relay, proxy, _client_ep, client_conn, _relay_conn) =
@@ -701,10 +675,6 @@ async fn interest_none_allocates_no_control_parser() {
 /// object); the second proves the gate is not simply dead, by running the
 /// same session shape with `Interest::OBJECTS` and watching the hook fire
 /// once per object.
-///
-/// *Ablation:* in `session.rs`'s `pipe_data_framed`, gate the `on_object`
-/// call on `ctx.objects_enabled` instead of `ctx.object_hook`. The first
-/// half must fail.
 #[tokio::test]
 async fn an_observer_does_not_turn_on_the_object_hook() {
     let stream = the_subgroup_stream();
@@ -808,10 +778,6 @@ const IDLE_STOP_WINDOW: std::time::Duration = std::time::Duration::from_millis(4
 ///
 /// The relay writes a *prefix* of the subgroup stream and then goes silent:
 /// no second write, no FIN, no reset. That silence is the test.
-///
-/// *Ablation (run, and it fails):* delete the `stop.watch()` branch from
-/// `pipe_data_passthrough`'s `select!`. `observed` is then `None` — nothing
-/// writes to the destination again, so nothing notices the `STOP_SENDING`.
 #[tokio::test]
 async fn an_interest_none_session_still_mirrors_a_stop() {
     let (hook, fired) = SilentHook::new();

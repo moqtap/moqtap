@@ -121,20 +121,6 @@ mod draft16 {
     }
 
     /// The prefix the peer asked for is read back from the record.
-    ///
-    /// # What it catches, observed by making the change and running it
-    ///
-    /// Moving the state machine on and dropping the request:
-    ///
-    /// ```text
-    /// the namespace subscription the peer opened must be readable
-    /// ```
-    ///
-    /// It reddens three tests: this gate, the one that says a subscription of
-    /// this endpoint's own is not the peer's, and
-    /// `the_peers_subscription_is_answered_on_its_own_stream` in
-    /// `draft16_namespace_stream_on_the_wire.rs`, where the request arrives off
-    /// a real QUIC stream.
     #[test]
     fn the_prefix_the_peer_asked_for_is_read_back() {
         let ep = asked();
@@ -155,17 +141,6 @@ mod draft16 {
     }
 
     /// A namespace subscription that has been answered is no longer waiting.
-    ///
-    /// # What it catches
-    ///
-    /// Reading the record back without asking the state machine beside it
-    /// whether an answer is still owed:
-    ///
-    /// ```text
-    /// an answered request is still waiting for an answer, and named Some(VarInt(0))
-    /// ```
-    ///
-    /// It reddens one test, this one.
     #[test]
     fn an_answered_namespace_subscription_is_no_longer_waiting() {
         let mut ep = asked();
@@ -181,20 +156,6 @@ mod draft16 {
     }
 
     /// An identifier nothing arrived under reads back nothing.
-    ///
-    /// # What it catches
-    ///
-    /// Finding the record by iteration instead of by the identifier the caller
-    /// named, and judging what was found instead of what was asked for:
-    ///
-    /// ```text
-    /// a request was read back for an id nothing arrived under
-    /// ```
-    ///
-    /// It reddens two tests, this gate and the one below it. Both halves of
-    /// the accessor have to be cut together: replacing only the lookup leaves
-    /// this gate green, because the state probe is still keyed by the
-    /// identifier and refuses one nothing arrived under.
     #[test]
     fn an_identifier_nothing_arrived_under_reads_back_nothing() {
         let ep = asked();
@@ -203,17 +164,6 @@ mod draft16 {
     }
 
     /// A namespace subscription this endpoint made is not one the peer made.
-    ///
-    /// # What it catches
-    ///
-    /// Writing the record on the outbound path as well as the inbound one,
-    /// which one map keyed by Request ID alone invites:
-    ///
-    /// ```text
-    /// a request this endpoint made was read back as the peer's, and named Some(VarInt(1))
-    /// ```
-    ///
-    /// It reddens one test, this one.
     #[test]
     fn a_namespace_subscription_of_this_endpoints_own_is_not_the_peers() {
         let mut ep = asked();
@@ -447,21 +397,6 @@ macro_rules! peers_request_gates {
             }
 
             /// The SUBSCRIBE the peer sent is read back from the record.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Moving the state machine on and dropping the request:
-            ///
-            /// ```text
-            /// the subscription the peer opened must be readable
-            /// ```
-            ///
-            /// One cut reaches every read-back gate in this group, because one
-            /// entry point takes every request kind: it reddens twenty-six
-            /// tests, eight on draft-17 and nine each on 18 and 19. The
-            /// exception is the gate that asserts an absence - with nothing
-            /// recorded, an identifier nothing arrived under still reads back
-            /// nothing - and that gate has a cut of its own.
             #[test]
             fn a_subscribe_the_peer_makes_is_read_back() {
                 let (ep, id) = arrives(crate::peers_request!(subscribe, $shape, v(0)));
@@ -575,17 +510,6 @@ macro_rules! peers_request_gates {
             /// The other half of what "pending" means. The record stays,
             /// because the subscription outlives its answer; what stops is the
             /// endpoint owing a reply.
-            ///
-            /// # What it catches
-            ///
-            /// Reading the record back without asking the state machine
-            /// whether it is still owed an answer:
-            ///
-            /// ```text
-            /// an answered request is still waiting for an answer, and named Some(VarInt(0))
-            /// ```
-            ///
-            /// It reddens three tests, this gate on each of the three drafts.
             #[test]
             fn an_answered_request_is_no_longer_waiting() {
                 let (mut ep, id) = arrives(crate::peers_request!(subscribe, $shape, v(0)));
@@ -609,25 +533,6 @@ macro_rules! peers_request_gates {
             }
 
             /// An identifier nothing arrived under reads back nothing.
-            ///
-            /// # What it catches
-            ///
-            /// Finding the record by iteration instead of by the identifier the
-            /// caller named, and judging what was found instead of what was
-            /// asked for. Every other gate in this group has exactly one
-            /// request outstanding, so a lookup that ignores the id finds the
-            /// right record by accident:
-            ///
-            /// ```text
-            /// a request was read back for an id nothing arrived under
-            /// ```
-            ///
-            /// It reddens six tests: this gate and the one above it, on all
-            /// three drafts. Both halves have to be cut together - replacing
-            /// only the lookup leaves this gate green, because the state probe
-            /// is still keyed by the identifier and refuses one nothing
-            /// arrived under. That was measured: the one-sided cut failed on
-            /// the gate above instead of on this one.
             #[test]
             fn an_identifier_nothing_arrived_under_reads_back_nothing() {
                 let (ep, _) = arrives(crate::peers_request!(subscribe, $shape, v(0)));
@@ -639,22 +544,6 @@ macro_rules! peers_request_gates {
             ///
             /// One map holds all of them, so the identifier alone does not say
             /// which kind of request it names.
-            ///
-            /// # What it catches
-            ///
-            /// A count that forgets which kind it counts -
-            /// `pending_publish_count` answering `inbound_requests.len()`:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: no offer arrived left: 1 right: 0
-            /// ```
-            ///
-            /// It reddens three tests, this gate on each of the three drafts.
-            /// The typed half of this gate has no cut of its own and cannot
-            /// have one: `pending_publish` returns `Option<&Publish>`, so an
-            /// accessor that ignored the variant would not compile. What can
-            /// go wrong is the count beside it, and that is what is measured
-            /// here.
             #[test]
             fn a_request_reads_back_only_as_the_kind_it_arrived_as() {
                 let (ep, id) = arrives(crate::peers_request!(subscribe, $shape, v(0)));
@@ -676,17 +565,6 @@ macro_rules! peers_request_gates {
             /// The state of both ends' subscriptions is in one map, keyed by
             /// Request ID, so the record that answers "what did the peer ask"
             /// is the one that knows which direction the request went.
-            ///
-            /// # What it catches
-            ///
-            /// Writing the record on the outbound path as well - one line in
-            /// `subscribe`, beside the state machine it already inserts:
-            ///
-            /// ```text
-            /// a request this endpoint made was read back as the peer's, and named Some(VarInt(1))
-            /// ```
-            ///
-            /// It reddens three tests, this gate on each of the three drafts.
             #[test]
             fn a_request_of_this_endpoints_own_is_not_the_peers() {
                 let (mut ep, _) = arrives(crate::peers_request!(subscribe, $shape, v(0)));

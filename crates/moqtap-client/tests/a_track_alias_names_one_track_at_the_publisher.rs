@@ -300,19 +300,6 @@ macro_rules! publisher_alias_gates {
 
             /// A second track under an alias a live subscription holds ends the
             /// session.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `conflicting_track_alias` call from
-            /// `receive_subscribe`:
-            ///
-            /// ```text
-            /// the peer gave one alias to two tracks and was not refused: ()
-            /// ```
-            ///
-            /// It reddens fifteen tests: this gate and the one below it that
-            /// holds this endpoint's own alias against the peer, on all five
-            /// drafts, and the loopback gate on the same five.
             #[test]
             fn a_second_track_under_a_live_alias_closes_the_session() {
                 let mut ep = active();
@@ -329,15 +316,6 @@ macro_rules! publisher_alias_gates {
             ///
             /// The rule is about an alias naming two tracks, not about naming
             /// one track twice.
-            ///
-            /// # What it catches
-            ///
-            /// Comparing only the alias and not the track it names, which
-            /// turns every re-subscription into a session close:
-            ///
-            /// ```text
-            /// a second subscription to the same track under the same alias was refused: DuplicateTrackAlias { alias: 7, established_side: Peers, established: 0, offered_side: Peers, offered: 2 }
-            /// ```
             #[test]
             fn the_same_track_under_the_same_alias_is_not_a_conflict() {
                 let mut ep = active();
@@ -353,19 +331,8 @@ macro_rules! publisher_alias_gates {
 
             /// An alias is free again once the subscription holding it ends.
             ///
-            /// This is the half that could not be built before the publisher
-            /// had a lifecycle for an inbound SUBSCRIBE: a binding nothing can
-            /// retire refuses the peer's next, conforming, use of the alias.
-            ///
-            /// # What it catches
-            ///
-            /// Reading liveness off a set kept beside the state machines
-            /// rather than off the state machines themselves - equivalently,
-            /// answering `binding_is_live` with `true`:
-            ///
-            /// ```text
-            /// an alias whose subscription had ended was still held: DuplicateTrackAlias { alias: 7, established_side: Peers, established: 0, offered_side: Peers, offered: 2 }
-            /// ```
+            /// A binding nothing can retire refuses the peer's next, conforming,
+            /// use of the alias.
             #[test]
             fn an_alias_is_free_once_its_subscription_ends() {
                 let mut ep = active();
@@ -388,18 +355,6 @@ macro_rules! publisher_alias_gates {
             /// of a session draw from the one space. A gate built only on two
             /// SUBSCRIBEs from the peer would pass against a table that only
             /// ever recorded the peer's.
-            ///
-            /// # What it catches
-            ///
-            /// Not recording a binding for the SUBSCRIBEs this endpoint sends:
-            ///
-            /// ```text
-            /// the peer took an alias this endpoint's own subscription held: ()
-            /// ```
-            ///
-            /// It reddens twenty-five tests: five gates on all five drafts.
-            /// Everything that reads an alias this endpoint chose reads it out
-            /// of that one insert.
             #[test]
             fn an_alias_this_endpoint_chose_is_held_against_the_peer() {
                 let mut ep = active();
@@ -413,20 +368,6 @@ macro_rules! publisher_alias_gates {
             }
 
             /// A retry alias that is already in use ends the session.
-            ///
-            /// # What it catches
-            ///
-            /// Deleting the `conflicting_retry_alias` call from
-            /// `receive_subscribe_error`:
-            ///
-            /// ```text
-            /// the retry offered an alias another track was using and was not refused: ()
-            /// ```
-            ///
-            /// It reddens ten tests: this gate on all five drafts and the
-            /// loopback gate on the same five. Nothing that judges an arriving
-            /// SUBSCRIBE is touched, which is what makes the two halves of the
-            /// rule two rules.
             #[test]
             fn a_retry_alias_already_in_use_closes_the_session() {
                 let mut ep = active();
@@ -454,17 +395,6 @@ macro_rules! publisher_alias_gates {
             /// judge that answered every retry with a conflict would pass both
             /// of them: one expects a refusal, and the other never reaches the
             /// judge because its code is not a retry.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Answering an offer of a free alias as though it were taken -
-            /// falling back to a conflict where the holder lookup finds none:
-            ///
-            /// ```text
-            /// a free retry alias was refused: DuplicateTrackAlias { alias: 8, established_side: Ours, established: 0, offered_side: Ours, offered: 0 }
-            /// ```
-            ///
-            /// It reddens five tests and only this gate, on all five drafts.
             #[test]
             fn a_free_retry_alias_is_taken_up() {
                 let mut ep = active();
@@ -485,15 +415,6 @@ macro_rules! publisher_alias_gates {
             }
 
             /// The Track Alias field means nothing under any other code.
-            ///
-            /// # What it catches
-            ///
-            /// Judging the field whatever the code says, which closes the
-            /// session over a number the peer never meant as an offer:
-            ///
-            /// ```text
-            /// a Track Alias under a code that is not a retry was judged: DuplicateTrackAlias { alias: 7, established_side: Ours, established: 0, offered_side: Ours, offered: 1 }
-            /// ```
             #[test]
             fn a_track_alias_under_another_code_is_ignored() {
                 let mut ep = active();
@@ -513,17 +434,6 @@ macro_rules! publisher_alias_gates {
 
             /// This endpoint will not give one alias to two tracks, and says
             /// so instead of sending the message.
-            ///
-            /// # What it catches
-            ///
-            /// Deleting the `alias_holder` call from `subscribe_inner`:
-            ///
-            /// ```text
-            /// this endpoint gave one alias to two tracks: (VarInt(1), Subscribe(Subscribe { subscribe_id: VarInt(1), track_alias: VarInt(7), track_namespace: TrackNamespace([[99, 111, 110, 102, 111, 114, 109, 97, 110, 99, 101]]), track_name: [98, 101, 116, 97], subscriber_priority: 128, group_order: Ascending, filter_type: LargestObject, start_location: None, end_group: None, end_object: None, parameters: [] }))
-            /// ```
-            ///
-            /// It reddens ten tests: this gate and the one below it, on all
-            /// five drafts. Nothing that judges a message arriving is touched.
             #[test]
             fn this_endpoint_will_not_give_one_alias_to_two_tracks() {
                 let mut ep = active();
@@ -549,20 +459,6 @@ macro_rules! publisher_alias_gates {
             /// subscription takes the identifier the refused one would have
             /// had. Draft-11 steps its Request IDs by two because they carry
             /// the allocating end's parity; the four before it step by one.
-            ///
-            /// # What it catches
-            ///
-            /// Judging the alias after allocating the identifier:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: a refused SUBSCRIBE spent an identifier
-            ///   left: 2
-            ///  right: 1
-            /// ```
-            ///
-            /// It reddens five tests and only this gate: the refusal still
-            /// happens, so the gate above stays green and only the identifier
-            /// it spent shows.
             #[test]
             fn a_refused_subscribe_spends_no_identifier() {
                 let mut ep = active();
@@ -589,19 +485,6 @@ macro_rules! publisher_alias_gates {
             /// endpoint would itself accept — the two gates above refuse a
             /// duplicate, and an offer that had to be refused would make the
             /// facade's SUBSCRIBE fail on its second call.
-            ///
-            /// # What it catches
-            ///
-            /// Offering one past the highest taken alias rather than the
-            /// lowest free one. That is not wrong on its own, but it drifts
-            /// upward forever in a long session and never reuses what a
-            /// finished subscription gave back:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: a hole below the highest taken alias is still free
-            ///   left: 10
-            ///  right: 1
-            /// ```
             #[test]
             fn the_offered_alias_is_the_lowest_one_no_live_binding_holds() {
                 let mut ep = active();
@@ -636,16 +519,6 @@ macro_rules! publisher_alias_gates {
             /// this endpoint's own subscriptions would hand out an alias the
             /// peer is using — and the gate that refuses it would then fire on
             /// a value this endpoint had just recommended.
-            ///
-            /// # What it catches
-            ///
-            /// Reading the offer off anything but the live bindings:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the peer's alias is held against this endpoint's own choice too
-            ///   left: 0
-            ///  right: 1
-            /// ```
             #[test]
             fn an_offered_alias_comes_back_when_its_subscription_ends() {
                 let mut ep = active();

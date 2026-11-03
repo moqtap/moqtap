@@ -5,18 +5,13 @@
 //! moves at the same point, so this file is organised by the rule rather than by
 //! the draft: a rule that arrives in draft-16 gets one test with the draft
 //! before it and the draft that states it side by side. That is the shape a
-//! blanket rule fails, and a blanket rule is what this code had.
+//! blanket rule fails.
 //!
 //! Every gate is a consequence: bytes in and an answer out, or a frame in and
 //! the message it becomes. None of them reads a rule value back.
 //!
 //! Drafts 17 and later state the same rules over a different varint and are
 //! covered in `parameter_and_namespace_rules.rs`.
-//!
-//! # What breaking each fix does, observed by making the change and running
-//!
-//! The output quoted in each docstring came from making that edit and running
-//! the test; none of it is a prediction.
 
 #![cfg(all(feature = "draft15", feature = "draft16"))]
 

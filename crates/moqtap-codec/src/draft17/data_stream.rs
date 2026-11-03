@@ -2343,22 +2343,8 @@ mod tests {
     /// `None` is checked too — without it the encoder emits an object whose
     /// declared payload length promises a status field that never arrives.
     ///
-    /// Made `write_object` encode a constant `ObjectStatus::Normal` instead of
-    /// the object's own status, ran it, and got:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: subgroup object status
-    ///   left: Some(Normal)
-    ///  right: Some(EndOfGroup)
-    /// ```
-    ///
-    /// The same change to `DatagramHeader::encode` gives:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: datagram object status
-    ///   left: Some(Normal)
-    ///  right: Some(EndOfGroup)
-    /// ```
+    /// Fails if `write_object` or `DatagramHeader::encode` writes a constant
+    /// `ObjectStatus::Normal` in place of the object's own status.
     #[test]
     fn every_assigned_status_survives_a_round_trip() {
         let header = SubgroupHeader::decode(&mut &hex("100100800004deadbeef")[..]).unwrap();
@@ -2415,46 +2401,15 @@ mod tests {
     /// sites — and no `ObjectStatus` exists to hand the encoder, so the frame
     /// has no way to be produced in the first place.
     ///
-    /// # What this catches, observed by making each change and running it
-    ///
-    /// Encoding a constant `ObjectStatus::Normal` in `write_object` instead of
-    /// the object's own status:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the encoder must produce the frame the decoder accepted for status 0x3
-    ///   left: [16, 1, 0, 128, 0, 0, 0]
-    ///  right: [16, 1, 0, 128, 0, 0, 3]
-    /// ```
-    ///
-    /// The same change in `DatagramHeader::encode`:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the encoder must produce the datagram the decoder accepted for status 0x3
-    ///   left: [32, 1, 0, 0, 128, 0]
-    ///  right: [32, 1, 0, 0, 128, 3]
-    /// ```
-    ///
-    /// The decoder drifting away from `ALL` — adding `0x2` to
-    /// `ObjectStatus::from_u64`, so a code the draft does not assign starts
-    /// decoding:
-    ///
-    /// ```text
-    /// subgroup read_object accepted status 0x2, which the draft does not assign
-    /// ```
+    /// Fails if `write_object` or `DatagramHeader::encode` writes a constant
+    /// status in place of the object's own, or if `ObjectStatus::from_u64`
+    /// starts decoding a code the draft does not assign, such as `0x2`.
     ///
     /// # The encode-side refusal is a type, not an assertion
     ///
     /// Once `object_status` is typed there is no runtime path that offers the
-    /// encoder a `0x2`, so no test here can watch one be refused. Reverting
-    /// `DatagramHeader::object_status` to `Option<u8>` with an `unwrap_or(0)`
-    /// encoder does not make this test fail — it makes it stop compiling,
-    /// which is the guarantee:
-    ///
-    /// ```text
-    /// error[E0308]: mismatched types
-    ///     = note: expected enum `Option<u8>`
-    ///                found enum `Option<draft17::types::ObjectStatus>`
-    /// ```
+    /// encoder a `0x2`, so no test here can watch one be refused. An untyped
+    /// `object_status` would stop this test compiling, which is the guarantee.
     #[test]
     fn the_encoder_writes_exactly_the_frames_the_decoder_accepts() {
         for code in 0x00u64..=0x3f {

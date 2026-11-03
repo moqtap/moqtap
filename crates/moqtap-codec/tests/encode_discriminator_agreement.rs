@@ -31,7 +31,7 @@
 //! refuse the result.
 //!
 //! Every draft that has the rule is driven, not one: this is the same sentence
-//! in eight documents and it was enforced in two of them.
+//! in eight documents.
 //!
 //! Those eight are drafts 07 through 14, and they are the drafts the first two
 //! gates hold on. Draft-15 removed both of the fields those gates move: its
@@ -41,10 +41,7 @@
 //!
 //! The third field outlived them. A FETCH carries a Fetch Type beside a typed
 //! payload on every draft from 08 to 19, so drafts 15 through 19 are driven
-//! here too, by a suite whose SUBSCRIBE arms are left out. Those five encoders
-//! refuse the disagreement already, which is the answer the gate wants and not
-//! a reason to leave it unasked: two of the first eight refused it already too,
-//! and that is exactly what made the other six worth looking at.
+//! here too, by a suite whose SUBSCRIBE arms are left out.
 //!
 //! **Draft-20 ends the range, and it is worth saying why rather than leaving a
 //! gap in the numbering.** Section 10.13 deleted the Fetch Type field along
@@ -106,11 +103,7 @@ macro_rules! discriminator_suite {
             /// so the fields around it are exactly what the corpus says they
             /// should be.
             ///
-            /// Writing the optional fields from `Option` instead fails with:
-            ///
-            /// ```text
-            /// a Filter Type that names a Start Location must not encode without one
-            /// ```
+            /// Fails if the optional fields are written from `Option`.
             #[test]
             fn subscribe_filter_type_must_agree_with_its_start_location() {
                 let vector = find(concat!($dir, "subscribe.json"), |d| {
@@ -137,11 +130,7 @@ macro_rules! discriminator_suite {
             /// A SUBSCRIBE_OK whose Content Exists claims a Largest Location it
             /// does not carry.
             ///
-            /// Writing the Largest Location from `Option` instead fails with:
-            ///
-            /// ```text
-            /// Content Exists must not encode without the location it promises
-            /// ```
+            /// Fails if the Largest Location is written from `Option`.
             #[test]
             fn subscribe_ok_content_exists_must_agree_with_its_largest_location() {
                 let vector = find(concat!($dir, "subscribe-ok.json"), |d| {
@@ -171,17 +160,11 @@ macro_rules! discriminator_suite {
                 /// A FETCH whose Fetch Type names one shape while its fields
                 /// are the other shape.
                 ///
-                /// Writing the fields independently of the type fails with:
-                ///
-                /// ```text
-                /// a Fetch Type must not encode beside the other type's fields
-                /// ```
+                /// Fails if the fields are written independently of the type.
                 ///
                 /// The check is written out once per draft rather than shared,
                 /// so each gate is held by its own and none of them is standing
-                /// on a neighbour: removing it from any one of drafts 15
-                /// through 19 fails that draft and leaves the other
-                /// twenty-seven tests in this file passing.
+                /// on a neighbour.
                 #[test]
                 fn fetch_type_must_agree_with_the_fields_it_names() {
                     let vector = find(concat!($dir, "fetch.json"), |d| {

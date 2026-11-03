@@ -135,16 +135,8 @@ mod draft15 {
     /// the one value under test — the framing, the declared length, the
     /// parameter count, the key — is exactly what it writes.
     ///
-    /// # What it catches
-    ///
-    /// Without `check_parameter_value_ranges` in `decode_parameters` the value
-    /// is handed up as an ordinary parameter:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: parameter 0x22 value 0 must be refused
-    ///   left: Ok(Subscribe(Subscribe { request_id: VarInt(1), track_namespace: TrackNamespace([[110, 115]]), track_name: [116], parameters: [KeyValuePair { key: VarInt(34), value: Varint(VarInt(0)) }] }))
-    ///  right: Err(ParameterValueOutOfRange { key: 34, value: 0 })
-    /// ```
+    /// Fails if `decode_parameters` hands an out-of-range value up as an
+    /// ordinary parameter.
     #[test]
     fn a_parameter_outside_the_range_its_type_allows_is_refused() {
         for &(key, legal, value) in CASES {
@@ -164,16 +156,8 @@ mod draft15 {
     /// written a message that ends the session and would learn of it from the
     /// far end rather than from the call that wrote it.
     ///
-    /// # What it catches
-    ///
-    /// Dropping the `check_parameter_value_ranges` call from this draft's
-    /// `encode_parameters`, which is where it was missing:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the writer produced parameter 0x22 value 0, which the reader refuses
-    ///   left: Ok(())
-    ///  right: Err(ParameterValueOutOfRange { key: 34, value: 0 })
-    /// ```
+    /// Fails if this draft's `encode_parameters` skips
+    /// `check_parameter_value_ranges`.
     #[test]
     fn a_value_the_reader_refuses_is_one_the_writer_will_not_write() {
         for &(key, _, value) in CASES {
@@ -222,13 +206,8 @@ mod draft15 {
     /// Section 9.2.1.4: "The value is from 0 to 255 and lower numbers get higher
     /// priority. Priorities above 255 are invalid." Every parameter this test
     /// file refuses states a close in the clause after its range; this one
-    /// stops. Adding `0x0E => value <= 255` to `parameter_value_in_range` is the
-    /// natural over-reach, and it fails here with:
-    ///
-    /// ```text
-    /// assertion failed: a range the draft states without a consequence is not a
-    /// close: Err(ParameterValueOutOfRange { key: 14, value: 300 })
-    /// ```
+    /// stops. Fails if `parameter_value_in_range` over-reaches to
+    /// `0x0E => value <= 255`.
     #[test]
     fn a_priority_the_draft_calls_invalid_without_saying_more_is_carried() {
         let bytes = subscribe_with(vec![parameter(PUBLISHER_PRIORITY, 300)]);
@@ -249,11 +228,7 @@ mod draft15 {
     ///
     /// Both sides of the codec are held here. The setup arms of `encode_payload`
     /// have to reach the encoder that leaves the version-specific rules out, and
-    /// pointing them at the other one refuses a CLIENT_SETUP the draft permits:
-    ///
-    /// ```text
-    /// a setup 0x22 has no range on this draft: ParameterValueOutOfRange { key: 34, value: 0 }
-    /// ```
+    /// pointing them at the other one refuses a CLIENT_SETUP the draft permits.
     #[test]
     fn the_ranges_do_not_reach_into_a_setup() {
         let message = ControlMessage::ClientSetup(ClientSetup {
@@ -347,16 +322,8 @@ mod draft16 {
     /// Draft-15's gate of the same name, on this draft's table — which is the
     /// same table with DELIVERY_TIMEOUT in place of DYNAMIC_GROUPS.
     ///
-    /// # What it catches
-    ///
-    /// Dropping the `check_parameter_value_ranges` call from this draft's
-    /// `encode_parameters_in`:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: the writer produced parameter 0x22 value 0, which the reader refuses
-    ///   left: Ok(())
-    ///  right: Err(ParameterValueOutOfRange { key: 34, value: 0 })
-    /// ```
+    /// Fails if this draft's `encode_parameters_in` skips
+    /// `check_parameter_value_ranges`.
     #[test]
     fn a_value_the_reader_refuses_is_one_the_writer_will_not_write() {
         for &(key, _, value) in CASES {
@@ -391,15 +358,7 @@ mod draft16 {
     /// as "no timeout" — which is the opposite of what a delivery timeout of
     /// zero would mean if the draft allowed it.
     ///
-    /// # What it catches
-    ///
-    /// Without DELIVERY_TIMEOUT in `parameter_value_in_range`:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a DELIVERY_TIMEOUT of zero must be refused
-    ///   left: Ok(Subscribe(Subscribe { request_id: VarInt(1), track_namespace: TrackNamespace([[110, 115]]), track_name: [116], parameters: [KeyValuePair { key: VarInt(2), value: Varint(VarInt(0)) }] }))
-    ///  right: Err(ParameterValueOutOfRange { key: 2, value: 0 })
-    /// ```
+    /// Fails if `parameter_value_in_range` omits DELIVERY_TIMEOUT.
     #[test]
     fn a_delivery_timeout_of_zero_is_refused() {
         let bytes = with_last_value(vec![parameter(DELIVERY_TIMEOUT, 1)], 1, 0);
@@ -461,14 +420,6 @@ mod draft16 {
     /// encoder are held here: the setup arms of `encode_payload` have to reach
     /// the encoder that leaves the version-specific rules out, and pointing
     /// them at the other one refuses a CLIENT_SETUP the draft permits.
-    ///
-    /// # What it catches
-    ///
-    /// Pointing this draft's ClientSetup arm at `encode_parameters`:
-    ///
-    /// ```text
-    /// a setup 0x22 has no range on this draft: ParameterValueOutOfRange { key: 34, value: 0 }
-    /// ```
     #[test]
     fn the_ranges_do_not_reach_into_a_setup() {
         let message = ControlMessage::ClientSetup(ClientSetup {

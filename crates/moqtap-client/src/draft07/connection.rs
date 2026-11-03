@@ -1695,11 +1695,6 @@ mod tests {
     /// this build makes. The section stating that rule is renumbered several
     /// times across the series, and the point does not turn on the
     /// number.
-    ///
-    /// Ablated by putting the arm back to
-    /// `ConnectionError::Codec(CodecError::UnknownMessageType(0))`: this test
-    /// reddens on the cause, and so does the probe's own
-    /// `violation::a_message_this_build_could_not_narrow_names_nobody`.
     #[test]
     fn a_message_this_build_could_not_narrow_names_nobody() {
         use crate::dispatch::{AnyConnectionError, ErrorCause};

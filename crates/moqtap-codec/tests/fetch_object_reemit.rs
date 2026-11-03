@@ -137,13 +137,9 @@ mod draft19 {
     /// gate that only checked what the bytes decode to, while changing the bytes of
     /// every stream it touched.
     ///
-    /// Choosing a canonical shape instead of the frame's own - always writing the
-    /// Object ID Delta rather than keeping C's omission - fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a stream with nothing removed was
-    /// rewritten
-    /// ```
+    /// Fails if the writer chooses a canonical shape instead of the frame's own,
+    /// such as always writing the Object ID Delta rather than keeping C's
+    /// omission.
     #[test]
     fn a_stream_written_back_unchanged_is_byte_identical() {
         let wire = sample_stream();
@@ -178,16 +174,8 @@ mod draft19 {
     /// past my predecessor" - now follows A and has to say 2 outright. D follows C,
     /// whose identity did not change, so D's own bytes are untouched.
     ///
-    /// Dropping the re-encode and deleting B's bytes instead is the shape this
-    /// exists to refuse:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a survivor was renumbered by the removal
-    ///   left: [(10, Some(3), 0, Some(128)), (10, Some(3), 1, Some(128)),
-    ///          (11, Some(3), 0, Some(128))]
-    ///  right: [(10, Some(3), 0, Some(128)), (10, Some(3), 2, Some(128)),
-    ///          (11, Some(3), 0, Some(128))]
-    /// ```
+    /// Fails if the rewrite drops the re-encode and deletes B's bytes instead:
+    /// C is then renumbered to 1.
     #[test]
     fn a_survivor_after_a_removed_object_still_resolves_to_itself() {
         let frames = read_all(&sample_stream());
@@ -370,13 +358,9 @@ mod draft20 {
     /// gate that only checked what the bytes decode to, while changing the bytes of
     /// every stream it touched.
     ///
-    /// Choosing a canonical shape instead of the frame's own - always writing the
-    /// Object ID Delta rather than keeping C's omission - fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a stream with nothing removed was
-    /// rewritten
-    /// ```
+    /// Fails if the writer chooses a canonical shape instead of the frame's own,
+    /// such as always writing the Object ID Delta rather than keeping C's
+    /// omission.
     #[test]
     fn a_stream_written_back_unchanged_is_byte_identical() {
         let wire = sample_stream();
@@ -411,16 +395,8 @@ mod draft20 {
     /// past my predecessor" - now follows A and has to say 2 outright. D follows C,
     /// whose identity did not change, so D's own bytes are untouched.
     ///
-    /// Dropping the re-encode and deleting B's bytes instead is the shape this
-    /// exists to refuse:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a survivor was renumbered by the removal
-    ///   left: [(10, Some(3), 0, Some(128)), (10, Some(3), 1, Some(128)),
-    ///          (11, Some(3), 0, Some(128))]
-    ///  right: [(10, Some(3), 0, Some(128)), (10, Some(3), 2, Some(128)),
-    ///          (11, Some(3), 0, Some(128))]
-    /// ```
+    /// Fails if the rewrite drops the re-encode and deletes B's bytes instead:
+    /// C is then renumbered to 1.
     #[test]
     fn a_survivor_after_a_removed_object_still_resolves_to_itself() {
         let frames = read_all(&sample_stream());
@@ -660,13 +636,9 @@ mod draft21 {
     /// gate that only checked what the bytes decode to, while changing the bytes of
     /// every stream it touched.
     ///
-    /// Choosing a canonical shape instead of the frame's own - always writing the
-    /// Object ID Delta rather than keeping C's omission - fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a stream with nothing removed was
-    /// rewritten
-    /// ```
+    /// Fails if the writer chooses a canonical shape instead of the frame's own,
+    /// such as always writing the Object ID Delta rather than keeping C's
+    /// omission.
     #[test]
     fn a_stream_written_back_unchanged_is_byte_identical() {
         let wire = sample_stream();
@@ -701,16 +673,8 @@ mod draft21 {
     /// past my predecessor" - now follows A and has to say 2 outright. D follows C,
     /// whose identity did not change, so D's own bytes are untouched.
     ///
-    /// Dropping the re-encode and deleting B's bytes instead is the shape this
-    /// exists to refuse:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a survivor was renumbered by the removal
-    ///   left: [(10, Some(3), 0, Some(128)), (10, Some(3), 1, Some(128)),
-    ///          (11, Some(3), 0, Some(128))]
-    ///  right: [(10, Some(3), 0, Some(128)), (10, Some(3), 2, Some(128)),
-    ///          (11, Some(3), 0, Some(128))]
-    /// ```
+    /// Fails if the rewrite drops the re-encode and deletes B's bytes instead:
+    /// C is then renumbered to 1.
     #[test]
     fn a_survivor_after_a_removed_object_still_resolves_to_itself() {
         let frames = read_all(&sample_stream());
@@ -951,13 +915,9 @@ mod draft22 {
     /// gate that only checked what the bytes decode to, while changing the bytes of
     /// every stream it touched.
     ///
-    /// Choosing a canonical shape instead of the frame's own - always writing the
-    /// Object ID Delta rather than keeping C's omission - fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a stream with nothing removed was
-    /// rewritten
-    /// ```
+    /// Fails if the writer chooses a canonical shape instead of the frame's own,
+    /// such as always writing the Object ID Delta rather than keeping C's
+    /// omission.
     #[test]
     fn a_stream_written_back_unchanged_is_byte_identical() {
         let wire = sample_stream();
@@ -992,16 +952,8 @@ mod draft22 {
     /// past my predecessor" - now follows A and has to say 2 outright. D follows C,
     /// whose identity did not change, so D's own bytes are untouched.
     ///
-    /// Dropping the re-encode and deleting B's bytes instead is the shape this
-    /// exists to refuse:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a survivor was renumbered by the removal
-    ///   left: [(10, Some(3), 0, Some(128)), (10, Some(3), 1, Some(128)),
-    ///          (11, Some(3), 0, Some(128))]
-    ///  right: [(10, Some(3), 0, Some(128)), (10, Some(3), 2, Some(128)),
-    ///          (11, Some(3), 0, Some(128))]
-    /// ```
+    /// Fails if the rewrite drops the re-encode and deletes B's bytes instead:
+    /// C is then renumbered to 1.
     #[test]
     fn a_survivor_after_a_removed_object_still_resolves_to_itself() {
         let frames = read_all(&sample_stream());

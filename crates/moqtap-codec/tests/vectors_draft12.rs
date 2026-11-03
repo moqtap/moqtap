@@ -203,12 +203,9 @@ fn run_subgroup_vectors(relative_path: &str) {
             // Each type is checked against whatever actually states its
             // Subgroup ID.
             //
-            // Ablation: assigning the first Object's ID into the header and
-            // asserting the header field, as this did before. Emptying this
-            // draft's `subgroup-first-obj-id` of objects then passes, because
-            // nothing is assigned and the decoder's zero is compared against a
-            // Subgroup ID no Object states — `[subgroup-first-obj-id] a
-            // first-object stream carrying no objects` is what it costs.
+            // A first-object stream carrying no objects fails here, rather than
+            // comparing the decoder's zero against a Subgroup ID no Object
+            // states.
             if matches!(
                 st,
                 StreamType::SubgroupFirstObj

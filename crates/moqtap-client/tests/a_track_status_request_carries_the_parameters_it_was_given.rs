@@ -3,10 +3,9 @@
 //! A TRACK_STATUS request carries the parameters the caller gave it, on
 //! drafts 12, 13 and 14.
 //!
-//! The third of the row's builders, after SUBSCRIBE and FETCH. The same claim
-//! and the same reason: each of these drafts registers AUTHORIZATION TOKEN,
-//! DELIVERY TIMEOUT and MAX CACHE DURATION, so an application that cannot
-//! attach one cannot ask the status of a track that requires it.
+//! As with SUBSCRIBE and FETCH, each of these drafts registers AUTHORIZATION
+//! TOKEN, DELIVERY TIMEOUT and MAX CACHE DURATION, so an application that
+//! cannot attach one cannot ask the status of a track that requires it.
 //!
 //! # Two shapes, because the request has two names
 //!
@@ -72,19 +71,6 @@ macro_rules! track_status_parameter_gates {
             }
 
             /// The parameters the request is given reach the peer.
-            ///
-            /// # What it catches
-            ///
-            /// Sending an empty list whatever the caller passed:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, not the empty list a call that
-            /// ignores its argument sends left: 0 right: 1
-            /// ```
-            ///
-            /// It reddens three, this gate on each draft in the range and
-            /// nothing else in the client or the proxy.
             #[test]
             fn the_parameters_a_track_status_request_is_given_reach_the_peer() {
                 let mut ep = active();
@@ -113,12 +99,6 @@ macro_rules! track_status_parameter_gates {
             }
 
             /// A request with nothing attached still carries nothing.
-            ///
-            /// # What it catches
-            ///
-            /// Nothing the cut reaches, which is what a control is for: the cut
-            /// sends an empty list whatever it is given, which is what this
-            /// gate asserts.
             #[test]
             fn a_track_status_request_given_no_parameters_carries_none() {
                 let mut ep = active();

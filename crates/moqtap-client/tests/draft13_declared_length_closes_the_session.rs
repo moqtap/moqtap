@@ -97,24 +97,6 @@ fn goaway_with_a_short_declared_length() -> Vec<u8> {
 
 /// A control message whose Length disagrees with its fields closes the QUIC
 /// connection with Protocol Violation.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Letting draft-13's `ControlMessage::decode` pass the payload parser's
-/// `UnexpectedEnd` out unchanged instead of answering with
-/// `ControlMessageLengthMismatch`, which is the shape in which a table cannot
-/// answer it:
-///
-/// ```text
-/// ---- a_short_declared_length_closes_the_quic_connection stdout ----
-///
-/// thread 'a_short_declared_length_closes_the_quic_connection' (61172) panicked at crates\moqtap-client\tests\draft13_declared_length_closes_the_session.rs:
-/// the error should name the rule; got "codec error: insufficient bytes"
-/// ```
-///
-/// That is the whole difficulty in one line. The frame was complete, the client
-/// had every byte of it, and the answer it gave was the one that means "keep
-/// waiting".
 #[tokio::test]
 async fn a_short_declared_length_closes_the_quic_connection() {
     common::init_crypto();

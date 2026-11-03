@@ -88,13 +88,6 @@ fn request_ok() -> ControlMessage {
 }
 
 /// One update past the limit closes the session, with its own code.
-///
-/// Ablation: dropping the `spend_update_credit` call from
-/// `receive_request_update` fails with
-///
-/// ```text
-/// a third REQUEST_UPDATE past a limit of 2 must close the session: Ok(())
-/// ```
 #[test]
 fn an_update_past_the_advertised_limit_closes_the_session() {
     let mut endpoint = advertising(Some(2));

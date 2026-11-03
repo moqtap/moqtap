@@ -2064,11 +2064,6 @@ mod tests {
     /// proved it, which is an accusation better evidenced than any real one
     /// this build makes. The section stating that rule is numbered differently
     /// on every draft, and the point does not turn on the number.
-    ///
-    /// Ablated by putting the arm back to
-    /// `ConnectionError::Codec(CodecError::UnknownMessageType(0))`: this test
-    /// reddens on the cause, and so does the probe's own
-    /// `violation::a_message_this_build_could_not_narrow_names_nobody`.
     #[test]
     fn a_message_this_build_could_not_narrow_names_nobody() {
         use crate::dispatch::{AnyConnectionError, ErrorCause};
@@ -2131,19 +2126,10 @@ mod tests {
     }
 
     /// `MOQT_ALPN` is the ALPN a client configured for this draft offers.
-    ///
-    /// Putting `moq-00` back — the value this constant held on all five of
-    /// drafts 15-19 — fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: MOQT_ALPN is "moq-00"; a draft-19 client offers ["moqt-19"]
-    /// ```
     #[test]
     fn moqt_alpn_is_the_one_a_client_offers() {
-        // A literal on its own is what let this constant keep `moq-00` for
-        // five drafts after draft-15 stopped using it, so the value is
-        // checked against what a client configured for this draft actually
-        // puts on the wire, and only then against the literal.
+        // Checked against what a client configured for this draft puts on the
+        // wire, and only then against the literal.
         let config = ClientConfig {
             draft: DraftVersion::Draft15,
             transport: TransportType::Quic,

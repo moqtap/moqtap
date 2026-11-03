@@ -67,13 +67,6 @@ fn header(stream_type: SubgroupStreamType, subgroup_id: Option<VarInt>) -> Subgr
 /// Zero is a legal Subgroup ID, so a header written this way is not malformed
 /// and the peer has no way to notice: it reads a perfectly good stream for
 /// subgroup 0.
-///
-/// Ablation: dropping the check from `SubgroupHeader::encode_checked` fails with
-///
-/// ```text
-/// a header with no Subgroup ID under a type that carries the field must be
-/// refused rather than written as subgroup 0; it wrote [14, 01, 02, 00, 80]
-/// ```
 #[test]
 fn a_missing_subgroup_id_is_not_written_as_zero() {
     let (explicit, _) = types();
@@ -101,13 +94,6 @@ fn a_missing_subgroup_id_is_not_written_as_zero() {
 ///
 /// The other direction, and the one that loses information outright rather than
 /// substituting for it.
-///
-/// Ablation: the same removal fails here with
-///
-/// ```text
-/// a Subgroup ID this type has nowhere to put must be refused rather than
-/// dropped; it wrote [10, 01, 02, 80]
-/// ```
 #[test]
 fn a_subgroup_id_the_type_cannot_carry_is_not_dropped() {
     let (_, implicit) = types();

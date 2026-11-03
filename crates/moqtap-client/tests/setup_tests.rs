@@ -61,16 +61,8 @@ fn version_negotiation_no_common_version() {
 /// server a request budget during setup is doing exactly what the parameter is
 /// for.
 ///
-/// The message is decoded from the corpus rather than built here, because the
-/// corpus and the validator disagreed about this exact byte string: the
-/// draft-14 `client-setup.json` vector `max-request-id-param` is a canonical
-/// CLIENT_SETUP that the client would neither send nor accept.
-///
-/// Refusing key 0x02 in `validate_client_setup` again fails with:
-///
-/// ```text
-/// a CLIENT_SETUP carrying MAX_REQUEST_ID must be accepted: Err(WrongParameterRole(2))
-/// ```
+/// The message is decoded from the corpus rather than built here: it is the
+/// draft-14 `client-setup.json` vector `max-request-id-param`.
 #[test]
 fn client_setup_may_carry_max_request_id() {
     // client-setup.json / max-request-id-param: 20000c01c0000000ff00000e010200
@@ -95,14 +87,6 @@ fn client_setup_may_carry_max_request_id() {
 /// when WebTransport is used." This is the parameter whose sender the draft
 /// restricts, and the restriction is on the server, so it is a SERVER_SETUP
 /// that has to refuse it.
-///
-/// Dropping the check from `validate_server_setup` fails with:
-///
-/// ```text
-/// assertion `left == right` failed: a SERVER_SETUP carrying PATH must be refused
-///   left: Ok(())
-///  right: Err(WrongParameterRole(1))
-/// ```
 #[test]
 fn server_setup_may_not_carry_path() {
     use moqtap_codec::kvp::{KeyValuePair, KvpValue};
@@ -125,14 +109,6 @@ fn server_setup_may_not_carry_path() {
 /// The same sentence in Section 9.3.2.2 forbids PATH "when WebTransport is
 /// used", which is a fact about the transport rather than about the message,
 /// so it is checked where the transport is known.
-///
-/// Removing the `over_webtransport` arm fails with:
-///
-/// ```text
-/// assertion `left == right` failed: PATH over WebTransport must be refused
-///   left: Ok(())
-///  right: Err(PathOverWebTransport)
-/// ```
 #[test]
 fn path_is_refused_over_webtransport_and_allowed_over_quic() {
     use moqtap_codec::kvp::{KeyValuePair, KvpValue};

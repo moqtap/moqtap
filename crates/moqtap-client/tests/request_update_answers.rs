@@ -186,15 +186,6 @@ macro_rules! request_update_answer_gates {
             /// not move the subscription: it is the transition out of Active, so
             /// it succeeds only if answering the update left the subscription
             /// there.
-            ///
-            /// # What it catches
-            ///
-            /// Ablation: dropping the `answers_an_update` branch from
-            /// `send_response_on_stream`:
-            ///
-            /// ```text
-            /// the REQUEST_OK a REQUEST_UPDATE requires: Err(UnknownRequest(0))
-            /// ```
             #[test]
             fn a_request_ok_answers_an_update_on_a_subscriptions_stream() {
                 let mut endpoint = responder();
@@ -251,18 +242,6 @@ macro_rules! request_update_answer_gates {
             /// REQUEST_OK is recognised as the update's answer with the FETCH
             /// still unanswered, because FETCH_OK is the only thing that answers
             /// a FETCH and a REQUEST_OK there can be nothing else.
-            ///
-            /// # What it catches
-            ///
-            /// Ablation: dropping the two-map branch from `answers_an_update`, so
-            /// that the ordering rule is the only rule:
-            ///
-            /// ```text
-            /// a REQUEST_OK on a FETCH stream answers the update: UnknownRequest(0)
-            /// ```
-            ///
-            /// which is the endpoint claiming not to know a request it opened a
-            /// stream for two calls earlier.
             #[test]
             fn an_update_before_the_requests_own_answer_is_still_answered() {
                 let mut endpoint = responder();
@@ -288,20 +267,6 @@ macro_rules! request_update_answer_gates {
             /// unanswered. The PUBLISH_DONE at the end says the update moved
             /// nothing: it is the transition out of Active, so it succeeds only
             /// if the update left the subscription to be accepted normally.
-            ///
-            /// # What it catches
-            ///
-            /// Ablation: `on_subscribe_update` restricted to `Active`:
-            ///
-            /// ```text
-            /// thread 'draft19::an_update_before_a_subscribes_own_answer_is_still_answered'
-            /// panicked at crates\moqtap-client\tests\request_update_answers.rs:
-            /// a REQUEST_UPDATE on its own request's stream: Subscription(InvalidTransition { from: Subscribing, event: "on_subscribe_update" })
-            /// ```
-            ///
-            /// It fails on the update rather than on the answer: the endpoint
-            /// refused the REQUEST_UPDATE on the way in, so there was never an
-            /// answer to write.
             #[test]
             fn an_update_before_a_subscribes_own_answer_is_still_answered() {
                 let mut endpoint = responder();
@@ -372,20 +337,6 @@ macro_rules! request_update_answer_gates {
             /// The ordering rule, driven where it is the only rule available.
             /// Three REQUEST_OKs against one request and one update: the first two
             /// have something to answer and the third does not.
-            ///
-            /// # What it catches
-            ///
-            /// Ablation: dropping the `answers_an_update` branch, so that every
-            /// REQUEST_OK is read as the request's own answer:
-            ///
-            /// ```text
-            /// the second answers the update:
-            /// Namespace(InvalidTransition { from: "Active", event: "on_subscribe_namespace_ok_sent" })
-            /// ```
-            ///
-            /// The namespace subscription was accepted once and is being accepted
-            /// again, which is a state machine reporting a message it has already
-            /// seen rather than one it was never given a place for.
             #[test]
             fn the_first_request_ok_on_a_namespace_stream_answers_the_request() {
                 let mut endpoint = responder();
@@ -412,21 +363,6 @@ macro_rules! request_update_answer_gates {
             /// Two updates outstanding and one REQUEST_ERROR. On drafts 18 and 19
             /// it stands for both, so a REQUEST_OK after it has nothing to answer;
             /// on draft-17 it stands for one, so the REQUEST_OK answers the other.
-            ///
-            /// # What it catches
-            ///
-            /// Ablation: dropping the `answers_an_update` branch, so that the
-            /// REQUEST_ERROR answering an update is read as the subscription's own
-            /// refusal:
-            ///
-            /// ```text
-            /// one REQUEST_ERROR for the updates:
-            /// Subscription(InvalidTransition { from: Active, event: "on_subscribe_error_sent" })
-            /// ```
-            ///
-            /// An endpoint whose machine did admit that edge would have refused a
-            /// subscription it had already accepted, on a message that was about
-            /// one of its parameters.
             #[test]
             fn how_many_updates_one_request_error_answers() {
                 let mut endpoint = responder();
@@ -455,30 +391,6 @@ macro_rules! request_update_answer_gates {
             /// publisher that refuses an update terminates the subscription
             /// with a PUBLISH_DONE carrying UPDATE_FAILED. The ending is
             /// therefore not free once a refusal has gone out.
-            ///
-            /// # What it catches
-            ///
-            /// Refusing an update and recording nothing:
-            ///
-            /// ```text
-            /// the ending after a refused update carries UPDATE_FAILED and no other
-            /// status, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens three, this gate on all three drafts and nothing else.
-            ///
-            /// Taking whatever status the ending carries, so the obligation is
-            /// remembered and then not enforced:
-            ///
-            /// ```text
-            /// the ending after a refused update carries UPDATE_FAILED and no other
-            /// status, and instead: Ok(())
-            /// ```
-            ///
-            /// It reddens three, this gate on all three drafts and nothing else.
-            /// The cut above leaves the obligation unrecorded and this one leaves
-            /// it unenforced, and each fails at a different assertion in the same
-            /// gate.
             #[test]
             fn a_refused_update_forces_the_status_of_the_ending() {
                 let mut endpoint = responder();
@@ -509,18 +421,6 @@ macro_rules! request_update_answer_gates {
             /// Without this the rule would hold a request to UPDATE_FAILED for
             /// the rest of the session, and a second ending would be refused
             /// for the wrong reason.
-            ///
-            /// # What it catches
-            ///
-            /// Never clearing the obligation, so a request whose update was refused
-            /// is held to UPDATE_FAILED for the rest of the session:
-            ///
-            /// ```text
-            /// the obligation was discharged and is not held open:
-            /// Err(WrongUpdateFailureStatus { request: 0, required: 8 })
-            /// ```
-            ///
-            /// It reddens three, this gate on all three drafts and nothing else.
             #[test]
             fn the_obligation_ends_when_the_ending_is_written() {
                 let mut endpoint = responder();
@@ -545,21 +445,6 @@ macro_rules! request_update_answer_gates {
             ///
             /// The sentence is about an *unsuccessful* update, and this is the
             /// half of it that says so.
-            ///
-            /// # What it catches
-            ///
-            /// Creating the obligation on an accepted update as well as a refused
-            /// one, which is the sentence read without the word "unsuccessful":
-            ///
-            /// ```text
-            /// an accepted update owes the peer no particular ending:
-            /// WrongUpdateFailureStatus { request: 0, required: 8 }
-            /// ```
-            ///
-            /// It reddens nine: this gate on all three drafts, and two gates about
-            /// answering an update at all on the same three, which end their
-            /// subscription afterwards and would now be held to a status they have
-            /// no reason to carry.
             #[test]
             fn an_accepted_update_leaves_the_ending_alone() {
                 let mut endpoint = responder();
@@ -580,14 +465,6 @@ macro_rules! request_update_answer_gates {
             /// The control for the two above: a rule that fired on every
             /// REQUEST_ERROR rather than on an update's would pass both of
             /// them and fail here.
-            ///
-            /// # What it catches
-            ///
-            /// Nothing the four cuts reach, which is what a control is. Every
-            /// one of the four cuts leaves it green, because none of them
-            /// reaches a request no update was ever sent for. It is here
-            /// so that a rule firing on every REQUEST_ERROR rather than on
-            /// an update's would have somewhere to fail.
             #[test]
             fn a_subscription_with_no_update_ends_however_it_likes() {
                 let mut endpoint = responder();
@@ -810,16 +687,6 @@ request_update_answer_gates!(
 ///
 /// It sits outside the macro above because draft-17 has no such message and
 /// draft-19, which does, already probed for it.
-///
-/// # What it catches
-///
-/// Ablation: dropping the `subscribe_tracks` probe from
-/// `receive_request_update`:
-///
-/// ```text
-/// a SUBSCRIBE_TRACKS is one of the requests Section 10.9 allows an update to:
-/// UnknownRequest(0)
-/// ```
 #[cfg(feature = "draft18")]
 #[test]
 fn a_subscribe_tracks_may_be_updated_on_draft18() {

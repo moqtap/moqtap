@@ -7,17 +7,6 @@
 //! ships. This file drives the two orders and the late close on every draft the
 //! build has, so the odd sibling is a failure rather than a silence.
 //!
-//! # Ablation, run
-//!
-//! Deleting the `FetchState::Unanswered` arm from draft-07's `on_fetch_ok` and
-//! nothing else — one sibling of the set put back the way it was — leaves
-//! `fetch_tests.rs` entirely green and fails one row here:
-//!
-//! ```text
-//! draft-07 refused an answer after delivery: invalid transition from
-//! Unanswered on event on_fetch_ok
-//! ```
-//!
 //! Every draft carries the sentence the two orders come from, differing only in
 //! how it names the far end of the range. draft-14 Section 9.17: "A publisher
 //! MAY send Objects in response to a FETCH before the FETCH_OK message is sent,

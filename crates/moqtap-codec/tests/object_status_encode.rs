@@ -9,7 +9,7 @@
 //!
 //! # Why the encoder needs a gate of its own
 //!
-//! Each draft's own `SubgroupObject` now carries a typed `ObjectStatus`, so
+//! Each draft's own `SubgroupObject` carries a typed `ObjectStatus`, so
 //! within one draft an unassigned status cannot be built and therefore cannot
 //! be encoded — that half is a compile-time property with nothing to assert at
 //! run time.
@@ -52,55 +52,12 @@
 //! gap inside the assigned range (`0x2`). Wider values are `object_status.rs`'
 //! sweep to make.
 //!
-//! # What this gate catches, observed by making each change and running it
+//! # What this gate catches
 //!
-//! The status field being typed means the *literal* untyped encode path —
-//! converting the draft-neutral `u64` straight to a `VarInt` — does not
-//! compile, so it cannot be ablated. What can be, and what a "just make it
-//! compile" fix actually looks like, is silently defaulting a code the target
-//! draft does not assign instead of refusing it:
-//! `ObjectStatus::from_u64(code).unwrap_or(ObjectStatus::Normal)` in the
-//! `explicit_length` arm of `modern_subgroup_glue!` in `src/data_dispatch.rs`.
-//! That fails exactly the five rows for the drafts that arm covers:
-//!
-//! ```text
-//! thread 'draft16_object_status_through_the_encoder' (39200) panicked at
-//! crates\moqtap-codec\tests\object_status_encode.rs:
-//! draft-16: write_object accepted status 0x1, which the draft does not assign
-//!
-//! thread 'draft15_object_status_through_the_encoder' (28912) panicked at
-//! crates\moqtap-codec\tests\object_status_encode.rs:
-//! draft-15: write_object accepted status 0x2, which the draft does not assign
-//!
-//! test result: FAILED. 8 passed; 5 failed
-//! ```
-//!
-//! The two messages differ because the sets do: `0x1` is assigned on draft-15
-//! and not on draft-16, so draft-15's row catches the same defect one code
-//! later. That is the per-draft claim working.
-//!
-//! Validating the code but then writing a different one — `.map(|_|
-//! ObjectStatus::Normal)` after the `from_u64` in that same arm, which no
-//! refusal-only gate would notice — fails the same five rows on the read-back
-//! half instead:
-//!
-//! ```text
-//! thread 'draft16_object_status_through_the_encoder' (67152) panicked at
-//! crates\moqtap-codec\tests\object_status_encode.rs:
-//! assertion `left == right` failed: draft-16: write_object was handed status 0x3 and wrote something else
-//!   left: Some(0)
-//!  right: Some(3)
-//! ```
-//!
-//! And narrowing the other way — deleting `0x01 => Some(ObjectDoesNotExist)`
-//! from draft-15's `ObjectStatus::from_u64` while leaving `ALL` alone, so a
-//! code the draft does assign is refused — fails the draft-15 row with:
-//!
-//! ```text
-//! thread 'draft15_object_status_through_the_encoder' (48544) panicked at
-//! crates\moqtap-codec\tests\object_status_encode.rs:
-//! draft-15: write_object refused status 0x1, which the draft assigns: InvalidField
-//! ```
+//! Within one draft the untyped encode path does not compile, so it has nothing
+//! to fail. The rows fail if the draft-neutral encoder silently defaults a code
+//! the target draft does not assign instead of refusing it, writes a code other
+//! than the one it validated, or refuses a code the draft does assign.
 
 #![cfg(any(
     feature = "draft07",

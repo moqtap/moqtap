@@ -58,35 +58,6 @@
 //! CONNECTION_CLOSE - `duplicate_track_alias_on_the_wire.rs` for drafts 12
 //! through 16, and `uni_control_plane.rs` for 17, 18 and 19, beside the peer
 //! that already enforces their stream topology.
-//!
-//! # Ablations, measured
-//!
-//! Five cuts fall on one gate each and are recorded there. The two that fall
-//! on the close table are recorded here, because they redden every gate in
-//! this file and both loopback files at once - twenty-four tests - and no one
-//! gate is where they belong.
-//!
-//! Deleting the `DuplicateTrackAlias` arm from each draft's
-//! `EndpointError::session_error_code` leaves the endpoint refusing the
-//! message and ending its own session with nothing to close the transport
-//! with:
-//!
-//! ```text
-//! assertion `left == right` failed: Sections 9.8 and 9.13 answer a PUBLISH with
-//! DUPLICATE_TRACK_ALIAS and with no other code; the endpoint offered None
-//!   left: None
-//!  right: Some(DuplicateTrackAlias)
-//! ```
-//!
-//! Answering that arm with `ProtocolViolation` instead:
-//!
-//! ```text
-//! assertion `left == right` failed: Sections 8.8 and 8.13 answer a PUBLISH with
-//! DUPLICATE_TRACK_ALIAS and with no other code; the endpoint offered
-//! Some(ProtocolViolation)
-//!   left: Some(ProtocolViolation)
-//!  right: Some(DuplicateTrackAlias)
-//! ```
 
 #![allow(clippy::items_after_test_module)]
 
@@ -450,19 +421,6 @@ macro_rules! duplicate_track_alias_gates {
 
             /// A SUBSCRIBE_OK giving a second track an alias a live one
             /// already holds ends the session.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the `conflicting_alias_for_subscribe_ok` call from
-            /// `receive_subscribe_ok`:
-            ///
-            /// ```text
-            /// the second SUBSCRIBE_OK reused a live track's alias and was accepted: ()
-            /// ```
-            ///
-            /// It reddens sixteen tests: this gate on all eight drafts, and
-            /// both loopback gates on all eight. A rule with a route to the
-            /// wire has both.
             #[test]
             fn a_second_track_under_a_live_alias_closes_the_session() {
                 let mut ep = active();
@@ -481,22 +439,6 @@ macro_rules! duplicate_track_alias_gates {
             /// The refusal is about the alias and not about there being two
             /// subscriptions, and this is the input that tells the two apart:
             /// everything else about it is the gate above.
-            ///
-            /// # What it catches
-            ///
-            /// Dropping the `binding.alias != Some(alias)` guard from
-            /// `conflicting_track_alias`:
-            ///
-            /// ```text
-            /// a second track under an alias of its own was refused: DuplicateTrackAlias { alias: 8, established: 0, offered: 2 }
-            /// ```
-            ///
-            /// It reddens eleven tests. The other three are
-            /// `two_requests_are_answered_on_their_own_streams` in
-            /// `uni_control_plane.rs`, which subscribes to two tracks and is
-            /// answered with two aliases - the shape a rule that ignored the
-            /// alias would break for every subscriber that has more than one
-            /// subscription open.
             #[test]
             fn a_second_track_under_its_own_alias_is_accepted() {
                 let mut ep = active();
@@ -528,15 +470,6 @@ macro_rules! duplicate_track_alias_gates {
             /// violation - of that rule, and not of this one. What is being
             /// measured is that the alias check reads the Full Track Name and
             /// not merely the Request ID.
-            ///
-            /// # What it catches
-            ///
-            /// Dropping the `binding.namespace == *namespace && binding.name
-            /// == name` guard from `conflicting_track_alias`:
-            ///
-            /// ```text
-            /// the same track was refused its own alias: DuplicateTrackAlias { alias: 7, established: 0, offered: 2 }
-            /// ```
             #[test]
             fn the_same_track_keeps_the_alias_it_has() {
                 let mut ep = active();
@@ -557,16 +490,6 @@ macro_rules! duplicate_track_alias_gates {
             /// This is the "simultaneously" in the sentence, and it is the
             /// reason the comparison set is read off the state machines rather
             /// than kept beside them.
-            ///
-            /// # What it catches
-            ///
-            /// Answering `binding_is_established` with `true` for every
-            /// binding - which is what a set kept beside the state machines
-            /// and never pruned would do:
-            ///
-            /// ```text
-            /// an alias whose subscription had ended was still held: DuplicateTrackAlias { alias: 7, established: 0, offered: 2 }
-            /// ```
             #[test]
             fn an_alias_is_free_once_its_subscription_ends() {
                 let mut ep = active();
@@ -590,19 +513,6 @@ macro_rules! duplicate_track_alias_gates {
             /// different path: a SUBSCRIBE_OK answers a request this endpoint
             /// made, a PUBLISH opens one the peer makes. One input cannot
             /// reach both.
-            ///
-            /// # What it catches
-            ///
-            /// Deleting the `conflicting_track_alias` call from the inbound
-            /// PUBLISH path:
-            ///
-            /// ```text
-            /// the PUBLISH reused a live track's alias and was accepted: ()
-            /// ```
-            ///
-            /// The cut above leaves this gate green and this cut leaves that
-            /// one green, on all eight drafts: one shared check, two callers,
-            /// and neither of them covered by the other's gate.
             #[test]
             fn a_publish_under_a_live_alias_closes_the_session() {
                 let mut ep = active();
@@ -622,21 +532,6 @@ macro_rules! duplicate_track_alias_gates {
             /// judged: a PUBLISH is one of the two sequences
             /// draft-19 Section 5.1 names as a source of a subscription, so
             /// what it establishes has to count against what comes next.
-            ///
-            /// # What it catches
-            ///
-            /// Recording nothing for an accepted PUBLISH - dropping the
-            /// `track_bindings.insert` from the inbound PUBLISH path:
-            ///
-            /// ```text
-            /// a SUBSCRIBE_OK took an alias an accepted PUBLISH holds: ()
-            /// ```
-            ///
-            /// It reddens ten tests: this gate on drafts 12 through 16 and
-            /// the loopback gate on the same five. Drafts 17, 18 and 19
-            /// record the binding at a call site of their own and are left
-            /// alone by that cut, which is why the five and the three each
-            /// need their own.
             #[test]
             fn an_accepted_publish_holds_its_alias() {
                 let mut ep = active();
@@ -655,20 +550,6 @@ macro_rules! duplicate_track_alias_gates {
             /// is a gate of its own because the two kinds are two arms of
             /// `binding_is_established`, and a wrong answer in one of them is
             /// invisible from the other.
-            ///
-            /// # What it catches
-            ///
-            /// Counting a `BindingKind::Publish` binding as established while
-            /// its subscription is over - reading `!= Publishing` where the
-            /// state should be `== Active`:
-            ///
-            /// ```text
-            /// the alias of a finished publish was still held: DuplicateTrackAlias { alias: 7, established: 1, offered: 0 }
-            /// ```
-            ///
-            /// It reddens eight tests and no others: this gate, on all eight
-            /// drafts. The cut above and this one are the two halves of the
-            /// same comparison, and neither reddens the other's gate.
             #[test]
             fn an_alias_is_free_once_its_publish_ends() {
                 let mut ep = active();
@@ -692,19 +573,6 @@ macro_rules! duplicate_track_alias_gates {
             /// the input that tells the recording apart from the acceptance:
             /// it differs from the gate above only in the answer not being
             /// sent.
-            ///
-            /// # What it catches
-            ///
-            /// Counting a `BindingKind::Publish` binding as established
-            /// from the moment it arrives - reading `!= Done` where the
-            /// state should be `== Active`:
-            ///
-            /// ```text
-            /// an unanswered PUBLISH held an alias it had not been given: DuplicateTrackAlias { alias: 7, established: 1, offered: 0 }
-            /// ```
-            ///
-            /// It reddens eight tests and no others: this gate, on all eight
-            /// drafts.
             #[test]
             fn an_unanswered_publish_holds_no_alias() {
                 let mut ep = active();

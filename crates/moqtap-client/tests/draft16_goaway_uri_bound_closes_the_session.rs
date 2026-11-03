@@ -82,20 +82,6 @@ fn goaway_with_an_oversized_uri() -> Vec<u8> {
 
 /// An oversized New Session URI length closes the QUIC connection with
 /// PROTOCOL_VIOLATION.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Dropping `CodecError::GoAwayUriTooLong` from draft-16's
-/// `codec_session_error_code` — that is, the state the table was in when it was
-/// first written, on the strength of a survey that said this draft states no
-/// such maximum:
-///
-/// ```text
-/// ---- an_oversized_new_session_uri_closes_the_quic_connection stdout ----
-///
-/// thread 'an_oversized_new_session_uri_closes_the_quic_connection' (20816) panicked at crates\moqtap-client\tests\draft16_goaway_uri_bound_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
 #[tokio::test]
 async fn an_oversized_new_session_uri_closes_the_quic_connection() {
     common::init_crypto();

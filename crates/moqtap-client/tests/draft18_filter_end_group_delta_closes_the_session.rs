@@ -134,28 +134,6 @@ fn subscribe_with_an_unrepresentable_end() -> Vec<u8> {
 
 /// An End Group Delta that carries the range past the end of the number space
 /// closes the QUIC connection with PROTOCOL_VIOLATION.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Dropping the `last_group()` call from draft-18's `check_subscription_filters`
-/// — the state every draft was in, where the filter decoded and the sum was
-/// never taken:
-///
-/// ```text
-/// ---- an_end_group_delta_past_the_range_closes_the_quic_connection stdout ----
-///
-/// thread 'an_end_group_delta_past_the_range_closes_the_quic_connection' (105508) panicked at crates\moqtap-client\tests\draft18_filter_end_group_delta_closes_the_session.rs:
-/// an unrepresentable end must be refused: Subscribe(Subscribe { request_id: VarInt(1), track_namespace: TrackNamespace([[108, 105, 118, 101]]), track_name: [118, 105, 100, 101, 111], parameters: [KeyValuePair { key: VarInt(33), value: Bytes([4, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 1]) }] })
-/// ```
-///
-/// Sending `CodecError::FilterEndGroupOverflow` to the no-close arm of
-/// draft-18's `codec_session_error_code`, which is where draft-17 correctly
-/// leaves it:
-///
-/// ```text
-/// thread 'an_end_group_delta_past_the_range_closes_the_quic_connection' (70128) panicked at crates\moqtap-client\tests\draft18_filter_end_group_delta_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
 #[tokio::test]
 async fn an_end_group_delta_past_the_range_closes_the_quic_connection() {
     common::init_crypto();

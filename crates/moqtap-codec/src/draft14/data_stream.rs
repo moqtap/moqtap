@@ -1777,26 +1777,9 @@ mod tests {
     /// an empty payload", so Normal is the status a payload-bearing object
     /// already has, and naming it asks for the same bytes as leaving it out.
     ///
-    /// # What this catches, observed by making each change and running it
-    ///
-    /// Dropping the status half of the check, leaving the type byte to decide
-    /// on its own:
-    ///
-    /// ```text
-    /// encode_checked must refuse ObjectDoesNotExist under a payload type; got Ok(())
-    /// ```
-    ///
-    /// Dropping the payload half instead:
-    ///
-    /// ```text
-    /// encode_checked must refuse a payload under a status type; got Ok(())
-    /// ```
-    ///
-    /// Widening the status half to refuse Normal beside a payload as well:
-    ///
-    /// ```text
-    /// encode_checked refused a Normal status under a payload type: InvalidField
-    /// ```
+    /// Fails if `encode_checked` accepts a non-Normal status under a payload
+    /// type or a payload under a status type, or refuses Normal beside a
+    /// payload.
     #[test]
     fn encode_checked_refuses_the_field_the_type_byte_cannot_carry() {
         for &status in ObjectStatus::ALL {

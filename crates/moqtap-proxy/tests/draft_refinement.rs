@@ -37,42 +37,6 @@
 //! Neither row reads a configured value back. The first asserts on the bytes
 //! that reached the far peer, re-framed by an independent framer; the second
 //! on what the shaper charged.
-//!
-//! # Two mutations, both applied, run, observed and reverted
-//!
-//! **One — read the per-task draft instead of the shared cell.** In
-//! `session.rs`, `pipe_data_framed` opens with `let draft = ctx.draft.initial;`
-//! in place of `let draft = ctx.resolved_draft().await;`. `initial` is
-//! exactly the draft each `ForwardCtx` was cloned with, so this is the
-//! per-task copy this work replaced. Both rows go red:
-//!
-//! ```text
-//! thread 'the_rule_elides_the_object_it_names_and_leaves_its_neighbour' (52012)
-//! panicked at crates\moqtap-proxy\tests\draft_refinement.rs:
-//! assertion `left == right` failed: the rule names object 1, so the relay must
-//! receive 0 and 2 and nothing between them
-//!   left: [0, 1, 2]
-//!  right: [0, 2]
-//! ```
-//!
-//! ```text
-//! thread 'a_shaped_session_with_no_interests_charges_its_class_for_real_objects' (68468)
-//! panicked at crates\moqtap-proxy\tests\draft_refinement.rs:
-//! assertion `left == right` failed: the shaper saw the three objects the client sent
-//!   left: 0
-//!  right: 3
-//! ```
-//!
-//! **Two — put the SETUP peek back behind the observer gate.** In
-//! `pipe_control_passthrough`, `if !detecting` becomes
-//! `if !detecting || !ctx.observer_enabled`, which is where the detection
-//! stood before this work. The cell is then never written on a session with
-//! no observer, so the wait in mutation one's place returns the starting
-//! draft and both rows fail identically — same lines, same left and right
-//! values, differing only in the thread ids (`61740` and `50116`). That
-//! identity is the point of running both: a shared cell nothing writes and
-//! no shared cell at all are the same session, and a fix that only added the
-//! cell would have shipped this failure under a new name.
 
 //! Both drafts are compiled in, because both are load-bearing: draft-14 is
 //! the one configured and draft-11 the one the client names, and a build
@@ -365,8 +329,6 @@ async fn name_the_draft(hook: Arc<dyn ProxyHook>) -> Named {
 /// one it names. Drafts 07-13 encode absolute object IDs, so the survivors
 /// are forwarded verbatim and the far peer decodes `0, 2` — a gap, which is
 /// what `DropMode::Elide` promises.
-///
-/// *Ablation, run and recorded:* see the module docs.
 #[tokio::test]
 async fn the_rule_elides_the_object_it_names_and_leaves_its_neighbour() {
     let rig = name_the_draft(Arc::new(ElideOne)).await;
@@ -403,17 +365,13 @@ async fn the_rule_elides_the_object_it_names_and_leaves_its_neighbour() {
 ///
 /// The configuration problem this file exists for, with nothing else in it:
 /// a [`ShapeProfile`], no observer, and [`NoOpHook`] — `Interest::NONE`. The
-/// profile is the only consumer of the draft in the whole session, and
-/// before the peek was lifted out from behind the observer gate it was
-/// consuming a guess.
+/// profile is the only consumer of the draft in the whole session.
 ///
 /// The consequence observed is the shaper's own count of what it saw. A
 /// stream the framer bypassed produces no `ObjectMeta` at all, so the
 /// classifier never runs and the count is zero however many bytes crossed —
 /// which is precisely the "byte pump reporting success" this gate exists to
 /// tell apart from a session that shaped something.
-///
-/// *Ablation, run and recorded:* see the module docs.
 #[tokio::test]
 async fn a_shaped_session_with_no_interests_charges_its_class_for_real_objects() {
     let rig = name_the_draft(Arc::new(NoOpHook)).await;

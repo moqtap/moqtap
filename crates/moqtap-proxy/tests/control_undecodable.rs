@@ -393,20 +393,6 @@ async fn both_frames_are_forwarded_counted_and_reported_once(interest: Interest)
 /// `pipe_control_passthrough` — bytes are written to the far side first and
 /// parsed afterwards, so forwarding was never in question here and the
 /// report is the whole of what was missing.
-///
-/// *Ablation (measured):* drop the `report_refused_frames` call from
-/// `emit_parsed_frames`. The counter goes with it — one call carries both —
-/// so the row stops at the wait for the report:
-///
-/// ```text
-/// ---- the_passthrough_pipe_forwards_counts_and_reports_a_refused_frame stdout ----
-/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:
-/// timed out waiting for the first refusal to be reported
-/// ```
-///
-/// The mutating row stays green under that cut, which is the point of
-/// having two: the call sites are separate and one of them going silent
-/// says nothing about the other.
 #[tokio::test]
 async fn the_passthrough_pipe_forwards_counts_and_reports_a_refused_frame() {
     both_frames_are_forwarded_counted_and_reported_once(Interest::NONE).await;
@@ -417,36 +403,6 @@ async fn the_passthrough_pipe_forwards_counts_and_reports_a_refused_frame() {
 /// The forwarding claim has teeth on this route and only on this route. The
 /// parser owns the write path here, so a refused frame it did not hand back
 /// was a frame nothing ever wrote.
-///
-/// *Ablation (measured):* drop the `ParsedItem::Refused` arm's
-/// `send.write_all(&raw)` in `forward_mutated_frames`, leaving the bare
-/// `continue` this code had before the round:
-///
-/// ```text
-/// ---- the_mutating_pipe_forwards_counts_and_reports_a_refused_frame stdout ----
-/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:
-/// the relay saw a control stream; one exists only once a byte is forwarded: Elapsed(())
-/// ```
-///
-/// It fails earlier than the byte comparison and says more than the byte
-/// comparison would have. The refused frame is the only thing this fixture
-/// writes, and a bidirectional stream does not reach the peer until a byte
-/// is written on it — so with the frame dropped the relay never sees the
-/// control stream at all. All of this on a session that reported the
-/// refusal correctly and counted it correctly, which is why the report was
-/// not on its own the fix.
-///
-/// *Ablation (measured):* drop the `report_refused_frames` call from
-/// `forward_mutated_frames` instead, leaving the forwarding intact:
-///
-/// ```text
-/// ---- the_mutating_pipe_forwards_counts_and_reports_a_refused_frame stdout ----
-/// panicked at crates\moqtap-proxy\tests\control_undecodable.rs:
-/// timed out waiting for the first refusal to be reported
-/// ```
-///
-/// Cut once per call site, because one cut stops at the first assertion
-/// that reads it: the passthrough row is green under this one.
 #[tokio::test]
 async fn the_mutating_pipe_forwards_counts_and_reports_a_refused_frame() {
     both_frames_are_forwarded_counted_and_reported_once(Interest::CONTROL).await;

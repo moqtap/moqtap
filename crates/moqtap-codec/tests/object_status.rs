@@ -23,7 +23,7 @@
 //! # How far this reaches
 //!
 //! What is gated here is `ObjectStatus::from_u64` — the conversion, and only
-//! the conversion. Every draft's decoders now route the wire code through it:
+//! the conversion. Every draft's decoders route the wire code through it:
 //! drafts 07-14 call it directly from each status read, and drafts 15-23 call
 //! it from their `data_stream` module's `decoded_status`, which is how the
 //! raw-coded `SubgroupObject::object_status` and `DatagramHeader::
@@ -31,23 +31,10 @@
 //!
 //! That composition is *not* asserted here. A green row below says the
 //! function answers correctly; it says nothing about whether any decoder calls
-//! it, which is exactly the gap drafts 15-19 sat in — thirteen rows passed
-//! while a draft-19 datagram carrying status 0x2 decoded clean. The wire side
-//! is gated separately, per draft and per decoder, in `object_status_wire.rs`.
+//! it. The wire side is gated separately, per draft and per decoder, in
+//! `object_status_wire.rs`.
 //! Both files are needed: this one catches a wrong assigned set, that one
 //! catches a decoder that does not consult it.
-//!
-//! What these tests catch, observed by making each change and running them:
-//!
-//! Adding `5 => Some(ObjectStatus::EndOfTrack)` to draft-11's `from_u64`, the
-//! shape of the defect these tests exist for, fails `draft11_object_status`
-//! with "draft-11: 0x5 decoded to Some(EndOfTrack), but the draft does not
-//! assign it".
-//!
-//! Deleting the `0x03 => Some(ObjectStatus::EndOfGroup)` arm from draft-16's
-//! `from_u64`, so that an assigned code point becomes unreachable, fails
-//! `draft16_object_status` with "draft-16: assigned status EndOfGroup (0x3)
-//! does not round-trip", left `None`, right `Some(EndOfGroup)`.
 
 /// Values every draft is swept over: the low code points, where an unassigned
 /// value is most likely to be waved through because its neighbours are

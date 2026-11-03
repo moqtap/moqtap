@@ -1517,12 +1517,6 @@ mod tests {
     /// On drafts 14-23 that is only true because the framer rewrites the
     /// next object's leading Object ID varint; on 07-13 the IDs are
     /// absolute and the surviving bytes already say the truth.
-    ///
-    /// *Ablation:* returning `Ok(None)` unconditionally from
-    /// `apply_elide_fixup` (never rewriting) fails this on the six delta
-    /// drafts, `[0, 2, 3]` decoding as `[0, 1, 2]` — the whole tail of the
-    /// stream shifted by one — and leaves 07-13 passing, which is exactly
-    /// the blast radius the fix-up is scoped to.
     #[test]
     fn eliding_an_object_renumbers_the_rest_of_the_stream() {
         for &draft in DRAFTS {
@@ -1548,9 +1542,6 @@ mod tests {
     /// shift every later object for the rest of the stream. The IDs are
     /// chosen so the correction changes the varint's *width*:
     /// `65 - 1 - 1 = 63` is one byte, `65 - 0 - 1 = 64` is two.
-    ///
-    /// *Ablation:* returning `Ok(None)` from `apply_elide_fixup` fails this
-    /// on all six delta drafts, decoding `[0, 65, 66]` as `[0, 64, 65]`.
     #[test]
     fn an_oversized_object_after_an_elide_is_still_renumbered() {
         for &draft in DRAFTS {
@@ -1585,22 +1576,6 @@ mod tests {
     /// whose object layout the codec can measure past an unarrived payload;
     /// on 07-13 a 4 KiB object with a 64-byte cap is out of measuring reach
     /// and the stream bypasses instead, which is a different property.
-    ///
-    /// *Ablation:* setting `passthrough_remaining = wire_len - emitted`
-    /// instead of `wire_len - buffered` — the plausible-looking
-    /// "correction" that redenominates the counter in emitted bytes when it
-    /// has to stay in source bytes — fails this on all six drafts with
-    /// `framed_ids == [0, 1]`: the
-    /// framer leaves one payload byte of object 65 in the buffer, reads it
-    /// as the head of the next object, and never frames object 66 at all.
-    /// It fails **nothing else**, including this file's byte-level
-    /// assertions, because the framer still emits every byte it was fed —
-    /// just partitioned wrongly. That is why `Run` reports `framed_ids`:
-    /// the first draft of this test asserted only on bytes and the
-    /// ablation walked straight through it.
-    ///
-    /// Returning `Ok(None)` from `apply_elide_fixup` fails it earlier,
-    /// with the re-decode reading `[0, 64, 65]`.
     #[test]
     fn an_elide_survives_an_object_streamed_through_in_chunks() {
         for &draft in DELTA_DRAFTS {
@@ -1632,14 +1607,6 @@ mod tests {
     /// [`ObjectFramer::note_elided`] is called. This is the property the
     /// acceptance suite rests on, restated where the code that could break
     /// it lives.
-    ///
-    /// *Ablation:* dropping the `self.fixup_pending` guard from
-    /// `apply_elide_fixup` (rewriting every object unconditionally) still
-    /// passes here, and passes `tests/framer_tests.rs` and
-    /// `tests/object_framing_acceptance.rs` too — a minimally encoded delta
-    /// re-encodes to itself, so the rewrite is invisible on any stream
-    /// these build. `a_widened_object_id_field_is_not_re_encoded` below is
-    /// the fence for that line; this test is a pin.
     #[test]
     fn a_stream_with_no_elide_is_emitted_byte_for_byte() {
         for &draft in DRAFTS {
@@ -1661,13 +1628,6 @@ mod tests {
     /// such a field would change bytes the proxy was asked to forward
     /// unchanged — so the fix-up must be reached only when an elide
     /// actually armed it, not merely when the draft delta-encodes.
-    ///
-    /// *Ablation:* dropping the `self.fixup_pending` guard from
-    /// `apply_elide_fixup` fails this on all six delta drafts, and fails
-    /// **nothing else** — not this file's other tests, not
-    /// `tests/framer_tests.rs`, not `tests/object_framing_acceptance.rs` — because
-    /// a minimally encoded field re-encodes to itself. This test is the
-    /// only fence that line has.
     #[test]
     fn a_widened_object_id_field_is_not_re_encoded() {
         for &draft in DELTA_DRAFTS {
@@ -1711,16 +1671,6 @@ mod tests {
     /// instead: it answers `None` for the reserved mode — the header
     /// determines no Subgroup ID — and reads the explicit field only for
     /// mode 2, which is the only mode the decoder reads one for.
-    ///
-    /// *Ablation:* accepting the reserved mode again — dropping the
-    /// Subgroup ID mode arm from the draft-16 `validate_subgroup_type` —
-    /// lets all eight headers decode, and this fails on the first:
-    ///
-    /// ```text
-    /// thread 'framer::tests::draft16_refuses_the_reserved_subgroup_id_mode'
-    /// panicked at crates\moqtap-proxy\src\framer.rs:
-    /// type 0x16 sets the reserved Subgroup ID mode and must be refused
-    /// ```
     #[test]
     #[cfg(feature = "draft16")]
     fn draft16_refuses_the_reserved_subgroup_id_mode() {
@@ -1748,14 +1698,6 @@ mod tests {
     /// *next* `poll_object`. The fix-up flag is the part that must be
     /// visible immediately, because it is what a bypass has to report as
     /// still owed.
-    ///
-    /// *Ablation:* committing eagerly (adding
-    /// `self.last_forwarded_id = Some(object_id)` where
-    /// `pending_disposition` is assigned) makes the elided object count as
-    /// forwarded. This test fails at its first cursor assertion, on
-    /// draft-07 — `Some(0)` where `None` is owed — and the three elide
-    /// tests fail alongside it from draft-14 on, reading `[0, 1, 2]` and
-    /// `[0, 64, 65]`.
     #[test]
     fn the_elide_cursor_tracks_the_last_object_actually_forwarded() {
         for &draft in DRAFTS {
@@ -1832,12 +1774,6 @@ mod tests {
     /// objects are not addressed. `latch_bypass` cannot return the
     /// `Bypassed` item from that poll — the poll already owes a `Header` —
     /// so it is deferred.
-    ///
-    /// *Ablation:* dropping the `pending_bypass` drain from the top of
-    /// `poll` fails this at the second poll with a `Passthrough`, and the
-    /// stream's whole reason for not being addressable becomes
-    /// unreportable — which is the state `BypassReason` was in before this
-    /// unit: declared, and never constructed.
     #[test]
     #[cfg(feature = "draft19")]
     fn a_bypass_is_reported_once_on_the_poll_after_the_item_that_decided_it() {
@@ -1898,10 +1834,6 @@ mod tests {
     /// the ceiling, so `read_object_meta` returns `InvalidField` rather than
     /// an incomplete-input error and the framer abandons the stream with the
     /// fix-up unspent.
-    ///
-    /// *Ablation:* reporting `fixup_owed: false` unconditionally passes
-    /// every other test in this file — nothing else reads the flag — and
-    /// leaves the session forwarding a tail that renumbers itself.
     #[test]
     fn a_bypass_that_strands_a_fix_up_reports_it_as_owed() {
         for &draft in DELTA_DRAFTS {
@@ -1952,10 +1884,6 @@ mod tests {
     /// This is the falsifiable half of the `Interest::NONE` claim: the
     /// framer is the slow path, so a framer that counts nothing makes the
     /// proof pass by measuring nothing.
-    ///
-    /// *Ablation:* passing a throwaway `Recorder` from `with_recorder`
-    /// instead of the caller's — the shape `ObjectFramer::new` has by
-    /// design — leaves every assertion here reading 0.
     #[test]
     fn the_framer_counts_the_slow_path_work_it_did() {
         for &draft in DRAFTS {
@@ -1987,11 +1915,6 @@ mod tests {
     /// oversized branch; the 32-byte feed routes it through
     /// `poll_oversized`, which emits it as several `Passthrough` chunks
     /// and must still count *one* object.
-    ///
-    /// *Ablation:* counting in `poll`'s `passthrough_remaining` branch
-    /// instead — the obvious place, since that is where most of the bytes
-    /// leave — reports 4 for the chunked run and 0 for the whole-stream
-    /// one.
     #[test]
     fn an_unaddressable_object_is_counted_once_per_object_not_per_chunk() {
         for &draft in DELTA_DRAFTS {

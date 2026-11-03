@@ -4,10 +4,10 @@
 //! `AnySubgroupObjectWriter` and reads it back with
 //! `AnySubgroupObjectReader`. That proves the two agree with each other, not
 //! that either agrees with the wire — a reader and writer that share the
-//! same misunderstanding round-trip perfectly. Two real bugs shipped green
-//! underneath exactly that shape of test: drafts 17-19 read the property
-//! block as count-prefixed KVPs when the wire is byte-length-prefixed, and
-//! drafts 15/16 dropped the `+1` from the Object ID delta.
+//! same misunderstanding round-trip perfectly. Two such misreadings pass that
+//! shape of test: reading the property block as count-prefixed KVPs when the
+//! wire is byte-length-prefixed (drafts 17-19), and dropping the `+1` from the
+//! Object ID delta (drafts 15/16).
 //!
 //! So the streams here are assembled by [`Wire`], a deliberately separate
 //! encoder built from each draft's documented layout, and the codec is only
@@ -640,9 +640,8 @@ fn write_all(
 /// wire actually states.
 ///
 /// Catches a reader and writer that agree with each other but not with the
-/// wire — the failure mode that let both bugs named in the module header
-/// ship. On drafts 17-19 the extension assertion is a direct regression
-/// test for the property-block one: a reader that took the `0x02` prefix
+/// wire. On drafts 17-19 the extension assertion catches the property-block
+/// misreading named in the module header: a reader that took the `0x02` prefix
 /// for a KVP *count* rather than a byte length would consume into the
 /// payload-length field and desynchronize the stream.
 fn assert_byte_identity(wire: &Wire) {
@@ -786,7 +785,7 @@ fn readers_consume_object_payloads() {
 ///
 /// Asserting on *bytes* rather than on decoded IDs is the point. A writer
 /// that re-used each object's original delta, or that used the wrong bias
-/// (`prev + delta` instead of `prev + delta + 1` — the drafts 15/16 bug
+/// (`prev + delta` instead of `prev + delta + 1` — the drafts 15/16 misreading
 /// named in the module header), still round-trips through its own reader
 /// and would satisfy an ID-level check.
 /// Only the wire bytes distinguish them.
@@ -1045,24 +1044,8 @@ fn fetch_object_meta_agrees_with_the_full_read() {
 /// the second object onwards, which an identity-only assertion would let
 /// through on a single-object stream.
 ///
-/// Ablated twice against the draft-19 glue in `src/data_dispatch.rs`. Skipping
-/// the payload instead of copying it — `conv::skip` in place of `conv::take`
-/// in `fo19::read_object` — gives
-///
-/// ```text
-/// assertion `left == right` failed: [draft-19] each object's payload must be the bytes framed under its own length
-///   left: [[], [], []]
-///  right: [[160], [161], [160]]
-/// ```
-///
-/// and dropping the `+ 1` from the Ascending Group ID arithmetic in
-/// `fo19::State::resolve` gives
-///
-/// ```text
-/// assertion `left == right` failed: [draft-19] fetch group/subgroup/object/priority must resolve to absolute values
-///   left: [(7, 0, 0, 128), (7, 0, 1, 128), (7, 0, 0, 128)]
-///  right: [(7, 0, 0, 128), (7, 0, 1, 128), (8, 0, 0, 128)]
-/// ```
+/// Fails if the dispatch layer skips a payload instead of copying it, or drops
+/// the `+ 1` from the Ascending Group ID arithmetic.
 #[test]
 fn fetch_streams_yield_their_objects_end_to_end_on_drafts_15_to_19() {
     for draft in drafts_with_fetch_serialization_flags() {
@@ -1139,16 +1122,11 @@ fn fetch_streams_yield_their_objects_end_to_end_on_drafts_15_to_19() {
 /// prior-object state, so the identities it reports for the second and third
 /// objects are resolved and not merely copied off the wire.
 ///
-/// Ablated by handing the draft-19 arm of `AnyFetchObjectReader::read_object_meta`
-/// a fresh `fo19::State` per call instead of the reader's own:
-///
-/// ```text
-/// [draft-19] fetch meta decode failed: invalid field value
-/// ```
-///
-/// The second object states no field at all, so a reader with no memory of the
-/// first has nothing to resolve it against and refuses rather than guessing —
-/// which is why the failure is an error and not a wrong identity.
+/// Fails if `AnyFetchObjectReader::read_object_meta` resolves each object
+/// against a fresh state instead of the reader's own. The second object states
+/// no field at all, so a reader with no memory of the first has nothing to
+/// resolve it against and refuses rather than guessing — which is why the
+/// failure is an error and not a wrong identity.
 #[test]
 fn fetch_object_meta_resolves_prior_object_fields_on_drafts_15_to_19() {
     for draft in drafts_with_fetch_serialization_flags() {
@@ -1195,22 +1173,9 @@ fn fetch_object_meta_resolves_prior_object_fields_on_drafts_15_to_19() {
 /// that defaulted the missing Group ID to 0 would decode this stream happily
 /// and place every later object in the wrong group.
 ///
-/// Ablated against `fo19::State::resolve` in `src/data_dispatch.rs`. Replacing
-/// the two "no prior object" refusals with zeros — the Group ID arm's
-/// `(None, None)` and the Object ID arm's `(None, _, _)` — was **not** enough:
-/// the test still passed, because this object also inherits its Priority and
-/// that arm refused independently. Only after the Priority arm was also
-/// defaulted did the gate fail:
-///
-/// ```text
-/// assertion `left == right` failed: [draft-19] a first fetch object inheriting from nothing must be refused
-///   left: Ok(AnyFetchObject { group_id: 0, subgroup_id: 0, has_subgroup_id: true, object_id: 0, publisher_priority: 128, extension_headers: [], extension_count: None, status: None, end_of_range: None, payload: [160] })
-///  right: Err(InvalidField)
-/// ```
-///
-/// That three separate refusals stand behind one flags value is the point: a
-/// stream whose first object states nothing is refused for each field it
-/// cannot produce, so weakening any one of them alone leaves the rule standing.
+/// Three separate refusals stand behind one flags value: a stream whose first
+/// object states nothing is refused for its Group ID, its Object ID and its
+/// Priority, so weakening any one of them alone leaves the rule standing.
 #[test]
 fn a_first_fetch_object_that_references_a_prior_object_is_refused_on_drafts_15_to_19() {
     for draft in drafts_with_fetch_serialization_flags() {

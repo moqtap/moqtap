@@ -244,15 +244,6 @@ fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -
 /// `$key` is the parameter type this draft numbers the token, which is the
 /// second half of the rule. The refusal must name the number the frame actually
 /// carried, or a reader chasing it consults the wrong table.
-///
-/// The ablations recorded below were run on every draft in the range and fail on
-/// all of them — ten drafts, 11 through 20, with no gaps. The structure is read
-/// by one shared parser, so an ablation of it is visible from every expansion at
-/// once: removing the Alias Type check fails
-/// `an_unassigned_alias_type_is_refused` on all ten and nothing else. The
-/// message quoted in each is draft-13's, with the fixture's own unchanging
-/// fields elided where they are the same in every one; the parameter at the end
-/// is what the gate is about.
 #[cfg(any(
     feature = "draft11",
     feature = "draft12",
@@ -308,17 +299,6 @@ macro_rules! token_structure_gates {
         /// The shortest possible malformation, and the one a length field alone
         /// would let through: the parameter is well-formed as a key-value pair
         /// and states a value length of zero.
-        ///
-        /// Removing the check fails with:
-        ///
-        /// ```text
-        /// a token with no Alias Type was carried: Ok(Subscribe(Subscribe {
-        /// request_id: VarInt(1), track_namespace: TrackNamespace([[110, 115]]),
-        /// track_name: [116], subscriber_priority: 5, group_order: Ascending,
-        /// forward: Forward, filter_type: NextGroupStart, start_group: None,
-        /// start_object: None, end_group: None, parameters: [KeyValuePair {
-        /// key: VarInt(3), value: Bytes([]) }] }))
-        /// ```
         #[test]
         fn a_token_with_no_alias_type_is_refused() {
             let got = decode(&carrying(&[]));
@@ -335,13 +315,6 @@ macro_rules! token_structure_gates {
         /// Alias Type is what says how many fields follow, so a reader meeting
         /// an unknown one does not know where the token ends, let alone what it
         /// holds.
-        ///
-        /// Removing the check fails with:
-        ///
-        /// ```text
-        /// an unassigned Alias Type was carried: Ok(Subscribe(Subscribe {
-        /// ... parameters: [KeyValuePair { key: VarInt(3), value: Bytes([4, 1]) }] }))
-        /// ```
         #[test]
         fn an_unassigned_alias_type_is_refused() {
             let got = decode(&carrying(&[0x04, 0x01]));
@@ -353,14 +326,6 @@ macro_rules! token_structure_gates {
 
         /// An Alias Type that promises a Token Alias, with the value ending
         /// first.
-        ///
-        /// Removing the check fails with:
-        ///
-        /// ```text
-        /// a token promising an Alias it does not carry was carried: Ok(Subscribe(
-        /// Subscribe { ... parameters: [KeyValuePair { key: VarInt(3),
-        /// value: Bytes([1]) }] }))
-        /// ```
         #[test]
         fn a_promised_alias_that_never_arrives_is_refused() {
             let got = decode(&carrying(&[0x01]));
@@ -374,14 +339,6 @@ macro_rules! token_structure_gates {
         ///
         /// The field that is missing here is one field further in than the gate
         /// above, which is what separates a truncated token from an empty one.
-        ///
-        /// Removing the check fails with:
-        ///
-        /// ```text
-        /// a token promising a Token Type it does not carry was carried: Ok(Subscribe(
-        /// Subscribe { ... parameters: [KeyValuePair { key: VarInt(3),
-        /// value: Bytes([1, 7]) }] }))
-        /// ```
         #[test]
         fn a_promised_token_type_that_never_arrives_is_refused() {
             let got = decode(&carrying(&[0x01, 0x07]));
@@ -399,14 +356,6 @@ macro_rules! token_structure_gates {
         /// have no Token Value — the parameter must end where the Alias does. A
         /// reader that stopped at the last field it wanted would take these
         /// bytes for a value the draft says is not there.
-        ///
-        /// Removing the check fails with:
-        ///
-        /// ```text
-        /// bytes after a token that ends at its Alias were carried: Ok(Subscribe(
-        /// Subscribe { ... parameters: [KeyValuePair { key: VarInt(3),
-        /// value: Bytes([0, 7, 99]) }] }))
-        /// ```
         #[test]
         fn bytes_after_a_token_that_carries_no_value_are_refused() {
             let got = decode(&carrying(&[0x00, 0x07, 0x63]));
@@ -431,15 +380,8 @@ macro_rules! token_structure_gates {
         ///
         /// It is also what the frames above are built the way they are for.
         ///
-        /// # What it catches
-        ///
-        /// Dropping the `check_authorization_tokens` call from this draft's
-        /// parameter encoder — which is where every draft in this range had it
-        /// missing:
-        ///
-        /// ```text
-        /// the writer produced a token the reader refuses: [] gave Ok(())
-        /// ```
+        /// Fails if this draft's parameter encoder skips
+        /// `check_authorization_tokens`.
         #[test]
         fn a_token_the_reader_refuses_is_one_the_writer_will_not_write() {
             for bad in MALFORMED {
@@ -499,14 +441,8 @@ macro_rules! token_structure_gates {
         /// The writers are two functions on most of these drafts, and a gate on
         /// one of them says nothing about the other.
         ///
-        /// # What it catches
-        ///
-        /// Dropping the `check_authorization_tokens` call from this draft's
-        /// setup-parameter encoder, leaving the message-namespace one in place:
-        ///
-        /// ```text
-        /// the writer produced a setup token the reader refuses: [] gave Ok(())
-        /// ```
+        /// Fails if this draft's setup-parameter encoder skips
+        /// `check_authorization_tokens` while the message-namespace one keeps it.
         #[test]
         fn a_setup_token_the_reader_refuses_is_one_the_writer_will_not_write() {
             for bad in MALFORMED {
@@ -580,14 +516,6 @@ mod draft11 {
     ///
     /// The path here begins with `h`, which is 0x68 and no Alias Type at all,
     /// so a reader that consulted the wrong namespace refuses it outright.
-    ///
-    /// Sharing one list across the two namespaces fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a setup PATH was read as a Token:
-    /// Err(KeyValueFormatting { key: 1, detail: "its Alias Type is not one this
-    /// draft assigns" })
-    /// ```
     #[test]
     fn a_setup_path_is_not_read_as_a_token() {
         const SETUP_PATH: u64 = 0x01;
@@ -701,14 +629,6 @@ mod draft13 {
     /// travel untouched under a number the draft has never assigned. Applying
     /// the token's structure to every length-prefixed parameter would close
     /// sessions over extensions the drafts leave room for.
-    ///
-    /// Dropping the condition fails with:
-    ///
-    /// ```text
-    /// assertion `left == right` failed: an extension parameter was held to the
-    /// token's structure: Err(KeyValueFormatting { key: 51, detail: "its Alias Type
-    /// is not one this draft assigns" })
-    /// ```
     #[test]
     fn a_type_this_draft_cannot_name_is_not_held_to_the_token_structure() {
         let message = subscribe(vec![super::pair(AN_EXTENSION_TYPE, vec![0x04, 0x01])]);

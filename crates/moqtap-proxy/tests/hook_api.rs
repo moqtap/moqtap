@@ -33,8 +33,7 @@
 //!    whose `wants_control_mutation()` is false —
 //!    [`legacy_hook_discards_a_control_replacement_when_mutation_was_not_requested`].
 //!
-//! Neither test can falsify the other's guard, which is exactly why both
-//! are here; see this file's ablation notes on each.
+//! Neither test can falsify the other's guard, which is why both are here.
 
 mod common;
 
@@ -504,14 +503,6 @@ async fn relay_control_bytes(relay: Arc<FakeRelay>, want: usize) -> Vec<u8> {
 /// A legacy `Some(bytes)` from a hook that did not ask for control
 /// mutation stays discarded — the inversion `LegacyHook`'s rustdoc warns
 /// about.
-///
-/// *Ablation:* drop the `if self.0.wants_control_mutation()` guard from
-/// `LegacyHook::on_control_message`, so the arm reads
-/// `Some(bytes) => Action::Replace(Bytes::from(bytes))`. `evil-replacement-bytes`
-/// then reaches the relay and this test goes red.
-///
-/// The fixture's flip-flop is what makes that ablation reachable at all;
-/// see [`FlipFlopLegacyHook`].
 #[tokio::test]
 #[allow(deprecated)]
 #[cfg(feature = "draft14")]
@@ -568,12 +559,6 @@ async fn legacy_hook_discards_a_control_replacement_when_mutation_was_not_reques
 
 /// A legacy hook that never asks for control mutation is never shown the
 /// control stream at all — the *first* of the two guards.
-///
-/// *Ablation:* make `LegacyHook::interest()` return
-/// `Interest::DATAGRAMS | Interest::CONTROL` unconditionally. The
-/// `control_calls` assertion then goes red, while the byte assertion keeps
-/// passing — which is precisely why the count is asserted and not only the
-/// bytes.
 #[tokio::test]
 #[allow(deprecated)]
 #[cfg(feature = "draft14")]
@@ -623,10 +608,6 @@ async fn legacy_hook_without_control_mutation_is_never_shown_the_control_stream(
 /// the datagram hook — there was no flag to ask for it — so gating it on
 /// `wants_control_mutation()` would stop datagram rewriting for every
 /// existing implementation.
-///
-/// *Ablation:* return `Interest::NONE` from `LegacyHook::interest()` when
-/// `wants_control_mutation()` is false. The relay then receives the
-/// original datagram and this test goes red.
 #[tokio::test]
 #[allow(deprecated)]
 #[cfg(feature = "draft14")]
@@ -684,10 +665,6 @@ async fn legacy_hook_keeps_datagram_rewriting() {
 /// `ProxyHook` **is** shown an undecodable datagram
 /// (`tests/actions_datagrams.rs`), which is what makes `Action::Drop` on
 /// malformed traffic expressible at all.
-///
-/// *Ablation:* delete the `let Some(header) = header else { return
-/// Action::Pass }` early return in `LegacyHook::on_datagram`. The call
-/// count goes to 1 and this test goes red.
 #[tokio::test]
 #[allow(deprecated)]
 #[cfg(feature = "draft14")]

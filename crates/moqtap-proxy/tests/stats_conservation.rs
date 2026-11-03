@@ -22,10 +22,7 @@
 //! stops being charged leaves the summed rows *short* of `bytes_shaped`, which
 //! `charged <= bytes_shaped` admits. A byte counted twice in the rows, or a
 //! term that stops entering `bytes_shaped`, leaves them *over*, which
-//! `charged >= bytes_shaped` admits. The second ablation recorded on
-//! [`bytes_are_conserved_on_one_session`] is measurably of the second kind —
-//! the rows came out fifteen bytes above `bytes_shaped` — so a gate written
-//! with a lower bound would have reported it green.
+//! `charged >= bytes_shaped` admits.
 //!
 //! ## The two exceptions are excluded by construction, not tolerated
 //!
@@ -860,62 +857,6 @@ fn assert_every_byte_is_charged_to_exactly_one_row(rows: &Rows, whose: &str) {
 /// [`the_identity_closes_when_the_rows_are_added_across_the_seam`] reads the
 /// proxy's, which is a different store written by the same calls, and it has
 /// to sum two legs to arrive at the same `bytes_shaped`.
-///
-/// *Ablation (a), recorded: charge the unshapeable units to `default_class`
-/// instead.* In `src/shape/stats.rs`, both `ShapeRecorder::row` and
-/// `ProxyRecorder::row` answer `&self.default_class` for
-/// `Class::Unshapeable`. **The equality still held** — the bytes moved from
-/// one term of the sum to another and the total is unchanged — which is
-/// exactly why the terms are asserted separately, and it is the whole
-/// argument for doing so. What reddened is the term:
-///
-/// ```text
-/// assertion `left == right` failed: the session's own recorder: the
-/// unshapeable row holds exactly the three subgroup stream headers — no rule
-/// could have claimed one, and a byte no rule could claim is still a byte the
-/// shaper handled: ClassStats { name: "", bytes_delivered: 0, bytes_dropped: 0,
-/// objects_delivered: 0, objects_dropped: 0, tokens_exhausted_episodes: 0,
-/// blocked_episodes: 0, starved_behind_other_class: 0 }
-///   left: 0
-///  right: 15
-/// ```
-///
-/// [`the_identity_closes_when_the_rows_are_added_across_the_seam`] failed on
-/// the same term with the same figures and its own prefix;
-/// [`each_crossing_is_charged_to_its_own_cell_of_the_two_by_two`] stayed
-/// green, which is right — moving a byte between two class rows changes no
-/// cell of the per-leg matrix.
-///
-/// *Ablation (b), recorded: drop the unshapeable term from the other side of
-/// the equals sign.* Empty the body of `ShapeRecorder::note_unshapeable_seen`,
-/// so the `unshapeable` row is still charged when the unit is released but its
-/// bytes never enter `bytes_shaped`. **This is the one a bound would have
-/// hidden.** Every term assertion above still passed — the row still reports
-/// its fifteen bytes — and the missing term makes the sum *larger* than
-/// `bytes_shaped`, so `charged >= bytes_shaped` is still true and so is
-/// `charged > 0`. Only the equality is not:
-///
-/// ```text
-/// assertion `left == right` failed: the session's own recorder: every byte the
-/// shaper saw is charged to exactly one row — classes [ClassStats { name: "up",
-/// bytes_delivered: 36012, bytes_dropped: 72024, objects_delivered: 4,
-/// objects_dropped: 8, .. }, ClassStats { name: "down", bytes_delivered: 36012,
-/// bytes_dropped: 18006, objects_delivered: 4, objects_dropped: 2, .. }],
-/// default ClassStats { name: "", bytes_delivered: 36012, bytes_dropped: 36012,
-/// objects_delivered: 4, objects_dropped: 4, .. }, unshapeable ClassStats {
-/// name: "", bytes_delivered: 15, bytes_dropped: 0, objects_delivered: 3,
-/// objects_dropped: 0, .. }
-///   left: 234093
-///  right: 234078
-/// ```
-///
-/// The fifteen-byte gap is the whole of it: three five-byte subgroup stream
-/// headers, each a unit no rule could have claimed. The seam row failed with
-/// the same two numbers, and
-/// [`each_crossing_is_charged_to_its_own_cell_of_the_two_by_two`] went with
-/// them on `bytes_shaped: 1020` against `1025` in the client's uplink cell —
-/// the same five missing header bytes, seen at the crossing rather than in
-/// the total.
 #[tokio::test]
 async fn bytes_are_conserved_on_one_session() {
     let hook = HeadHoldingHook::new();
@@ -957,37 +898,6 @@ async fn bytes_are_conserved_on_one_session() {
 /// count every delivered byte twice and leave a total about double what the
 /// rows account for. And not `ProxyStats::sessions`, which is derived from
 /// these same two cells — see the file docstring.
-///
-/// *Ablations, run:* both of the mutations recorded on
-/// [`bytes_are_conserved_on_one_session`] reddened this row too, which is
-/// what makes them mutations of the recorder rather than of one of its
-/// readers. Under (a) — the unshapeable units charged to `default_class` —
-/// this row failed on the same term with the same `left: 0 / right: 15`,
-/// under the prefix "the proxy's recorder, summed across both legs". Under
-/// (b) — the unshapeable bytes never entering `bytes_shaped` — it failed on
-/// the equality with `left: 234093 / right: 234078`.
-///
-/// A third mutation reddened it and belongs here rather than with the gate it
-/// was aimed at, because what it shows is that the figure the rows are
-/// compared against really is summed over both legs. *Recorded: `leg_index`
-/// answers `0` for `Leg::Upstream` as well as for `Leg::Client`*, which folds
-/// every departure measurement back into the two arrival cells this row adds
-/// up:
-///
-/// ```text
-/// assertion `left == right` failed: the proxy's recorder, summed across both
-/// legs: every byte the shaper saw is charged to exactly one row — ...
-///   left: 234093
-///  right: 342144
-/// ```
-///
-/// The rows are untouched at 234093 and the total they are compared against
-/// has grown by exactly 108051 — the four rows' `bytes_delivered`, counted a
-/// second time where they left. That is the shape of the mistake this row's
-/// `Rows::from_proxy` is written to avoid, arrived at from the other
-/// direction:
-/// [`bytes_are_conserved_on_one_session`] stayed green throughout, because a
-/// session's recorder has no leg axis to collapse.
 #[tokio::test]
 async fn the_identity_closes_when_the_rows_are_added_across_the_seam() {
     let hook = HeadHoldingHook::new();
@@ -1146,65 +1056,6 @@ fn attribution_profile() -> ShapeProfile {
 /// snapshot time, so asserting it equals their sum is `a + b == a + b` — no
 /// mutation can redden it. The file docstring states the condition under
 /// which that stops being true.
-///
-/// *Ablation (a), recorded: charge every unit to the uplink direction
-/// regardless of the side it arrived on.* In `src/shape/stats.rs`, `split`
-/// answers `Direction::Uplink` in all four arms. The legs are still told
-/// apart and every byte is still counted somewhere — the two downlink cells
-/// are simply empty and their traffic has been folded into the uplink cell
-/// beside them:
-///
-/// ```text
-/// assertion `left == right` failed: the client leg: what this proxy read from
-/// the client, and what it wrote back to the client
-///   left: LegStats { directions: [DirectionStats { objects_seen: 17,
-///     bytes_shaped: 3151, objects_expired: 0, streams_reset_by_shaping: 0,
-///     streams_with_mixed_classes: 0 }, DirectionStats { objects_seen: 0,
-///     bytes_shaped: 0, objects_expired: 0, streams_reset_by_shaping: 0,
-///     streams_with_mixed_classes: 0 }] }
-///  right: LegStats { directions: [DirectionStats { objects_seen: 10,
-///     bytes_shaped: 1025, objects_expired: 0, streams_reset_by_shaping: 0,
-///     streams_with_mixed_classes: 0 }, DirectionStats { objects_seen: 7,
-///     bytes_shaped: 2126, objects_expired: 0, streams_reset_by_shaping: 0,
-///     streams_with_mixed_classes: 0 }] }
-/// ```
-///
-/// `1025 + 2126 == 3151` and `10 + 7 == 17`: the client leg's own two flows,
-/// added together and reported as though both had gone the same way.
-/// [`bytes_are_conserved_on_one_session`] stayed green under it — a direction
-/// that vanished is not a byte that vanished — and
-/// [`the_identity_closes_when_the_rows_are_added_across_the_seam`] timed out
-/// on its "every offered object to be classified" anchor, which is honest
-/// rather than incidental: that anchor counts the two arrival cells, and this
-/// mutation empties one of them.
-///
-/// *Ablation (b), recorded: collapse the leg-to-direction mapping so both
-/// legs report row 0.* In `src/shape/stats.rs`, `leg_index` answers `0` for
-/// `Leg::Upstream` as well as for `Leg::Client`. This is the other axis, and
-/// neither mutation is the other: here the *directions* are still told apart
-/// perfectly and it is the upstream leg that has vanished into the client's:
-///
-/// ```text
-/// assertion `left == right` failed: the client leg: what this proxy read from
-/// the client, and what it wrote back to the client
-///   left: LegStats { directions: [DirectionStats { objects_seen: 19,
-///     bytes_shaped: 1948, objects_expired: 0, streams_reset_by_shaping: 0,
-///     streams_with_mixed_classes: 0 }, DirectionStats { objects_seen: 15,
-///     bytes_shaped: 4555, objects_expired: 0, streams_reset_by_shaping: 0,
-///     streams_with_mixed_classes: 0 }] }
-///  right: LegStats { directions: [DirectionStats { objects_seen: 10,
-///     bytes_shaped: 1025, objects_expired: 0, streams_reset_by_shaping: 0,
-///     streams_with_mixed_classes: 0 }, DirectionStats { objects_seen: 7,
-///     bytes_shaped: 2126, objects_expired: 0, streams_reset_by_shaping: 0,
-///     streams_with_mixed_classes: 0 }] }
-/// ```
-///
-/// `1025 + 923 == 1948` and `2429 + 2126 == 4555`: the uplink pair summed
-/// into one uplink cell and the downlink pair into one downlink cell, with
-/// the client leg reporting the whole proxy and the upstream leg reporting
-/// nothing. Compare the numbers with ablation (a)'s — the two mutations put
-/// the same traffic in different places, so neither could stand in for the
-/// other.
 #[tokio::test]
 async fn each_crossing_is_charged_to_its_own_cell_of_the_two_by_two() {
     let hook = Arc::new(TailElidingHook {

@@ -1,5 +1,5 @@
 //! The engine's behavioural gates: the model order, each model's arithmetic,
-//! and the stream separation the readability of every ablation rests on.
+//! and the stream separation that keeps each model's decisions its own.
 //!
 //! This file is an integration test, i.e. a separate crate, and that is
 //! deliberate: `Decision`, `Verdict` and `DropCause` are constructible and
@@ -128,7 +128,7 @@ fn loss_rate_over_100k_packets_is_exactly_the_pinned_count() {
 /// The exact counts are the gate. The band is asserted as well because it is
 /// what says the counts *mean* five percent: over 100 000 datagrams at p = 0.05
 /// the mean is 5000.000 and the standard deviation 68.920244, so six sigma is
-/// 413.5215 and the integer band is [4587, 5413] — ±8.27% relative. The measured
+/// 413.5215 and the integer band is [4587, 5413] — ±8.27% relative. The pinned
 /// extremes are 4922 and 5063, which are 1.13 and 0.91 sigma out.
 ///
 /// A companion to the single-seed equality, never a replacement for it: a band
@@ -242,9 +242,9 @@ fn gilbert_elliott_degenerate_rows_are_exact_for_every_seed() {
 /// the mean burst length is `1/r`. At `r = 0.25` that is `P(len >= 2) = 0.75`
 /// and a mean of 4.
 ///
-/// Measured over a million datagrams at `p = 0.05`, seed 7: 41 638 bursts, of
-/// which 31 194 reach length 2 — a ratio of 0.749171 against a closed form of
-/// 0.75 — and 166 722 losses, a mean burst of 4.0041 against 4.
+/// Over a million datagrams at `p = 0.05`, seed 7, the pinned counts are 41 638
+/// bursts, of which 31 194 reach length 2 — a ratio of 0.749171 against a
+/// closed form of 0.75 — and 166 722 losses, a mean burst of 4.0041 against 4.
 ///
 /// **The slack is derived from the distribution this count actually has, not
 /// from the loss count's.** The number of losses in a burst-loss run is *not*
@@ -256,7 +256,7 @@ fn gilbert_elliott_degenerate_rows_are_exact_for_every_seed() {
 /// bursts, each burst independently continues with probability `1 - r`, so the
 /// count of bursts reaching length 2 is exactly binomial in the number of bursts
 /// and its standard deviation is `sqrt(41638 * 0.75 * 0.25)` = 88.4. Six of
-/// those is 530 bursts, which is the one-sided allowance below. The observed
+/// those is 530 bursts, which is the one-sided allowance below. The pinned
 /// shortfall is 34.5 bursts, 0.39 sigma.
 ///
 /// The exact counts are asserted too. The run is deterministic, so they are
@@ -299,7 +299,7 @@ fn gilbert_elliott_burst_tail_matches_the_closed_form() {
 /// of it. A loss drop is terminal, so the duplication model sees ninety
 /// datagrams rather than a hundred and its j-th draw goes to the j-th survivor —
 /// which is asserted here as an exact index mapping, because it is the property
-/// that makes every ablation in this file readable and because the obvious
+/// that keeps each model's decisions its own and because the obvious
 /// wrong version of it ("the same sequence numbers duplicate either way") would
 /// be asserting that a dropped datagram consumes a draw.
 ///
@@ -331,7 +331,7 @@ fn pattern_mode_drops_exactly_the_listed_indices() {
     // A loss drop is terminal, so the duplication model downstream of it sees
     // only the survivors — and the j-th survivor gets the j-th duplication
     // draw, exactly as if the dropped datagrams had never been offered. That is
-    // the property the whole suite's ablations rest on, and it is the one an
+    // the property the whole suite rests on, and it is the one an
     // implementation that spent a draw on a dropped datagram would break.
     //
     // Note what is *not* claimed: that the duplication hits land on the same
@@ -614,9 +614,9 @@ fn blackout_boundaries_are_half_open() {
 /// model's decisions are a function of the datagrams that reached it and of
 /// nothing else.
 ///
-/// This is the property every other ablation in this suite depends on for its
-/// readability. Without it, switching one model off rewrites the whole log and
-/// the diff names nothing.
+/// This is the property every other test in this suite depends on. Without
+/// it, switching one model off rewrites the whole log and the diff names
+/// nothing.
 ///
 /// **The comparison is by position in the loss model's own input sequence, not
 /// by sequence number, and that is the only form of the claim that is true.** A
@@ -995,8 +995,8 @@ fn the_two_directions_draw_from_independent_streams() {
 ///
 /// Two claims, and the second is the one that matters. The whole reason each
 /// model has its own generator is that switching a model off must produce a diff
-/// that names exactly that model — every ablation recorded in this file depends
-/// on it, and until it is asserted it is a convention rather than a property.
+/// that names exactly that model, and until it is asserted it is a convention
+/// rather than a property.
 ///
 /// Arming duplication alongside loss must leave the loss decisions **identical,
 /// datagram for datagram**, because duplication draws from its own stream and

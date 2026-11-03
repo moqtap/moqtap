@@ -119,37 +119,6 @@ macro_rules! unknown_update_wire_gate {
 
             /// An update for a request this session never carried ends the
             /// QUIC connection, with the code the section names.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Deleting the new arm from `EndpointError::session_error_code`
-            /// leaves the endpoint refusing the update and ending its own
-            /// session, and leaves the connection layer with no code to close
-            /// with:
-            ///
-            /// ```text
-            /// the client was sent an update for nothing and never closed: Elapsed(())
-            /// ```
-            ///
-            /// It reddens ten tests: this gate on all five drafts and the in-process
-            /// one on the same five, where the close code is read off the error rather
-            /// than off the wire.
-            ///
-            /// Answering that arm with a different code leaves the close going
-            /// out with the wrong number on it, which is the failure only a
-            /// peer can see:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: Section 8.10 answers an update naming a request
-            /// the session never carried with PROTOCOL_VIOLATION; the close carried 4 instead
-            ///   left: 4
-            ///  right: 3
-            /// ```
-            ///
-            /// Made by answering the arm with INVALID_REQUEST_ID, which is the code the
-            /// neighbouring rule about Request IDs uses. It reddens ten tests, and only
-            /// the five here can tell the two codes apart: in process the session ends
-            /// either way.
             #[tokio::test]
             async fn an_update_for_nothing_closes_the_quic_connection() {
                 crate::common::init_crypto();

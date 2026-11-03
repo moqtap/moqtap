@@ -220,20 +220,10 @@ fn ns_name_moqt<P: MoqtProfile>(namespace_bytes: usize, name_bytes: usize) -> Ve
 /// the at-cap frame must not be: a decoder that refused everything, or one whose
 /// buffer simply ran out, would pass the first assertion on its own.
 ///
-/// # What it catches
-///
-/// Ablation: deleting the `check_full_track_name` call from one arm leaves the
-/// decoder reading on into whatever follows the name, so what comes back is a
-/// complaint about the rest of the message. Measured by removing it from
-/// draft-19's TRACK_STATUS arm:
-///
-/// ```text
-/// a 4,097-byte Full Track Name must be refused, got Err(ControlMessageLengthMismatch
-/// { declared: 4102, detail: "its fields ran past the end" })
-/// ```
-///
-/// which says the sender misframed the message. The sender framed it exactly as
-/// it meant to.
+/// Fails if an arm skips its `check_full_track_name` call: the decoder then
+/// reads on into whatever follows the name and complains about the rest of the
+/// message, which says the sender misframed a message it framed exactly as it
+/// meant to.
 macro_rules! cap_gate {
     ($fname:ident, $feat:literal, $draft:ident, $type_id:expr, $payload:expr) => {
         #[cfg(feature = $feat)]

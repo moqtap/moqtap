@@ -1,12 +1,12 @@
 //! Object Status: on drafts 15 through 20, the encode path can put a code on
 //! the wire exactly when the decode path accepts that code.
 //!
-//! The asymmetry this gates against is a real one: every draft's decoder
-//! refuses a status code the draft does not assign (draft-17 Section 10.2.1.1
-//! says an unassigned status SHOULD be treated as a protocol error and the
-//! session closed with PROTOCOL_VIOLATION), while the encoders once wrote
-//! whatever raw code they were handed. A peer could therefore emit, from this
-//! codec, bytes this codec would itself reject on the way back in.
+//! The asymmetry this gates against: every draft's decoder refuses a status
+//! code the draft does not assign (draft-17 Section 10.2.1.1 says an unassigned
+//! status SHOULD be treated as a protocol error and the session closed with
+//! PROTOCOL_VIOLATION), so an encoder that wrote whatever raw code it was
+//! handed would emit, from this codec, bytes this codec would itself reject on
+//! the way back in.
 //!
 //! # The shapes covered
 //!
@@ -70,84 +70,17 @@
 //! draft-17 with the MoQT varint of draft-17 Section 1.4.1, and drafts 18-23
 //! with the revision of it that restored the 7-byte length.
 //!
-//! # What this gate catches, observed by making each change and running it
+//! # What this gate catches
 //!
-//! Both halves of the fix are typed fields: `SubgroupObject::object_status` and
-//! `DatagramHeader::object_status` hold an `ObjectStatus`, not a raw code, so
-//! the encoders cannot be handed a code their own decoder would refuse. The two
-//! draft groups reached that from different starting points — drafts 15-16 held
-//! the datagram status as a varint, drafts 17-23 as a single byte — so both are
-//! ablated below.
-//!
-//! Taking the check away on draft-16 — its datagram status held as a raw
-//! `Option<VarInt>` instead, written verbatim with `if let Some(s) =
-//! &self.object_status { s.encode(buf) }` and read back into the raw field —
-//! stops this gate compiling, which is the check being enforced at the earliest
-//! possible moment:
-//!
-//! ```text
-//! error[E0308]: mismatched types
-//!    --> crates\moqtap-codec\tests\object_status_symmetry.rs:494:45
-//!     |
-//! 494 |                         object_status: Some(ObjectStatus::ALL[index]),
-//!     |                                        ---- ^^^^^^^^^^^^^^^^^^^^^^^^ expected `VarInt`, found `ObjectStatus`
-//!     |                                        |
-//!     |                                        arguments to this enum variant are incorrect
-//! ...
-//! 554 | datagram_row!(varint_status draft16_datagram_status, "draft16", draft16, Some(0x80));
-//!     | ------------------------------------------------------------------------------------ in this macro invocation
-//! ```
-//!
-//! and the same on draft-18, whose datagram status was a bare `Option<u8>`
-//! written with `buf.put_u8(self.object_status.unwrap_or(0))`:
-//!
-//! ```text
-//! error[E0308]: mismatched types
-//!    --> crates\moqtap-codec\tests\object_status_symmetry.rs:536:45
-//!     |
-//! 536 |                         object_status: Some(ObjectStatus::ALL[index]),
-//!     |                                        ---- ^^^^^^^^^^^^^^^^^^^^^^^^ expected `u8`, found `ObjectStatus`
-//!     |                                        |
-//!     |                                        arguments to this enum variant are incorrect
-//! ...
-//! 556 | datagram_row!(byte_status draft18_datagram_status, "draft18", draft18);
-//!     | ---------------------------------------------------------------------- in this macro invocation
-//! ```
-//!
-//! A compile error says nothing about behaviour, though, so both groups were
-//! ablated a second way that keeps the API shape and moves the defect onto the
-//! wire: the encoder emitting `0x1`, the code draft-15 assigned to Object Does
-//! Not Exist and draft-16 dropped, where it should emit End of Group. That is
-//! what forwarding a status between drafts without checking it looks like.
-//! Draft-16, whose datagram status is a varint:
-//!
-//! ```text
-//! thread 'draft16_datagram_status' (47776) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:
-//! draft16 datagram header: decode refused the encoder's own output for status 0x1: InvalidField
-//!
-//! test result: FAILED. 9 passed; 1 failed
-//! ```
-//!
-//! and draft-18, whose datagram status is one octet:
-//!
-//! ```text
-//! thread 'draft18_datagram_status' (26244) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:
-//! draft18 datagram header: decode refused the encoder's own output for status 0x1: InvalidField
-//!
-//! test result: FAILED. 9 passed; 1 failed
-//! ```
-//!
-//! The metadata shape is gated in its own right, not just as a passenger of the
-//! object shape. Dropping the `decoded_status(code)?` from draft-15's
-//! `read_object_meta`, so that the payload-skipping view accepts what the
-//! full read refuses:
-//!
-//! ```text
-//! thread 'draft15_subgroup_status' (18096) panicked at crates\moqtap-codec\tests\object_status_symmetry.rs:
-//! draft15 subgroup object: read_object_meta accepted status 0x2 as Some(2), which the draft does not assign
-//!
-//! test result: FAILED. 9 passed; 1 failed
-//! ```
+//! `SubgroupObject::object_status` and `DatagramHeader::object_status` hold an
+//! `ObjectStatus`, not a raw code, so the encoders cannot be handed a code their
+//! own decoder would refuse, and a raw status field would stop this gate
+//! compiling. Behind the type, the gate fails if an encoder writes a different
+//! code from the one it was handed: `0x1`, the code draft-15 assigned to Object
+//! Does Not Exist and draft-16 dropped, in place of End of Group, which is what
+//! forwarding a status between drafts without checking it looks like. The
+//! metadata shape is gated in its own right too: it fails if
+//! `read_object_meta` accepts a code the full read refuses.
 
 #![cfg(any(
     feature = "draft15",

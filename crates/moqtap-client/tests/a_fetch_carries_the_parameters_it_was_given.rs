@@ -122,20 +122,6 @@ macro_rules! fetch_parameter_gates {
             }
 
             /// The parameters a fetch is given reach the peer.
-            ///
-            /// # What it catches
-            ///
-            /// Sending an empty parameter list whatever the caller passed:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the parameter the caller attached
-            /// must reach the peer, not the empty list a call that ignores its
-            /// argument sends left: 0 right: 1 failures:
-            /// draft15::the_parameters_a_fetch_is_given_reach_the_peer
-            /// ```
-            ///
-            /// It reddens five, this gate on every draft in the range and nothing
-            /// else.
             #[test]
             fn the_parameters_a_fetch_is_given_reach_the_peer() {
                 let mut ep = active();
@@ -176,15 +162,6 @@ macro_rules! fetch_parameter_gates {
             ///
             /// The other half, and the reason it is here: a change that made
             /// the field always non-empty would pass the gate above.
-            ///
-            /// # What it catches
-            ///
-            /// Nothing the cut reaches, and that is what it is for. The one
-            /// cut sends an empty list whatever it is given, which is what
-            /// this gate asserts, so the cut leaves it green. It is the
-            /// control for the gate above: without it, a change that filled
-            /// the field with something of its own would pass the only other
-            /// assertion in this file.
             #[test]
             fn a_fetch_given_no_parameters_carries_none() {
                 let mut ep = active();
@@ -221,21 +198,6 @@ macro_rules! fetch_parameter_gates {
             /// INVALID_JOINING_REQUEST_ID". What is being watched is the
             /// parameter list, and a fetch that never leaves the endpoint
             /// would not need one.
-            ///
-            /// # What it catches
-            ///
-            /// A joining fetch that sends an empty list whatever the caller
-            /// passed:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: a Joining Fetch is a FETCH,
-            /// and the parameter the caller attached must reach the peer
-            ///   left: 0
-            ///  right: 1
-            /// ```
-            ///
-            /// It reddens one, this gate on the draft the cut was made in,
-            /// because each draft builds its own message.
             #[test]
             fn the_parameters_a_joining_fetch_is_given_reach_the_peer() {
                 let mut ep = active();

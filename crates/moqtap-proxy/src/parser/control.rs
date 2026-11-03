@@ -335,19 +335,6 @@ mod tests {
     /// good ones, and the stricter the codec about draft-19's MUSTs, the more
     /// of the stream a single refusal would take with it. That is backwards
     /// for a proxy whose purpose is to report the traffic it sees.
-    ///
-    /// *Ablation (measured):* turn the `continue` into `break`.
-    ///
-    /// ```text
-    /// ---- parser::control::tests::a_refused_frame_does_not_cost_the_frames_behind_it stdout ----
-    /// assertion `left == right` failed: a bad frame must not swallow the good
-    /// frames behind it, and must keep its place among them
-    ///   left: [Ok(0), Err(3)]
-    ///  right: [Ok(0), Err(3), Ok(0), Ok(0)]
-    /// ```
-    ///
-    /// The frame ahead of the bad one survives and the refusal is still
-    /// reported; both frames behind it are gone.
     #[cfg(feature = "draft19")]
     #[test]
     fn a_refused_frame_does_not_cost_the_frames_behind_it() {
@@ -385,21 +372,6 @@ mod tests {
     /// Capturing mode is what the second half needs, so both modes are
     /// checked here — the observation-only parser must not start copying
     /// bytes it has no forwarding use for.
-    ///
-    /// *Ablation (measured):* drop the `items.push(ParsedItem::Refused(..))`
-    /// and step over the frame in silence.
-    ///
-    /// ```text
-    /// ---- parser::control::tests::a_refused_frame_comes_back_with_its_bytes_and_its_type stdout ----
-    /// a whole frame arrived and the decoder refused it; waiting for more bytes
-    /// would hold a frame nothing will ever complete
-    /// ```
-    ///
-    /// `NeedMore` for a frame that is entirely present, which is the shape
-    /// of the original defect: nothing is coming that would make it
-    /// readable, and a caller told to wait holds bytes it is meant to be
-    /// forwarding. Three of this module's four refusal tests redden under
-    /// that cut, each in its own place.
     #[cfg(feature = "draft19")]
     #[test]
     fn a_refused_frame_comes_back_with_its_bytes_and_its_type() {
@@ -442,15 +414,6 @@ mod tests {
     /// and it can only do both if the sequence distinguishes them; a parser
     /// that recorded *something was refused* would make the count and the
     /// report the same number.
-    ///
-    /// *Ablation (measured):* step over a refused frame in silence.
-    ///
-    /// ```text
-    /// ---- parser::control::tests::refusals_are_distinguished_from_each_other stdout ----
-    /// assertion `left == right` failed
-    ///   left: [Ok(0)]
-    ///  right: [Err(58), Ok(0), Err(59)]
-    /// ```
     #[cfg(feature = "draft19")]
     #[test]
     fn refusals_are_distinguished_from_each_other() {

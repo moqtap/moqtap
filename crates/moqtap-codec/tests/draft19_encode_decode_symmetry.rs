@@ -81,19 +81,8 @@ fn encode(msg: &ControlMessage) -> Result<Vec<u8>, CodecError> {
 /// Values outside a uint8 parameter's range are refused by the encoder, not
 /// just by the decoder.
 ///
-/// Replacing the encoder's range check with a truncating one-liner
-/// (`buf.put_u8(v.into_inner() as u8)`) fails this test with:
-///
-/// ```text
-/// assertion `left == right` failed: GROUP_ORDER = 7: the encoder said Ok("ok")
-/// and the decoder said false. A frame this crate writes must be one this crate
-/// reads; encoded bytes were [3, 0, 9, 0, 1, 1, 97, 1, 98, 1, 34, 7]
-///   left: true
-///  right: false
-/// ```
-///
-/// The trailing `34, 7` is the parameter: key 0x22, value 7 — a SUBSCRIBE this
-/// crate emits and this crate will not read back.
+/// Fails if the encoder writes an out-of-range value, which is a SUBSCRIBE
+/// this crate emits and will not read back.
 #[test]
 fn the_encoder_refuses_uint8_parameter_values_its_decoder_would_reject() {
     // In-range and out-of-range together. The assertion is not that these
@@ -168,16 +157,8 @@ fn in_range_uint8_parameter_values_still_round_trip() {
 /// first and checking after produces a frame that passes every later check and
 /// carries a value nobody asked for.
 ///
-/// With that truncating one-liner in place, this test fails with the corrupted
-/// value visible in the bytes:
-///
-/// ```text
-/// GROUP_ORDER = 258 must not encode; its low byte is a valid Descending and the
-/// receiver could not tell the difference: [3, 0, 9, 0, 1, 1, 97, 1, 98, 1, 34, 2]
-/// ```
-///
-/// `34, 2` — key 0x22, value 2. The 258 the caller asked for is gone and a
-/// well-formed Descending stands in its place.
+/// Fails if the encoder truncates first: the 258 the caller asked for is gone
+/// and a well-formed Descending stands in its place.
 #[test]
 fn a_uint8_parameter_value_too_wide_for_its_octet_is_not_truncated() {
     // 258 == 0x102: low byte 0x02, which is GROUP_ORDER's Descending.
@@ -221,15 +202,6 @@ fn datagram(datagram_type: u8, object_status: Option<ObjectStatus>) -> DatagramH
 /// and that is what makes the loss invisible: the same header goes out as an
 /// ordinary payload object. Both halves are asserted, so the test fails if
 /// `encode_checked` ever becomes a synonym for `encode`.
-///
-/// Deleting the guard from `encode_checked` — leaving it as a call to `encode`
-/// that always returns `Ok` — fails this test with:
-///
-/// ```text
-/// ---- a_datagram_status_the_framing_cannot_carry_is_refused_rather_than_dropped stdout ----
-/// thread '...' panicked at crates\moqtap-codec\tests\draft19_encode_decode_symmetry.rs:
-/// a status with no field on the wire must be refused: ()
-/// ```
 #[test]
 fn a_datagram_status_the_framing_cannot_carry_is_refused_rather_than_dropped() {
     // 0x08: DEFAULT_PRIORITY set, STATUS (0x20) clear — a payload datagram.

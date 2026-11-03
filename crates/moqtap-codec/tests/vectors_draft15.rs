@@ -333,12 +333,9 @@ fn run_datagram_vectors(relative_path: &str) {
             // these bytes has to write back as these bytes. Without it a
             // published datagram vector cannot catch an encoder and decoder
             // that disagree, because only one of the two is ever run.
-            //
-            // Ablation: writing the Object ID from a datagram header whose Type
-            // says there is none — `[datagram-no-object-id] re-encoded datagram
-            // mismatch / left: "0405640080" / right: "04056480"`, measured on
-            // draft-19. The decoder honours the bit either way, so nothing else
-            // in these suites notices.
+            // This fails if the encoder writes an Object ID from a datagram
+            // header whose Type says there is none. The decoder honours the bit
+            // either way, so nothing else in these suites notices.
             if vector.is_canonical() {
                 let mut out = Vec::new();
                 hdr.encode(&mut out);
@@ -674,15 +671,8 @@ fn d15_data_stream_fetch() {
 /// Every fetch object in the corpus decodes through the library to the fields
 /// the corpus states, and re-encodes to the bytes it came from.
 ///
-/// Observed by having `read_object_header` resolve the Group ID to zero instead
-/// of reading it off the wire, which shifts every field after it and fails this
-/// with:
-///
-/// ```text
-/// assertion `left == right` failed: [fetch-stream-single-object] object 0 publisher_priority mismatch
-///   left: "0"
-///  right: "128"
-/// ```
+/// Fails if `read_object_header` resolves the Group ID to zero instead of
+/// reading it off the wire, which shifts every field after it.
 #[test]
 fn d15_data_stream_fetch_objects() {
     run_fetch_object_vectors("transport/draft15/codec/data-streams/fetch-header.json");

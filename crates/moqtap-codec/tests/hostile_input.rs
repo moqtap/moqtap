@@ -20,19 +20,10 @@ use moqtap_codec::kvp::KeyValuePair;
 
 /// A count-prefixed key-value list must not size its allocation from the count.
 ///
-/// Eleven bytes: a varint count of 2^62-1 and nothing after it. Before this was
-/// bounded, `KeyValuePair::decode_list` reached `Vec::with_capacity` with that
-/// count and the process aborted — no error returned, no session closed, no
-/// stack to unwind.
-///
-/// *Ablation:* restore `Vec::with_capacity(count)` in `decode_list`, and the
-/// test does not fail — it takes the whole process down with it:
-///
-/// ```text
-/// thread 'a_hostile_parameter_count_does_not_abort_the_process' panicked at
-/// library\alloc\src\raw_vec\mod.rs:
-/// capacity overflow
-/// ```
+/// Eleven bytes: a varint count of 2^62-1 and nothing after it. If
+/// `KeyValuePair::decode_list` sizes `Vec::with_capacity` from that count, the
+/// process aborts — no error returned, no session closed, no stack to unwind —
+/// so this test fails by taking the whole process down, not by an assertion.
 #[test]
 fn a_hostile_parameter_count_does_not_abort_the_process() {
     // 0xff repeated is the largest eight-byte varint: 2^62-1.
@@ -51,9 +42,8 @@ fn a_hostile_parameter_count_does_not_abort_the_process() {
 /// SETUP is the first thing either side sends, so this runs before version
 /// negotiation, before any parameter is read, and before there is any notion of
 /// who the peer is. That is what makes the allocation bound a property worth
-/// gating rather than a tidiness fix.
-///
-/// *Ablation:* as above — the process aborts rather than the test failing.
+/// gating rather than a tidiness fix. As above, an unbounded allocation aborts
+/// the process rather than failing the test.
 #[cfg(feature = "draft14")]
 #[test]
 fn a_hostile_setup_does_not_abort_the_process() {
@@ -76,9 +66,8 @@ fn a_hostile_setup_does_not_abort_the_process() {
 /// of bytes each time. The bound makes the request proportional to what was
 /// actually sent.
 ///
-/// *Ablation:* restore the unbounded capacity and this still passes, because it
-/// asserts the error rather than the allocation. It is here for the shape, and
-/// the gate that bites is the one above.
+/// This asserts the error, not the allocation, so an unbounded capacity still
+/// passes it. It is here for the shape; the gate on the bound is the first one.
 #[test]
 fn a_large_but_allocatable_count_still_fails_on_the_missing_items() {
     // 4 million, as a four-byte varint, with nothing behind it.
@@ -101,10 +90,8 @@ fn a_large_but_allocatable_count_still_fails_on_the_missing_items() {
 /// This builds the message rather than decoding one: draft-07 does define
 /// MAX_SUBSCRIBE_ID as an integer, so its own encoder and decoder both refuse
 /// this value, and it is exactly the case the extractor cannot assume it has
-/// been spared.
-///
-/// *Ablation:* restore the `unwrap` and this does not fail — it panics inside
-/// the function under test, which is the report.
+/// been spared. An unchecked `unwrap` shows up here as a panic inside the
+/// function under test, which is the report.
 #[cfg(feature = "draft07")]
 #[test]
 fn a_named_integer_parameter_with_no_varint_in_it_does_not_panic() {
@@ -147,11 +134,10 @@ fn a_named_integer_parameter_with_no_varint_in_it_does_not_panic() {
 ///
 /// The message is built with this crate's encoder and read back with its
 /// decoder, because that is what says the bytes are reachable: a peer can send
-/// this before a session exists, and until the tables agreed it took the
-/// process down.
+/// this before a session exists.
 ///
-/// *Ablation:* point draft-08 back at draft-07's setup table and this panics
-/// rather than fails, on the `unwrap` above or on the name below.
+/// If draft-08 reads draft-07's setup table, this panics rather than fails, on
+/// the `unwrap` above or on the name below.
 #[cfg(feature = "draft08")]
 #[test]
 fn a_setup_parameter_type_draft_08_dropped_is_not_named_role() {

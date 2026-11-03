@@ -32,14 +32,6 @@
 //! releasing the client. Nothing is timed, and the byte counts the
 //! assertions read back are the same ones.
 //!
-//! *Ablation:* return from `propagate_reset` before its
-//! `if let Some(code) = mirrored` arm resets the destination. All three
-//! reset tests here go red — the two control ones with
-//! `left: Fin, right: Reset(33)` after 13 bytes, which is the whole
-//! CLIENT_SETUP, so the ordering held while the propagation was broken.
-//! `upstream_fin_still_reaches_the_client_as_a_fin` and both
-//! `STOP_SENDING` tests stay green.
-//!
 //! Draft-14 throughout: `common::spawn_proxy` configures the session for
 //! draft-14 and the control-stream cases feed it a draft-14 CLIENT_SETUP,
 //! which the `Interest::CONTROL` case genuinely parses. The file compiles
@@ -561,11 +553,6 @@ const IDLE_STOP_WINDOW: Duration = Duration::from_millis(400);
 /// `objects_enabled` is true. `interest_none.rs`'s
 /// `an_interest_none_session_still_mirrors_a_stop` covers the pass-through
 /// pipe, which is a separate function with its own watcher.
-///
-/// *Ablation (run, and it fails):* delete the `stop.watch()` branch from
-/// `pipe_data_framed`'s `select!`. The upstream then sees nothing —
-/// `observed` is `None` — because nothing ever writes to the destination
-/// again and there is no other trigger.
 #[tokio::test]
 async fn stop_sending_reaches_an_idle_upstream() {
     common::init_crypto();

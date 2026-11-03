@@ -1104,19 +1104,18 @@ fn an_over_mtu_datagram_produces_zero_inner_sends() {
 /// decorator that computes every decision, moves every counter, writes every
 /// log record and then forwards the datagram anyway — and each one is required
 /// to **panic**. If they all pass against it, the gates are decoration: they
-/// would be green against precisely the failure they exist to detect, which is
-/// the failure that was measured delivering 41 of 52 datagrams reported as
-/// dropped.
+/// would be green against precisely the failure they exist to detect: datagrams
+/// reported as dropped that were delivered anyway.
 ///
 /// So do not "fix" `fixtures/silentshim/`. Making it forward conditionally
 /// makes the suite go green against it and reddens **this** test. That
 /// inversion is correct and it is the reason the fixture is committed instead
 /// of described.
 ///
-/// Neither this test nor the shim it runs is behind a feature. Both were, and
-/// no ordinary build compiled either: `--workspace` turns `quinn-socket` on by
-/// unification and turned nothing else on, so the eight gates below ran without
-/// the one check that says they gate anything.
+/// Neither this test nor the shim it runs is behind a feature: `--workspace`
+/// turns `quinn-socket` on by unification and nothing else, so a feature gate
+/// here would leave the eight gates running without the one check that says
+/// they gate anything.
 #[test]
 fn the_wire_gates_are_red_against_a_send_anyway_shim() {
     // The gate bodies are expected to panic, and their backtraces are noise

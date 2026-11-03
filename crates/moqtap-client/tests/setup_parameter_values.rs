@@ -54,17 +54,6 @@ mod draft07 {
     /// The parameter grants a budget, and the endpoint has to be able to spend
     /// it. `is_blocked` is a consequence rather than a stored value: it is what
     /// the next `subscribe` will do.
-    ///
-    /// Reading only a varint-shaped value fails with:
-    ///
-    /// ```text
-    /// called `Result::unwrap()` on an `Err` value: MalformedSetupParameter(2)
-    /// ```
-    ///
-    /// which is the refusal added beside this fix rather than the assertion
-    /// below. That ordering is the point: the original code skipped the
-    /// parameter in silence, so the only symptom was a ceiling that never
-    /// rose. Now an unreadable value has a name.
     #[test]
     fn a_max_subscribe_id_parameter_off_the_wire_grants_a_budget() {
         let mut endpoint = Endpoint::new(Role::Client);
@@ -128,17 +117,6 @@ mod draft08 {
     /// The parameter grants a budget, and the endpoint has to be able to spend
     /// it. `is_blocked` is a consequence rather than a stored value: it is what
     /// the next `subscribe` will do.
-    ///
-    /// Reading only a varint-shaped value fails with:
-    ///
-    /// ```text
-    /// called `Result::unwrap()` on an `Err` value: MalformedSetupParameter(2)
-    /// ```
-    ///
-    /// which is the refusal added beside this fix rather than the assertion
-    /// below. That ordering is the point: the original code skipped the
-    /// parameter in silence, so the only symptom was a ceiling that never
-    /// rose. Now an unreadable value has a name.
     #[test]
     fn a_max_subscribe_id_parameter_off_the_wire_grants_a_budget() {
         let mut endpoint = Endpoint::new(Role::Client);
@@ -202,17 +180,6 @@ mod draft09 {
     /// The parameter grants a budget, and the endpoint has to be able to spend
     /// it. `is_blocked` is a consequence rather than a stored value: it is what
     /// the next `subscribe` will do.
-    ///
-    /// Reading only a varint-shaped value fails with:
-    ///
-    /// ```text
-    /// called `Result::unwrap()` on an `Err` value: MalformedSetupParameter(2)
-    /// ```
-    ///
-    /// which is the refusal added beside this fix rather than the assertion
-    /// below. That ordering is the point: the original code skipped the
-    /// parameter in silence, so the only symptom was a ceiling that never
-    /// rose. Now an unreadable value has a name.
     #[test]
     fn a_max_subscribe_id_parameter_off_the_wire_grants_a_budget() {
         let mut endpoint = Endpoint::new(Role::Client);
@@ -276,17 +243,6 @@ mod draft10 {
     /// The parameter grants a budget, and the endpoint has to be able to spend
     /// it. `is_blocked` is a consequence rather than a stored value: it is what
     /// the next `subscribe` will do.
-    ///
-    /// Reading only a varint-shaped value fails with:
-    ///
-    /// ```text
-    /// called `Result::unwrap()` on an `Err` value: MalformedSetupParameter(2)
-    /// ```
-    ///
-    /// which is the refusal added beside this fix rather than the assertion
-    /// below. That ordering is the point: the original code skipped the
-    /// parameter in silence, so the only symptom was a ceiling that never
-    /// rose. Now an unreadable value has a name.
     #[test]
     fn a_max_subscribe_id_parameter_off_the_wire_grants_a_budget() {
         let mut endpoint = Endpoint::new(Role::Client);

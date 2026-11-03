@@ -68,59 +68,6 @@
 //! would be draft-16's, but their control plane is a pair of unidirectional
 //! streams with every request on a bidirectional stream of its own — the
 //! topology `uni_control_plane.rs`'s peer serves and this one does not.
-//!
-//! # Ablations, measured
-//!
-//! Seven cuts, each applied to the working tree, run under the one draft it
-//! concerns, and reverted with the file compared byte for byte afterwards. The
-//! two that move a draft between eras are the ones worth having: an era is a
-//! claim about a sentence, and a claim nothing can contradict is not measured.
-//!
-//! Dropping the call that records an arriving datagram's framing, in draft-11's
-//! `recv_datagram`:
-//!
-//! ```text
-//! Section 9 forbids one track's objects being framed two ways, and the second framing was accepted
-//! ```
-//!
-//! Dropping the call that records an arriving subgroup header's, in draft-13's
-//! `accept_subgroup_stream` — the same message, because a track whose first
-//! framing was never written down has nothing for the second to disagree with:
-//!
-//! ```text
-//! Section 9 forbids one track's objects being framed two ways, and the second framing was accepted
-//! ```
-//!
-//! Dropping the same call from draft-15's `open_subgroup_stream`, which is the
-//! writer half:
-//!
-//! ```text
-//! Section 10 forbids one track's objects being framed two ways, and the second framing was accepted
-//! ```
-//!
-//! Taking the rule out of draft-09's close table, and — separately — taking
-//! `close_for_data_stream`'s route to that table out of draft-07's connection.
-//! Two different edits, one message, which is the point of the two being
-//! separate: having the code is not having the route:
-//!
-//! ```text
-//! Section 8 answers this with a close, but close_for_data_stream declined
-//! Section 7 answers this with a close, but close_for_data_stream declined
-//! ```
-//!
-//! Giving draft-14 the close-table arm its own draft withdrew:
-//!
-//! ```text
-//! Section 10 sends this to Malformed Tracks rather than ending the session, but close_for_data_stream closed it
-//! ```
-//!
-//! Reporting the two framings the wrong way round, in draft-12's endpoint:
-//!
-//! ```text
-//! assertion `left == right` failed: the track's first object was on a subgroup stream, so that is what the datagram disagreed with
-//!   left: (Datagram, Subgroup)
-//!  right: (Subgroup, Datagram)
-//! ```
 
 mod common;
 

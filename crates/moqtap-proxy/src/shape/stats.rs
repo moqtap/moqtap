@@ -140,33 +140,24 @@
 //! byte is counted exactly once. Summing all four would count every byte
 //! twice, once read and once written.
 //!
-//! **Every figure on this page has a producer.** Worth stating, because it
-//! was not always true: five fields here snapshotted as a constant zero for
-//! a long time, each documenting its own emptiness, and what settled them
-//! was not writing five producers but noticing that none of the five
-//! belonged here.
-//!
-//! Everything on this page is gated on a configured [`ShapeProfile`] — a
-//! proxy running without one reports `ProxyStats::default()` however many
-//! gigabytes it forwards. Two of the five counted what a **hook** does,
-//! which needs no profile at all, so in this type they could only ever have
-//! been a partial count that read zero for every unprofiled session that
-//! delayed or truncated a thousand objects. They are
-//! [`Counters::units_delayed`](crate::instrument::Counters::units_delayed)
-//! and
+//! **Every figure on this page has a producer.** Everything on this page is
+//! gated on a configured [`ShapeProfile`] — a proxy running without one
+//! reports `ProxyStats::default()` however many gigabytes it forwards — so
+//! what a **hook** does, which needs no profile at all, is counted on
+//! [`Counters`](crate::instrument::Counters) instead:
+//! [`Counters::units_delayed`](crate::instrument::Counters::units_delayed),
 //! [`Counters::objects_truncated`](crate::instrument::Counters::objects_truncated)
-//! now, beside
-//! [`Counters::objects_elided`](crate::instrument::Counters::objects_elided),
-//! which had already settled where a hook's decision is counted.
+//! and
+//! [`Counters::objects_elided`](crate::instrument::Counters::objects_elided).
 //!
-//! The other three were `Duration` totals, and a sum of wall-clock time that
-//! the machine's scheduler moves as much as this code does is reportable and
-//! never assertable. The timing dimension is measured instead by
+//! No figure here is a `Duration` total: a sum of wall-clock time that the
+//! machine's scheduler moves as much as this code does is reportable and
+//! never assertable. The timing dimension is measured by
 //! [`Counters::release_errors`](crate::instrument::Counters::release_errors),
 //! which reports a distribution — p50, p95 and an exact maximum — rather
 //! than a total nobody can calibrate.
 //!
-//! With release and the unshapeable row wired, the conservation identity
+//! The conservation identity
 //! `Σ classes(delivered + dropped) + default + unshapeable == bytes_shaped`
 //! holds for a stream that ran to completion. Both sides come from the same
 //! measurement — `raw.len()` for a framed object, `Pending::len()` for a
@@ -296,9 +287,7 @@ fn leg_index(leg: Leg) -> usize {
 /// forms can never disagree — pick the leg when the question is which side
 /// stalled, and the aggregate when it is whether the profile ran at all.
 ///
-/// **Every field here is written.** Two were not until recently — the
-/// `Duration` totals on [`ClassStats`], which were calibration figures and
-/// are gone; that type says why there is no duration among these at all. A
+/// **Every field here is written.** A
 /// zero row is still reported, never omitted — a class that saw nothing is
 /// present and empty, which is the difference between a starved class and a
 /// mis-typed one.
@@ -431,22 +420,19 @@ pub struct DirectionStats {
 /// Per-class shaping statistics, one entry in [`ShapeStats`].
 ///
 /// Every figure is a count, and there is deliberately no duration among
-/// them. Two once were — a blocked total and a hold total — and both would
-/// have been sums of wall-clock time, movable by the machine's scheduler as
-/// much as by this code, so a gate could only ever have reported them. One
-/// of the two would have misdescribed itself as well:
+/// them. A duration would be a sum of wall-clock time, movable by the
+/// machine's scheduler as much as by this code, so a gate could only ever
+/// report it. A blocked time would misdescribe itself as well:
 /// [`Overflow::Block`](super::Overflow::Block) stops *this crate* calling
 /// `read()` on the source stream and does **not** stall the peer, because
 /// the transport's own receive window absorbs megabytes before a publisher
-/// notices anything — so a blocked time measured here would have been how
-/// long this queue refused to read, never how long the publisher was held
-/// up, and a test reading it as publisher backpressure would have been
-/// measuring the wrong thing under a name that invited it. Real backpressure
-/// needs a small
+/// notices anything — so a blocked time measured here would be how long
+/// this queue refused to read, never how long the publisher was held up.
+/// Real backpressure needs a small
 /// [`TransportProfile::stream_receive_window`](crate::transport::TransportProfile::stream_receive_window),
 /// which is a transport setting and not a shaping one.
 ///
-/// What survives is the load-independent companion a gate can read:
+/// The load-independent companions a gate can read are
 /// [`Self::blocked_episodes`] and [`Self::tokens_exhausted_episodes`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClassStats {
@@ -638,19 +624,16 @@ impl LegStats {
 /// Summing all four cells would count every byte twice, once where it was
 /// read and once where it was written.
 ///
-/// # Every field here has a producer, and the three that did not are gone
+/// # Every field here has a producer
 ///
 /// Every figure is derived at snapshot time from the per-leg cells and the
-/// class rows, and those are written only by the shaping path. So a figure
+/// class rows, and those are written only by the shaping path. A figure
 /// counting something a **hook** does — which needs no
 /// [`ShapeProfile`](super::ShapeProfile), while everything here is gated on
-/// one — could not have been a complete count in this type however it was
-/// wired, and two of the three were exactly that. [`Self::objects_dropped`]
-/// below already said where that kind of figure lives: an object a hook
-/// elided is counted on [`Counters`](crate::instrument::Counters), and a
-/// unit a hook delayed and an object it truncated are counted beside it
-/// there now. The third was a `Duration` total; see [`ClassStats`] for why
-/// no statistic on this page is one.
+/// one — could not be a complete count in this type, so it lives on
+/// [`Counters`](crate::instrument::Counters): an object a hook elided, a unit
+/// it delayed and an object it truncated. See [`ClassStats`] for why no
+/// statistic on this page is a `Duration` total.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionStats {
     /// Hook-visible units the classifier saw, over every session. Objects
@@ -1081,7 +1064,7 @@ impl ShapeRecorder {
     /// an unshaped session's writers are all behind a configured profile, so
     /// it charges nothing at all.
     ///
-    /// A **shaped** session cannot be in the same position any more:
+    /// A **shaped** session cannot be in the same position:
     /// [`ShapeProfile::try_new`] refuses a profile with no classes, so
     /// `Some(profile)` always carries at least one class name to install.
     /// [`ProxyRecorder::adopt_classes`] keeps its own guard against an empty
@@ -1386,11 +1369,7 @@ mod tests {
 
     /// No profile means no rows and an all-default snapshot — the claim
     /// `interest_none.rs` rests on, checked without a session.
-    /// *Ablation, recorded:* give the `None` arm of `for_profile` one row
-    /// (`unwrap_or_else(|| vec![ClassCounters::named(String::new())])`). Every
-    /// counter is still zero and the compare still reddens, on `classes:
-    /// [ClassStats { .. }]` against `classes: []` — which is the point: a
-    /// `ShapeStats` that is *all zeros but shaped* is not `default()`, and the
+    /// A `ShapeStats` that is *all zeros but shaped* is not `default()`, and the
     /// integration gate compares the whole struct.
     #[test]
     fn an_unshaped_recorder_snapshots_as_default() {
@@ -1407,9 +1386,6 @@ mod tests {
     /// is a `Vec` and not a map. The two class names are deliberately in
     /// non-alphabetical order, so a snapshot that sorted would redden here
     /// too.
-    ///
-    /// *Ablation, recorded:* `.rev()` the class iteration in `for_profile`
-    /// — `left: ["audio", "video"]`, `right: ["video", "audio"]`.
     #[test]
     fn rows_are_pre_sized_in_configured_order() {
         let rec = ShapeRecorder::for_profile(Some(&profile(&["video", "audio"])));
@@ -1441,11 +1417,6 @@ mod tests {
     /// measurement taken here, so a class row moving at the see-point would
     /// mean the same byte counted twice on the right-hand side of the
     /// conservation identity.
-    ///
-    /// *Ablation, recorded:* have `note_object_seen` also bump
-    /// `default_class.objects_delivered` —
-    /// `left: ClassStats { .., objects_delivered: 2, .. }` against
-    /// `right: ClassStats { .., objects_delivered: 0, .. }`.
     #[test]
     fn note_object_seen_moves_the_session_totals_only() {
         let rec = ShapeRecorder::for_profile(Some(&profile(&["video"])));
@@ -1464,8 +1435,8 @@ mod tests {
     ///
     /// This is the shape of a session shaping in both directions, which is
     /// the case a single set of totals cannot report: the recorder is
-    /// shared by every forwarding task, so before the split "5 objects
-    /// seen" was compatible with 5/0, 0/5 and anything between, and an
+    /// shared by every forwarding task, so one "5 objects
+    /// seen" would be compatible with 5/0, 0/5 and anything between, and an
     /// author diagnosing a stall could not tell which leg had it.
     ///
     /// Both legs are compared **whole** rather than field by field, so a
@@ -1479,26 +1450,6 @@ mod tests {
     /// which sums the legs rather than keeping a third counter. What the
     /// per-leg equalities above them falsify is the attribution, and that
     /// is the part no arithmetic guarantees.
-    ///
-    /// *Ablation, recorded:* swap the two legs in `snapshot`, so each row is
-    /// reported under the other's name. Every sum below still passes —
-    /// addition does not care which order it is given — and the uplink
-    /// compare reddens with `left: DirectionStats { objects_seen: 3,
-    /// bytes_shaped: 605, objects_expired: 2, streams_reset_by_shaping: 3,
-    /// streams_with_mixed_classes: 0 }` against `right: DirectionStats {
-    /// objects_seen: 2, bytes_shaped: 49, objects_expired: 0,
-    /// streams_reset_by_shaping: 1, streams_with_mixed_classes: 1 }`. That
-    /// is the whole case for the per-leg equalities: they are the part the
-    /// arithmetic cannot check.
-    ///
-    /// *Ablation, recorded:* collapse the split instead — have
-    /// `ShapeRecorder::leg` ignore its argument and always answer
-    /// `&self.totals[0]`. The uplink compare reddens with `left:
-    /// DirectionStats { objects_seen: 5, bytes_shaped: 654, objects_expired:
-    /// 2, streams_reset_by_shaping: 4, streams_with_mixed_classes: 1 }`, and
-    /// `note_object_seen_moves_the_session_totals_only` goes with it on
-    /// `left: 4 right: 2` — the aggregate counts the one surviving row
-    /// twice.
     #[test]
     fn a_bidirectional_run_charges_each_leg_and_the_legs_sum_to_the_aggregate() {
         let rec = ShapeRecorder::for_profile(Some(&profile(&["video", "audio"])));
@@ -1704,47 +1655,6 @@ mod tests {
     /// an expiry is a decision over traffic that came in and never went out,
     /// so a departure cell that reported one would be claiming a crossing
     /// that did not happen.
-    ///
-    /// *Ablation, recorded:* collapse the leg axis — have `leg_index`
-    /// answer `0` for both legs, so every figure lands on the client row.
-    /// The first compare reddens with `left: DirectionStats { objects_seen:
-    /// 3, bytes_shaped: 86, objects_expired: 0, streams_reset_by_shaping: 0,
-    /// streams_with_mixed_classes: 1 }` against `right: DirectionStats {
-    /// objects_seen: 2, bytes_shaped: 49, objects_expired: 0,
-    /// streams_reset_by_shaping: 0, streams_with_mixed_classes: 1 }` — what
-    /// was written to the relay piled on top of what was read from the
-    /// client.
-    ///
-    /// *Ablation, recorded:* derive the leg from the arriving side instead —
-    /// name `Leg::Client` in both upstream arms of `split`, which is what
-    /// that derivation amounts to over the two sides a hook site can hold.
-    /// The upstream downlink compare reddens with `left: DirectionStats {
-    /// objects_seen: 3, bytes_shaped: 605, objects_expired: 0,
-    /// streams_reset_by_shaping: 0, streams_with_mixed_classes: 0 }` against
-    /// `right: DirectionStats { objects_seen: 4, bytes_shaped: 1005,
-    /// objects_expired: 1, streams_reset_by_shaping: 1,
-    /// streams_with_mixed_classes: 0 }` — the two downlink cells swapped,
-    /// so what this proxy read from the relay is reported as what it sent to
-    /// the client. Every total still adds up, and every sum still passes.
-    ///
-    /// *Ablation, recorded:* collapse the direction axis instead — name
-    /// `Direction::Uplink` in both downlink arms of `split`. The first
-    /// compare reddens with `left: DirectionStats { objects_seen: 5,
-    /// bytes_shaped: 654, objects_expired: 0, streams_reset_by_shaping: 0,
-    /// streams_with_mixed_classes: 1 }` against `right: DirectionStats {
-    /// objects_seen: 2, bytes_shaped: 49, objects_expired: 0,
-    /// streams_reset_by_shaping: 0, streams_with_mixed_classes: 1 }` — both
-    /// directions piled into row 0.
-    ///
-    /// *Ablation, recorded:* keep both axes and drop the turn-around — have
-    /// `ProxyRecorder::departure` answer `self.arrival(side)`. The first
-    /// compare reddens with `left: DirectionStats { objects_seen: 3,
-    /// bytes_shaped: 86, objects_expired: 0, streams_reset_by_shaping: 0,
-    /// streams_with_mixed_classes: 1 }` against the same right-hand side as
-    /// the leg collapse above — the two mutations are different mistakes
-    /// with one observable, because a proxy that cannot tell its legs apart
-    /// and a proxy that never turns a release around both file a write where
-    /// the read went.
     #[test]
     fn each_crossing_charges_its_own_cell_of_the_two_by_two() {
         let (proxy, rec) = attached(&["video"]);
@@ -1806,11 +1716,6 @@ mod tests {
     /// hold the same line or the field means two different things in two
     /// cells of the same array, and the difference between the two would
     /// read as objects this proxy invented.
-    ///
-    /// *Ablation, recorded:* drop the `class != Class::Unshapeable` guard in
-    /// `note_delivered`, so every released unit counts as an object. The
-    /// compare reddens with `left: 2` against `right: 1` — the header
-    /// counted as an object on the way out and not on the way in.
     #[test]
     fn a_released_header_is_bytes_on_the_departure_cell_and_not_an_object() {
         let (proxy, rec) = attached(&["video"]);
@@ -1841,13 +1746,6 @@ mod tests {
     /// The compare is over the **whole struct** rather than the fields this
     /// test has an opinion about, so a field added to [`SessionStats`] later
     /// and derived from the wrong cells cannot slip past it.
-    ///
-    /// *Ablation, re-run:* sum all four cells in `ProxyRecorder::snapshot`
-    /// instead of the two arrival cells. The compare reddens with `left:
-    /// SessionStats { objects_seen: 10, objects_dropped: 2, objects_expired:
-    /// 1, streams_reset: 1, bytes_shaped: 1696 }` against `right:
-    /// SessionStats { objects_seen: 6, .., bytes_shaped: 1054 }` — every byte
-    /// counted twice, and nothing else out of place.
     #[test]
     fn the_flat_rollup_counts_a_byte_where_it_entered() {
         let (proxy, rec) = attached(&["video"]);
@@ -1875,11 +1773,6 @@ mod tests {
     /// The comparison is over the figures the two types share — the flat
     /// session totals and the class rows — because those are the ones a
     /// reader would put side by side and expect to match.
-    ///
-    /// *Ablation, recorded:* drop the proxy forward from
-    /// `note_object_seen`. The compare reddens with `left: 0` against
-    /// `right: 6` — the session still reports six objects and the proxy
-    /// reports none of them.
     #[test]
     fn one_session_charges_its_own_rows_and_its_proxys_together() {
         let (proxy, rec) = attached(&["video"]);
@@ -1925,10 +1818,6 @@ mod tests {
     /// names, monotone and plausible and wrong. The default row is where a
     /// unit whose row cannot be named belongs, which is the answer
     /// `ShapeRecorder::row` already gives an index it cannot place.
-    ///
-    /// *Ablation, recorded:* have `ProxyRecorder::row` ignore `sized`. The
-    /// compare reddens with `left: 500` against `right: 100` — the second
-    /// session's bytes filed under `video`, a class it never had.
     #[test]
     fn a_session_on_another_class_list_charges_the_default_row() {
         let proxy = Arc::new(ProxyRecorder::new());
@@ -1956,11 +1845,6 @@ mod tests {
     /// the first connection happened to be one nobody configured shaping
     /// for. Nothing is lost by skipping it: an unshaped session's writers
     /// are all behind a configured profile, so it charges nothing at all.
-    ///
-    /// *Ablation, recorded:* let the `None` arm of `ShapeRecorder::attached`
-    /// adopt an empty class list too. The compare reddens with `left: []`
-    /// against `right: ["video"]` — the proxy sized itself from a session
-    /// that had no classes, and the shaped session behind it has no row.
     #[test]
     fn an_unshaped_session_does_not_size_the_proxys_class_rows() {
         let proxy = Arc::new(ProxyRecorder::new());
@@ -2000,22 +1884,6 @@ mod tests {
     /// The 100 bytes are asserted on the row rather than on the total,
     /// because a total is exactly what survives the bug: the bytes are never
     /// lost, only misfiled.
-    ///
-    /// *Ablation, run:* drop the `names.is_empty()` guard from
-    /// `ProxyRecorder::adopt_classes`. The first assertion reddens with
-    ///
-    /// ```text
-    /// thread 'shape::stats::tests::an_empty_class_list_does_not_size_the_proxys_class_rows'
-    /// (63164) panicked at crates\moqtap-proxy\src\shape\stats.rs:
-    /// a list with no rows in it names no row, so there is nothing for it to
-    /// charge and nothing is lost by declining it
-    /// ```
-    ///
-    /// The three assertions under it are not reached, so that is the whole of
-    /// what the mutation was seen to produce; the misfiling they describe is
-    /// what the empty row set leaves behind once the sizing has been lost.
-    /// A probe run without the guard prints `classes=[] default_bytes=100`:
-    /// every byte counted, every label gone.
     #[test]
     fn an_empty_class_list_does_not_size_the_proxys_class_rows() {
         let proxy = Arc::new(ProxyRecorder::new());
@@ -2051,11 +1919,6 @@ mod tests {
     /// different class list, which is the relabelling the sizing rule exists
     /// to prevent. So the observable is a class row that is present, still
     /// named, and empty.
-    ///
-    /// *Ablation, recorded:* have `ProxyRecorder::reset` skip the class rows
-    /// — reset the four cells and stop. The compare reddens with `left:
-    /// 630` against `right: 0`: the legs read as a proxy that has done
-    /// nothing while the class rows still hold the whole run.
     #[test]
     fn a_reset_zeroes_the_counters_and_keeps_the_rows() {
         let (proxy, rec) = attached(&["video"]);

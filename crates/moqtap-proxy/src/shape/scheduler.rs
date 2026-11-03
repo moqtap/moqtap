@@ -425,12 +425,11 @@ impl Scheduler {
     /// it does not depend on whether some earlier rule happened to claim this
     /// particular unit.
     ///
-    /// Returning at the winner made it depend on exactly that. A catch-all
-    /// placed first — which is the value `ClassRule::default()` hands you,
-    /// since `Matcher::default()` claims everything — matched every unit and
-    /// so no later rule was ever examined, silencing every diagnostic behind
-    /// it for the session's whole life. Measured: same profile, same
-    /// traffic, class order reversed, 1 report against 0.
+    /// Returning at the winner would make it depend on exactly that. A
+    /// catch-all placed first — which is the value `ClassRule::default()` hands
+    /// you, since `Matcher::default()` claims everything — would match every
+    /// unit, so no later rule would ever be examined, silencing every
+    /// diagnostic behind it for the session's whole life.
     ///
     /// The winner itself is skipped, and that is not the same thing: a rule
     /// that *matched* cannot have been defeated by an absent key, so
@@ -850,9 +849,6 @@ mod tests {
 
     /// The first rule that claims a unit wins, and a unit no rule claims
     /// falls to the default row rather than to the first rule.
-    ///
-    /// *Ablation:* return `Class::Rule(0)` instead of `Class::Default` —
-    /// the `Default` assertion reddens with `left: Rule(0)`.
     #[test]
     fn the_first_matching_rule_wins_and_the_rest_fall_to_default() {
         let s = scheduler(
@@ -886,9 +882,6 @@ mod tests {
     /// The three separate assertions are the three cases that must not be
     /// conflated: absent-and-keyed reports, present-but-wrong does not, and
     /// a second unit of the same shape does not report again.
-    ///
-    /// *Ablation:* drop the `fetch_or` guard and report unconditionally —
-    /// the "once" assertion reddens with two entries for the same pair.
     #[test]
     fn an_absent_key_reports_once_per_class_and_field() {
         let s = scheduler(
@@ -936,20 +929,6 @@ mod tests {
     /// default on both. The third is what a live `Datagram` rule turns the
     /// silence into: not a rule that can never fire, but one that is live
     /// and simply did not claim *this* unit.
-    ///
-    /// *Ablation (measured):* have `MatchKind::is_matchable_on` answer
-    /// `false` for `Datagram`. The first run of it left this test **green**
-    /// and reddened two others, which is what put the fresh scheduler below
-    /// in: an assertion above it had already consumed the report.
-    ///
-    /// ```text
-    /// ---- shape::scheduler::tests::a_datagram_rule_claims_a_datagram stdout ----
-    /// assertion `left == right` failed: a Datagram rule is live now, so a
-    /// framed object walking past it is an ordinary non-match and not a
-    /// diagnostic
-    ///   left: [(0, StreamKind)]
-    ///  right: []
-    /// ```
     #[test]
     fn a_datagram_rule_claims_a_datagram() {
         let s = scheduler(
@@ -984,7 +963,7 @@ mod tests {
         // including one whose reporter discards what it is handed. Asking
         // the scheduler above would read a mask the assertion before it had
         // already consumed, and the assertion would pass for every possible
-        // implementation. Measured — the ablation below left it green.
+        // implementation.
         let fresh = scheduler(
             vec![class(
                 "dgram",
@@ -1015,17 +994,6 @@ mod tests {
     /// a "fix" that reported the shadowed rule by also *letting it win*
     /// would break first-match-wins, and the second assertion is what
     /// forbids it.
-    ///
-    /// *Ablation, recorded:* restore the `return Class::Rule(index)` in
-    /// place of `claimed = Some(..); continue;` —
-    ///
-    /// ```text
-    /// assertion `left == right` failed: a rule behind the winner can still be
-    /// one that can never fire, and the winner claiming this unit is not a
-    /// statement about it
-    ///   left: []
-    ///  right: [(1, TrackAlias)]
-    /// ```
     #[test]
     fn a_rule_shadowed_by_a_catch_all_is_still_checked() {
         let catch_all = || class("everything", Matcher::default());
@@ -1076,9 +1044,6 @@ mod tests {
     /// have no fetch object codec, so every fetch stream is bypassed at its
     /// header — which is exactly why it has to be built here: it is the only
     /// input that can tell the `continue` from a `return`.
-    ///
-    /// *Ablation, recorded:* drop the `continue` so the winner falls into
-    /// the sweep — `left: [(0, StreamKind)] / right: []`.
     #[test]
     fn the_winning_rule_is_never_reported_as_unmatchable() {
         let s = scheduler(
@@ -1095,9 +1060,7 @@ mod tests {
         };
         // The reporting assertion goes **first**, and deliberately: the mask
         // is once-per-session, so a classification run with a no-op reporter
-        // would spend the budget and leave the ablation invisible. Measured
-        // — with the assertions the other way round the `continue` ablation
-        // ran green.
+        // would spend the budget before the reporting assertion runs.
         assert_eq!(
             reports(&s, &claimed)(0),
             vec![],
@@ -1128,10 +1091,6 @@ mod tests {
     }
 
     /// The depth reaches `PendingQueue` under `Block` and nowhere else.
-    ///
-    /// *Ablation:* return the depth for every overflow — `DropTail`'s
-    /// `None` assertion reddens, which is the read branch being switched
-    /// off under the one policy that needs it on.
     #[test]
     fn only_block_installs_a_blocking_depth() {
         let depths = QueueConfig { depth_objects: 4, depth_bytes: 99, ..QueueConfig::default() };
@@ -1150,8 +1109,6 @@ mod tests {
     }
 
     /// Both depth limits, and the policy each one selects.
-    /// *Ablation:* make the object test `>` instead of `>=` — the *the fourth
-    /// slot is taken* row admits a fifth unit and reddens.
     #[test]
     fn admission_applies_both_depths_and_then_the_policy() {
         let depths = QueueConfig { depth_objects: 4, depth_bytes: 100, ..QueueConfig::default() };
@@ -1218,10 +1175,6 @@ mod tests {
     /// Neither of the two rows that name no bucket can be charged one, and
     /// neither is arbitrated: an unclassified unit is not a class competing
     /// for anything.
-    ///
-    /// *Ablation:* charge `Class::Default` to bucket 0 — the zero-rate arm
-    /// answers `Never` and the assertion reddens, which is a unit no rule
-    /// claimed being paced by a bucket no rule pointed it at.
     #[test]
     fn the_unclassified_rows_are_never_charged_a_bucket() {
         let base = Instant::now();
@@ -1263,12 +1216,6 @@ mod tests {
     /// were the same value and the run reported the same clamp for both, so *1
     /// MB/s delivering at the hold clamp* looked exactly like *this class was
     /// configured to stop*.
-    ///
-    /// *Ablation, recorded:* fold the two refusals back together in `charge`
-    /// (`if rate == 0 || need > cap { Grant::Never }`) — the first
-    /// assertion panics with
-    /// `a rate that was asked for and a burst that cannot cover one object is a
-    /// misconfiguration, not a rate limit: Never`.
     #[test]
     fn a_burst_below_one_unit_is_separable_from_a_stopped_or_a_slow_class() {
         let base = Instant::now();
@@ -1328,10 +1275,6 @@ mod tests {
     /// The two halves are one test because neither means anything alone: a
     /// park that is never released is a stall, and a release that never
     /// parked is `Fifo` wearing a different name.
-    ///
-    /// *Ablation:* drop the `wake_bucket` call from `withdraw_demand` — the
-    /// gate assertion reddens, and in the session that is a low class stalled
-    /// to `max_hold` after the high class has finished.
     #[test]
     fn strict_priority_parks_the_low_class_until_the_high_one_withdraws() {
         let base = Instant::now();
@@ -1374,17 +1317,13 @@ mod tests {
     /// branch does — `while let Some(unit) = pop_next_due(..)`, i.e. until it
     /// is refused. Asking exactly once per turn instead would cap a class at
     /// one grant per turn whatever its weight, and the harness rather than
-    /// the discipline would be setting the ratio. (Measured: that shape gave
-    /// `[40, 14]` for weights 3:1.)
+    /// the discipline would be setting the ratio.
     ///
     /// The ratio is asserted as a **band**, not an equality, and the reason
     /// is arithmetic rather than caution: a round hands out `weight` grants
     /// per class, so the totals are exact only when sampled on a round
     /// boundary and the last partial round moves them by at most `weight`.
     /// The band still separates 3:1 from 1:1 by a factor of three.
-    ///
-    /// *Ablation:* give both classes weight 1 — the counts come out equal and
-    /// the `>= 2x` assertion reddens.
     #[test]
     fn weighted_round_robin_grants_in_the_weight_ratio() {
         let base = Instant::now();
@@ -1417,10 +1356,6 @@ mod tests {
     /// A class with no rival holding demand takes the whole bucket under
     /// `WeightedRoundRobin`, rather than stalling once its own credits run
     /// out. A round is over when everyone *who wants it* has had their share.
-    ///
-    /// *Ablation:* refill only when `credits[index] == 0` for every class
-    /// including those with no demand — this loop stops after three grants
-    /// and reddens.
     #[test]
     fn weighted_round_robin_does_not_wait_for_a_class_with_nothing_to_send() {
         let base = Instant::now();

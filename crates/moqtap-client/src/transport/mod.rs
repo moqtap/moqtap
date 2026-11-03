@@ -429,7 +429,7 @@ impl SendStream {
     /// that the peer walked away. This is the watcher for that case: it
     /// borrows nothing, so it can sit in a `select!` beside the read
     /// branch for the stream's whole life.
-    /// The four outcomes, all measured against quinn 0.11.9:
+    /// The four outcomes, on quinn 0.11.9:
     ///
     /// - The peer sent `STOP_SENDING` → [`TransportError::Stopped`] carrying
     ///   the peer's application error code, the same typed value a failed

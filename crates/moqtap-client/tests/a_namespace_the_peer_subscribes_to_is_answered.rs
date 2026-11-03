@@ -305,17 +305,6 @@ macro_rules! inbound_namespace_gates {
 
             /// A namespace subscription the peer makes is kept, rather than
             /// counted and dropped.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the namespace subscription the peer made should be on record
-            /// ```
-            ///
-            /// Made by dropping the record instead of inserting it. It reddens 103
-            /// tests: every gate in this file on all nine drafts except the one
-            /// naming a request that never arrived, which an empty record refuses
-            /// anyway, and all four loopback gates.
             #[test]
             fn a_namespace_subscription_the_peer_makes_is_recorded() {
                 let ep = subscribed();
@@ -333,22 +322,6 @@ macro_rules! inbound_namespace_gates {
 
             /// The record holds the request and not only its state, which is
             /// what an answer is built from.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the prefix the peer named should be
-            /// readable back
-            ///   left: [[99, 111, 110, 102, 111, 114, 109, 97, 110, 99, 101]]
-            ///  right: []
-            /// ```
-            ///
-            /// Made by recording the request with its prefix emptied, which is what a
-            /// record that keeps the state machine alone amounts to - the shape the
-            /// peer's PUBLISH is still kept in on three drafts. It reddens 17 tests:
-            /// this gate on all nine, and both withdrawal gates on drafts 11 through
-            /// 14, where the request is keyed by Request ID and the withdrawal names
-            /// the prefix, so the prefix is what finds the record.
             #[test]
             fn the_record_holds_the_prefix_the_peer_named() {
                 let ep = subscribed();
@@ -363,18 +336,6 @@ macro_rules! inbound_namespace_gates {
 
             /// It is kept when it arrives the way it arrives on the wire, which
             /// is through the control stream's dispatcher.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the request should have reached the endpoint's record
-            ///   left: 0
-            ///  right: 1
-            /// ```
-            ///
-            /// Made by cutting the dispatch arm, which sends the message back to the
-            /// fall-through that accepts and ignores it. It reddens 13 tests: this
-            /// gate on all nine, and all four loopback gates.
             #[test]
             fn a_namespace_subscription_arriving_on_the_control_stream_is_recorded() {
                 let mut ep = active();
@@ -388,17 +349,6 @@ macro_rules! inbound_namespace_gates {
             }
 
             /// Accepting it answers it, and it is no longer waiting.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the request should be answered
-            /// ```
-            ///
-            /// Made by building the acceptance without moving the flow, so the
-            /// request stays where it was and could be answered again. It reddens 45
-            /// tests, five per draft: nothing downstream of an acceptance happens if
-            /// the acceptance leaves no trace.
             #[test]
             fn accepting_a_namespace_subscription_answers_it() {
                 let mut ep = subscribed();
@@ -421,15 +371,6 @@ macro_rules! inbound_namespace_gates {
             }
 
             /// Refusing it answers it too, and the other way is closed.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the refusal should answer it
-            /// ```
-            ///
-            /// Made by building the refusal without moving the flow. It reddens 18
-            /// tests, two per draft.
             #[test]
             fn refusing_a_namespace_subscription_answers_it() {
                 let mut ep = subscribed();
@@ -480,20 +421,6 @@ macro_rules! inbound_namespace_gates {
             }
 
             /// The refusal names the event this draft's own message carries.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the event should name this draft's
-            /// message
-            ///   left: "on_subscribe_announces_ok_sent"
-            ///  right: "on_subscribe_namespace_ok_sent"
-            /// ```
-            ///
-            /// Made by naming draft-13's namespace flow for SUBSCRIBE_ANNOUNCES,
-            /// which is the message draft-12 carries and draft-13 renames. It
-            /// reddens 1 test, on draft-13 alone, which is what a rename that
-            /// reaches only one draft should redden.
             #[test]
             fn the_refusal_names_the_message_this_draft_carries() {
                 let mut ep = accepted();
@@ -515,18 +442,6 @@ macro_rules! inbound_namespace_gates {
             /// names a different one. An empty record cannot tell a lookup that
             /// reads its key from one that ignores it: both come up with
             /// nothing.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// there is nothing to accept: SubscribeAnnouncesOk(SubscribeAnnouncesOk {
-            /// track_namespace_prefix: TrackNamespace([[101, 108, 115, 101, 119, 104,
-            /// 101, 114, 101]]) })
-            /// ```
-            ///
-            /// Made by answering whichever request the record happens to hold instead
-            /// of the one named, at every place that reads it. It reddens 9 tests, one
-            /// per draft.
             #[test]
             fn an_answer_to_a_namespace_subscription_that_never_arrived_is_refused() {
                 let mut ep = subscribed();
@@ -541,16 +456,6 @@ macro_rules! inbound_namespace_gates {
 
             /// The peer withdraws a namespace subscription this endpoint
             /// accepted, and the record ends.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// a withdrawal ends the namespace subscription once
-            /// ```
-            ///
-            /// Made by leaving the flow where it was when the withdrawal arrives, so
-            /// the same subscription could be withdrawn for ever. It reddens 18 tests,
-            /// two per draft.
             #[test]
             fn the_peer_withdraws_a_namespace_subscription_this_endpoint_accepted() {
                 let mut ep = accepted();
@@ -602,16 +507,6 @@ macro_rules! inbound_namespace_gates {
 
             /// A withdrawal naming nothing the peer ever subscribed to is
             /// refused, and the refusal says which record came up empty.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the peer subscribed to nothing under that name
-            /// ```
-            ///
-            /// Made by cutting the withdrawal's dispatch arm, so it reaches the
-            /// fall-through that accepts and ignores it - which is where the message
-            /// went on all nine drafts. It reddens 27 tests, three per draft.
             #[test]
             fn a_withdrawal_for_a_namespace_subscription_that_never_arrived_is_refused() {
                 let mut ep = accepted();

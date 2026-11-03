@@ -88,19 +88,6 @@ macro_rules! subscribe_parameter_gates {
             }
 
             /// The parameters a subscribe is given reach the peer.
-            ///
-            /// # What it catches
-            ///
-            /// Sending an empty list whatever the caller passed:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the parameter the caller
-            /// attached must reach the peer, not the empty list a call that
-            /// ignores its argument sends left: 0 right: 1
-            /// ```
-            ///
-            /// It reddens three, this gate on each draft in the range and
-            /// nothing else in the client or the proxy.
             #[test]
             fn the_parameters_a_subscribe_is_given_reach_the_peer() {
                 let mut ep = active();
@@ -136,14 +123,6 @@ macro_rules! subscribe_parameter_gates {
             }
 
             /// A subscribe with nothing attached still carries nothing.
-            ///
-            /// # What it catches
-            ///
-            /// Nothing the cut reaches, which is what a control is for. The cut
-            /// sends an empty list whatever it is given, which is what this
-            /// gate asserts, so it stays green under it — and without it a
-            /// change that filled the field with something of its own would
-            /// satisfy the only other assertion here.
             #[test]
             fn a_subscribe_given_no_parameters_carries_none() {
                 let mut ep = active();

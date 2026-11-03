@@ -347,17 +347,6 @@ macro_rules! single_answer_gates {
 
             /// A track status the peer asks for is kept, rather than counted
             /// and dropped.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the request the peer sent should be on record
-            /// ```
-            ///
-            /// Made by dropping the record instead of inserting it. It reddens
-            /// 87 tests across all three files: a request that is not kept is
-            /// one no answer can find, and nothing that names it can be refused
-            /// for the right reason either.
             #[test]
             fn a_track_status_the_peer_asks_for_is_recorded() {
                 let ep = asked();
@@ -382,20 +371,6 @@ macro_rules! single_answer_gates {
 
             /// It is kept when it arrives the way it arrives on the wire, which
             /// is through the control stream's dispatcher.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the request should have
-            /// reached the endpoint's record
-            ///   left: 0
-            ///  right: 1
-            /// ```
-            ///
-            /// Made by cutting the dispatch arm, which sends the message back to
-            /// the fall-through that accepts and ignores it. It reddens 15 tests:
-            /// this gate on all ten drafts, and the loopback gate on the five
-            /// that have one.
             #[test]
             fn a_request_arriving_on_the_control_stream_is_recorded() {
                 let mut ep = active();
@@ -414,16 +389,6 @@ macro_rules! single_answer_gates {
             }
 
             /// Answering it answers it, and it is no longer waiting.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the request should be answered
-            /// ```
-            ///
-            /// Made by building the answer without moving the flow, so the request
-            /// stays where it was and could be answered again. It reddens 30 tests
-            /// across two files.
             #[test]
             fn answering_a_track_status_answers_it() {
                 let mut ep = asked();
@@ -488,18 +453,6 @@ macro_rules! single_answer_gates {
             }
 
             /// An answer to a request that never arrived has nothing to answer.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// nothing was asked about that: TrackStatus(TrackStatus {
-            /// track_namespace: TrackNamespace(...), ... })
-            /// ```
-            ///
-            /// Made by having the answer take the first record it finds rather than
-            /// the one its key names, so a caller naming a track nobody asked about
-            /// is handed someone else's request. It reddens 15 tests across two
-            /// files.
             #[test]
             fn an_answer_to_a_request_that_never_arrived_is_refused() {
                 let mut ep = asked();
@@ -519,19 +472,6 @@ macro_rules! single_answer_gates {
 
             /// Two requests are answered independently, so answering one leaves
             /// the other waiting.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: answering one should leave
-            /// the other waiting
-            ///   left: 2
-            ///  right: 1
-            /// ```
-            ///
-            /// Made by having the count ignore whether a request has been answered.
-            /// It reddens 16 tests: the count is what says a request is outstanding,
-            /// so a count that never falls says every request still is.
             #[test]
             fn answering_one_request_leaves_the_other_waiting() {
                 let mut ep = asked();
@@ -564,19 +504,6 @@ macro_rules! single_answer_gates {
             }
 
             /// The peer's request does not join the ones this endpoint made.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the peer's request should not
-            /// join the ones this endpoint made
-            ///   left: 2
-            ///  right: 1
-            /// ```
-            ///
-            /// Made by recording the arriving request in this endpoint's own map as
-            /// well as the peer's. It reddens 16 tests, this gate and the one after
-            /// it on every draft that has both.
             #[test]
             fn the_peers_request_is_kept_apart_from_this_endpoints_own() {
                 let mut ep = active();
@@ -602,18 +529,6 @@ macro_rules! single_answer_gates {
             }
 
             /// And answering the peer's leaves this endpoint's own alone.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: this endpoint's own request
-            /// should still be outstanding
-            ///   left: 2
-            ///  right: 1
-            /// ```
-            ///
-            /// The same cut, one moment later: this is the half of it that says the
-            /// peer's request never becomes one of ours.
             #[test]
             fn answering_the_peers_request_leaves_this_endpoints_own_alone() {
                 let mut ep = active();
@@ -695,15 +610,6 @@ macro_rules! two_answer_gates {
 
             /// A track status the peer asks for is kept, rather than counted
             /// and dropped.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the request the peer sent should be on record
-            /// ```
-            ///
-            /// Made by dropping the record instead of inserting it. It reddens
-            /// 87 tests across all three files.
             #[test]
             fn a_track_status_the_peer_asks_for_is_recorded() {
                 let ep = asked();
@@ -720,18 +626,6 @@ macro_rules! two_answer_gates {
             }
 
             /// It is kept when it arrives the way it arrives on the wire.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the request should have
-            /// reached the endpoint's record
-            ///   left: 0
-            ///  right: 1
-            /// ```
-            ///
-            /// Made by cutting the dispatch arm. It reddens 15 tests: this gate on
-            /// all ten drafts and the loopback gate on the five that have one.
             #[test]
             fn a_request_arriving_on_the_control_stream_is_recorded() {
                 let mut ep = active();
@@ -750,16 +644,6 @@ macro_rules! two_answer_gates {
             }
 
             /// Accepting it answers it.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the request should be answered
-            /// ```
-            ///
-            /// Made by building the acceptance without moving the flow. It reddens
-            /// 30 tests across two files: nothing downstream of an answer happens
-            /// if the answer leaves no trace.
             #[test]
             fn accepting_a_track_status_answers_it() {
                 let mut ep = asked();
@@ -777,15 +661,6 @@ macro_rules! two_answer_gates {
             }
 
             /// Refusing it answers it too.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// the refusal should answer it
-            /// ```
-            ///
-            /// The same cut on the refusal. It reddens 8 tests: this gate and the
-            /// one after it on each of the four drafts with a pair of answers.
             #[test]
             fn refusing_a_track_status_answers_it() {
                 let mut ep = asked();
@@ -836,16 +711,6 @@ macro_rules! two_answer_gates {
             }
 
             /// An answer to a request that never arrived has nothing to answer.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// nothing was asked under that identifier: TrackStatusOk(
-            /// TrackStatusOk { request_id: VarInt(7), track_alias: VarInt(0), ... })
-            /// ```
-            ///
-            /// Made by having the answer take the first record it finds rather than
-            /// the one its identifier names. It reddens 15 tests across two files.
             #[test]
             fn an_answer_to_a_request_that_never_arrived_is_refused() {
                 let mut ep = asked();
@@ -880,20 +745,6 @@ macro_rules! two_answer_gates {
 
             /// The acceptance hands out no alias that could collide with one,
             /// so two of them in a session do not tread on each other.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the acceptance sets Track Alias
-            /// to 0 and this draft allows no other value
-            ///   left: 7
-            ///  right: 0
-            /// ```
-            ///
-            /// Made by putting a live-looking alias in the acceptance. It reddens 2
-            /// tests, this gate on the two drafts whose answer carries an alias at
-            /// all: the caller cannot choose the value, so the only way a wrong one
-            /// reaches the wire is for this builder to write it.
             #[test]
             fn two_track_statuses_are_accepted_though_the_alias_is_the_same() {
                 let mut ep = asked();
@@ -920,18 +771,6 @@ macro_rules! two_answer_gates {
             }
 
             /// The peer's request does not join the ones this endpoint made.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// assertion `left == right` failed: the peer's request should not
-            /// join the ones this endpoint made
-            ///   left: 2
-            ///  right: 1
-            /// ```
-            ///
-            /// Made by recording the arriving request in this endpoint's own map as
-            /// well as the peer's. It reddens 16 tests across the ten drafts.
             #[test]
             fn the_peers_request_is_kept_apart_from_this_endpoints_own() {
                 let mut ep = active();
@@ -1045,19 +884,8 @@ macro_rules! alias_carve_out_gates {
             /// A track status is accepted even though a live track already
             /// holds the alias its answer carries.
             ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// ```text
-            /// Section 8.21: it is not an error if Track Alias 0 is already in
-            /// use: TrackAliasInUse { alias: 0, held: 3 }
-            /// ```
-            ///
-            /// Made by having the acceptance consult the alias table a SUBSCRIBE_OK
-            /// is judged against, and add its own alias to it. It reddens 2 tests,
-            /// this gate on both drafts that carry an alias. The cut is what the
-            /// sentence in Section 8.21 exists to forbid, and without a live track
-            /// holding alias 0 it reddens nothing at all - which is why this gate
-            /// opens with a subscription rather than with an empty session.
+            /// Draft-13 Section 8.21 and draft-14 Section 9.21 say it is not an
+            /// error if Track Alias 0 is already in use.
             #[test]
             fn a_track_status_is_accepted_though_a_live_track_holds_alias_zero() {
                 let mut ep = alias_zero_in_use();

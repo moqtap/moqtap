@@ -83,27 +83,10 @@ const SUBGROUP_WITH_PROPERTIES: u8 = 0x11;
 /// The gate is therefore two-sided on purpose: refusing the datagram is only
 /// correct if the subgroup object is still written.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Dropping the `properties_block_well_formed()` term from
-/// `DatagramHeader::encode_checked` in draft-17, which is how the method
-/// behaved before:
-///
-/// ```text
-/// thread 'the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-17 wrote a datagram with the PROPERTIES bit and an empty block
-/// ```
-///
-/// Applying the datagram rule to the subgroup writer as well, by refusing a
-/// zero-length block in `SubgroupObjectReader::write_object` on draft-19:
-///
-/// ```text
-/// thread 'the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-19 refused a zero-length properties block on a subgroup stream, which
-/// Section 11.4.2 requires of an object with no properties: InvalidField
-/// ```
+/// Fails if draft-17's `DatagramHeader::encode_checked` writes a datagram with
+/// the PROPERTIES bit and an empty block, or if draft-19's subgroup writer
+/// refuses the zero-length block draft-19 Section 11.4.2 requires of an object
+/// with no properties.
 #[test]
 fn the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one() {
     // ── Datagrams: the block must not be empty ──
@@ -388,27 +371,10 @@ fn the_zero_length_properties_block_is_a_datagram_rule_and_not_a_subgroup_one() 
 /// what separates this rule from "a status datagram may not carry properties":
 /// a status datagram carrying the Normal code is entitled to its block.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Dropping the rule from `DatagramHeader::properties_permitted` on draft-18,
-/// so that it always answers yes:
-///
-/// ```text
-/// thread 'properties_are_not_written_beside_a_status_other_than_normal'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-18 wrote properties beside End of Track
-/// ```
-///
-/// Answering `properties_permitted` from the framing instead of the status —
-/// `self.properties.is_empty() || !self.has_status()` — on draft-19, which
-/// refuses the Normal status datagram the draft permits its block:
-///
-/// ```text
-/// thread 'properties_are_not_written_beside_a_status_other_than_normal'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-19 refused properties beside Normal, which Section 11.2.1.2 permits:
-/// InvalidField
-/// ```
+/// Fails if draft-18 writes properties beside End of Track, or if draft-19
+/// answers `properties_permitted` from the framing instead of the status and
+/// so refuses the Normal status datagram that draft-19 Section 11.2.1.2
+/// permits its block.
 #[test]
 fn properties_are_not_written_beside_a_status_other_than_normal() {
     let properties = vec![0x3c, 0x01];
@@ -611,34 +577,8 @@ fn namespace_17() -> moqtap_codec::types::TrackNamespace {
 /// [`a_request_error_redirect_must_match_its_error_code`] drives. A draft-20
 /// row here would have nothing to construct.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Deleting the `check_discriminators(self)?` call from
-/// `ControlMessage::encode` on draft-17, which is how the method behaved
-/// before:
-///
-/// ```text
-/// thread 'a_fetch_type_that_disagrees_with_its_body_is_refused'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-17 encoded a Standalone FETCH holding a joining body; it decodes as
-/// Err(VarInt(UnexpectedEnd))
-/// ```
-///
-/// The decode error is the honest half of the damage and not the whole of it:
-/// the joining request id and joining start were written where a Track
-/// Namespace field count and a field length belong, so what the peer refuses is
-/// a truncated namespace rather than the fetch that was asked for.
-///
-/// Comparing the body against the wrong arm — `FetchType::RelativeJoining` in
-/// place of `FetchType::Standalone` — on draft-19, which lets the mismatched
-/// pair through:
-///
-/// ```text
-/// thread 'a_fetch_type_that_disagrees_with_its_body_is_refused'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-19 encoded a Standalone FETCH holding a joining body; it decodes as
-/// Err(VarInt(UnexpectedEnd))
-/// ```
+/// Fails if `ControlMessage::encode` skips `check_discriminators` (draft-17) or
+/// compares the body against the wrong arm (draft-19).
 #[test]
 fn a_fetch_type_that_disagrees_with_its_body_is_refused() {
     // draft-17: Standalone type, joining body.
@@ -733,33 +673,9 @@ fn a_fetch_type_that_disagrees_with_its_body_is_refused() {
 /// Section 10.13 deleted FETCH's Fetch Type — so the arm this drives is the
 /// whole of that draft's `check_discriminators`.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Deleting the `ControlMessage::RequestError` arm from
-/// `check_discriminators` on draft-18, which is how the function looked before
-/// the arm was added:
-///
-/// ```text
-/// thread 'a_request_error_redirect_must_match_its_error_code'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-18 encoded a REDIRECT error with no Redirect body; it decodes as
-/// Err(VarInt(UnexpectedEnd))
-/// ```
-///
-/// Checking only one direction — `code_is_redirect && m.redirect.is_none()` in
-/// place of the inequality — on draft-19, which lets a Redirect body through
-/// under an unrelated code:
-///
-/// ```text
-/// thread 'a_request_error_redirect_must_match_its_error_code'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-19 encoded a Redirect body under error code 0x1; it decodes as
-/// Err(InvalidField)
-/// ```
-///
-/// That second error is the message length disagreeing with the fields, not the
-/// redirect being noticed: the Redirect bytes were written and the decoder,
-/// told by the code that there is no Redirect to read, ran into them.
+/// Fails if `check_discriminators` lacks the `ControlMessage::RequestError` arm
+/// (draft-18), or checks only one direction and lets a Redirect body through
+/// under an unrelated code (draft-19).
 #[test]
 fn a_request_error_redirect_must_match_its_error_code() {
     const REDIRECT: u64 = 0x34;
@@ -971,27 +887,9 @@ fn a_request_error_redirect_must_match_its_error_code() {
 /// A datagram's payload runs to the end of the transport datagram, so those
 /// bytes are exactly what a caller would hand on as content.
 ///
-/// # What this catches, observed by making each change and running it
-///
-/// Answering `DatagramHeader::permits_payload` from the status alone on
-/// draft-19 — `self.status().permits_payload()` without the `has_status()`
-/// guard, which is how the method behaved before:
-///
-/// ```text
-/// thread 'a_status_datagram_never_yields_a_payload'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-19 permitted a payload on a status datagram carrying status 0x00
-/// ```
-///
-/// Dropping the trailing-bytes refusal from `DatagramHeader::decode_object` on
-/// draft-17, leaving the header decode to stand for the whole datagram:
-///
-/// ```text
-/// thread 'a_status_datagram_never_yields_a_payload'
-/// panicked at crates\moqtap-codec\tests\late_draft_rule_coverage.rs:
-/// draft-17 accepted 4 trailing byte(s) on a status 0x00 datagram and handed
-/// them back as [de, ad, be, ef]
-/// ```
+/// Fails if `DatagramHeader::permits_payload` answers from the status alone
+/// without the framing (draft-19), or if `DatagramHeader::decode_object` hands
+/// trailing bytes back instead of refusing them (draft-17).
 #[test]
 fn a_status_datagram_never_yields_a_payload() {
     // Type 0x28: STATUS (0x20) and DEFAULT_PRIORITY (0x08), so the datagram is

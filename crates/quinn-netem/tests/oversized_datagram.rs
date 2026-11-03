@@ -1,8 +1,7 @@
 //! A datagram larger than the burst, on a profile nothing is wrong with.
 //!
-//! `Impairer::decide` aborted here until 0.1.3, on the premise that
-//! `validate_models` refuses every configuration that could reach the token
-//! bucket's `RateGrant::Never`. Three facts falsify it:
+//! `validate_models` does not refuse every configuration that could reach the
+//! token bucket's `RateGrant::Never`:
 //!
 //! * `validate_models` refuses `burst_bytes` below **one on-wire datagram**,
 //!   and "one on-wire datagram" is the direction's `mtu_blackhole` where one is
@@ -13,7 +12,7 @@
 //!   `burst_bytes` between those two numbers with a `queue_bytes` above them —
 //!   the window in which the queue admits a datagram the bucket then refuses.
 //!
-//! The shim decides about every datagram arriving at the port, so this was
+//! The shim decides about every datagram arriving at the port, so this is
 //! reachable before the QUIC handshake, from anywhere.
 
 use quinn_netem::{
@@ -49,20 +48,6 @@ fn vulnerable_uplinks() -> Vec<(Preset, RateModel)> {
 /// Both halves are the finding. The profile validating is what says this was
 /// never an operator error, and the datagram being the maximum a UDP sender can
 /// send is what says no protocol had to be spoken to reach it.
-///
-/// *Ablation:* restore
-/// `RateGrant::Never => panic!(..)` in `engine.rs::decide` and this does not
-/// fail — it takes the test binary down:
-///
-/// ```text
-/// thread 'a_datagram_larger_than_the_burst_is_dropped_and_not_aborted_on' panicked at
-/// crates\quinn-netem\src\engine.rs:
-/// the token bucket can never grant a 65535-byte datagram at 5000000 bits per
-/// second with a 16384-byte burst; that is a refusal the profile validator owed
-/// the caller, not a datagram to dispose of
-/// ```
-///
-/// That is `LossyEdge`'s uplink, the first of the four this loop reaches.
 #[test]
 fn a_datagram_larger_than_the_burst_is_dropped_and_not_aborted_on() {
     let vulnerable = vulnerable_uplinks();
@@ -106,16 +91,6 @@ fn a_datagram_larger_than_the_burst_is_dropped_and_not_aborted_on() {
 ///
 /// The second decision is at the same tick as the first, so nothing has drained
 /// and the backlog is exactly what the first decision left behind.
-///
-/// *Ablation:* drop the `queue.withdraw(wire_bytes)` call and this fails on the
-/// refused datagram's own backlog — the bytes of a datagram that is not going
-/// to leave, recorded as occupancy:
-///
-/// ```text
-/// assertion `left == right` failed: nothing was queued before it and it is not queued either
-///   left: 65535
-///  right: 0
-/// ```
 #[test]
 fn a_refused_datagram_leaves_nothing_in_the_queue() {
     let profile = preset(Preset::LossyEdge).uplink;
@@ -147,7 +122,7 @@ fn a_refused_datagram_leaves_nothing_in_the_queue() {
 /// A datagram larger than the *queue* is still refused by the queue, unchanged.
 ///
 /// The two refusals meet here and must not have been folded into one: this one
-/// never reaches the bucket, and the fix above must not have moved the
+/// never reaches the bucket, and the bucket's refusal above must not move the
 /// boundary between them.
 #[test]
 fn a_datagram_larger_than_the_queue_is_oversize() {

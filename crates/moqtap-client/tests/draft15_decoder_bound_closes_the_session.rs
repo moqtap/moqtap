@@ -83,21 +83,6 @@ fn oversized_request_error(len: usize) -> Vec<u8> {
 
 /// An oversized Reason Phrase closes the QUIC connection with
 /// PROTOCOL_VIOLATION.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Replacing `recv_control`'s body with `recv.read_control(capture_raw).await?`,
-/// so the refusal never reaches `close_for_codec`:
-///
-/// ```text
-/// ---- an_oversized_reason_phrase_closes_the_quic_connection stdout ----
-///
-/// thread 'an_oversized_reason_phrase_closes_the_quic_connection' panicked at crates\moqtap-client\tests\draft15_decoder_bound_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
-///
-/// The client still returns `Err(ReasonPhraseTooLong)` in that state; the peer
-/// just never hears about it and can repeat the frame indefinitely.
 #[tokio::test]
 async fn an_oversized_reason_phrase_closes_the_quic_connection() {
     common::init_crypto();

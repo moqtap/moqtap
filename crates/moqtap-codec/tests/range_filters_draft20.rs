@@ -66,19 +66,11 @@ fn read(parameter_type: u64, bytes: &[u8]) -> Result<RangeFilter, RangeFilterErr
 /// is 3 (delta from 0), the first End is 2 (5 minus 3), the second Start is 5
 /// (10 minus 5), and the second End is 5 (15 minus 10)."
 ///
-/// # What it catches
-///
-/// The sentence names two different baselines in one line, and the plausible
-/// misreading is to count a Start from the prior Range's *Start* rather than its
-/// End. The same four integers then decode as 3-5 and 8-13. Both ranges are well
-/// formed, both are plausible, and the second admits two values the subscriber
-/// did not ask for while excluding two it did:
-///
-/// ```text
-/// assertion `left == right` failed: a Start counts from the prior Range's End, not from its Start
-///   left: [FilterRange { start: 3, end: Some(5) }, FilterRange { start: 8, end: Some(13) }]
-///  right: [FilterRange { start: 3, end: Some(5) }, FilterRange { start: 10, end: Some(15) }]
-/// ```
+/// Fails if a Start is counted from the prior Range's *Start* rather than its
+/// End. The sentence names two different baselines in one line, and under that
+/// misreading the same four integers decode as 3-5 and 8-13: both well formed,
+/// both plausible, and the second admits two values the subscriber did not ask
+/// for while excluding two it did.
 #[test]
 fn the_drafts_own_worked_example_reads_back_as_the_ranges_it_names() {
     let filter = read(SUBGROUP_FILTER_PARAMETER, &value(0, None, &[3, 2, 5, 5]))
@@ -181,17 +173,10 @@ fn a_delta_off_the_end_of_the_space_is_reported() {
 /// nothing to name and the subscriber would wait for a reply that no longer has
 /// a subject.
 ///
-/// # What it catches
-///
-/// Calling the reader from draft-20's `decode_parameters` — the shape the
-/// LOCATION_FILTER check beside it has, because *that* rule is a session close.
-/// The reader's error has no route into `CodecError`, so the ablation had to
-/// invent one, which is itself the point: nothing in the crate can make this
-/// mistake without adding a conversion that does not exist.
-///
-/// ```text
-/// a Range Filter is carried whether or not it makes sense: InvalidField
-/// ```
+/// Fails if draft-20's `decode_parameters` calls the reader, the shape the
+/// LOCATION_FILTER check beside it has because *that* rule is a session close.
+/// The reader's error has no route into `CodecError`, so nothing in the crate
+/// can make this mistake without adding a conversion that does not exist.
 #[test]
 fn a_filter_this_module_cannot_read_does_not_refuse_the_frame() {
     let message = ControlMessage::Subscribe(Subscribe {

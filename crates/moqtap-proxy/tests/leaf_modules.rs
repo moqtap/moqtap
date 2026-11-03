@@ -39,14 +39,6 @@ fn code_lines(name: &str) -> Vec<(usize, String)> {
         .collect()
 }
 
-/// # What this catches, observed by adding one `use` line
-///
-/// Adding `use crate::error::ProxyError;` to `instrument.rs` fails with:
-///
-/// ```text
-/// instrument.rs is not a leaf: it names this crate at line 32
-///   use crate::error::ProxyError;
-/// ```
 #[test]
 fn the_leaf_modules_name_nothing_in_this_crate() {
     for name in LEAVES {

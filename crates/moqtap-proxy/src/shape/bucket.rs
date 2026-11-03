@@ -104,9 +104,7 @@ pub struct BucketConfig {
     /// unit ever grantable, every object leaves at its `max_hold` clamp
     /// instead of at `rate_bps`, so the measured throughput is
     /// `depth / max_hold` and bears no relation to the rate that was
-    /// written down. Measured, at `rate_bps: Some(1_000_000)` with
-    /// `burst_bytes: 100` and 1000-byte objects: delivery landed on the
-    /// clamp exactly, at a rate the configuration never names.
+    /// written down.
     ///
     /// [`charge`] answers [`Grant::LargerThanBurst`] for that case rather
     /// than folding it into [`Grant::Never`], so the caller can report it as
@@ -242,9 +240,7 @@ pub enum Grant {
 ///     depth / max_hold * elapsed)         <- the clamp, per stream
 /// ```
 ///
-/// Measured, with `rate_bps: Some(0)`, `depth_bytes: 4096` and `max_hold:
-/// 300 ms`: a bucket configured at **0 bytes/s** sustained ~25 kB/s. The
-/// clamp is the deliberate non-destructive default — a starved unit is
+/// The clamp is the deliberate non-destructive default — a starved unit is
 /// delivered late rather than dropped — and not a defect, but a fixture that
 /// means to observe *this* function's bound has to pin
 /// `max_hold` far enough out that the clamp cannot bind inside its sampling
@@ -421,12 +417,6 @@ mod tests {
     /// A rate of zero is a class that was asked to stop; a rate of 1000 with
     /// a burst of 100 is a class that was asked for 1000 bytes a second and
     /// will never see one byte of it, and only the second is worth a report.
-    ///
-    /// *Ablation:* restore the single `if rate == 0 || need > cap { Never }`
-    /// — the first assertion reddens with
-    /// `left: Never / right: LargerThanBurst { burst_bytes: 100, unit_bytes: 101 }`,
-    /// which is precisely the collapse that made a mis-sized burst
-    /// unreportable.
     #[test]
     fn a_unit_larger_than_the_burst_is_refused_as_a_burst_problem() {
         let base = Instant::now();

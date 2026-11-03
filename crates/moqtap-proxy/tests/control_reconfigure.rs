@@ -321,15 +321,6 @@ async fn can_open_bi(conn: &quinn::Connection, window: Duration) -> bool {
 /// somehow reached into a live connection, and is the assertion that makes
 /// the documented "this never reaches a connection that already exists"
 /// falsifiable rather than a claim about quinn nobody checked.
-///
-/// *Ablation, recorded:* replace the body of `Listener::set_transport` with
-/// `let _ = transport;`, so the endpoint is never given the rebuilt server
-/// configuration. This row fails with
-///
-/// ```text
-/// a client that connected after the call negotiated the new limit, so it is
-/// never granted a stream
-/// ```
 #[tokio::test]
 async fn a_client_leg_profile_reaches_the_next_client_and_not_the_one_already_connected() {
     common::init_crypto();
@@ -385,32 +376,6 @@ async fn a_client_leg_profile_reaches_the_next_client_and_not_the_one_already_co
 /// field rather than about stream credit in general. The client is never
 /// granted a bidirectional stream; it is granted a unidirectional one at
 /// once, at quinn's untouched default.
-///
-/// *Ablations, recorded — three, and the first two are worth reading
-/// together.* Deleting the `max_concurrent_bidi_streams` arm from
-/// `TransportProfile::apply_to` fails the first half with
-///
-/// ```text
-/// a client that negotiated a bidirectional ceiling of zero is never granted a bidirectional stream
-/// ```
-///
-/// Pointing that same arm at `tc.max_concurrent_uni_streams` — the slip a
-/// field added beside another is most likely to carry — fails it with the
-/// **same message**. That was not the prediction and it is the more useful
-/// answer: seen from the first half, a value written to the wrong setter and
-/// a value written nowhere are one event, so this row catches the slip and
-/// cannot tell a maintainer which of the two they made.
-///
-/// The second half is aimed at a different mistake, and it takes a third cut
-/// to reach. Making the one arm set both ceilings — the shape a refactor to
-/// a single stream-concurrency knob would take — leaves the first half green
-/// and fails with
-///
-/// ```text
-/// the unidirectional ceiling was left alone, so a unidirectional stream is still granted
-/// ```
-///
-/// So the two assertions cover two mistakes rather than one of them twice.
 #[tokio::test]
 async fn a_bidirectional_ceiling_starves_only_bidirectional_streams() {
     common::init_crypto();
@@ -449,25 +414,6 @@ async fn a_bidirectional_ceiling_starves_only_bidirectional_streams() {
 /// window has to be held and applied at the bind rather than dropped. The
 /// consequence is the same one: the first client ever to connect is refused
 /// a stream.
-///
-/// *Ablation, recorded, and it takes two:* the pre-bind path is carried
-/// redundantly, on purpose. `listener_config()` reads the stored parameters
-/// so the endpoint is *born* with them, and `ControlPlane::publish_listener`
-/// installs them again under the lock so that a request landing between the
-/// bind and the publish — the one window in which the first route has
-/// already been taken and the second is not yet reachable — is not lost.
-/// Removing either alone leaves this row green; that was measured, not
-/// assumed. Removing **both** fails it with
-///
-/// ```text
-/// the first client to connect negotiated a limit set before there was an
-/// endpoint to set it on
-/// ```
-///
-/// No gate reaches the window the second route exists for, because producing
-/// it means winning a race against two adjacent statements. It is kept for
-/// the same reason a `Drop` is preferred to a list of teardown calls: the
-/// failure it prevents is a request accepted and silently dropped.
 #[tokio::test]
 async fn a_client_leg_profile_set_before_the_bind_reaches_the_first_client() {
     common::init_crypto();
@@ -506,14 +452,6 @@ async fn a_client_leg_profile_set_before_the_bind_reaches_the_first_client() {
 /// while one that dialled before the call sits at quinn's 30 s default and
 /// stays. Two sessions, one call, and the difference between them is the
 /// dial that happened after it.
-///
-/// *Ablation, recorded:* make `session_config()` ignore
-/// `ControlPlane::upstream_transport` and copy the template's fields
-/// unconditionally. This row fails with
-///
-/// ```text
-/// timed out waiting for the second session's relay leg to time out
-/// ```
 #[tokio::test]
 async fn an_upstream_profile_reaches_the_next_session_and_not_the_one_already_dialled() {
     common::init_crypto();
@@ -843,16 +781,6 @@ const PACED_BPS: u64 = 32;
 /// with a 10 s ceiling against a paced delivery of at most 320 bytes in that
 /// time — a factor of eight below the total — so it cannot pass by pacing
 /// having quietly finished.
-///
-/// *Ablation, recorded:* delete the `enabled` check at the top of
-/// `Scheduler::acquire`, so the switch reaches nothing. This row fails with
-///
-/// ```text
-/// assertion `left == right` failed: with pacing switched off the queue
-/// drains
-///   left: 401
-///  right: 2645
-/// ```
 #[tokio::test]
 async fn the_shaper_switch_stops_and_resumes_a_live_sessions_pacing() {
     let run = ShapedRun::start(one_class_profile("media", Some(PACED_BPS))).await;
@@ -909,16 +837,6 @@ async fn the_shaper_switch_stops_and_resumes_a_live_sessions_pacing() {
 /// scheduler its units were admitted under, so a unit classified against one
 /// profile and released against another would charge a class that was not
 /// the one matched.
-///
-/// *Ablation, recorded:* make `SessionShaper::current` return the cached
-/// scheduler without consulting the plane's generation. This row fails with
-///
-/// ```text
-/// assertion `left == right` failed: a stream opened after the call is paced
-/// by the new profile, so its objects stay queued
-///   left: 269
-///  right: 5
-/// ```
 #[tokio::test]
 async fn a_new_profile_reaches_the_next_stream_and_leaves_the_one_already_forwarding_alone() {
     let run = ShapedRun::start(one_class_profile("media", None)).await;
@@ -972,16 +890,6 @@ async fn a_new_profile_reaches_the_next_stream_and_leaves_the_one_already_forwar
 ///
 /// The two rows together are the gate. Either alone would pass for an
 /// implementation that ignored `set_shape` completely.
-///
-/// *Ablation, recorded:* make `same_classes` return `true` unconditionally.
-/// This row fails with
-///
-/// ```text
-/// assertion `left == right` failed: a session keeps its own profile when the
-/// class list would change, so a stream opened afterwards still flows
-///   left: 5
-///  right: 269
-/// ```
 #[tokio::test]
 async fn a_profile_with_a_different_class_list_is_not_taken_up_by_a_running_session() {
     let run = ShapedRun::start(one_class_profile("media", None)).await;
@@ -1055,16 +963,6 @@ async fn impairing_a_leg_the_proxy_cannot_impair_is_refused_and_names_the_call_t
 /// The recovery half is not decoration. Without it the row would pass for an
 /// impairment that killed the connection outright, which is a different
 /// thing from one that dropped its datagrams.
-///
-/// *Ablation, recorded:* make `ProxyControl::set_impair` return `Ok(())`
-/// without arming the handle. This row fails with
-///
-/// ```text
-/// assertion `left == right` failed: 256 byte(s) arrived during a 300ms
-/// window in which nothing should have
-///   left: 512
-///  right: 256
-/// ```
 #[cfg(feature = "impair")]
 #[tokio::test]
 async fn an_impairment_armed_on_the_client_leg_stops_the_bytes_and_clearing_it_resumes_them() {
@@ -1146,22 +1044,6 @@ async fn an_impairment_armed_on_the_client_leg_stops_the_bytes_and_clearing_it_r
 /// and clearing it lets them through. A refusal that had half-armed
 /// something, or had disarmed what was there, would show up as bytes
 /// arriving in the middle window.
-///
-/// *Ablation, run:* return a blanket refusal from
-/// `ProxyControl::set_impair` —
-/// `ControlError::Unsupported { what: "the impairment profile supplied",
-/// leg, transport: … }` — for any profile `arm` rejects. This row reddens
-/// with
-///
-/// ```text
-/// thread 'a_profile_quinn_netem_refuses_is_reported_with_its_own_reason_and_arms_nothing'
-/// (4568) panicked at crates\moqtap-proxy\tests\control_reconfigure.rs:
-/// a refused impairment profile has to carry quinn-netem's own reason: the
-/// thirteen ways a profile arms and does nothing have thirteen different
-/// fixes, got the impairment profile supplied is unsupported on the Client leg
-/// over this leg's socket — quinn-netem refused the profile itself;
-/// ImpairProfile::validate() returns the reason
-/// ```
 #[cfg(feature = "impair")]
 #[tokio::test]
 async fn a_profile_quinn_netem_refuses_is_reported_with_its_own_reason_and_arms_nothing() {
@@ -1715,15 +1597,6 @@ async fn a_transport_profile_reaches_the_next_client_and_never_the_one_already_c
 /// *towards* the proxy. Media on MoQT flows that way anyway; this row's client
 /// is the source on one leg and its relay is the source on the other, and
 /// neither direction is a special case in the forwarding path.
-///
-/// *Ablation, recorded:* make `set_transport`'s `Leg::Client` arm store the
-/// profile as the upstream profile as well, so one call reaches both legs. The
-/// relay-leg anchor reddens:
-///
-/// ```text
-/// the relay leg was never named, so it keeps quinn's 1250000-byte window and
-/// takes the 131072 bytes the client leg could not
-/// ```
 #[tokio::test]
 async fn a_window_set_on_one_leg_leaves_the_other_leg_on_quinns_defaults() {
     common::init_crypto();
@@ -1829,17 +1702,6 @@ const SECOND_BATCH: usize = 4;
 /// more true. The batches either side of it are waited for with anchored polls
 /// against a [`PATIENCE`] ceiling, so a slow box makes this row slower and
 /// never wrong. Nothing here measures how long a retransmission took.
-///
-/// *Ablation, recorded:* make `ProxyControl::set_impair` return `Ok(())`
-/// without arming the handle, so the profile is stored and never installed on
-/// the socket. The objects keep flowing and the row fails with
-///
-/// ```text
-/// assertion `left == right` failed: with every datagram on the relay leg
-/// dropped, no object written afterwards reaches the client
-///   left: 8
-///  right: 4
-/// ```
 #[cfg(feature = "impair")]
 #[tokio::test]
 async fn an_impairment_on_the_relay_leg_stops_the_objects_and_clearing_it_resumes_them() {
@@ -2032,18 +1894,6 @@ async fn read_wt_uni(conn: &wtransport::Connection) -> Vec<u8> {
 ///   the upstream is — the refusal is per leg, not per proxy;
 /// * the client's stream still crosses the WebTransport leg and arrives byte
 ///   for byte, so the refusal left the session exactly as it was.
-///
-/// *Ablation, recorded:* replace the `Leg::Upstream` WebTransport arm of
-/// `ProxyControl::set_transport` with `Ok(())`, which is the "store it and say
-/// nothing" outcome this refusal exists to prevent. The row fails with
-///
-/// ```text
-/// assertion `left == right` failed: a WebTransport relay leg has no endpoint
-/// to install transport parameters on, so the request is refused rather than
-/// accepted and dropped
-///   left: Ok(())
-///  right: Err(Unsupported { what: "transport profile", leg: Upstream, transport: "webtransport" })
-/// ```
 #[cfg(feature = "webtransport")]
 #[tokio::test]
 async fn a_live_webtransport_relay_leg_refuses_a_transport_profile_and_keeps_forwarding() {

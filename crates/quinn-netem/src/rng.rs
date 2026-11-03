@@ -150,9 +150,7 @@ mod tests {
     /// threshold is `(-bound) % bound`, so at `bound = 6` it is `4` and a
     /// draw is discarded with probability `4 / 2^32`: over any test-sized
     /// sample the rejection loop never runs, and a naive `next_u32() % bound`
-    /// produces byte-identical output. Measured over 40 draws at each of
-    /// bounds 3, 5, 6, 7, 10 and 100 — correct and naive agreed everywhere
-    /// and the loop fired zero times.
+    /// produces byte-identical output.
     ///
     /// So the bound is one where rejection actually happens: at
     /// `3_000_000_000` the threshold is `1_294_967_296`, discarding 30.2% of

@@ -25,9 +25,8 @@
 //! Neither mistake is possible to make with the other seven rules, so this is
 //! where the gate belongs.
 //!
-//! The other seven are shared verbatim with drafts 11, 12 and 13 — the finditer
-//! sweep across all the drafts found the same eight sentences in all four —
-//! so a gate on any one of them would say the same thing four times.
+//! The other seven are shared verbatim with drafts 11, 12 and 13, so a gate on
+//! any one of them would say the same thing four times.
 //!
 //! # Why the frame is built by hand
 //!
@@ -110,21 +109,6 @@ fn publish_namespace_with_an_oversized_parameter() -> Vec<u8> {
 
 /// A parameter value declared past the maximum closes the QUIC connection with
 /// Protocol Violation.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Replacing `recv_control`'s body with `recv.read_control(capture_raw).await?`,
-/// so the refusal never reaches `close_for_codec`:
-///
-/// ```text
-/// ---- an_oversized_parameter_value_closes_the_quic_connection stdout ----
-///
-/// thread 'an_oversized_parameter_value_closes_the_quic_connection' (16764) panicked at crates\moqtap-client\tests\draft14_kvp_value_bound_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
-///
-/// The client still returns `Err(Kvp(ValueTooLong(65536)))` in that state; the
-/// peer just never hears about it and can repeat the frame indefinitely.
 #[tokio::test]
 async fn an_oversized_parameter_value_closes_the_quic_connection() {
     common::init_crypto();

@@ -495,20 +495,6 @@ macro_rules! update_gates {
 
             /// The peer updates the subscription it opened, and it is
             /// accepted.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Looking the update up among the subscriptions this endpoint
-            /// opened rather than among the peer's:
-            ///
-            /// ```text
-            /// the peer's update of its own subscription: UpdateForUnknownRequest(1)
-            /// ```
-            ///
-            /// It reddens forty-eight tests across both update files and the draft-14
-            /// dispatch test. From draft-11 the parity rule makes the lookup a miss
-            /// rather than a hit on the wrong record, so under the cut every
-            /// conforming update is refused.
             #[test]
             fn an_update_for_the_peers_subscription_is_accepted() {
                 let mut ep = publishing();
@@ -523,22 +509,6 @@ macro_rules! update_gates {
 
             /// An update naming an identifier this session has never carried
             /// ends the session, carrying PROTOCOL_VIOLATION.
-            ///
-            /// # What it catches
-            ///
-            /// Answering it with a plain error, which is what drafts 07
-            /// through 11 do - their sentence says SHOULD and this one says
-            /// MUST:
-            ///
-            /// ```text
-            /// assertion `left == right` failed: a MUST-terminate rule leaves the session closed
-            ///   left: Active
-            ///  right: Closed
-            /// ```
-            ///
-            /// Made by raising the error without failing the session, which is exactly
-            /// what drafts 07 through 11 do and are right to do: their sentence says
-            /// SHOULD. It reddens five tests and only this gate.
             #[test]
             fn an_update_for_an_identifier_nothing_has_carried_ends_the_session() {
                 let mut ep = publishing();
@@ -582,22 +552,6 @@ macro_rules! update_gates {
             /// An ended subscription existed, so this is not the case the
             /// draft ends the session over. The record outlives the
             /// subscription for exactly that reason.
-            ///
-            /// # What it catches
-            ///
-            /// Dropping the record when the subscription ends, which turns an
-            /// identifier the session has carried into one it never had and
-            /// ends the session over conforming traffic:
-            ///
-            /// ```text
-            /// an identifier the session has carried should be refused by its flow, and
-            /// was refused by UpdateForUnknownRequest(1)
-            /// ```
-            ///
-            /// Made by removing the inbound record when the subscription ends. It
-            /// reddens fifteen tests across both update files, and here it does more
-            /// than misreport: the session ends over traffic the sentence does not
-            /// reach.
             #[test]
             fn an_update_for_an_ended_subscription_is_refused_by_the_flow() {
                 let mut ep = publishing();
@@ -627,20 +581,6 @@ macro_rules! update_gates {
             /// identifier: the peer has no business updating it, but the
             /// sentence the close comes from is about an identifier that "has
             /// not existed within the Session", and this one has.
-            ///
-            /// # What it catches
-            ///
-            /// Closing over every identifier that is not the peer's
-            /// subscription, which ends the session over traffic the sentence
-            /// does not reach:
-            ///
-            /// ```text
-            /// an identifier the session had carried was refused: UpdateForUnknownRequest(0)
-            /// ```
-            ///
-            /// Made by closing over everything the inbound-subscribe map does not hold.
-            /// It reddens five tests and only this gate: every other update here names
-            /// either the peer's subscription or nothing at all.
             #[test]
             fn an_identifier_carried_by_another_request_is_accepted() {
                 let mut ep = publishing();
@@ -660,20 +600,6 @@ macro_rules! update_gates {
             /// offering a track to a relay meets: the relay may narrow or
             /// pause what it accepted, and closing over it would end the
             /// session over conforming traffic and blame the relay for it.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Leaving this endpoint's own offers out of the set of identifiers
-            /// that have existed:
-            ///
-            /// ```text
-            /// the peer's update of the offer it accepted: UpdateForUnknownRequest(0)
-            /// ```
-            ///
-            /// Made by removing the outbound-publish lookup from the draft-12 set. It
-            /// reddens this gate on draft-12 alone, and the same cut on draft-13
-            /// reddens draft-13's; drafts 14 through 16 keep both directions of
-            /// PUBLISH in one map.
             #[test]
             fn an_update_for_a_publish_this_endpoint_made_is_accepted() {
                 let mut ep = publishing();
@@ -691,11 +617,6 @@ macro_rules! update_gates {
 
             /// An update arriving the way the control stream delivers one
             /// reaches the peer's record.
-            ///
-            /// # What it catches
-            ///
-            /// The same as the first gate, through the dispatch arm rather
-            /// than the handler.
             #[test]
             fn an_update_off_the_control_stream_reaches_the_peers_record() {
                 let mut ep = publishing();
@@ -716,19 +637,6 @@ macro_rules! update_gates {
             /// update, and this endpoint is the subscriber for every
             /// subscription it opened. Earlier only draft-14 could
             /// build one.
-            ///
-            /// # What it catches
-            ///
-            /// Building the update without moving the subscription's own
-            /// record, which would go on building updates for a subscription
-            /// that had ended:
-            ///
-            /// ```text
-            /// a subscription this endpoint had ended was updated: ((), SubscribeUpdate(SubscribeUpdate { request_id: VarInt(0), start_group: VarInt(0), start_object: VarInt(0), end_group: VarInt(0), subscriber_priority: 128, forward: Forward, parameters: [] }))
-            /// ```
-            ///
-            /// It reddens ten tests: this gate on all ten drafts that can build an
-            /// update. Nothing that judges one arriving is touched.
             #[test]
             fn this_endpoint_can_update_a_subscription_of_its_own() {
                 let mut ep = active();

@@ -59,11 +59,8 @@
 //!
 //! Nothing in that section compares durations. The obvious companion —
 //! "the impaired run took longer" — reads as one-sided and is not, because
-//! it is conditional on the loss having selected a datagram that mattered;
-//! over 400 paired trials of this transfer it held 226 times, or 56%. That
-//! is a coin flip, and a gate that fails half the time is re-run rather
-//! than diagnosed, so the latency comparison is an `#[ignore]`d
-//! measurement instead.
+//! it is conditional on the loss having selected a datagram that mattered,
+//! so the latency comparison is an `#[ignore]`d measurement instead.
 //!
 //! # A note on the direction names
 //!
@@ -926,18 +923,6 @@ async fn deliver_every_object(ingress: &Ingress) -> Duration {
 /// uplink decision is a pass, so every drop the socket reports is a
 /// downlink drop.
 ///
-/// Ablation: replacing the loss model with `Bernoulli { p: 0 }` leaves
-/// the byte equality green and reddens the precondition —
-/// `the 5% loss profile dropped nothing across 391 datagrams, so the byte
-/// equality above was a claim about an unimpaired connection`.
-///
-/// Ablation: sending a datagram whose verdict was `Drop` instead of
-/// discarding it. The byte equality stays green, `dropped_loss > 0` stays
-/// green, and the identity reddens with
-/// `386 datagram(s) reached the socket below the shim and 12 were
-/// reported dropped, out of 386 decided`, `left: 398 right: 386` — the
-/// twelve drops that were announced and not performed, counted twice.
-///
 /// No duration is compared. See
 /// [`calibration_five_percent_loss_inflates_delivery_latency`].
 #[tokio::test]
@@ -1019,16 +1004,7 @@ async fn five_percent_downlink_loss_still_delivers_every_object() {
 /// impaired run took at least as long as the unimpaired one", which reads
 /// as one-sided and is not: it holds only when the loss selects a
 /// datagram whose recovery is on the critical path, and on a loopback
-/// with a few hundred datagrams in flight it usually is not. Over 400
-/// paired trials of this transfer it held 226 times — 56%, a coin flip.
-/// A CI job that fails half the time is re-run and forgotten; it never
-/// becomes a diagnosis.
-///
-/// One twenty-trial run of the body below, recorded:
-/// `median ratio 0.954 over 20 paired trials; the impaired run was the
-/// slower one in 6/20`, with per-trial ratios spanning 0.312 to 1.342 and
-/// the same ten datagrams dropped every time — the loss pattern is a
-/// fixture, and the run time is not.
+/// with a few hundred datagrams in flight it usually is not.
 ///
 /// So this reports and does not gate. The one thing it asserts is the
 /// thing that is not a coin flip, which
@@ -1120,11 +1096,6 @@ fn total_downlink_corruption() -> ImpairProfile {
 ///
 /// The transparent phase first is the control. Without it a handshake
 /// that had quietly failed would look exactly like corruption working.
-///
-/// Sender-side loss counters were tried for this and are useless: over
-/// this transfer a wholly unimpaired loopback run reported
-/// `lost packets 106` against the corrupted run's `18`, because loopback
-/// send-buffer overflow at this rate swamps the effect being measured.
 ///
 /// Run it with
 /// `cargo test -p moqtap-proxy --test impair_e2e -- --ignored --nocapture`.

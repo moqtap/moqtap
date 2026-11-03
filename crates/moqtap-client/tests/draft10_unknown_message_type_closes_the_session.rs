@@ -75,19 +75,6 @@ fn message_of_an_unassigned_type() -> Vec<u8> {
 
 /// An unassigned control message type closes the QUIC connection with Protocol
 /// Violation.
-///
-/// # What it catches, observed by making the change and running it
-///
-/// Dropping `CodecError::UnknownMessageType` from draft-10's
-/// `codec_session_error_code` — the state the draft was in before it had a table
-/// at all, where the decoder refused the frame and the peer never heard:
-///
-/// ```text
-/// ---- an_unassigned_message_type_closes_the_quic_connection stdout ----
-///
-/// thread 'an_unassigned_message_type_closes_the_quic_connection' (28572) panicked at crates\moqtap-client\tests\draft10_unknown_message_type_closes_the_session.rs:
-/// the client refused the frame but never closed the connection: Elapsed(())
-/// ```
 #[tokio::test]
 async fn an_unassigned_message_type_closes_the_quic_connection() {
     common::init_crypto();

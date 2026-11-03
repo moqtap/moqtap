@@ -8,11 +8,10 @@
 //!
 //! # Why the close is under test and not the refusal
 //!
-//! Because a codec test cannot tell the two apart. Nothing read these values at
-//! all before, so the frame was carried and the rule was silent; a decoder that
-//! refuses the frame and leaves the session open looks identical from inside the
-//! codec, and the peer that broke the rule goes on sending either way. Only the
-//! wire says which happened.
+//! Because a codec test cannot tell the two apart. A decoder that refuses the
+//! frame and leaves the session open looks identical from inside the codec, and
+//! the peer that broke the rule goes on sending either way. Only the wire says
+//! which happened.
 //!
 //! # Why the value is sent inside the Immutable block
 //!
@@ -60,9 +59,8 @@ const PATIENCE: Duration = Duration::from_secs(10);
 /// Build one draft's gate.
 ///
 /// The offending frame is hand-built rather than produced by this codec's
-/// encoder, because the encoder refuses the value under test — which is the
-/// other half of the same fix, gated in the codec's own
-/// `a_value_the_decoder_refuses_is_never_written`. Everything around the one
+/// encoder, because the encoder refuses the value under test, which the codec's
+/// own `a_value_the_decoder_refuses_is_never_written` gates. Everything around the one
 /// value is what the encoder writes: the message type, the sixteen-bit payload
 /// length, an empty Parameters list, and on draft-16 a Request ID.
 macro_rules! nested_property_closes_the_session {
@@ -122,28 +120,6 @@ macro_rules! nested_property_closes_the_session {
 
             /// A DYNAMIC_GROUPS of 2 inside the Immutable block closes the QUIC
             /// connection with PROTOCOL_VIOLATION.
-            ///
-            /// # What it catches, observed by making the change and running it
-            ///
-            /// Both messages below were measured on draft-19.
-            ///
-            /// Removing the descent into the Immutable block — a check that
-            /// walks the outer run only, which is what a first reading of the
-            /// rule produces. The block reaches the application whole, with the
-            /// forbidden value inside it:
-            ///
-            /// ```text
-            /// a DYNAMIC_GROUPS of 2 must be refused wherever it is carried: SubscribeOk(SubscribeOk { track_alias: VarInt(4), parameters: [], track_properties: [KeyValuePair { key: VarInt(11), value: Bytes([48, 2]) }] })
-            /// ```
-            ///
-            /// Sending `CodecError::TrackPropertyValueOutOfRange` to the
-            /// no-close arm of this draft's `codec_session_error_code` instead —
-            /// which is the shape every rule reported under a shared variant
-            /// ends up in, the frame refused and the peer none the wiser:
-            ///
-            /// ```text
-            /// the client refused the frame but never closed the connection: Elapsed(())
-            /// ```
             #[tokio::test]
             async fn a_dynamic_groups_hidden_in_the_immutable_block_closes_the_quic_connection() {
                 common::init_crypto();
