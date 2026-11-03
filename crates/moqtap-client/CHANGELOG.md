@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The draft-22 error for a control message that does not narrow to draft-22 no longer has a run of spaces in the middle of its text.
+- Drafts 20-23: an accept no longer drops a stream of another type that arrives first.
+  `accept_subgroup_stream` holds fill and fetch streams for `accept_fill_stream` and
+  `accept_fetch_stream`, and they hold subgroup streams for it.
 
 ## [0.9.1] - 2026-10-30
 

@@ -60,6 +60,13 @@ pub const MOQT_ALPN: &[u8] = b"moqt-20";
 /// [`DraftVersion::decode_varint`] rather than assuming a width.
 pub const CONTROL_STREAM_TYPE: u64 = 0x2F00;
 
+/// The unidirectional stream type of FETCH_HEADER, 0x05 (draft-20 Section 3.4).
+///
+/// A fill fetch stream opens with it too: draft-20 Section 5.1.3 has a
+/// subscription carrying FILL_PARAMETERS open "a unidirectional stream
+/// beginning with a FETCH_HEADER".
+const FETCH_STREAM_TYPE: u64 = 0x05;
+
 /// The application error code a request stream is reset with when the
 /// requester abandons it: `CANCELLED`, 0x1.
 ///
@@ -1518,7 +1525,8 @@ pub struct Connection {
     /// The framed wire bytes of [`Self::server_setup`].
     server_setup_raw: Option<Vec<u8>>,
     /// Unidirectional streams accepted while `connect` was looking for the
-    /// peer's control stream, in arrival order.
+    /// peer's control stream, in arrival order, and then any stream that is
+    /// not a FETCH_HEADER one that a fetch or fill accept met.
     ///
     /// Data streams are allowed to arrive before the control streams on this
     /// draft, so the search cannot assume the first unidirectional stream is
@@ -1528,8 +1536,15 @@ pub struct Connection {
     /// this before it accepts anything new.
     ///
     /// Behind a mutex because that method takes `&self`. The lock is only
-    /// ever held for a `pop_front`, never across an await.
+    /// ever held for a push or a pop, never across an await.
     deferred_uni: Mutex<VecDeque<FramedRecvStream>>,
+    /// FETCH_HEADER streams, fetch and fill alike, accepted by a call that
+    /// wanted another kind, in arrival order. The type varint is still on
+    /// the front of each.
+    /// [`accept_fetch_stream`](Connection::accept_fetch_stream) and
+    /// [`accept_fill_stream`](Connection::accept_fill_stream) empty this
+    /// before they accept anything new.
+    deferred_fetch: Mutex<VecDeque<FramedRecvStream>>,
     /// Bidirectional streams the peer opened that
     /// [`accept_request_stream`](Connection::accept_request_stream) took off
     /// the transport but did not finish reading a first message from, because
@@ -1652,11 +1667,13 @@ impl Connection {
         // Receive half: the peer's control stream is whichever unidirectional
         // stream leads with CONTROL_STREAM_TYPE.
         let mut deferred_uni: VecDeque<FramedRecvStream> = VecDeque::new();
+        let mut deferred_fetch: VecDeque<FramedRecvStream> = VecDeque::new();
         let mut control_recv = loop {
             let recv = transport.accept_uni().await?;
             let mut framed = FramedRecvStream::new(recv, draft);
             match framed.peek_stream_type().await {
                 Ok(CONTROL_STREAM_TYPE) => break framed,
+                Ok(FETCH_STREAM_TYPE) => deferred_fetch.push_back(framed),
                 // Every other type is a data stream — and so is a stream that
                 // ended or failed before its type arrived, not because it is
                 // one but because there is nothing left to decide with. The
@@ -1706,6 +1723,7 @@ impl Connection {
             server_setup,
             server_setup_raw: raw_server_setup,
             deferred_uni: Mutex::new(deferred_uni),
+            deferred_fetch: Mutex::new(deferred_fetch),
             pending_inbound: Mutex::new(VecDeque::new()),
         })
     }
@@ -2972,13 +2990,15 @@ impl Connection {
     /// stream and set the rest aside rather than drop them. They are
     /// otherwise ordinary — the type varint `connect` read is still on the
     /// front of each one.
+    ///
+    /// A FETCH_HEADER stream, fetch or fill, is never read as a subgroup: it
+    /// is set aside for [`accept_fetch_stream`](Self::accept_fetch_stream)
+    /// and [`accept_fill_stream`](Self::accept_fill_stream), and this waits
+    /// for the next stream.
     pub async fn accept_subgroup_stream(
         &self,
     ) -> Result<(AnySubgroupHeader, FramedRecvStream), ConnectionError> {
-        let mut framed = match self.take_deferred_uni() {
-            Some(framed) => framed,
-            None => FramedRecvStream::new(self.transport.accept_uni().await?, self.draft),
-        };
+        let mut framed = self.next_non_fetch_uni().await?;
         let sid = framed.stream_id();
         let header = framed.read_subgroup_header().await?;
         self.emit(ClientEvent::StreamOpened {
@@ -3010,13 +3030,14 @@ impl Connection {
     ///
     /// Objects come off the returned stream with
     /// [`FramedRecvStream::read_fetch_object`].
+    ///
+    /// FETCH_HEADER streams another accept set aside come first, in arrival
+    /// order. A stream of any other type that arrives while this waits is
+    /// set aside for [`accept_subgroup_stream`](Self::accept_subgroup_stream).
     pub async fn accept_fetch_stream(
         &self,
     ) -> Result<(AnyFetchHeader, FramedRecvStream), ConnectionError> {
-        let mut framed = match self.take_deferred_uni() {
-            Some(framed) => framed,
-            None => FramedRecvStream::new(self.transport.accept_uni().await?, self.draft),
-        };
+        let mut framed = self.next_fetch_uni().await?;
         let sid = framed.stream_id();
         let header = framed.read_fetch_header().await?;
         self.emit(ClientEvent::StreamOpened {
@@ -3088,13 +3109,17 @@ impl Connection {
     /// [`EndpointError::UnrequestedFillStream`] when the header names a request
     /// that asked for no fill. Not fatal to the session — draft-20 states no
     /// rule for the case, and the stream is the only thing wrong.
+    ///
+    /// # Which stream it takes
+    ///
+    /// The same one [`accept_fetch_stream`](Self::accept_fetch_stream)
+    /// would: a FETCH_HEADER stream another accept set aside, else the next
+    /// one to arrive. Streams of any other type are set aside for
+    /// [`accept_subgroup_stream`](Self::accept_subgroup_stream).
     pub async fn accept_fill_stream(
         &mut self,
     ) -> Result<(AnyFetchHeader, FramedRecvStream), ConnectionError> {
-        let mut framed = match self.take_deferred_uni() {
-            Some(framed) => framed,
-            None => FramedRecvStream::new(self.transport.accept_uni().await?, self.draft),
-        };
+        let mut framed = self.next_fetch_uni().await?;
         let sid = framed.stream_id();
         let header = framed.read_fetch_header().await?;
         let request_id = VarInt::from_u64(header.request_id())
@@ -3125,20 +3150,68 @@ impl Connection {
     /// Synchronous on purpose: the guard is dropped before the caller awaits,
     /// so the lock is never held across a suspension point. A poisoned lock
     /// is recovered rather than propagated — nothing here can leave the queue
-    /// in a state a later reader could be misled by, since the only mutation
-    /// is a `pop_front`.
+    /// in a state a later reader could be misled by, since the only mutations
+    /// are a `push_back` and a `pop_front`.
     fn take_deferred_uni(&self) -> Option<FramedRecvStream> {
         self.deferred_uni.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).pop_front()
     }
 
-    /// How many unidirectional streams [`connect`](Self::connect) set aside
-    /// and [`accept_subgroup_stream`](Self::accept_subgroup_stream) has not
-    /// yet handed back.
+    /// Take the oldest FETCH_HEADER stream set aside, if any. Synchronous for
+    /// the reason [`take_deferred_uni`](Self::take_deferred_uni) is.
+    fn take_deferred_fetch(&self) -> Option<FramedRecvStream> {
+        self.deferred_fetch.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).pop_front()
+    }
+
+    fn set_aside(queue: &Mutex<VecDeque<FramedRecvStream>>, framed: FramedRecvStream) {
+        queue.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push_back(framed);
+    }
+
+    /// The next stream that is not a FETCH_HEADER stream: a set-aside one
+    /// first, then the transport's. FETCH_HEADER streams met on the way are
+    /// set aside. A stream whose type cannot be read is returned, so that the
+    /// header read reports why.
+    async fn next_non_fetch_uni(&self) -> Result<FramedRecvStream, ConnectionError> {
+        loop {
+            let mut framed = match self.take_deferred_uni() {
+                Some(framed) => framed,
+                None => FramedRecvStream::new(self.transport.accept_uni().await?, self.draft),
+            };
+            match framed.peek_stream_type().await {
+                Ok(FETCH_STREAM_TYPE) => Self::set_aside(&self.deferred_fetch, framed),
+                _ => return Ok(framed),
+            }
+        }
+    }
+
+    /// The next FETCH_HEADER stream: a set-aside one first, then the
+    /// transport's. Streams of other types met on the way are set aside. A
+    /// stream whose type cannot be read is returned, so that the header read
+    /// reports why.
+    async fn next_fetch_uni(&self) -> Result<FramedRecvStream, ConnectionError> {
+        if let Some(framed) = self.take_deferred_fetch() {
+            return Ok(framed);
+        }
+        loop {
+            let mut framed = FramedRecvStream::new(self.transport.accept_uni().await?, self.draft);
+            match framed.peek_stream_type().await {
+                Ok(stream_type) if stream_type != FETCH_STREAM_TYPE => {
+                    Self::set_aside(&self.deferred_uni, framed)
+                }
+                _ => return Ok(framed),
+            }
+        }
+    }
+
+    /// How many unidirectional streams have been set aside and not yet handed
+    /// back: those [`connect`](Self::connect) met before the control stream,
+    /// and those an accept met that were for another accept.
     ///
-    /// Zero for a peer that opened its control stream first, which is the
-    /// ordinary case.
+    /// Zero for a peer that opened its control stream first and a caller
+    /// that accepted each stream as the kind it is, which is the ordinary
+    /// case.
     pub fn deferred_stream_count(&self) -> usize {
         self.deferred_uni.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).len()
+            + self.deferred_fetch.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).len()
     }
 
     /// Send an object via datagram.
