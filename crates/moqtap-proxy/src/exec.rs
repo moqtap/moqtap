@@ -320,7 +320,7 @@ pub(crate) struct Engine<'a> {
     ///
     /// Datagrams are per-connection and unordered by definition, so they
     /// have no queue — and [`Action::Delay`] / [`Action::Hold`] are
-    /// refused there, so nothing can need one. `None` is not a degraded
+    /// refused there, so nothing can need one. `None` is not a fallback
     /// mode; it is the datagram site's shape.
     pub(crate) queue: Option<Queue<'a>>,
     /// Where [`Action::CloseSession`] is recorded.

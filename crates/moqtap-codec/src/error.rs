@@ -778,9 +778,10 @@ pub enum CodecError {
     /// A known Error Detail whose value is not the structure its Type defines.
     ///
     /// Draft-23 Section 9.4.2.1 gives the REDIRECT Error Detail a structure,
-    /// and Section 8.3: "If a receiver understands a Type, and the following
-    /// Value or Length/Value does not match the serialization defined by that
-    /// Type, the receiver MUST close the session with MALFORMED_KEY_VALUE."
+    /// and draft-23 Section 8.3: "If a receiver understands a Type, and the
+    /// following Value or Length/Value does not match the serialization defined
+    /// by that Type, the receiver MUST close the session with
+    /// MALFORMED_KEY_VALUE."
     #[error(
         "error detail of type {detail_type:#x} is not the structure that type defines: {detail}"
     )]

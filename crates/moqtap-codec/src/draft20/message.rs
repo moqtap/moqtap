@@ -1345,8 +1345,8 @@ pub struct FetchOk {
     /// "the end of the range covered by the FETCH response, using the same
     /// encoding as the FETCH request End Location (the last Object, plus 1; or
     /// 0 to indicate the entire Group)". Draft-20 Section 10.14 drops that
-    /// parenthesis entirely, and Sections 5.1.2 and 10.13 both say the Location
-    /// filter "specifies an inclusive range of Locations".
+    /// parenthesis entirely, and Section 5.1.2 and Section 10.13 both say the
+    /// Location filter "specifies an inclusive range of Locations".
     ///
     /// So both draft-19 conventions are gone: there is no plus one, and an
     /// Object of 0 now means object 0 rather than the whole group. The bytes

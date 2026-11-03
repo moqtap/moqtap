@@ -587,8 +587,9 @@ request_stream_gate!(
         }
     },
     FILTER_VALUES.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
-    "draft-20 Sections 5.1.2 and 10.13 make the filter's range inclusive: nothing adds one to \
-     the end, and a range that covers a whole Group has three fields rather than a fourth of 0"
+    "draft-20 Section 5.1.2 and draft-20 Section 10.13 make the filter's range inclusive: nothing \
+     adds one to the end, and a range that covers a whole Group has three fields rather than a \
+     fourth of 0"
 );
 request_stream_gate!(
     draft21,
@@ -607,8 +608,9 @@ request_stream_gate!(
         }
     },
     FILTER_VALUES.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
-    "draft-21 Sections 3.3.1 and 9.11 make the filter's range inclusive: nothing adds one to \
-     the end, and a range that covers a whole Group has three fields rather than a fourth of 0"
+    "draft-21 Section 3.3.1 and draft-21 Section 9.11 make the filter's range inclusive: nothing \
+     adds one to the end, and a range that covers a whole Group has three fields rather than a \
+     fourth of 0"
 );
 request_stream_gate!(
     draft22,
@@ -627,8 +629,8 @@ request_stream_gate!(
         }
     },
     FILTER_VALUES_22.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
-    "draft-22 Sections 3.2 and 3.3.1 make the range inclusive: nothing adds one to the end, \
-     and a range that covers a whole Group is type 0x03 rather than a fourth field of 0"
+    "draft-22 Section 3.2 and draft-22 Section 3.3.1 make the range inclusive: nothing adds one to \
+     the end, and a range that covers a whole Group is type 0x03 rather than a fourth field of 0"
 );
 request_stream_gate!(
     draft23,
@@ -647,6 +649,6 @@ request_stream_gate!(
         }
     },
     FILTER_VALUES_23.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
-    "draft-23 Sections 3.2 and 3.3.1 make the range inclusive: nothing adds one to the end, \
-     and a range that covers a whole Group is type 0x03 rather than a fourth field of 0"
+    "draft-23 Section 3.2 and draft-23 Section 3.3.1 make the range inclusive: nothing adds one to \
+     the end, and a range that covers a whole Group is type 0x03 rather than a fourth field of 0"
 );

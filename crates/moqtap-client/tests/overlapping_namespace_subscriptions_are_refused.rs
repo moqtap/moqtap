@@ -20,21 +20,22 @@
 //! Two namespace subscriptions on one session may not overlap, and the
 //! publisher is the end that says so.
 //!
-//! Drafts 07 through 11, Sections 6.13, 7.13, 7.13, 8.23 and 8.24: "A
+//! Draft-07 Section 6.13, draft-08 Section 7.13, draft-09 Section 7.13,
+//! draft-10 Section 8.23 and draft-11 Section 8.24: "A
 //! subscriber cannot make overlapping namespace subscriptions on a single
 //! session. Within a session, if a publisher receives a SUBSCRIBE_ANNOUNCES
 //! with a Track Namespace Prefix that is a prefix of an earlier
 //! SUBSCRIBE_ANNOUNCES or vice versa, it MUST respond with
 //! SUBSCRIBE_ANNOUNCES_ERROR, with error code SUBSCRIBE_ANNOUNCES_OVERLAP" -
-//! spelled `Namespace Prefix Overlap` from draft-11. Drafts 12, 13 and 14,
-//! Sections 8.27, 8.28 and 9.28, change the relation to "a prefix of, suffix
-//! of, or equal to an active SUBSCRIBE_ANNOUNCES", with the message renamed
-//! SUBSCRIBE_NAMESPACE from draft-13 and the code spelled
-//! `NAMESPACE_PREFIX_OVERLAP` at draft-14. Drafts 15, 16 and 17, Sections
-//! 9.23, 9.25 and 9.20, and drafts 18 and 19 Section 10.18: "a Track Namespace
-//! Prefix that shares a common prefix with an established namespace
-//! subscription, it MUST respond with REQUEST_ERROR with error code
-//! PREFIX_OVERLAP".
+//! spelled `Namespace Prefix Overlap` from draft-11. Draft-12 Section 8.27,
+//! draft-13 Section 8.28 and draft-14 Section 9.28 change the relation to "a
+//! prefix of, suffix of, or equal to an active SUBSCRIBE_ANNOUNCES", with the
+//! message renamed SUBSCRIBE_NAMESPACE from draft-13 and the code spelled
+//! `NAMESPACE_PREFIX_OVERLAP` at draft-14. Draft-15 Section 9.23,
+//! draft-16 Section 9.25, draft-17 Section 9.20, draft-18 Section 10.18 and
+//! draft-19 Section 10.18: "a Track Namespace Prefix that shares a common
+//! prefix with an established namespace subscription, it MUST respond with
+//! REQUEST_ERROR with error code PREFIX_OVERLAP".
 //!
 //! # The relation, and why all three wordings are read the same way
 //!

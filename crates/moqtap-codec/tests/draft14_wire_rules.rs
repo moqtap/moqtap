@@ -8,10 +8,10 @@
 //!
 //! # A message carrying a field its draft does not define
 //!
-//! Sections 9.24 and 9.29 give PUBLISH_NAMESPACE_OK and SUBSCRIBE_NAMESPACE_OK
-//! a Type, a Length and a Request ID, and nothing else. Both ends of a
-//! namespace handshake read these, so a codec that appends a field to them
-//! cannot complete a handshake with anyone but itself.
+//! Draft-14 Section 9.24 and draft-14 Section 9.29 give PUBLISH_NAMESPACE_OK
+//! and SUBSCRIBE_NAMESPACE_OK a Type, a Length and a Request ID, and nothing
+//! else. Both ends of a namespace handshake read these, so a codec that appends
+//! a field to them cannot complete a handshake with anyone but itself.
 //!
 //! # The declared Length is part of the message
 //!
@@ -631,11 +631,10 @@ fn the_reason_phrase_and_uri_caps_bind_the_reader() {
 ///
 /// FETCH's Fetch Type, SUBSCRIBE's Filter Type and SUBSCRIBE_OK's Content Exists
 /// each say which of the following fields are on the wire. This codec keeps the
-/// optional halves in `Option`s and an enum, so the two can disagree — and the
-/// encoder and the decoder resolved that disagreement differently. The encoder
-/// followed the body; the decoder follows the discriminator. A value that
-/// disagreed with itself therefore did not survive its own round trip, and the
-/// bytes that came out were a well-formed message of a different shape.
+/// optional halves in `Option`s and an enum, so the two can disagree — and an
+/// encoder that followed the body, against a decoder that follows the
+/// discriminator, would turn such a value into a well-formed message of a
+/// different shape. `encode` refuses it.
 #[test]
 fn a_discriminator_that_disagrees_with_its_body_is_refused() {
     let joining_body = FetchPayload::Joining { joining_request_id: vi(1), joining_start: vi(0) };

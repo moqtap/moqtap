@@ -349,7 +349,8 @@ fn a_delta_that_overruns_the_type_space_is_refused() {
 }
 
 // ============================================================
-// Subgroup and datagram Type validation (Sections 10.4.2, 10.3.1)
+// Subgroup and datagram Type validation (draft-16 Section 10.4.2,
+// draft-16 Section 10.3.1)
 // ============================================================
 
 /// Every subgroup header Type draft-16 Section 10.4.2 permits: the form

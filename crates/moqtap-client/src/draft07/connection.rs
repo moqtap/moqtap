@@ -98,24 +98,10 @@ impl From<crate::transport::DialError> for ConnectionError {
     /// `InvalidAddress`, `TlsConfig` and `Transport` are what a caller has to
     /// match on.
     ///
-    /// # `LocalSocket` joins `InvalidAddress`, and that is the answer being kept
-    ///
-    /// A socket this machine would not open has a variant of its own on
-    /// [`DialError`](crate::transport::DialError), and it still arrives here.
-    /// Not laziness about the churn — `InvalidAddress` is one of the
-    /// variants the facade reads as
-    /// [`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade), which
-    /// `is_local` answers **true** for, and a failed bind is this side's by
-    /// definition. Routing it to `Transport` would read better in prose and
-    /// would publish this machine's missing IPv6 stack as the relay's doing.
-    ///
-    /// The phase is not lost, only unread on this path. A caller measuring
-    /// which stage of a dial died reads
-    /// [`DialError::phase`](crate::transport::DialError::phase) off the dial
-    /// itself; a caller who arrived at this type named a `host:port` and asked
-    /// for a connection, not for a measurement, and a public variant here for
-    /// a distinction nothing on this path reads is churn with no reader, which
-    /// is why this impl stays flat.
+    /// A `LocalSocket` failure maps to `InvalidAddress`, which the facade reads
+    /// as this side's failure
+    /// ([`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade)). The dial
+    /// phase stays on [`DialError::phase`](crate::transport::DialError::phase).
     fn from(e: crate::transport::DialError) -> Self {
         match e {
             // Two variants, one arm, deliberately — see above.
@@ -1431,8 +1417,8 @@ impl Connection {
             CodecError::ControlMessageLengthMismatch { .. } => {
                 Some(SessionErrorCode::ProtocolViolation)
             }
-            // A Content Exists field that is neither zero nor one, Sections
-            // 6.15 and 6.19: "Any other value is a protocol error and MUST
+            // A Content Exists field that is neither zero nor one, Section 6.15
+            // and Section 6.19: "Any other value is a protocol error and MUST
             // terminate the session with a Protocol Violation". Drafts 08
             // through 14 carry the field and the same sentence; draft-15 is
             // where it goes.

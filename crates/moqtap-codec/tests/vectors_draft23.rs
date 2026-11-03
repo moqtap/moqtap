@@ -399,8 +399,8 @@ fn run_datagram_vectors(relative_path: &str) -> usize {
 /// Decode a draft-23 fetch stream and check every entry against the vectors.
 ///
 /// Resolution runs through `FetchObjectReader`, the same public API a consumer
-/// uses (Sections 11.4.1.1 and 11.4.2.1). End of Group and End of Track
-/// entries carry only their flags in the vectors.
+/// uses (draft-23 Section 11.4.1.1 and draft-23 Section 11.4.2.1). End of Group
+/// and End of Track entries carry only their flags in the vectors.
 fn run_fetch_vectors(relative_path: &str) -> usize {
     let path = vectors_dir().join(relative_path);
     let file = load_vectors(&path);

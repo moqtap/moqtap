@@ -1,10 +1,11 @@
 //! Where a Message Parameter is allowed to appear, and what happens when it
 //! appears anywhere else.
 //!
-//! Draft-17 Section 9.3.1, and drafts 18 and 19 Section 10.2.1: "Each Message
-//! Parameter definition indicates the message types in which it can appear. If
-//! it appears in some other type of message, the receiving endpoint MUST close
-//! the connection with a PROTOCOL_VIOLATION."
+//! Draft-17 Section 9.3.1, draft-18 Section 10.2.1 and
+//! draft-19 Section 10.2.1: "Each Message Parameter definition indicates the
+//! message types in which it can appear. If it appears in some other type of
+//! message, the receiving endpoint MUST close the connection with a
+//! PROTOCOL_VIOLATION."
 //!
 //! Every draft before them states the first sentence and reverses the second.
 //! Draft-16 Section 9.2.2, and drafts 07 through 15 under the older name Version
@@ -169,13 +170,14 @@ mod draft17 {
 
     use super::{remessaged, retyped, varint_parameter, vi, UNDEFINED_PARAMETER};
 
-    /// EXPIRES, Section 9.3.8. A varint, and named for four messages of which
-    /// SUBSCRIBE is not one.
+    /// EXPIRES, draft-17 Section 9.3.8. A varint, and named for four messages
+    /// of which SUBSCRIBE is not one.
     const EXPIRES: u64 = 0x08;
-    /// DELIVERY TIMEOUT, Section 9.3.3. A varint, and named for SUBSCRIBE.
+    /// DELIVERY TIMEOUT, draft-17 Section 9.3.3. A varint, and named for
+    /// SUBSCRIBE.
     const DELIVERY_TIMEOUT: u64 = 0x02;
-    /// LARGEST OBJECT, Section 9.3.9. Named for REQUEST_OK and not for the
-    /// PUBLISH_OK that is a separate message on this draft.
+    /// LARGEST OBJECT, draft-17 Section 9.3.9. Named for REQUEST_OK and not for
+    /// the PUBLISH_OK that is a separate message on this draft.
     const LARGEST_OBJECT: u64 = 0x09;
 
     const SUBSCRIBE_TYPE: u8 = 0x03;
@@ -209,8 +211,8 @@ mod draft17 {
         out
     }
 
-    /// Section 9.3.3 names SUBSCRIBE, so a SUBSCRIBE carrying DELIVERY TIMEOUT
-    /// survives both directions unchanged.
+    /// Draft-17 Section 9.3.3 names SUBSCRIBE, so a SUBSCRIBE carrying DELIVERY
+    /// TIMEOUT survives both directions unchanged.
     ///
     /// The control for every refusal below: without it, a decoder that refused
     /// all parameters everywhere would pass them all.
@@ -225,8 +227,8 @@ mod draft17 {
         assert_eq!(decoded, message);
     }
 
-    /// Section 9.3.8 names SUBSCRIBE_OK, PUBLISH, PUBLISH_OK and REQUEST_OK, and
-    /// SUBSCRIBE is none of them.
+    /// Draft-17 Section 9.3.8 names SUBSCRIBE_OK, PUBLISH, PUBLISH_OK and
+    /// REQUEST_OK, and SUBSCRIBE is none of them.
     ///
     /// Fails if draft-17's `parameter_in_scope` returns `true` from every arm.
     #[test]
@@ -262,9 +264,9 @@ mod draft17 {
         );
     }
 
-    /// Section 9.15 gives FETCH_OK a Parameters field and no parameter
-    /// definition in Section 9.3 names FETCH_OK, so every type this draft
-    /// defines is "some other type of message" there.
+    /// Draft-17 Section 9.15 gives FETCH_OK a Parameters field and no parameter
+    /// definition in draft-17 Section 9.3 names FETCH_OK, so every type this
+    /// draft defines is "some other type of message" there.
     #[test]
     fn a_fetch_ok_admits_no_parameter_this_draft_defines() {
         let carried = encoded(&fetch_ok(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
@@ -281,8 +283,8 @@ mod draft17 {
         );
     }
 
-    /// PUBLISH_OK is a message type of its own on this draft (0x1E), and Section
-    /// 9.3.9 does not name it.
+    /// PUBLISH_OK is a message type of its own on this draft (0x1E), and
+    /// draft-17 Section 9.3.9 does not name it.
     ///
     /// The two frames differ in one byte, and both are otherwise this codec's own
     /// output: REQUEST_OK and PUBLISH_OK carry the same body, so the bytes that
@@ -333,7 +335,7 @@ mod draft17 {
     }
 
     /// The parameter refused in a SUBSCRIBE above is carried in a SUBSCRIBE_OK,
-    /// which Section 9.3.8 does name.
+    /// which draft-17 Section 9.3.8 does name.
     ///
     /// One parameter, two messages, opposite outcomes: what decides is the pair
     /// and not either half of it.
@@ -367,11 +369,12 @@ mod draft18 {
 
     use super::{retyped, varint_parameter, vi, UNDEFINED_PARAMETER};
 
-    /// EXPIRES, Section 10.2.10.
+    /// EXPIRES, draft-18 Section 10.2.10.
     const EXPIRES: u64 = 0x08;
-    /// OBJECT_DELIVERY_TIMEOUT, Section 10.2.4. Named for SUBSCRIBE.
+    /// OBJECT_DELIVERY_TIMEOUT, draft-18 Section 10.2.4. Named for SUBSCRIBE.
     const OBJECT_DELIVERY_TIMEOUT: u64 = 0x02;
-    /// RENDEZVOUS TIMEOUT, Section 10.2.6. Named for SUBSCRIBE and nothing else.
+    /// RENDEZVOUS TIMEOUT, draft-18 Section 10.2.6. Named for SUBSCRIBE and
+    /// nothing else.
     const RENDEZVOUS_TIMEOUT: u64 = 0x04;
 
     const SUBSCRIBE_TYPE: u8 = 0x03;
@@ -401,7 +404,7 @@ mod draft18 {
         out
     }
 
-    /// Section 10.2.4 names SUBSCRIBE.
+    /// Draft-18 Section 10.2.4 names SUBSCRIBE.
     #[test]
     fn a_parameter_named_for_the_message_it_arrives_in_is_carried() {
         let message = subscribe(vec![varint_parameter(OBJECT_DELIVERY_TIMEOUT, 5_000)]);
@@ -412,7 +415,7 @@ mod draft18 {
         assert_eq!(decoded, message);
     }
 
-    /// Section 10.2.10 names SUBSCRIBE_OK, PUBLISH, PUBLISH_OK and
+    /// Draft-18 Section 10.2.10 names SUBSCRIBE_OK, PUBLISH, PUBLISH_OK and
     /// REQUEST_UPDATE_OK, and SUBSCRIBE is none of them.
     #[test]
     fn an_out_of_scope_parameter_ends_the_session() {
@@ -446,8 +449,8 @@ mod draft18 {
         );
     }
 
-    /// Section 10.13 gives FETCH_OK a Parameters field and no parameter
-    /// definition names FETCH_OK.
+    /// Draft-18 Section 10.13 gives FETCH_OK a Parameters field and no
+    /// parameter definition names FETCH_OK.
     #[test]
     fn a_fetch_ok_admits_no_parameter_this_draft_defines() {
         let carried = encoded(&ControlMessage::FetchOk(FetchOk {
@@ -472,10 +475,11 @@ mod draft18 {
 
     /// SUBSCRIBE_TRACKS admits what its own definitions name and nothing more.
     ///
-    /// Section 10.2.6 names SUBSCRIBE for RENDEZVOUS TIMEOUT, and this draft has
-    /// no sentence extending a SUBSCRIBE's parameters to a SUBSCRIBE_TRACKS.
-    /// Draft-19 Section 10.19.1 adds one, and the draft-19 test of the same name
-    /// asserts the opposite outcome from the same parameter and the same message.
+    /// Draft-18 Section 10.2.6 names SUBSCRIBE for RENDEZVOUS TIMEOUT, and this
+    /// draft has no sentence extending a SUBSCRIBE's parameters to a
+    /// SUBSCRIBE_TRACKS. Draft-19 Section 10.19.1 adds one, and the draft-19
+    /// test of the same name asserts the opposite outcome from the same
+    /// parameter and the same message.
     #[test]
     fn subscribe_tracks_does_not_inherit_a_subscribes_parameters() {
         let carried = encoded(&subscribe_tracks(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
@@ -494,11 +498,11 @@ mod draft18 {
 
     /// A REQUEST_OK is held to the union of the responses it carries.
     ///
-    /// Section 10.5 makes PUBLISH_OK, REQUEST_UPDATE_OK, TRACK_STATUS_OK,
-    /// SUBSCRIBE_NAMESPACE_OK and PUBLISH_NAMESPACE_OK all one wire type, and
-    /// which one a given REQUEST_OK is depends on the request it answers. So
-    /// EXPIRES is carried — Section 10.2.10 names PUBLISH_OK — while
-    /// RENDEZVOUS TIMEOUT, which no response names, is not.
+    /// Draft-18 Section 10.5 makes PUBLISH_OK, REQUEST_UPDATE_OK,
+    /// TRACK_STATUS_OK, SUBSCRIBE_NAMESPACE_OK and PUBLISH_NAMESPACE_OK all one
+    /// wire type, and which one a given REQUEST_OK is depends on the request it
+    /// answers. So EXPIRES is carried — draft-18 Section 10.2.10 names
+    /// PUBLISH_OK — while RENDEZVOUS TIMEOUT, which no response names, is not.
     #[test]
     fn a_request_ok_admits_what_any_of_its_responses_name() {
         let message = ControlMessage::RequestOk(RequestOk {
@@ -537,16 +541,18 @@ mod draft19 {
 
     use super::{bytes_parameter, retyped, varint_parameter, vi, UNDEFINED_PARAMETER};
 
-    /// EXPIRES, Section 10.2.15.
+    /// EXPIRES, draft-19 Section 10.2.15.
     const EXPIRES: u64 = 0x08;
-    /// OBJECT_DELIVERY_TIMEOUT, Section 10.2.4. Named for SUBSCRIBE.
+    /// OBJECT_DELIVERY_TIMEOUT, draft-19 Section 10.2.4. Named for SUBSCRIBE.
     const OBJECT_DELIVERY_TIMEOUT: u64 = 0x02;
-    /// RENDEZVOUS TIMEOUT, Section 10.2.6. Named for SUBSCRIBE.
+    /// RENDEZVOUS TIMEOUT, draft-19 Section 10.2.6. Named for SUBSCRIBE.
     const RENDEZVOUS_TIMEOUT: u64 = 0x04;
-    /// SUBGROUP_FILTER, Section 10.2.10, scoped by Section 5.1.3.
+    /// SUBGROUP_FILTER, draft-19 Section 10.2.10, scoped by
+    /// draft-19 Section 5.1.3.
     const SUBGROUP_FILTER: u64 = 0x25;
-    /// TRACK_PROPERTY_FILTER, Section 10.2.14, scoped by Section 5.1.3 to
-    /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
+    /// TRACK_PROPERTY_FILTER, draft-19 Section 10.2.14, scoped by
+    /// draft-19 Section 5.1.3 to SUBSCRIBE_TRACKS and the REQUEST_UPDATE for
+    /// one.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
 
     const SUBSCRIBE_TYPE: u8 = 0x03;
@@ -575,7 +581,7 @@ mod draft19 {
         out
     }
 
-    /// Section 10.2.4 names SUBSCRIBE.
+    /// Draft-19 Section 10.2.4 names SUBSCRIBE.
     #[test]
     fn a_parameter_named_for_the_message_it_arrives_in_is_carried() {
         let message = subscribe(vec![varint_parameter(OBJECT_DELIVERY_TIMEOUT, 5_000)]);
@@ -586,8 +592,8 @@ mod draft19 {
         assert_eq!(decoded, message);
     }
 
-    /// Section 10.2.15 names SUBSCRIBE_OK, PUBLISH and five response types, and
-    /// SUBSCRIBE is none of them.
+    /// Draft-19 Section 10.2.15 names SUBSCRIBE_OK, PUBLISH and five response
+    /// types, and SUBSCRIBE is none of them.
     #[test]
     fn an_out_of_scope_parameter_ends_the_session() {
         let carried = encoded(&subscribe(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
@@ -620,8 +626,8 @@ mod draft19 {
         );
     }
 
-    /// Section 10.13 gives FETCH_OK a Parameters field and no parameter
-    /// definition names FETCH_OK.
+    /// Draft-19 Section 10.13 gives FETCH_OK a Parameters field and no
+    /// parameter definition names FETCH_OK.
     #[test]
     fn a_fetch_ok_admits_no_parameter_this_draft_defines() {
         let carried = encoded(&ControlMessage::FetchOk(FetchOk {
@@ -644,9 +650,9 @@ mod draft19 {
         );
     }
 
-    /// Section 10.19.1: "Any Parameter that can be specified on a Subscription
-    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
-    /// specified."
+    /// Draft-19 Section 10.19.1: "Any Parameter that can be specified on a
+    /// Subscription (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless
+    /// otherwise specified."
     ///
     /// RENDEZVOUS TIMEOUT names SUBSCRIBE and nothing else, and arrives in a
     /// SUBSCRIBE_TRACKS unrefused because of that sentence alone. Draft-18 has no
@@ -665,7 +671,7 @@ mod draft19 {
 
     /// The one Range Filter a SUBSCRIBE may not carry.
     ///
-    /// Section 5.1.3 scopes four of the five to "a FETCH, SUBSCRIBE,
+    /// Draft-19 Section 5.1.3 scopes four of the five to "a FETCH, SUBSCRIBE,
     /// SUBSCRIBE_TRACKS, PUBLISH_OK, or REQUEST_UPDATE" and the Track Property
     /// filter to "a SUBSCRIBE_TRACKS message or REQUEST_UPDATE for it" — it
     /// selects tracks rather than objects, and a SUBSCRIBE has already named its
@@ -712,17 +718,18 @@ mod draft20 {
 
     use super::{bytes_parameter, retyped, varint_parameter, vi, UNDEFINED_PARAMETER};
 
-    /// EXPIRES, Section 10.2.16 — draft-19's 10.2.15, renumbered.
+    /// EXPIRES, draft-20 Section 10.2.16 — draft-19's 10.2.15, renumbered.
     const EXPIRES: u64 = 0x08;
-    /// OBJECT_DELIVERY_TIMEOUT, Section 10.2.4. Named for SUBSCRIBE.
+    /// OBJECT_DELIVERY_TIMEOUT, draft-20 Section 10.2.4. Named for SUBSCRIBE.
     const OBJECT_DELIVERY_TIMEOUT: u64 = 0x02;
-    /// RENDEZVOUS TIMEOUT, Section 10.2.6. Named for SUBSCRIBE.
+    /// RENDEZVOUS TIMEOUT, draft-20 Section 10.2.6. Named for SUBSCRIBE.
     const RENDEZVOUS_TIMEOUT: u64 = 0x04;
-    /// SUBGROUP_FILTER, Section 10.2.10, scoped by Section 5.1.4 —
-    /// draft-19's 5.1.3.
+    /// SUBGROUP_FILTER, draft-20 Section 10.2.10, scoped by
+    /// draft-20 Section 5.1.4 — draft-19's 5.1.3.
     const SUBGROUP_FILTER: u64 = 0x25;
-    /// TRACK_PROPERTY_FILTER, Section 10.2.14, scoped by Section 5.1.4 to
-    /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
+    /// TRACK_PROPERTY_FILTER, draft-20 Section 10.2.14, scoped by
+    /// draft-20 Section 5.1.4 to SUBSCRIBE_TRACKS and the REQUEST_UPDATE for
+    /// one.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
 
     /// LOCATION_FILTER, carried in a SUBSCRIBE_TRACKS by this codec's decision.
@@ -757,7 +764,7 @@ mod draft20 {
         out
     }
 
-    /// Section 10.2.4 names SUBSCRIBE.
+    /// Draft-20 Section 10.2.4 names SUBSCRIBE.
     #[test]
     fn a_parameter_named_for_the_message_it_arrives_in_is_carried() {
         let message = subscribe(vec![varint_parameter(OBJECT_DELIVERY_TIMEOUT, 5_000)]);
@@ -768,8 +775,8 @@ mod draft20 {
         assert_eq!(decoded, message);
     }
 
-    /// Section 10.2.16 names SUBSCRIBE_OK, PUBLISH and five response types, and
-    /// SUBSCRIBE is none of them.
+    /// Draft-20 Section 10.2.16 names SUBSCRIBE_OK, PUBLISH and five response
+    /// types, and SUBSCRIBE is none of them.
     #[test]
     fn an_out_of_scope_parameter_ends_the_session() {
         let carried = encoded(&subscribe(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
@@ -802,8 +809,8 @@ mod draft20 {
         );
     }
 
-    /// Section 10.14 gives FETCH_OK a Parameters field and no parameter
-    /// definition names FETCH_OK.
+    /// Draft-20 Section 10.14 gives FETCH_OK a Parameters field and no
+    /// parameter definition names FETCH_OK.
     #[test]
     fn a_fetch_ok_admits_no_parameter_this_draft_defines() {
         let carried = encoded(&ControlMessage::FetchOk(FetchOk {
@@ -828,13 +835,13 @@ mod draft20 {
 
     /// SUBSCRIBER_PRIORITY, OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS TIMEOUT,
     /// SUBGROUP_DELIVERY_TIMEOUT and NEW GROUP REQUEST name SUBSCRIBE and not
-    /// SUBSCRIBE_TRACKS, so Section 10.2.1 refuses each of them there.
+    /// SUBSCRIBE_TRACKS, so draft-20 Section 10.2.1 refuses each of them there.
     ///
-    /// Section 10.20.1's "Any Parameter that can be specified on a Subscription
-    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
-    /// specified" does not carry them: the definitions are the "otherwise". Each
-    /// parameter is first shown carried in a SUBSCRIBE, so the refusal is the
-    /// message's and not the parameter's.
+    /// Draft-20 Section 10.20.1's "Any Parameter that can be specified on a
+    /// Subscription (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless
+    /// otherwise specified" does not carry them: the definitions are the
+    /// "otherwise". Each parameter is first shown carried in a SUBSCRIBE, so
+    /// the refusal is the message's and not the parameter's.
     #[test]
     fn subscribe_tracks_refuses_a_subscribe_only_parameter() {
         for key in [OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS_TIMEOUT, 0x06, 0x20, 0x32] {
@@ -862,10 +869,10 @@ mod draft20 {
     /// LOCATION_FILTER and FILL_PARAMETERS are carried in a SUBSCRIBE_TRACKS,
     /// together and apart, although neither definition names it.
     ///
-    /// Section 10.20.1: "To join Tracks initiated via the resulting PUBLISHes,
-    /// the subscriber can specify a Location Filter and optionally include
-    /// FILL_PARAMETERS". This codec follows that sentence for these two and
-    /// for no other parameter. The filter is the two-field `{0, 0}` Next
+    /// Draft-20 Section 10.20.1: "To join Tracks initiated via the resulting
+    /// PUBLISHes, the subscriber can specify a Location Filter and optionally
+    /// include FILL_PARAMETERS". This codec follows that sentence for these two
+    /// and for no other parameter. The filter is the two-field `{0, 0}` Next
     /// Object form, and the FILL_PARAMETERS block is empty.
     #[test]
     fn subscribe_tracks_carries_a_location_filter_and_fill_parameters() {
@@ -887,7 +894,7 @@ mod draft20 {
 
     /// The one Range Filter a SUBSCRIBE may not carry.
     ///
-    /// Section 5.1.4 scopes four of the five to "a FETCH, SUBSCRIBE,
+    /// Draft-20 Section 5.1.4 scopes four of the five to "a FETCH, SUBSCRIBE,
     /// SUBSCRIBE_TRACKS, or REQUEST_UPDATE (on a subscription, from the
     /// subscriber only) message" and the Track Property filter to "a
     /// SUBSCRIBE_TRACKS message or REQUEST_UPDATE for it" — it
@@ -930,17 +937,18 @@ mod draft21 {
 
     use super::{bytes_parameter, retyped, varint_parameter, vi, UNDEFINED_PARAMETER};
 
-    /// EXPIRES, Section 9.20.17 — draft-19's 10.2.15, renumbered.
+    /// EXPIRES, draft-21 Section 9.20.17 — draft-19's 10.2.15, renumbered.
     const EXPIRES: u64 = 0x08;
-    /// OBJECT_DELIVERY_TIMEOUT, Section 9.20.5. Named for SUBSCRIBE.
+    /// OBJECT_DELIVERY_TIMEOUT, draft-21 Section 9.20.5. Named for SUBSCRIBE.
     const OBJECT_DELIVERY_TIMEOUT: u64 = 0x02;
-    /// RENDEZVOUS TIMEOUT, Section 9.20.7. Named for SUBSCRIBE.
+    /// RENDEZVOUS TIMEOUT, draft-21 Section 9.20.7. Named for SUBSCRIBE.
     const RENDEZVOUS_TIMEOUT: u64 = 0x04;
-    /// SUBGROUP_FILTER, Section 9.20.11, scoped by Section 3.3.2 —
-    /// draft-19's 5.1.3.
+    /// SUBGROUP_FILTER, draft-21 Section 9.20.11, scoped by
+    /// draft-21 Section 3.3.2 — draft-19's 5.1.3.
     const SUBGROUP_FILTER: u64 = 0x25;
-    /// TRACK_PROPERTY_FILTER, Section 9.20.15, scoped by Section 3.3.2 to
-    /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
+    /// TRACK_PROPERTY_FILTER, draft-21 Section 9.20.15, scoped by
+    /// draft-21 Section 3.3.2 to SUBSCRIBE_TRACKS and the REQUEST_UPDATE for
+    /// one.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
 
     /// LOCATION_FILTER, carried in a SUBSCRIBE_TRACKS by this codec's decision.
@@ -975,7 +983,7 @@ mod draft21 {
         out
     }
 
-    /// Section 9.20.5 names SUBSCRIBE.
+    /// Draft-21 Section 9.20.5 names SUBSCRIBE.
     #[test]
     fn a_parameter_named_for_the_message_it_arrives_in_is_carried() {
         let message = subscribe(vec![varint_parameter(OBJECT_DELIVERY_TIMEOUT, 5_000)]);
@@ -986,8 +994,8 @@ mod draft21 {
         assert_eq!(decoded, message);
     }
 
-    /// Section 9.20.17 names SUBSCRIBE_OK, PUBLISH and five response types, and
-    /// SUBSCRIBE is none of them.
+    /// Draft-21 Section 9.20.17 names SUBSCRIBE_OK, PUBLISH and five response
+    /// types, and SUBSCRIBE is none of them.
     #[test]
     fn an_out_of_scope_parameter_ends_the_session() {
         let carried = encoded(&subscribe(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
@@ -1020,7 +1028,7 @@ mod draft21 {
         );
     }
 
-    /// Section 9.12 gives FETCH_OK a Parameters field and no parameter
+    /// Draft-21 Section 9.12 gives FETCH_OK a Parameters field and no parameter
     /// definition names FETCH_OK.
     #[test]
     fn a_fetch_ok_admits_no_parameter_this_draft_defines() {
@@ -1046,13 +1054,13 @@ mod draft21 {
 
     /// SUBSCRIBER_PRIORITY, OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS TIMEOUT,
     /// SUBGROUP_DELIVERY_TIMEOUT and NEW GROUP REQUEST name SUBSCRIBE and not
-    /// SUBSCRIBE_TRACKS, so Section 9.20.1 refuses each of them there.
+    /// SUBSCRIBE_TRACKS, so draft-21 Section 9.20.1 refuses each of them there.
     ///
-    /// Section 9.18.1's "Any Parameter that can be specified on a Subscription
-    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
-    /// specified" does not carry them: the definitions are the "otherwise". Each
-    /// parameter is first shown carried in a SUBSCRIBE, so the refusal is the
-    /// message's and not the parameter's.
+    /// Draft-21 Section 9.18.1's "Any Parameter that can be specified on a
+    /// Subscription (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless
+    /// otherwise specified" does not carry them: the definitions are the
+    /// "otherwise". Each parameter is first shown carried in a SUBSCRIBE, so
+    /// the refusal is the message's and not the parameter's.
     #[test]
     fn subscribe_tracks_refuses_a_subscribe_only_parameter() {
         for key in [OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS_TIMEOUT, 0x06, 0x20, 0x32] {
@@ -1080,10 +1088,10 @@ mod draft21 {
     /// LOCATION_FILTER and FILL_PARAMETERS are carried in a SUBSCRIBE_TRACKS,
     /// together and apart, although neither definition names it.
     ///
-    /// Section 9.18.1: "To join Tracks initiated via the resulting PUBLISHes,
-    /// the subscriber can specify a Location Filter and optionally include
-    /// FILL_PARAMETERS". This codec follows that sentence for these two and
-    /// for no other parameter. The filter is the two-field `{0, 0}` Next
+    /// Draft-21 Section 9.18.1: "To join Tracks initiated via the resulting
+    /// PUBLISHes, the subscriber can specify a Location Filter and optionally
+    /// include FILL_PARAMETERS". This codec follows that sentence for these two
+    /// and for no other parameter. The filter is the two-field `{0, 0}` Next
     /// Object form, and the FILL_PARAMETERS block is empty.
     #[test]
     fn subscribe_tracks_carries_a_location_filter_and_fill_parameters() {
@@ -1105,7 +1113,7 @@ mod draft21 {
 
     /// The one Range Filter a SUBSCRIBE may not carry.
     ///
-    /// Section 3.3.2 scopes four of the five to "a FETCH, SUBSCRIBE,
+    /// Draft-21 Section 3.3.2 scopes four of the five to "a FETCH, SUBSCRIBE,
     /// SUBSCRIBE_TRACKS, or REQUEST_UPDATE (on a subscription, from the
     /// subscriber only) message" and the Track Property filter to "a
     /// SUBSCRIBE_TRACKS message or REQUEST_UPDATE for it" — it
@@ -1149,17 +1157,18 @@ mod draft22 {
 
     use super::{bytes_parameter, retyped, varint_parameter, vi, UNDEFINED_PARAMETER};
 
-    /// EXPIRES, Section 9.20.16 — draft-19's 10.2.15, renumbered.
+    /// EXPIRES, draft-22 Section 9.20.16 — draft-19's 10.2.15, renumbered.
     const EXPIRES: u64 = 0x08;
-    /// OBJECT_DELIVERY_TIMEOUT, Section 9.20.4. Named for SUBSCRIBE.
+    /// OBJECT_DELIVERY_TIMEOUT, draft-22 Section 9.20.4. Named for SUBSCRIBE.
     const OBJECT_DELIVERY_TIMEOUT: u64 = 0x02;
-    /// RENDEZVOUS TIMEOUT, Section 9.20.6. Named for SUBSCRIBE.
+    /// RENDEZVOUS TIMEOUT, draft-22 Section 9.20.6. Named for SUBSCRIBE.
     const RENDEZVOUS_TIMEOUT: u64 = 0x04;
-    /// SUBGROUP_FILTER, Section 9.20.10, scoped by Section 3.3.2 —
-    /// draft-19's 5.1.3.
+    /// SUBGROUP_FILTER, draft-22 Section 9.20.10, scoped by
+    /// draft-22 Section 3.3.2 — draft-19's 5.1.3.
     const SUBGROUP_FILTER: u64 = 0x25;
-    /// TRACK_PROPERTY_FILTER, Section 9.20.14, scoped by Section 3.3.2 to
-    /// SUBSCRIBE_TRACKS and the REQUEST_UPDATE for one.
+    /// TRACK_PROPERTY_FILTER, draft-22 Section 9.20.14, scoped by
+    /// draft-22 Section 3.3.2 to SUBSCRIBE_TRACKS and the REQUEST_UPDATE for
+    /// one.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
 
     /// LOCATION_FILTER, carried in a SUBSCRIBE_TRACKS by this codec's decision.
@@ -1194,7 +1203,7 @@ mod draft22 {
         out
     }
 
-    /// Section 9.20.4 names SUBSCRIBE.
+    /// Draft-22 Section 9.20.4 names SUBSCRIBE.
     #[test]
     fn a_parameter_named_for_the_message_it_arrives_in_is_carried() {
         let message = subscribe(vec![varint_parameter(OBJECT_DELIVERY_TIMEOUT, 5_000)]);
@@ -1205,8 +1214,8 @@ mod draft22 {
         assert_eq!(decoded, message);
     }
 
-    /// Section 9.20.16 names SUBSCRIBE_OK, PUBLISH and five response types, and
-    /// SUBSCRIBE is none of them.
+    /// Draft-22 Section 9.20.16 names SUBSCRIBE_OK, PUBLISH and five response
+    /// types, and SUBSCRIBE is none of them.
     #[test]
     fn an_out_of_scope_parameter_ends_the_session() {
         let carried = encoded(&subscribe(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
@@ -1239,7 +1248,7 @@ mod draft22 {
         );
     }
 
-    /// Section 9.12 gives FETCH_OK a Parameters field and no parameter
+    /// Draft-22 Section 9.12 gives FETCH_OK a Parameters field and no parameter
     /// definition names FETCH_OK.
     #[test]
     fn a_fetch_ok_admits_no_parameter_this_draft_defines() {
@@ -1265,13 +1274,13 @@ mod draft22 {
 
     /// SUBSCRIBER_PRIORITY, OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS TIMEOUT,
     /// SUBGROUP_DELIVERY_TIMEOUT and NEW GROUP REQUEST name SUBSCRIBE and not
-    /// SUBSCRIBE_TRACKS, so Section 9.20.1 refuses each of them there.
+    /// SUBSCRIBE_TRACKS, so draft-22 Section 9.20.1 refuses each of them there.
     ///
-    /// Section 3.6.2's "Any Parameter that can be specified on a Subscription
-    /// (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless otherwise
-    /// specified" does not carry them: the definitions are the "otherwise". Each
-    /// parameter is first shown carried in a SUBSCRIBE, so the refusal is the
-    /// message's and not the parameter's.
+    /// Draft-22 Section 3.6.2's "Any Parameter that can be specified on a
+    /// Subscription (ie: in SUBSCRIBE) is valid in SUBSCRIBE_TRACKS, unless
+    /// otherwise specified" does not carry them: the definitions are the
+    /// "otherwise". Each parameter is first shown carried in a SUBSCRIBE, so
+    /// the refusal is the message's and not the parameter's.
     #[test]
     fn subscribe_tracks_refuses_a_subscribe_only_parameter() {
         for key in [OBJECT_DELIVERY_TIMEOUT, RENDEZVOUS_TIMEOUT, 0x06, 0x20, 0x32] {
@@ -1297,12 +1306,13 @@ mod draft22 {
     }
 
     /// LOCATION_FILTER and FILL_PARAMETERS are carried in a SUBSCRIBE_TRACKS,
-    /// together and apart, although Section 9.18's list leaves both out.
+    /// together and apart, although draft-22 Section 9.18's list leaves both
+    /// out.
     ///
-    /// Section 3.6.2: "To join Tracks initiated via the resulting PUBLISHes,
-    /// the subscriber can specify a Location Filter and optionally include
-    /// FILL_PARAMETERS". This codec follows that sentence for these two and
-    /// for no other parameter. The filter is filter type 0x05, Next Object,
+    /// Draft-22 Section 3.6.2: "To join Tracks initiated via the resulting
+    /// PUBLISHes, the subscriber can specify a Location Filter and optionally
+    /// include FILL_PARAMETERS". This codec follows that sentence for these two
+    /// and for no other parameter. The filter is filter type 0x05, Next Object,
     /// and the FILL_PARAMETERS block is empty.
     #[test]
     fn subscribe_tracks_carries_a_location_filter_and_fill_parameters() {
@@ -1324,7 +1334,7 @@ mod draft22 {
 
     /// The one Range Filter a SUBSCRIBE may not carry.
     ///
-    /// Section 3.3.2 scopes four of the five to "a FETCH, SUBSCRIBE,
+    /// Draft-22 Section 3.3.2 scopes four of the five to "a FETCH, SUBSCRIBE,
     /// SUBSCRIBE_TRACKS, or REQUEST_UPDATE (on a subscription, from the
     /// subscriber only) message" and the Track Property filter to "a
     /// SUBSCRIBE_TRACKS message or REQUEST_UPDATE for it" — it
@@ -1369,19 +1379,21 @@ mod draft23 {
 
     use super::{bytes_parameter, retyped, varint_parameter, vi, UNDEFINED_PARAMETER};
 
-    /// EXPIRES, Section 9.19.16.
+    /// EXPIRES, draft-23 Section 9.19.16.
     const EXPIRES: u64 = 0x08;
-    /// OBJECT_DELIVERY_TIMEOUT, Section 9.19.4.
+    /// OBJECT_DELIVERY_TIMEOUT, draft-23 Section 9.19.4.
     const OBJECT_DELIVERY_TIMEOUT: u64 = 0x02;
-    /// RENDEZVOUS TIMEOUT, Section 9.19.6.
+    /// RENDEZVOUS TIMEOUT, draft-23 Section 9.19.6.
     const RENDEZVOUS_TIMEOUT: u64 = 0x04;
-    /// SUBGROUP_FILTER, Section 9.19.10, scoped by Section 3.3.2.
+    /// SUBGROUP_FILTER, draft-23 Section 9.19.10, scoped by
+    /// draft-23 Section 3.3.2.
     const SUBGROUP_FILTER: u64 = 0x25;
-    /// TRACK_PROPERTY_FILTER, Section 9.19.14, scoped by Section 3.3.2.
+    /// TRACK_PROPERTY_FILTER, draft-23 Section 9.19.14, scoped by
+    /// draft-23 Section 3.3.2.
     const TRACK_PROPERTY_FILTER: u64 = 0x29;
-    /// NEW GROUP REQUEST, Section 9.19.19.
+    /// NEW GROUP REQUEST, draft-23 Section 9.19.19.
     const NEW_GROUP_REQUEST: u64 = 0x32;
-    /// SUBSCRIBE_TRACKS_ID, Section 9.19.21.
+    /// SUBSCRIBE_TRACKS_ID, draft-23 Section 9.19.21.
     const SUBSCRIBE_TRACKS_ID: u64 = 0x36;
 
     const SUBSCRIBE_TYPE: u8 = 0x03;
@@ -1411,7 +1423,7 @@ mod draft23 {
         out
     }
 
-    /// Section 9.19.4 names SUBSCRIBE.
+    /// Draft-23 Section 9.19.4 names SUBSCRIBE.
     #[test]
     fn a_parameter_named_for_the_message_it_arrives_in_is_carried() {
         let message = subscribe(vec![varint_parameter(OBJECT_DELIVERY_TIMEOUT, 5_000)]);
@@ -1421,8 +1433,8 @@ mod draft23 {
         assert_eq!(decoded, message);
     }
 
-    /// Section 9.19.16: EXPIRES "MAY appear in PUBLISH, SUBSCRIBE_OK, FETCH_OK,
-    /// or any REQUEST_OK", and SUBSCRIBE is none of them.
+    /// Draft-23 Section 9.19.16: EXPIRES "MAY appear in PUBLISH, SUBSCRIBE_OK,
+    /// FETCH_OK, or any REQUEST_OK", and SUBSCRIBE is none of them.
     #[test]
     fn an_out_of_scope_parameter_ends_the_session() {
         let carried = encoded(&subscribe(vec![varint_parameter(UNDEFINED_PARAMETER, 30)]));
@@ -1437,11 +1449,12 @@ mod draft23 {
         assert_eq!(subscribe(vec![varint_parameter(EXPIRES, 30)]).encode(&mut out), Err(refusal));
     }
 
-    /// Section 9.17's list adds OBJECT_DELIVERY_TIMEOUT, SUBGROUP_DELIVERY_TIMEOUT,
-    /// SUBSCRIBER_PRIORITY, LOCATION_FILTER and FILL_PARAMETERS to
-    /// SUBSCRIBE_TRACKS. Section 3.6.2: "Parameters that only apply to a
-    /// SUBSCRIBE for a single Track, such as RENDEZVOUS_TIMEOUT and
-    /// NEW_GROUP_REQUEST, cannot appear in SUBSCRIBE_TRACKS."
+    /// Draft-23 Section 9.17's list adds OBJECT_DELIVERY_TIMEOUT,
+    /// SUBGROUP_DELIVERY_TIMEOUT, SUBSCRIBER_PRIORITY, LOCATION_FILTER and
+    /// FILL_PARAMETERS to SUBSCRIBE_TRACKS. Draft-23 Section 3.6.2: "Parameters
+    /// that only apply to a SUBSCRIBE for a single Track, such as
+    /// RENDEZVOUS_TIMEOUT and NEW_GROUP_REQUEST, cannot appear in
+    /// SUBSCRIBE_TRACKS."
     #[test]
     fn subscribe_tracks_takes_its_own_list() {
         for parameters in [
@@ -1467,8 +1480,8 @@ mod draft23 {
         }
     }
 
-    /// Section 9.19.21: SUBSCRIBE_TRACKS_ID "appears only in a PUBLISH sent as
-    /// a result of a SUBSCRIBE_TRACKS".
+    /// Draft-23 Section 9.19.21: SUBSCRIBE_TRACKS_ID "appears only in a PUBLISH
+    /// sent as a result of a SUBSCRIBE_TRACKS".
     #[test]
     fn subscribe_tracks_id_is_carried_in_publish_alone() {
         let publish = ControlMessage::Publish(Publish {
@@ -1494,7 +1507,7 @@ mod draft23 {
         );
     }
 
-    /// No parameter definition names NAMESPACE (Section 9.15).
+    /// No parameter definition names NAMESPACE (draft-23 Section 9.15).
     #[test]
     fn namespace_admits_no_parameter_this_draft_defines() {
         let message = ControlMessage::Namespace(Namespace {
@@ -1508,8 +1521,8 @@ mod draft23 {
         );
     }
 
-    /// The one Range Filter a SUBSCRIBE may not carry. Section 3.3.2: "The
-    /// Track Property filter parameter MAY appear multiple times in a
+    /// The one Range Filter a SUBSCRIBE may not carry. Draft-23 Section 3.3.2:
+    /// "The Track Property filter parameter MAY appear multiple times in a
     /// SUBSCRIBE_TRACKS message or REQUEST_UPDATE for it."
     #[test]
     fn a_track_property_filter_is_refused_where_the_other_filters_are_carried() {
@@ -1544,13 +1557,14 @@ mod draft16 {
 
     use super::{varint_parameter, vi};
 
-    /// EXPIRES, Section 9.2.2.6: it "MAY appear in SUBSCRIBE_OK, PUBLISH or
-    /// PUBLISH_OK". SUBSCRIBE is not among them, on this draft either.
+    /// EXPIRES, draft-16 Section 9.2.2.6: it "MAY appear in SUBSCRIBE_OK,
+    /// PUBLISH or PUBLISH_OK". SUBSCRIBE is not among them, on this draft
+    /// either.
     const EXPIRES: u64 = 0x08;
 
-    /// Section 9.2.2: "Each message parameter definition indicates the message
-    /// types in which it can appear. If it appears in some other type of message,
-    /// it MUST be ignored."
+    /// Draft-16 Section 9.2.2: "Each message parameter definition indicates the
+    /// message types in which it can appear. If it appears in some other type
+    /// of message, it MUST be ignored."
     ///
     /// The same frame draft-17 ends a session over, on the draft immediately
     /// below it, carried in both directions. Ten drafts say this and three say

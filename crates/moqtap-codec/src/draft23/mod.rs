@@ -11,7 +11,7 @@
 //!   Track Properties (Section 9.3).
 //! - **REQUEST_ERROR ends in Error Details**, Key-Value-Pairs (Section
 //!   9.4.1): REDIRECT 0x01, which MUST accompany Error Code REDIRECT, and
-//!   UNSUPPORTED_PROPERTY 0x02 (Sections 9.4.2.1, 9.4.2.2).
+//!   UNSUPPORTED_PROPERTY 0x02 (Section 9.4.2.1, Section 9.4.2.2).
 //! - **NAMESPACE carries a parameter block** (Section 9.15, Figure 20).
 //! - **`FILL_PARAMETERS` (0x23) is a count, not a length** (Section 9.19.15),
 //!   and may appear in PUBLISH and SUBSCRIBE_TRACKS.
@@ -24,8 +24,8 @@
 //!   and End of Track `0x81`.
 //! - **Session termination codes 0x200-0x203, 0x300-0x306 and 0x400-0x401**,
 //!   and 0x6 MALFORMED_KEY_VALUE (Section 12.2). REQUEST_ERROR has
-//!   UNAVAILABLE 0xA and PUBLISH_DONE has EXPIRED_AUTH_TOKEN 0x7 (Sections
-//!   12.3 and 12.4); neither REQUEST_ERROR 0x30 nor stream reset 0x6 is
+//!   UNAVAILABLE 0xA and PUBLISH_DONE has EXPIRED_AUTH_TOKEN 0x7 (Section 12.3
+//!   and Section 12.4); neither REQUEST_ERROR 0x30 nor stream reset 0x6 is
 //!   assigned.
 //!
 //! # Where this codec had to choose

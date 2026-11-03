@@ -653,7 +653,7 @@ async fn serialize_after_an_unknown_stream_proceeds_and_says_so() {
 /// This is the gate on the rule that a serialize is released on every
 /// termination path *without exception*. A reset is the path an enumerated
 /// list forgets, and forgetting
-/// it does not fail loudly — it degrades to a `max_hold` stall on a
+/// it does not fail loudly — it falls back to a `max_hold` stall on a
 /// *different* stream than the one that broke.
 ///
 /// The window is [`RESUME_WINDOW`] against [`MAX_HOLD`] pinned in

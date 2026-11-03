@@ -20,9 +20,10 @@
 //! a SUBSCRIBE, FETCH, REQUEST_UPDATE (for a subscription or FETCH),
 //! PUBLISH_OK message". Draft-16 Section 9.2.2.5: SUBSCRIPTION_FILTER "MAY
 //! appear in a SUBSCRIBE, PUBLISH_OK or REQUEST_UPDATE (for a subscription)
-//! message", and Sections 9.2.2.8 and 9.2.2.9 say the same of FORWARD and
-//! NEW_GROUP_REQUEST. AUTHORIZATION TOKEN and DELIVERY TIMEOUT name
-//! REQUEST_UPDATE with no qualifier and are admitted whatever the kind.
+//! message", and draft-16 Section 9.2.2.8 and draft-16 Section 9.2.2.9 say
+//! the same of FORWARD and NEW_GROUP_REQUEST. AUTHORIZATION TOKEN and DELIVERY
+//! TIMEOUT name REQUEST_UPDATE with no qualifier and are admitted whatever the
+//! kind.
 //!
 //! # The rule this file deliberately does not enforce
 //!

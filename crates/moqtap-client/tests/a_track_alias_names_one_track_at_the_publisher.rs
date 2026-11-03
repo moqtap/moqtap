@@ -273,7 +273,7 @@ macro_rules! publisher_alias_gates {
                 assert_eq!(
                     err.session_error_code(),
                     Some(SessionErrorCode::DuplicateTrackAlias),
-                    "Sections {} and {} answer {what} with Duplicate Track Alias and \
+                    "Section {} and Section {} answer {what} with Duplicate Track Alias and \
                      with no other code; the endpoint offered {:?}",
                     $sub_sec,
                     $err_sec,

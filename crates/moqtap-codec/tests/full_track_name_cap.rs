@@ -113,7 +113,8 @@ fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     wire
 }
 
-/// [`framed`] with draft-23's `vi64` Message Length (Section 9, Figure 6).
+/// [`framed`] with draft-23's `vi64` Message Length (draft-23 Section 9,
+/// Figure 6).
 #[cfg(feature = "draft23")]
 fn framed_vi64(type_id: u8, payload: &[u8]) -> Vec<u8> {
     use moqtap_codec::varint::{Moqt18, VarInt};
@@ -320,8 +321,8 @@ full_track_name_cap_gate_moqt!(
     moqtap_codec::varint::Moqt18,
     1
 );
-// Draft-20's SUBSCRIBE is byte-identical to draft-19's, and Section 2.4.1's cap
-// is unchanged.
+// Draft-20's SUBSCRIBE is byte-identical to draft-19's, and
+// draft-20 Section 2.4.1's cap is unchanged.
 full_track_name_cap_gate_moqt!(
     draft20_caps_the_full_track_name,
     "draft20",
@@ -344,7 +345,7 @@ full_track_name_cap_gate_moqt!(
     1
 );
 // Draft-23 frames the message with a `vi64` Length; the SUBSCRIBE fields and
-// Section 8.7's cap are draft-22's.
+// draft-23 Section 8.7's cap are draft-22's.
 full_track_name_cap_gate_moqt!(
     draft23_caps_the_full_track_name,
     "draft23",

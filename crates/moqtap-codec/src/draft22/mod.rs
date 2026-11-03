@@ -65,7 +65,7 @@
 //!   Draft-19's fetch end was "the last Object, plus 1; or 0 to indicate the
 //!   entire Group"; neither convention exists here, and a draft-19 encoder
 //!   ported forward with its end-location arithmetic intact fetches one object
-//!   too many (Sections 3.3.1, 9.12)
+//!   too many (Section 3.3.1, Section 9.12)
 //! - **`FILL_PARAMETERS` (0x23)** is a length-prefixed parameter whose value is
 //!   a nested parameter block, and whose mere presence on a SUBSCRIBE or a
 //!   REQUEST_UPDATE asks the publisher to open a fill fetch stream
@@ -82,10 +82,10 @@
 //!   `PUBLISH_OK`; a subscriber changes anything else with a REQUEST_UPDATE
 //!   after it (Section 9.20)
 //! - The data-plane headers call their leading field `Type Flags` and state
-//!   the validity rules in prose after the figure. Sections 11.2.1 and 11.3.1
-//!   give **different** rule sets — subgroup's reserved bit 4 must be 1,
-//!   datagram's must be 0, and subgroup has no "unspecified bit" clause
-//!   because bits 0-6 are all specified for it
+//!   the validity rules in prose after the figure. Section 11.2.1 and
+//!   Section 11.3.1 give **different** rule sets — subgroup's reserved bit 4
+//!   must be 1, datagram's must be 0, and subgroup has no "unspecified bit"
+//!   clause because bits 0-6 are all specified for it
 //! - A fetch stream has a third End of Range marker, `End of Timed-Out Range`
 //!   (Serialization Flags `0x20C`), for the Objects a relay abandoned when its
 //!   `FILL_TIMEOUT` budget ran out (Section 11.4.1, Table 8)

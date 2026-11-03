@@ -291,24 +291,10 @@ impl From<crate::transport::DialError> for ConnectionError {
     /// Maps a dial failure onto the variants this error already has, so a
     /// caller matches `InvalidAddress` or `TlsConfig`.
     ///
-    /// # `LocalSocket` joins `InvalidAddress`, and that is the answer being kept
-    ///
-    /// A socket this machine would not open has a variant of its own on
-    /// [`DialError`](crate::transport::DialError), and it still arrives here.
-    /// Not laziness about the churn — `InvalidAddress` is one of the
-    /// variants the facade reads as
-    /// [`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade), which
-    /// `is_local` answers **true** for, and a failed bind is this side's by
-    /// definition. Routing it to `Transport` would read better in prose and
-    /// would publish this machine's missing IPv6 stack as the relay's doing.
-    ///
-    /// The phase is not lost, only unread on this path. A caller measuring
-    /// which stage of a dial died reads
-    /// [`DialError::phase`](crate::transport::DialError::phase) off the dial
-    /// itself; a caller who arrived at this type named a `host:port` and asked
-    /// for a connection, not for a measurement, and a public variant here for
-    /// a distinction nothing on this path reads is churn with no reader, which
-    /// is why this impl stays flat.
+    /// A `LocalSocket` failure maps to `InvalidAddress`, which the facade reads
+    /// as this side's failure
+    /// ([`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade)). The dial
+    /// phase stays on [`DialError::phase`](crate::transport::DialError::phase).
     fn from(e: crate::transport::DialError) -> Self {
         match e {
             // Two variants, one arm, deliberately — see above.
@@ -1072,10 +1058,10 @@ pub enum RequestOrigin {
 /// All five of the messages Table 5 marks "Request" without their beginning one:
 /// REQUEST_UPDATE modifies the request its stream carries (Section 10.9),
 /// NAMESPACE and NAMESPACE_DONE report namespaces on the SUBSCRIBE_NAMESPACE
-/// stream that asked for them (Sections 10.17 and 10.18), PUBLISH_SKIPPED
-/// names a track on the SUBSCRIBE_TRACKS stream that asked for it (Section
-/// 10.20), and PUBLISH_STATE_NOTIFY — new in draft-20 — reports a change on the
-/// subscription's own stream (Section 10.10).
+/// stream that asked for them (Section 10.17 and Section 10.18),
+/// PUBLISH_SKIPPED names a track on the SUBSCRIBE_TRACKS stream that asked for
+/// it (Section 10.20), and PUBLISH_STATE_NOTIFY — new in draft-20 — reports a
+/// change on the subscription's own stream (Section 10.10).
 ///
 /// `Endpoint::receive_message` already closes the session over all five when
 /// they arrive on the control stream. Without this the client would write on the
@@ -2760,10 +2746,10 @@ impl Connection {
     /// Send a FETCH for one range, carried as a `LOCATION_FILTER` parameter.
     ///
     /// **The range is inclusive at both ends.** Draft-19's `End Location` was
-    /// "the last Object, plus 1; or 0 to indicate the entire Group"; draft-20
-    /// Sections 5.1.2 and 10.13 both call the filter's range inclusive and
-    /// delete both conventions, and nothing here restores them. Port a
-    /// draft-19 call by removing the `+ 1`.
+    /// "the last Object, plus 1; or 0 to indicate the entire Group";
+    /// draft-20 Section 5.1.2 and draft-20 Section 10.13 both call the filter's
+    /// range inclusive and delete both conventions, and nothing here restores
+    /// them. Port a draft-19 call by removing the `+ 1`.
     pub async fn fetch_range(
         &mut self,
         track_namespace: TrackNamespace,
@@ -3107,7 +3093,7 @@ impl Connection {
     /// endpoint kept the order when the subscription asked for the fill — see
     /// [`Endpoint::fill_group_order`](crate::draft20::endpoint::Endpoint::fill_group_order)
     /// and [`fill::group_order`](crate::draft20::fill::group_order) for the
-    /// three-step resolution Sections 5.1.3 and 10.2.8 define.
+    /// three-step resolution Section 5.1.3 and Section 10.2.8 define.
     ///
     /// Doing it here rather than leaving it to the caller is the difference
     /// between an error and a wrong answer: a reader started in the wrong
@@ -3505,8 +3491,8 @@ impl Connection {
     /// decoded because the peer broke a rule draft-20 answers with a close.
     ///
     /// Every variant listed here comes from a sentence in the draft that names
-    /// the consequence: the reason phrase and GOAWAY URI maxima (Sections
-    /// 1.4.4 and 10.4), the KVP value maximum and the delta-encoded
+    /// the consequence: the reason phrase and GOAWAY URI maxima (Section 1.4.4
+    /// and Section 10.4), the KVP value maximum and the delta-encoded
     /// type overflow (Section 1.4.3), the duplicate-parameter rule (Section
     /// 10.2), the Track Namespace field, count and length rules
     /// (Section 2.4.1), and the Object ID delta wrap (Section 11.4.2). Each of

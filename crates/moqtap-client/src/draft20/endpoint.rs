@@ -10,9 +10,9 @@
 //!   four location varints. `joining_fetch` and `absolute_joining_fetch` are
 //!   gone, as is `INVALID_JOINING_REQUEST_ID` (REQUEST_ERROR 0x32) and every
 //!   rule this endpoint enforced with it.
-//! * **Fill fetch streams replace the joining fetch** (Sections 5.1.3 and
-//!   5.1.3.1). A SUBSCRIBE or REQUEST_UPDATE carrying `FILL_PARAMETERS` (0x23)
-//!   asks the publisher for a unidirectional stream that opens with a
+//! * **Fill fetch streams replace the joining fetch** (Section 5.1.3 and
+//!   Section 5.1.3.1). A SUBSCRIBE or REQUEST_UPDATE carrying `FILL_PARAMETERS`
+//!   (0x23) asks the publisher for a unidirectional stream that opens with a
 //!   FETCH_HEADER carrying the *subscription's* Request ID. This endpoint
 //!   records the request in [`Endpoint::fill_requested`] so an arriving
 //!   FETCH_HEADER can be told from a fetch's, and counts the streams so a
@@ -20,8 +20,9 @@
 //! * **PUBLISH_STATE_NOTIFY (0x22) is new** (Section 10.10): unilateral, from
 //!   the publisher, on a subscription's stream, answered with nothing and
 //!   explicitly outside the `MAX_REQUEST_UPDATES` ceiling.
-//! * **Ranges are inclusive at both ends** (Sections 5.1.2, 10.13, 10.14), so
-//!   no end location in this module carries draft-19's `+ 1`.
+//! * **Ranges are inclusive at both ends** (Section 5.1.2, Section 10.13,
+//!   Section 10.14), so no end location in this module carries draft-19's
+//!   `+ 1`.
 //! * `INCLUDE_PROPERTIES` (0x35) is new; `SUBSCRIPTION_ENDED` (PUBLISH_DONE
 //!   0x3) and `VERSION_NEGOTIATION_FAILED` (session 0x15) are unassigned.
 //! * Six parameters dropped PUBLISH_OK from their scope and several gained
@@ -326,12 +327,12 @@ pub enum EndpointError {
     /// A namespace-scoped request's response half opened with something other
     /// than REQUEST_OK or REQUEST_ERROR.
     ///
-    /// Draft-20 Sections 10.19 and 10.20, of SUBSCRIBE_NAMESPACE and
-    /// SUBSCRIBE_TRACKS alike: "The publisher will respond with REQUEST_OK or
-    /// REQUEST_ERROR on the response half of the stream. If the subscriber
-    /// receives any message other than a REQUEST_OK or a REQUEST_ERROR as the
-    /// first message on the response half of the stream, then it MUST close the
-    /// session with a PROTOCOL_VIOLATION."
+    /// Draft-20 Section 10.19 and draft-20 Section 10.20, of
+    /// SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS alike: "The publisher will
+    /// respond with REQUEST_OK or REQUEST_ERROR on the response half of the
+    /// stream. If the subscriber receives any message other than a REQUEST_OK
+    /// or a REQUEST_ERROR as the first message on the response half of the
+    /// stream, then it MUST close the session with a PROTOCOL_VIOLATION."
     #[error("request {0} answered with {1:?} before its REQUEST_OK or REQUEST_ERROR")]
     ResponseBeforeTheFirstResponse(u64, MessageType),
     /// Track Properties were put on a REQUEST_OK answering something other
@@ -2066,12 +2067,12 @@ impl Endpoint {
     /// worth a method because Section 10.2 makes that order a wire rule and the
     /// codec's encoder refuses a descending pair rather than emitting one.
     ///
-    /// **The range is inclusive at both ends** (Sections 5.1.2 and 10.13), and
-    /// nothing here adds or subtracts one. Draft-19's `End Location` was "the
-    /// last Object, plus 1; or 0 to indicate the entire Group"; a caller that
-    /// ports that arithmetic forward fetches one object too many, and one that
-    /// ports the `0`-means-whole-group convention fetches a single object where
-    /// it meant a group. [`LocationFilter`]
+    /// **The range is inclusive at both ends** (Section 5.1.2 and
+    /// Section 10.13), and nothing here adds or subtracts one. Draft-19's
+    /// `End Location` was "the last Object, plus 1; or 0 to indicate the entire
+    /// Group"; a caller that ports that arithmetic forward fetches one object
+    /// too many, and one that ports the `0`-means-whole-group convention
+    /// fetches a single object where it meant a group. [`LocationFilter`]
     /// carries the same warning at each constructor.
     pub fn fetch_range(
         &mut self,
@@ -2087,11 +2088,11 @@ impl Endpoint {
 
     // -- Fill fetch streams -----------------------------------------
     //
-    // Draft-20 Sections 5.1.3 and 5.1.3.1, new in this draft, and what replaced
-    // the joining fetch. There is no message here and no state machine: a fill
-    // is asked for by a parameter on a SUBSCRIBE or a REQUEST_UPDATE, answered
-    // by a unidirectional stream, and ended by that stream being finished or
-    // reset.
+    // Draft-20 Section 5.1.3 and draft-20 Section 5.1.3.1, new in this draft,
+    // and what replaced the joining fetch. There is no message here and no
+    // state machine: a fill is asked for by a parameter on a SUBSCRIBE or a
+    // REQUEST_UPDATE, answered by a unidirectional stream, and ended by that
+    // stream being finished or reset.
 
     /// Note that the request under `request_id` asked for a fill fetch stream.
     ///
@@ -2584,9 +2585,9 @@ impl Endpoint {
     /// Four are refused for that reason. REQUEST_UPDATE modifies the request
     /// its stream carries (Section 10.9). NAMESPACE and NAMESPACE_DONE report
     /// namespaces on the SUBSCRIBE_NAMESPACE request stream that asked for them
-    /// (Sections 10.17 and 10.18), and PUBLISH_SKIPPED names a track that will
-    /// not be published on the SUBSCRIBE_TRACKS stream that asked for it
-    /// (Section 10.21). All four route through
+    /// (Section 10.17 and Section 10.18), and PUBLISH_SKIPPED names a track
+    /// that will not be published on the SUBSCRIBE_TRACKS stream that asked for
+    /// it (Section 10.21). All four route through
     /// [`receive_response_on_stream`](Self::receive_response_on_stream), which
     /// has the request ID they need.
     pub fn receive_message(&mut self, msg: ControlMessage) -> Result<(), EndpointError> {
@@ -2643,16 +2644,16 @@ impl Endpoint {
     /// Hold the response half of a namespace-scoped request to the rule that
     /// its first message answers the request.
     ///
-    /// Sections 10.19 and 10.20 state it once each, for SUBSCRIBE_NAMESPACE
-    /// and for SUBSCRIBE_TRACKS: "The publisher will respond with REQUEST_OK or
-    /// REQUEST_ERROR on the response half of the stream. If the subscriber
-    /// receives any message other than a REQUEST_OK or a REQUEST_ERROR as the
-    /// first message on the response half of the stream, then it MUST close the
-    /// session with a PROTOCOL_VIOLATION." Draft-18's own change log records it
-    /// as new work rather than as a clarification, so drafts 17 and earlier are
-    /// deliberately not held to it: they say nothing about which message comes
-    /// first, and refusing one there would close a session over traffic those
-    /// drafts permit.
+    /// Section 10.19 and Section 10.20 state it once each, for
+    /// SUBSCRIBE_NAMESPACE and for SUBSCRIBE_TRACKS: "The publisher will
+    /// respond with REQUEST_OK or REQUEST_ERROR on the response half of the
+    /// stream. If the subscriber receives any message other than a REQUEST_OK
+    /// or a REQUEST_ERROR as the first message on the response half of the
+    /// stream, then it MUST close the session with a PROTOCOL_VIOLATION."
+    /// Draft-18's own change log records it as new work rather than as a
+    /// clarification, so drafts 17 and earlier are deliberately not held to it:
+    /// they say nothing about which message comes first, and refusing one there
+    /// would close a session over traffic those drafts permit.
     ///
     /// # Why only these two requests
     ///
@@ -3489,10 +3490,10 @@ impl Endpoint {
     /// Beyond the four responses this also takes the three messages draft-20
     /// Table 5 places on a request stream that a responder writes after its
     /// response: NAMESPACE and NAMESPACE_DONE on a SUBSCRIBE_NAMESPACE stream
-    /// (Sections 10.17 and 10.18) and PUBLISH_SKIPPED on a SUBSCRIBE_TRACKS
-    /// stream (Section 10.21). All three require the request to have been
-    /// accepted first, because each machine only leaves Pending on its
-    /// REQUEST_OK.
+    /// (Section 10.17 and Section 10.18) and PUBLISH_SKIPPED on a
+    /// SUBSCRIBE_TRACKS stream (Section 10.21). All three require the request
+    /// to have been accepted first, because each machine only leaves Pending on
+    /// its REQUEST_OK.
     ///
     /// The caller writes `msg` only after this returns `Ok`. What it cannot
     /// undo is the opposite order: a write that fails afterwards leaves the
@@ -4562,8 +4563,8 @@ mod tests {
             let mut ep = active(Role::Client);
             let id = ep.subscribe_namespace(ns("live"), vec![]).unwrap().0;
 
-            // Sections 10.19 and 10.20 make REQUEST_OK or REQUEST_ERROR the
-            // first message on this stream, so the answer comes before the
+            // Section 10.19 and Section 10.20 make REQUEST_OK or REQUEST_ERROR
+            // the first message on this stream, so the answer comes before the
             // messages that follow it. Sending the NAMESPACE first is a
             // different rule's violation and would answer this test's question
             // with that rule's error.
@@ -4819,8 +4820,8 @@ mod tests {
             .find(|p| p.key.into_inner() == 0x21)
             .expect("the range is a LOCATION_FILTER parameter");
         let KvpValue::Bytes(bytes) = &filter.value else { panic!("length-prefixed") };
-        // The last object is 5, not 6: Sections 5.1.2 and 10.13 make the range
-        // inclusive, and draft-19's "the last Object, plus 1" is gone.
+        // The last object is 5, not 6: Section 5.1.2 and Section 10.13 make the
+        // range inclusive, and draft-19's "the last Object, plus 1" is gone.
         assert_eq!(bytes, &vec![10, 0, 0, 5]);
     }
 

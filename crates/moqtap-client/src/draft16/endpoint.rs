@@ -548,7 +548,7 @@ impl EndpointError {
             // because a control message carries its own length and the next
             // boundary is known.
             EndpointError::NotASubscribeNamespace(_) => Some(SessionErrorCode::ProtocolViolation),
-            // Sections 9.10 and 9.13 name this code in the sentence that
+            // Section 9.10 and Section 9.13 name this code in the sentence that
             // states the rule, and name no other. A close carrying
             // PROTOCOL_VIOLATION would tell the peer a different thing went
             // wrong.
@@ -698,13 +698,13 @@ pub struct Endpoint {
     /// What Full Track Name the peer has attached each Track Alias to, per
     /// Request ID.
     ///
-    /// Sections 9.10 and 9.13 forbid one alias naming two tracks at once, and the
-    /// "at once" is what makes this a table rather than a set: an alias the
-    /// peer used for a track whose subscription has ended is free again. The
-    /// table therefore records the binding and reads liveness back off the
-    /// subscription's own state machine, rather than keeping a second copy of
-    /// it that every path ending a subscription would have to remember to
-    /// prune.
+    /// Section 9.10 and Section 9.13 forbid one alias naming two tracks at
+    /// once, and the "at once" is what makes this a table rather than a set: an
+    /// alias the peer used for a track whose subscription has ended is free
+    /// again. The table therefore records the binding and reads liveness back
+    /// off the subscription's own state machine, rather than keeping a second
+    /// copy of it that every path ending a subscription would have to remember
+    /// to prune.
     track_bindings: HashMap<u64, TrackBinding>,
     /// Which tracks this endpoint has given up on, and what for.
     ///
@@ -866,9 +866,9 @@ impl Endpoint {
         VarInt::from_u64(alias).ok()
     }
 
-    /// The refusal Sections 9.10 and 9.13 require when `alias` already names a
-    /// different track whose subscription is still live, or `None` when it is
-    /// free.
+    /// The refusal Section 9.10 and Section 9.13 require when `alias` already
+    /// names a different track whose subscription is still live, or `None` when
+    /// it is free.
     ///
     /// # Why the set is read rather than kept
     ///

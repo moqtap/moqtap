@@ -501,9 +501,10 @@ impl EndpointError {
             | EndpointError::RequestId(RequestIdError::WrongParity(..)) => {
                 Some(SessionErrorCode::InvalidRequestId)
             }
-            // Sections 9.9 and 9.11 name this code in the sentence that states the
-            // rule, and name no other. A close carrying PROTOCOL_VIOLATION
-            // would tell the peer a different thing went wrong.
+            // Section 9.9 and Section 9.11 name this code in the sentence that
+            // states the rule, and name no other. A close carrying
+            // PROTOCOL_VIOLATION would tell the peer a different thing went
+            // wrong.
             EndpointError::DuplicateTrackAlias { .. } => {
                 Some(SessionErrorCode::DuplicateTrackAlias)
             }
@@ -595,12 +596,12 @@ pub struct Endpoint {
     /// What Full Track Name the peer has attached each Track Alias to, per
     /// Request ID.
     ///
-    /// Sections 9.9 and 9.11 forbid one alias naming two tracks at once, and the "at
-    /// once" is what makes this a table rather than a set: an alias the peer
-    /// used for a track whose subscription has ended is free again. The table
-    /// therefore records the binding and reads liveness back off the request's
-    /// own state machine, rather than keeping a second copy of it that every
-    /// path ending a subscription would have to remember to prune.
+    /// Section 9.9 and Section 9.11 forbid one alias naming two tracks at once,
+    /// and the "at once" is what makes this a table rather than a set: an alias
+    /// the peer used for a track whose subscription has ended is free again.
+    /// The table therefore records the binding and reads liveness back off the
+    /// request's own state machine, rather than keeping a second copy of it
+    /// that every path ending a subscription would have to remember to prune.
     track_bindings: HashMap<u64, TrackBinding>,
     /// The track each fetch this endpoint made is for.
     ///
@@ -703,9 +704,9 @@ impl Endpoint {
         VarInt::from_u64(alias).ok()
     }
 
-    /// The refusal Sections 9.9 and 9.11 require when `alias` already names a
-    /// different track that still has an Established subscription, or `None`
-    /// when it is free.
+    /// The refusal Section 9.9 and Section 9.11 require when `alias` already
+    /// names a different track that still has an Established subscription, or
+    /// `None` when it is free.
     ///
     /// # Why the set is read rather than kept
     ///
@@ -1802,8 +1803,8 @@ impl Endpoint {
     /// Four are refused for that reason. REQUEST_UPDATE modifies the request
     /// its stream carries (Section 9.10). NAMESPACE and NAMESPACE_DONE report
     /// namespaces on the SUBSCRIBE_NAMESPACE request stream that asked for them
-    /// (Sections 9.18 and 9.19), and PUBLISH_BLOCKED names a track that cannot
-    /// be published on that same stream (Section 9.21 — draft-17 has no
+    /// (Section 9.18 and Section 9.19), and PUBLISH_BLOCKED names a track that
+    /// cannot be published on that same stream (Section 9.21 — draft-17 has no
     /// SUBSCRIBE_TRACKS to put it on). All four route through
     /// [`receive_response_on_stream`](Self::receive_response_on_stream), which
     /// has the request ID they need.

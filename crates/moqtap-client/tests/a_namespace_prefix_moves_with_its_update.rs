@@ -238,9 +238,10 @@ macro_rules! gates {
             /// An update moving a subscription onto ground another one of its
             /// kind already holds may not be accepted.
             ///
-            /// Sections 10.18 and 10.19 state the rule for the arriving
-            /// request; Section 10.9.2 states it again for the update, and the
-            /// answer it names is the same one.
+            /// Draft-18 Section 10.18 and draft-18 Section 10.19 state the rule
+            /// for the arriving request; draft-18 Section 10.9.2 states it again
+            /// for the update, and the answer it names is the same one. Draft-19
+            /// numbers all three the same.
             #[test]
             fn an_update_may_not_move_a_prefix_onto_an_established_one() {
                 let mut ep = active();

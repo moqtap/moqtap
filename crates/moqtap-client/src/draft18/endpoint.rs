@@ -172,12 +172,12 @@ pub enum EndpointError {
     /// A namespace-scoped request's response half opened with something other
     /// than REQUEST_OK or REQUEST_ERROR.
     ///
-    /// Draft-18 Sections 10.18 and 10.19, of SUBSCRIBE_NAMESPACE and
-    /// SUBSCRIBE_TRACKS alike: "The publisher will respond with REQUEST_OK or
-    /// REQUEST_ERROR on the response half of the stream. If the subscriber
-    /// receives any message other than a REQUEST_OK or a REQUEST_ERROR as the
-    /// first message on the response half of the stream, then it MUST close the
-    /// session with a PROTOCOL_VIOLATION."
+    /// Draft-18 Section 10.18 and draft-18 Section 10.19, of
+    /// SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS alike: "The publisher will
+    /// respond with REQUEST_OK or REQUEST_ERROR on the response half of the
+    /// stream. If the subscriber receives any message other than a REQUEST_OK
+    /// or a REQUEST_ERROR as the first message on the response half of the
+    /// stream, then it MUST close the session with a PROTOCOL_VIOLATION."
     #[error("request {0} answered with {1:?} before its REQUEST_OK or REQUEST_ERROR")]
     ResponseBeforeTheFirstResponse(u64, MessageType),
     /// A REQUEST_OK or REQUEST_ERROR was offered as the answer to a
@@ -2055,9 +2055,9 @@ impl Endpoint {
     /// Four are refused for that reason. REQUEST_UPDATE modifies the request
     /// its stream carries (Section 10.9). NAMESPACE and NAMESPACE_DONE report
     /// namespaces on the SUBSCRIBE_NAMESPACE request stream that asked for them
-    /// (Sections 10.16 and 10.17), and PUBLISH_BLOCKED names a track that
-    /// cannot be published on the SUBSCRIBE_TRACKS stream that asked for it
-    /// (Section 10.20). All four route through
+    /// (Section 10.16 and Section 10.17), and PUBLISH_BLOCKED names a track
+    /// that cannot be published on the SUBSCRIBE_TRACKS stream that asked for
+    /// it (Section 10.20). All four route through
     /// [`receive_response_on_stream`](Self::receive_response_on_stream), which
     /// has the request ID they need.
     pub fn receive_message(&mut self, msg: ControlMessage) -> Result<(), EndpointError> {
@@ -2093,16 +2093,16 @@ impl Endpoint {
     /// Hold the response half of a namespace-scoped request to the rule that
     /// its first message answers the request.
     ///
-    /// Sections 10.18 and 10.19 state it once each, for SUBSCRIBE_NAMESPACE
-    /// and for SUBSCRIBE_TRACKS: "The publisher will respond with REQUEST_OK or
-    /// REQUEST_ERROR on the response half of the stream. If the subscriber
-    /// receives any message other than a REQUEST_OK or a REQUEST_ERROR as the
-    /// first message on the response half of the stream, then it MUST close the
-    /// session with a PROTOCOL_VIOLATION." Draft-18's own change log records it
-    /// as new work rather than as a clarification, so drafts 17 and earlier are
-    /// deliberately not held to it: they say nothing about which message comes
-    /// first, and refusing one there would close a session over traffic those
-    /// drafts permit.
+    /// Section 10.18 and Section 10.19 state it once each, for
+    /// SUBSCRIBE_NAMESPACE and for SUBSCRIBE_TRACKS: "The publisher will
+    /// respond with REQUEST_OK or REQUEST_ERROR on the response half of the
+    /// stream. If the subscriber receives any message other than a REQUEST_OK
+    /// or a REQUEST_ERROR as the first message on the response half of the
+    /// stream, then it MUST close the session with a PROTOCOL_VIOLATION."
+    /// Draft-18's own change log records it as new work rather than as a
+    /// clarification, so drafts 17 and earlier are deliberately not held to it:
+    /// they say nothing about which message comes first, and refusing one there
+    /// would close a session over traffic those drafts permit.
     ///
     /// # Why only these two requests
     ///
@@ -3585,8 +3585,8 @@ mod responder_tests {
             let mut ep = active_client();
             let id = ep.subscribe_namespace(ns(), vec![]).unwrap().0;
 
-            // Sections 10.18 and 10.19 make REQUEST_OK or REQUEST_ERROR the
-            // first message on this stream, so the answer comes before the
+            // Section 10.18 and Section 10.19 make REQUEST_OK or REQUEST_ERROR
+            // the first message on this stream, so the answer comes before the
             // messages that follow it. Sending the NAMESPACE first is a
             // different rule's violation and would answer this test's question
             // with that rule's error.

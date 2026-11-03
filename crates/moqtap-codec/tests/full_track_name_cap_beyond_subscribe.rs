@@ -130,7 +130,8 @@ fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     wire
 }
 
-/// [`framed`] with draft-23's `vi64` Message Length (Section 9, Figure 6).
+/// [`framed`] with draft-23's `vi64` Message Length (draft-23 Section 9,
+/// Figure 6).
 #[cfg(feature = "draft23")]
 fn framed_vi64(type_id: u8, payload: &[u8]) -> Vec<u8> {
     use moqtap_codec::varint::{Moqt18, VarInt};
@@ -439,9 +440,9 @@ cap_gate!(draft19_caps_a_fetch, "draft19", draft19, 0x16, |ns, name| {
     .concat()
 });
 // Draft-20's FETCH is a Request ID, the namespace, the name and a parameter
-// count: Section 10.13 deleted the Fetch Type and the four range fields, so
-// the payload is shorter than draft-19's by six varints and the namespace
-// starts one field earlier.
+// count: draft-20 Section 10.13 deleted the Fetch Type and the four range
+// fields, so the payload is shorter than draft-19's by six varints and the
+// namespace starts one field earlier.
 cap_gate!(draft20_caps_a_fetch, "draft20", draft20, 0x16, |ns, name| {
     [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(0)].concat()
 });
@@ -529,7 +530,8 @@ cap_gate!(draft22_caps_a_redirect, "draft22", draft22, 0x05, |ns, name| {
     .concat()
 });
 
-// Draft-23: the same carriers under a `vi64` Length (Section 9, Figure 6).
+// Draft-23: the same carriers under a `vi64` Length (draft-23 Section 9,
+// Figure 6).
 cap_gate!(
     draft23_caps_a_track_status,
     "draft23",

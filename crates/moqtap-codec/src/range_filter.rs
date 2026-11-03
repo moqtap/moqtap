@@ -178,10 +178,11 @@ pub enum RangeFilterError {
     PriorityAboveTheField(u64),
     /// A property filter names a Property Type that is not an integer-valued one.
     ///
-    /// Sections 10.2.13 and 10.2.14 say the same of both: the filter selects a
-    /// range "for a required Object Property Type which MUST be even, i.e. a
-    /// single integer value (see Figure 2), otherwise the endpoint MUST reject
-    /// this with REQUEST_ERROR with error code INVALID_FILTER".
+    /// Draft-19 Section 10.2.13 and draft-19 Section 10.2.14 say the same of
+    /// both: the filter selects a range "for a required Object Property Type
+    /// which MUST be even, i.e. a single integer value (see Figure 2),
+    /// otherwise the endpoint MUST reject this with REQUEST_ERROR with error
+    /// code INVALID_FILTER".
     ///
     /// The parity is the Key-Value-Pair convention doing the work: an even Type
     /// carries a bare varint and an odd one carries length-prefixed bytes, so an
@@ -232,7 +233,7 @@ impl RangeFilter {
     /// range the peer is not allowed to have asked for. A **renderer** must
     /// not: it is describing a message that has already been decoded, and a
     /// filter that broke a content rule is exactly the one whose fields a
-    /// reader most needs to see. Refusing there degrades the rendering to
+    /// reader most needs to see. Refusing there reduces the rendering to
     /// opaque bytes and hides the offending value inside them.
     ///
     /// So the split is by what the caller does with the answer, not by how
@@ -310,9 +311,10 @@ impl RangeFilter {
     /// Both are answered with the same REQUEST_ERROR as the delta rule, so
     /// [`decode_moqt`](Self::decode_moqt) applies them for you and a filter
     /// that reaches an application through it has already been held to
-    /// everything Section 5.1.3 and Sections 10.2.12 through 10.2.14 state
-    /// about its own contents. What is left for the session to decide is the
-    /// ceiling and the repeats, which need more than one parameter to see.
+    /// everything draft-19 Section 5.1.3 and draft-19 Section 10.2.12 through
+    /// draft-19 Section 10.2.14 state about its own contents. What is left for
+    /// the session to decide is the ceiling and the repeats, which need more
+    /// than one parameter to see.
     ///
     /// It is public so that a caller which decoded with
     /// [`decode_moqt_structure`](Self::decode_moqt_structure) can still ask the

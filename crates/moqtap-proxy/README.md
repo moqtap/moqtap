@@ -90,8 +90,8 @@ Client ──QUIC/WT──▶ moqtap-proxy ──QUIC/WT──▶ Relay
   handled as both: its control stream is the first client-initiated
   bidirectional stream, and draft-16 Section 3.3 gives SUBSCRIBE_NAMESPACE a
   bidirectional stream of its own, so every stream after the control stream is
-  forwarded as a request stream — in both directions, because draft-16 Section 6.1 lets
-  either endpoint be the subscriber.
+  forwarded as a request stream — in both directions, because draft-16 Section 5.1 lets
+  either endpoint initiate a subscription.
 - Inline MoQT frame parsing for observation (drafts 07 through 23, via
   `moqtap-codec`'s dispatch enums)
 - Automatic stream type detection on unidirectional streams — subgroup, fetch, and on drafts 17-23 the control stream, which those drafts carry as a pair of unidirectional streams rather than a bidirectional one

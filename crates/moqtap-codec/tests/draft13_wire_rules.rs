@@ -28,12 +28,14 @@
 //! # The same field, two different rules
 //!
 //! Group Order `0x0` means "the original publisher's Group Order SHOULD be
-//! used". Sections 8.7, 8.16 and 8.20 permit it, because a request is where a
-//! subscriber says it has no preference. Sections 8.8, 8.13, 8.14, 8.17 and
-//! 8.21 forbid it — "Values of 0x0 and those larger than 0x2 are a protocol
-//! error" — because a response reports the order the publisher settled on. One
-//! reader for both halves is wrong whichever way it is written, so the gates
-//! below drive the two directions separately.
+//! used". Draft-13 Section 8.7, draft-13 Section 8.16 and draft-13 Section 8.20
+//! permit it, because a request is where a subscriber says it has no
+//! preference. Draft-13 Section 8.8, draft-13 Section 8.13,
+//! draft-13 Section 8.14, draft-13 Section 8.17 and draft-13 Section 8.21
+//! forbid it — "Values of 0x0 and those larger than 0x2 are a protocol error" —
+//! because a response reports the order the publisher settled on. One reader
+//! for both halves is wrong whichever way it is written, so the gates below
+//! drive the two directions separately.
 
 use moqtap_codec::draft13::message::{
     Announce, ControlMessage, Fetch, FetchOk, FetchPayload, FetchType, Subscribe,
@@ -291,13 +293,13 @@ fn draft13_refuses_values_the_draft_calls_protocol_errors() {
 
 /// The encoder refuses a message whose discriminator disagrees with its body.
 ///
-/// Each of these encodes without complaint and comes back as something else, or
+/// Unchecked, each of these would encode and come back as something else, or
 /// as an error, because the encoder follows the `Option` and the decoder follows
 /// the field that says what is there. A SUBSCRIBE_OK announcing a location it
 /// does not carry hands its own reader the parameter count where a Group ID
 /// belongs.
 ///
-/// The Group Order case is the same defect one layer along: the decoders
+/// The Group Order case is the same failure one layer along: the decoders
 /// refuse `0x0` on a response, so an encoder that writes one produces a frame
 /// nothing can read, including itself. Fails if `encode` skips
 /// `check_discriminators` or `check_group_order`.
@@ -404,11 +406,11 @@ fn draft13_encode_refuses_a_message_that_contradicts_itself() {
 
 /// A Track Namespace tuple holds between 1 and 32 fields, on the way out too.
 ///
-/// Sections 2.4.1 and 8.28: "If an endpoint receives a Track Namespace tuple
-/// with an N of 0 or more than 32, it MUST close the session with a Protocol
-/// Violation." A writer that skips the check emits namespaces this codec would
-/// refuse to read back — the sentence is about a receiver, and the peer is the
-/// receiver.
+/// Draft-13 Section 2.4.1 and draft-13 Section 8.28: "If an endpoint receives a
+/// Track Namespace tuple with an N of 0 or more than 32, it MUST close the
+/// session with a Protocol Violation." A writer that skips the check emits
+/// namespaces this codec would refuse to read back — the sentence is about a
+/// receiver, and the peer is the receiver.
 ///
 /// The rule is written once and applied at nine separate call sites, so the
 /// gate drives all three field names a site can carry — the plain namespace, the

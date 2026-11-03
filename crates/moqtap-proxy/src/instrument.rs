@@ -439,7 +439,7 @@ impl TimerBackend {
     ///
     /// `SleepSlice => true` on every platform. `Condvar => cfg!(unix)` —
     /// platform-dependent, because it is the good primitive on Unix and
-    /// the degraded one on Windows, and the type says so rather than the
+    /// the weaker one on Windows, and the type says so rather than the
     /// reader having to know.
     pub const fn is_high_resolution(self) -> bool {
         match self {

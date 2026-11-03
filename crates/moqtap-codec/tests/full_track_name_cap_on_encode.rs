@@ -1179,8 +1179,8 @@ mod draft20 {
             ),
             // Draft-20's FETCH holds the namespace and the name inline rather
             // than inside a Standalone Fetch, and has no Fetch Type and no
-            // inline range (Section 10.13). Same two fields, same cap, one
-            // level shallower.
+            // inline range (draft-20 Section 10.13). Same two fields, same cap,
+            // one level shallower.
             (
                 "FETCH",
                 ControlMessage::Fetch(Fetch {
@@ -1300,8 +1300,8 @@ mod draft21 {
             ),
             // Draft-21's FETCH holds the namespace and the name inline rather
             // than inside a Standalone Fetch, and has no Fetch Type and no
-            // inline range (Section 9.11). Same two fields, same cap, one
-            // level shallower.
+            // inline range (draft-21 Section 9.11). Same two fields, same cap,
+            // one level shallower.
             (
                 "FETCH",
                 ControlMessage::Fetch(Fetch {
@@ -1422,8 +1422,8 @@ mod draft22 {
             ),
             // Draft-22's FETCH holds the namespace and the name inline rather
             // than inside a Standalone Fetch, and has no Fetch Type and no
-            // inline range (Section 9.11). Same two fields, same cap, one
-            // level shallower.
+            // inline range (draft-22 Section 9.11). Same two fields, same cap,
+            // one level shallower.
             (
                 "FETCH",
                 ControlMessage::Fetch(Fetch {
@@ -1515,8 +1515,8 @@ mod draft23 {
     use moqtap_codec::kvp::{KeyValuePair, KvpValue};
     use moqtap_codec::varint::{Moqt18, VarInt};
 
-    /// A REDIRECT Error Detail (Section 9.4.2.1) written by hand, so the cap is
-    /// left for `ControlMessage::encode` to apply.
+    /// A REDIRECT Error Detail (draft-23 Section 9.4.2.1) written by hand, so
+    /// the cap is left for `ControlMessage::encode` to apply.
     fn redirect_detail(ns: &TrackNamespace, tn: &[u8]) -> KeyValuePair {
         let mut value = vec![0x00];
         ns.encode_moqt::<Moqt18>(&mut value);

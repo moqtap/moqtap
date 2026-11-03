@@ -636,11 +636,11 @@ impl AnyConnectionError {
 /// The drafts do not agree about what a number in an "end object" field means,
 /// and the disagreement is silent: draft-19 Section 10.13 defines `End
 /// Location` as "the last Object, plus 1; or 0 to indicate the entire Group",
-/// while draft-20 Sections 5.1.2 and 10.13 make the `LOCATION_FILTER` range
-/// "inclusive" at both ends and delete both conventions without a note in the
-/// change log. The same `end_object = 10` therefore asks for objects 0 through
-/// 9 on one draft and 0 through 10 on the other, and nothing on the wire says
-/// which was meant.
+/// while draft-20 Section 5.1.2 and draft-20 Section 10.13 make the
+/// `LOCATION_FILTER` range "inclusive" at both ends and delete both conventions
+/// without a note in the change log. The same `end_object = 10` therefore asks
+/// for objects 0 through 9 on one draft and 0 through 10 on the other, and
+/// nothing on the wire says which was meant.
 ///
 /// So this enum, not a number. [`FetchEnd::Object`] is the last Object the
 /// fetch covers and the range **holds** it; [`FetchEnd::EntireGroup`] is
@@ -835,13 +835,14 @@ impl FetchRange {
     /// The draft-22 `LOCATION_FILTER` that carries this range.
     ///
     /// Draft-22 Section 9.11 gives FETCH no `Start Location` or `End Location`
-    /// field: the range is the parameter, and Section 3.2 has a FETCH request
-    /// Objects "between a Start Location and an End Location, inclusive". So
-    /// [`FetchEnd::Object`] is written **as it stands** — Location Filter Type
-    /// 0x04, Absolute Range — and [`FetchEnd::EntireGroup`] is type 0x03, which
-    /// Section 9.20.9 ends at the "last Object of Group StartGroup +
-    /// EndGroupDelta". The end Group travels as `EndGroupDelta`, "delta
-    /// encoded from StartGroup", so it is `end_group - start_group`.
+    /// field: the range is the parameter, and draft-22 Section 3.2 has a FETCH
+    /// request Objects "between a Start Location and an End Location,
+    /// inclusive". So [`FetchEnd::Object`] is written **as it stands** —
+    /// Location Filter Type 0x04, Absolute Range — and
+    /// [`FetchEnd::EntireGroup`] is type 0x03, which draft-22 Section 9.20.9
+    /// ends at the "last Object of Group StartGroup + EndGroupDelta". The end
+    /// Group travels as `EndGroupDelta`, "delta encoded from StartGroup", so it
+    /// is `end_group - start_group`.
     ///
     /// # Errors
     ///
@@ -876,16 +877,16 @@ impl FetchRange {
     /// The draft-23 `LOCATION_FILTER` that carries this range.
     ///
     /// Draft-23 Section 9.11 gives FETCH no `Start Location` or `End Location`
-    /// field: the range is the parameter, and Section 3.2 has a FETCH request
-    /// Objects "between a Start Location and an End Location, inclusive". So
-    /// [`FetchEnd::Object`] is written as it stands, Location Filter Type 0x04
-    /// (Absolute Range), and [`FetchEnd::EntireGroup`] is type 0x03, which
-    /// Section 9.19.9 ends at the "last Object of Group StartGroup +
-    /// EndGroupDelta". The end Group travels as `EndGroupDelta`, "delta
-    /// encoded from StartGroup", so it is `end_group - start_group`. Both types
-    /// are absolute, so neither meets Section 3.2's "If the Location filter is
-    /// relative (see Section 9.19.9), the publisher MUST return REQUEST_ERROR
-    /// with error code INVALID_RANGE."
+    /// field: the range is the parameter, and draft-23 Section 3.2 has a FETCH
+    /// request Objects "between a Start Location and an End Location,
+    /// inclusive". So [`FetchEnd::Object`] is written as it stands, Location
+    /// Filter Type 0x04 (Absolute Range), and [`FetchEnd::EntireGroup`] is type
+    /// 0x03, which draft-23 Section 9.19.9 ends at the "last Object of Group
+    /// StartGroup + EndGroupDelta". The end Group travels as `EndGroupDelta`,
+    /// "delta encoded from StartGroup", so it is `end_group - start_group`.
+    /// Both types are absolute, so neither meets draft-23 Section 3.2's "If the
+    /// Location filter is relative (see Section 9.19.9), the publisher MUST
+    /// return REQUEST_ERROR with error code INVALID_RANGE."
     ///
     /// # Errors
     ///
@@ -4467,9 +4468,10 @@ impl AnyConnection {
                 // Draft-20 Section 10.13 has no location fields to fill in:
                 // `fetch_range` puts the whole range in the `LOCATION_FILTER`
                 // parameter, at the position ascending Parameter Type order
-                // requires. Nothing here adds one to the end — Section 5.1.2
-                // makes the filter's range inclusive, and the `+ 1` the six
-                // arms above apply lives in `inline_end_object` alone.
+                // requires. Nothing here adds one to the end —
+                // draft-20 Section 5.1.2 makes the filter's range inclusive,
+                // and the `+ 1` the six arms above apply lives in
+                // `inline_end_object` alone.
                 let filter = range.location_filter_draft20()?;
                 c.fetch_range(namespace, track_name, &filter, Vec::new())
                     .await
@@ -4481,9 +4483,10 @@ impl AnyConnection {
                 // Draft-21 Section 9.11 has no location fields to fill in:
                 // `fetch_range` puts the whole range in the `LOCATION_FILTER`
                 // parameter, at the position ascending Parameter Type order
-                // requires. Nothing here adds one to the end — Section 3.3.1
-                // makes the filter's range inclusive, and the `+ 1` the six
-                // arms above apply lives in `inline_end_object` alone.
+                // requires. Nothing here adds one to the end —
+                // draft-21 Section 3.3.1 makes the filter's range inclusive,
+                // and the `+ 1` the six arms above apply lives in
+                // `inline_end_object` alone.
                 let filter = range.location_filter_draft21()?;
                 c.fetch_range(namespace, track_name, &filter, Vec::new())
                     .await
@@ -4495,9 +4498,10 @@ impl AnyConnection {
                 // Draft-22 Section 9.11 has no location fields to fill in:
                 // `fetch_range` puts the whole range in the `LOCATION_FILTER`
                 // parameter, at the position ascending Parameter Type order
-                // requires. Nothing here adds one to the end — Section 3.3.1
-                // makes the filter's range inclusive, and the `+ 1` the six
-                // arms above apply lives in `inline_end_object` alone.
+                // requires. Nothing here adds one to the end —
+                // draft-22 Section 3.3.1 makes the filter's range inclusive,
+                // and the `+ 1` the six arms above apply lives in
+                // `inline_end_object` alone.
                 let filter = range.location_filter_draft22()?;
                 c.fetch_range(namespace, track_name, &filter, Vec::new())
                     .await
@@ -4509,9 +4513,10 @@ impl AnyConnection {
                 // Draft-23 Section 9.11 has no location fields to fill in:
                 // `fetch_range` puts the whole range in the `LOCATION_FILTER`
                 // parameter, at the position ascending Parameter Type order
-                // requires. Nothing here adds one to the end — Section 3.3.1
-                // makes the filter's range inclusive, and the `+ 1` the six
-                // arms above apply lives in `inline_end_object` alone.
+                // requires. Nothing here adds one to the end —
+                // draft-23 Section 3.3.1 makes the filter's range inclusive,
+                // and the `+ 1` the six arms above apply lives in
+                // `inline_end_object` alone.
                 let filter = range.location_filter_draft23()?;
                 c.fetch_range(namespace, track_name, &filter, Vec::new())
                     .await
@@ -5821,11 +5826,11 @@ impl AnyConnection {
     /// Sending a SUBSCRIBE, the alias is bookkeeping the caller has no opinion
     /// about — any free one names the track locally — so it is read off the
     /// endpoint. Answering one, the alias is what **this side's objects will
-    /// carry on the wire**, and Sections 9.8 and 9.13 require one alias to name
-    /// one track: two subscriptions to the same track must be answered with the
-    /// *same* alias, and a fresh one per subscription would be wrong. The
-    /// endpoint cannot know which track a caller considers this to be, so the
-    /// choice is the caller's and cannot be inferred.
+    /// carry on the wire**, and draft-14 Section 9.8 and draft-14 Section 9.13
+    /// require one alias to name one track: two subscriptions to the same track
+    /// must be answered with the *same* alias, and a fresh one per subscription
+    /// would be wrong. The endpoint cannot know which track a caller considers
+    /// this to be, so the choice is the caller's and cannot be inferred.
     ///
     /// **Drafts 07 through 11 ignore it.** Those drafts put the Track Alias on
     /// SUBSCRIBE and make it the subscriber's, so their SUBSCRIBE_OK has no

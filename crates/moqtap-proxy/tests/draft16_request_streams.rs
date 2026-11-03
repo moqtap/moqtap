@@ -488,8 +488,7 @@ async fn the_first_bidi_is_the_control_stream_and_the_rest_are_requests() {
     // ── the relay's own namespace subscription ──
     //
     // Draft-16 Section 5.1 gives the subscriber role to either endpoint, so this is
-    // the same rule read from the other end — and it is the direction in
-    // which nothing accepted a bidirectional stream at all.
+    // the same rule read from the other end.
     let relays = subscribe_namespace(RELAY_REQUEST, b"cdn-edge");
     let (mut relays_send, _relays_recv) = relay.open_bi().await;
     relays_send.write_all(&framed(&relays)).await.expect("the relay subscribes");

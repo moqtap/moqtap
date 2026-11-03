@@ -1811,8 +1811,8 @@ fn check_error_details_to_send(m: &RequestError) -> Result<(), CodecError> {
 /// definitions say the same thing from the other side.
 ///
 /// REQUEST_OK and REQUEST_UPDATE list their parameters per kind of request
-/// (Sections 9.3 and 9.5), and the request is session state, so each is held
-/// to the union of its lists here. [`RequestOk::check_answers`] narrows a
+/// (Section 9.3 and Section 9.5), and the request is session state, so each is
+/// held to the union of its lists here. [`RequestOk::check_answers`] narrows a
 /// REQUEST_OK to one list.
 ///
 /// No definition names NAMESPACE, so every parameter is out of scope there.

@@ -4,7 +4,8 @@
 //! half carries traffic of its own after the answer — NAMESPACE and
 //! NAMESPACE_DONE for the first, PUBLISH_BLOCKED for the second — so they are
 //! the two where a message could arrive before the answer and be taken for a
-//! stream that had been accepted. Sections 10.18 and 10.19 close that:
+//! stream that had been accepted. Draft-18 Section 10.18 and
+//! draft-18 Section 10.19 close that:
 //!
 //! > The publisher will respond with REQUEST_OK or REQUEST_ERROR on the
 //! > response half of the stream. If the subscriber receives any message other

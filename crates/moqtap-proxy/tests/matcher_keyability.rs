@@ -320,9 +320,9 @@ fn a_fetch_key_is_carried_on_every_draft() {
         );
     }
 
-    // Reality, on draft-19. The order the session would
-    // have read off the FETCH is handed to the framer here directly, which
-    // is the same value by a shorter road.
+    // On draft-19, the order the session would have read off the FETCH is
+    // handed to the framer directly, which is the same value by a shorter
+    // road.
     let stream = delta_fetch_stream();
     let orders = Arc::new(FetchGroupOrders::default());
     orders.record(FETCH_REQUEST, AnyFetchGroupOrder::Ascending);

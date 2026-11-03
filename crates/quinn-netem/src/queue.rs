@@ -175,7 +175,7 @@ impl BucketState {
 /// needs no separate clamp, since tokens are the burst minus the deficit.
 ///
 /// A wait longer than a `u64` nanosecond count saturates to `Tick(u64::MAX)`
-/// rather than degrading to [`RateGrant::Never`] — a saturated tick is a real
+/// rather than collapsing to [`RateGrant::Never`] — a saturated tick is a real
 /// tick a release path can hold, where `Never` is a claim about the
 /// configuration that a caller should treat as a validation bug.
 pub fn charge(

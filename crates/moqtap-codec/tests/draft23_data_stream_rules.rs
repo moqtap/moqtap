@@ -260,7 +260,8 @@ enum Refusal {
     /// A Type no table assigns. Section 6.4.1 ends the session.
     Unknown,
     /// A Type inside a form the draft defines but on a list it calls invalid.
-    /// Sections 11.3.1 and 11.2.1 end the session and name the code.
+    /// Draft-23 Section 11.3.1 and draft-23 Section 11.2.1 end the session and
+    /// name the code.
     NamedInvalid,
     /// A Type the draft assigns, handed to a reader that cannot read it. The
     /// session survives.

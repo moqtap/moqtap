@@ -322,7 +322,7 @@ pub struct ProxySession {
     /// This session's attachment to its proxy's control plane, or `None`
     /// when it has no proxy.
     ///
-    /// `None` is not a degraded mode. A session constructed directly — which
+    /// `None` is not a fallback mode. A session constructed directly — which
     /// is how this crate's own tests drive one, and how a caller that wants
     /// one socket per session reaches the seam — belongs to no
     /// [`TransparentProxy`](crate::proxy::TransparentProxy), so there is no

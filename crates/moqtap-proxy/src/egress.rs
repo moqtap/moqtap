@@ -2603,7 +2603,7 @@ mod tests {
     }
 
     /// The estimate is reporting; `due_at` is readiness. Conflating the two
-    /// is what stranded whole streams behind a released `Hold`.
+    /// would strand whole streams behind a released `Hold`.
     #[test]
     fn the_queues_estimate_never_rewrites_a_units_own_deadline() {
         let (mut q, _c) = queue();

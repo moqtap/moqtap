@@ -13,9 +13,10 @@
 //!
 //! Draft-19 Section 11.1, and draft-18 in the same words: "The same Track
 //! Alias MUST NOT be used by a publisher to refer to two different Tracks
-//! simultaneously in the same session." Draft-17 Sections 9.9 and 9.11 state
-//! the same sentence once per message; drafts 12 through 16 state it without
-//! "by a publisher" and without "in the same session".
+//! simultaneously in the same session." Draft-17 Section 9.9 and
+//! draft-17 Section 9.11 state the same sentence once per message; drafts 12
+//! through 16 state it without "by a publisher" and without "in the same
+//! session".
 //!
 //! Every one of those sentences is two rules, and the second one is what
 //! `duplicate_track_alias_closes_the_session.rs` measures: a subscriber that

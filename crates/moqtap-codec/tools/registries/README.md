@@ -27,9 +27,7 @@ because it is identified by a different rule: only drafts 19 through 23 print it
 a table at all, and drafts 07-18 assign the same code points as a run of bullets with no IANA
 registry anywhere. `extract-registries.py` states both rules in full in its
 module docstring, under `WHAT COUNTS AS A ROW` and `OBJECT STATUS: A SECOND
-FAMILY, COUNTED SEPARATELY`. Read that before changing what the tool matches;
-getting the definition wrong has already produced one wrong count in this
-project's history, and the docstring is where that is written down.
+FAMILY, COUNTED SEPARATELY`. Read that before changing what the tool matches.
 
 Object Status rows carry the `Payload` column drafts 19 through 23 print (draft-19
 Section 15.9, Table 16)
@@ -133,8 +131,8 @@ committed files are verified against the published documents rather than against
 whatever copy a contributor has. It fails closed if the archive cannot be
 reached: an unverifiable extraction is not a verified one. The other half is
 covered without the drafts at all — see `tests/registry_extraction_health.rs`
-below — so an extraction that silently degraded fails a Rust test even where the
-document that degraded it is not available.
+below — so an extraction that silently decayed fails a Rust test even where the
+document that decayed it is not available.
 
 ## What the tests do with these files
 
@@ -167,7 +165,7 @@ document that degraded it is not available.
   covers draft-20 and every draft after it without editing.
   Together those fail if a future revision moves the
   Object Status heading and the tool falls back to reading bullets — the one
-  degradation that costs the `Payload` column without changing a row count.
+  decay that costs the `Payload` column without changing a row count.
 
 None of these read the rendered drafts. They read the JSON here, which is why
 the `source_sha256` chain matters: it is the only link back to the document.

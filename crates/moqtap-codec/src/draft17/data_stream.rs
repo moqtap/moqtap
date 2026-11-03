@@ -13,13 +13,14 @@
 //!   - bit 3 (0x08): DEFAULT_PRIORITY (no priority byte)
 //!   - bit 5 (0x20): STATUS (status byte replaces payload)
 //!
-//! Neither range is fully populated. Draft-17 Sections 10.4.2 and 10.3.1 each
-//! close with a list of type values an endpoint "MUST close the session with a
-//! PROTOCOL_VIOLATION" on receiving, and the two figures spell the surviving
-//! values out: `0x10..0x15 / 0x18..0x1D / 0x30..0x35 / 0x38..0x3D` for a
-//! subgroup header, `0x00..0x0F / 0x20..0x21 / 0x24..0x25 / 0x28..0x29 /
-//! 0x2C..0x2D` for a datagram. Both decoders refuse everything else, so a
-//! header this module hands back always describes a framing the draft defines.
+//! Neither range is fully populated. Draft-17 Section 10.4.2 and
+//! draft-17 Section 10.3.1 each close with a list of type values an endpoint
+//! "MUST close the session with a PROTOCOL_VIOLATION" on receiving, and the two
+//! figures spell the surviving values out:
+//! `0x10..0x15 / 0x18..0x1D / 0x30..0x35 / 0x38..0x3D` for a subgroup header,
+//! `0x00..0x0F / 0x20..0x21 / 0x24..0x25 / 0x28..0x29 / 0x2C..0x2D` for a
+//! datagram. Both decoders refuse everything else, so a header this module
+//! hands back always describes a framing the draft defines.
 //!
 //! Fetch header: stream type 0x05 + request_id, followed by objects whose
 //! fields are named by a Serialization Flags varint rather than all being

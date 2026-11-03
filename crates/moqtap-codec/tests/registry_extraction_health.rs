@@ -3,8 +3,8 @@
 //!
 //! The other registry gates read values out of `tools/registries/draft-NN.json`
 //! and compare them with this crate. That catches the crate drifting from the
-//! extraction. It does not catch the extraction itself quietly degrading — and
-//! a degraded extraction can go on producing the same row counts, so every
+//! extraction. It does not catch the extraction itself quietly decaying — and
+//! a decayed extraction can go on producing the same row counts, so every
 //! count-based check keeps passing while the rows lose a column.
 //!
 //! Nothing here can re-derive the JSON from the rendered draft; those documents
@@ -139,7 +139,7 @@ fn the_two_registry_definitions_do_not_share_a_source_table() {
 /// Every Object Status row the extraction reports as an assignment carries a
 /// payload permission.
 ///
-/// This is the observable that the heading-anchored degradation actually
+/// This is the observable that the heading-anchored decay actually
 /// destroys. Falling back to the prose bullets leaves `payload` null on every
 /// row, because the prose branch derives a permission only from the blanket
 /// sentence of drafts 07-18 and draft-19 replaced that sentence with a deferral
@@ -197,7 +197,7 @@ fn every_object_status_assignment_has_a_payload_permission() {
 /// The distinction the extraction records between a permission the draft
 /// registered and one the tool derived from an older blanket sentence is what
 /// separates draft-19 and later from their predecessors — the three rows are
-/// otherwise identical in code, name and answer. A degraded extraction of
+/// otherwise identical in code, name and answer. A decayed extraction of
 /// draft-19 or any later draft reports `form: prose-list` and looks exactly
 /// like a draft-18 one, so pinning the form is what makes that visible from inside
 /// this repository.

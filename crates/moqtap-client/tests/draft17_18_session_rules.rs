@@ -295,7 +295,7 @@ fn a_redirect_is_held_to_the_rules_of_the_request_it_answers() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Draft-18 Sections 10.1 and 10.9 — REQUEST_UPDATE placement
+// Draft-18 Section 10.1 and draft-18 Section 10.9 — REQUEST_UPDATE placement
 // ─────────────────────────────────────────────────────────────
 
 /// A REQUEST_UPDATE names its target by the stream it arrives on, and arriving

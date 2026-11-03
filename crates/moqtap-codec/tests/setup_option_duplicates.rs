@@ -168,7 +168,7 @@ mod draft17 {
         Ok(buf)
     }
 
-    /// Section 9.4: "Senders MUST NOT repeat the same Option Type in a
+    /// Draft-17 Section 9.4: "Senders MUST NOT repeat the same Option Type in a
     /// message unless the option definition explicitly allows multiple
     /// instances."
     #[test]
@@ -203,7 +203,7 @@ mod draft17 {
         );
     }
 
-    /// And carries a repeat of a type it cannot name. Section 9.4:
+    /// And carries a repeat of a type it cannot name. Draft-17 Section 9.4:
     /// "Receivers MUST allow duplicates of unknown Setup Options."
     ///
     /// This is the test a symmetric check fails.
@@ -221,8 +221,8 @@ mod draft17 {
         assert_eq!(options.len(), 2, "and carries both copies rather than folding them");
     }
 
-    /// Section 9.4.1.4: "The endpoint can specify one or more tokens in
-    /// SETUP that the peer can use to authorize MOQT session establishment."
+    /// Draft-17 Section 9.4.1.4: "The endpoint can specify one or more tokens
+    /// in SETUP that the peer can use to authorize MOQT session establishment."
     /// That is the "unless the option definition explicitly allows multiple
     /// instances" carve-out, and this draft has exactly one.
     #[test]
@@ -310,8 +310,8 @@ mod draft18 {
         Ok(buf)
     }
 
-    /// Section 10.3: "Senders MUST NOT repeat the same Option Type in a
-    /// message unless the option definition explicitly allows multiple
+    /// Draft-18 Section 10.3: "Senders MUST NOT repeat the same Option Type in
+    /// a message unless the option definition explicitly allows multiple
     /// instances."
     #[test]
     fn a_repeated_known_option_has_no_encoding() {
@@ -345,7 +345,7 @@ mod draft18 {
         );
     }
 
-    /// And carries a repeat of a type it cannot name. Section 10.3:
+    /// And carries a repeat of a type it cannot name. Draft-18 Section 10.3:
     /// "Receivers MUST allow duplicates of unknown Setup Options."
     ///
     /// This is the test a symmetric check fails.
@@ -363,8 +363,8 @@ mod draft18 {
         assert_eq!(options.len(), 2, "and carries both copies rather than folding them");
     }
 
-    /// Section 10.3.1.4: "The endpoint can specify one or more tokens in
-    /// SETUP that the peer can use to authorize MOQT session establishment."
+    /// Draft-18 Section 10.3.1.4: "The endpoint can specify one or more tokens
+    /// in SETUP that the peer can use to authorize MOQT session establishment."
     /// That is the "unless the option definition explicitly allows multiple
     /// instances" carve-out, and this draft has exactly one.
     #[test]
@@ -452,8 +452,8 @@ mod draft19 {
         Ok(buf)
     }
 
-    /// Section 10.3: "Senders MUST NOT repeat the same Option Type in a
-    /// message unless the option definition explicitly allows multiple
+    /// Draft-19 Section 10.3: "Senders MUST NOT repeat the same Option Type in
+    /// a message unless the option definition explicitly allows multiple
     /// instances."
     #[test]
     fn a_repeated_known_option_has_no_encoding() {
@@ -487,7 +487,7 @@ mod draft19 {
         );
     }
 
-    /// And carries a repeat of a type it cannot name. Section 10.3:
+    /// And carries a repeat of a type it cannot name. Draft-19 Section 10.3:
     /// "Receivers MUST allow duplicates of unknown Setup Options."
     ///
     /// This is the test a symmetric check fails.
@@ -505,8 +505,8 @@ mod draft19 {
         assert_eq!(options.len(), 2, "and carries both copies rather than folding them");
     }
 
-    /// Section 10.3.1.4: "The endpoint can specify one or more tokens in
-    /// SETUP that the peer can use to authorize MOQT session establishment."
+    /// Draft-19 Section 10.3.1.4: "The endpoint can specify one or more tokens
+    /// in SETUP that the peer can use to authorize MOQT session establishment."
     /// That is the "unless the option definition explicitly allows multiple
     /// instances" carve-out, and this draft has exactly one.
     #[test]
@@ -594,8 +594,8 @@ mod draft20 {
         Ok(buf)
     }
 
-    /// Section 10.3: "Senders MUST NOT repeat the same Option Type in a
-    /// message unless the option definition explicitly allows multiple
+    /// Draft-20 Section 10.3: "Senders MUST NOT repeat the same Option Type in
+    /// a message unless the option definition explicitly allows multiple
     /// instances."
     #[test]
     fn a_repeated_known_option_has_no_encoding() {
@@ -629,7 +629,7 @@ mod draft20 {
         );
     }
 
-    /// And carries a repeat of a type it cannot name. Section 10.3:
+    /// And carries a repeat of a type it cannot name. Draft-20 Section 10.3:
     /// "Receivers MUST allow duplicates of unknown Setup Options."
     ///
     /// This is the test a symmetric check fails.
@@ -647,8 +647,8 @@ mod draft20 {
         assert_eq!(options.len(), 2, "and carries both copies rather than folding them");
     }
 
-    /// Section 10.3.1.4: "The endpoint can specify one or more tokens in
-    /// SETUP that the peer can use to authorize MOQT session establishment."
+    /// Draft-20 Section 10.3.1.4: "The endpoint can specify one or more tokens
+    /// in SETUP that the peer can use to authorize MOQT session establishment."
     /// That is the "unless the option definition explicitly allows multiple
     /// instances" carve-out, and this draft has exactly one.
     #[test]
@@ -735,7 +735,7 @@ mod draft21 {
         Ok(buf)
     }
 
-    /// Section 9.1: "Senders MUST NOT repeat the same Option Type in a
+    /// Draft-21 Section 9.1: "Senders MUST NOT repeat the same Option Type in a
     /// message unless the option definition explicitly allows multiple
     /// instances."
     #[test]
@@ -770,7 +770,7 @@ mod draft21 {
         );
     }
 
-    /// And carries a repeat of a type it cannot name. Section 9.1:
+    /// And carries a repeat of a type it cannot name. Draft-21 Section 9.1:
     /// "Receivers MUST allow duplicates of unknown Setup Options."
     ///
     /// This is the test a symmetric check fails.
@@ -788,7 +788,7 @@ mod draft21 {
         assert_eq!(options.len(), 2, "and carries both copies rather than folding them");
     }
 
-    /// Section 9.1.4: "The endpoint can specify one or more tokens in
+    /// Draft-21 Section 9.1.4: "The endpoint can specify one or more tokens in
     /// SETUP that the peer can use to authorize MOQT session establishment."
     /// That is the "unless the option definition explicitly allows multiple
     /// instances" carve-out, and this draft has exactly one.
@@ -877,7 +877,7 @@ mod draft22 {
         Ok(buf)
     }
 
-    /// Section 9.1: "Senders MUST NOT repeat the same Option Type in a
+    /// Draft-22 Section 9.1: "Senders MUST NOT repeat the same Option Type in a
     /// message unless the option definition explicitly allows multiple
     /// instances."
     #[test]
@@ -912,7 +912,7 @@ mod draft22 {
         );
     }
 
-    /// And carries a repeat of a type it cannot name. Section 9.1:
+    /// And carries a repeat of a type it cannot name. Draft-22 Section 9.1:
     /// "Receivers MUST allow duplicates of unknown Setup Options."
     ///
     /// This is the test a symmetric check fails.
@@ -930,7 +930,7 @@ mod draft22 {
         assert_eq!(options.len(), 2, "and carries both copies rather than folding them");
     }
 
-    /// Section 9.1.4: "The endpoint can specify one or more tokens in
+    /// Draft-22 Section 9.1.4: "The endpoint can specify one or more tokens in
     /// SETUP that the peer can use to authorize MOQT session establishment."
     /// That is the "unless the option definition explicitly allows multiple
     /// instances" carve-out, and this draft has exactly one.
@@ -1018,7 +1018,7 @@ mod draft23 {
         Ok(buf)
     }
 
-    /// Section 9.1: "Senders MUST NOT repeat the same Option Type in a
+    /// Draft-23 Section 9.1: "Senders MUST NOT repeat the same Option Type in a
     /// message unless the option definition explicitly allows multiple
     /// instances."
     #[test]
@@ -1053,7 +1053,7 @@ mod draft23 {
         );
     }
 
-    /// And carries a repeat of a type it cannot name. Section 9.1:
+    /// And carries a repeat of a type it cannot name. Draft-23 Section 9.1:
     /// "Receivers MUST allow duplicates of unknown Setup Options."
     ///
     /// This is the test a symmetric check fails.
@@ -1071,7 +1071,7 @@ mod draft23 {
         assert_eq!(options.len(), 2, "and carries both copies rather than folding them");
     }
 
-    /// Section 9.1.4: "The endpoint can specify one or more tokens in
+    /// Draft-23 Section 9.1.4: "The endpoint can specify one or more tokens in
     /// SETUP that the peer can use to authorize MOQT session establishment."
     /// That is the "unless the option definition explicitly allows multiple
     /// instances" carve-out, and this draft has exactly one.

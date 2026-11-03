@@ -8,10 +8,11 @@
 //!     in the very same table, Table 5; drafts 08 through 16 split the table in
 //!     two and say "an unknown stream or datagram type" to cover both; drafts
 //!     17 through 20 give each table a sentence of its own.
-//!   - Sections 6.15 and 6.19, of the ContentExists field in SUBSCRIBE_OK and
-//!     SUBSCRIBE_ERROR: "Any other value is a protocol error and MUST terminate
-//!     the session with a Protocol Violation". Draft-08 replaced the field, so
-//!     this one is draft-07's alone.
+//!   - Draft-07 Section 6.15 and draft-07 Section 6.19, of the ContentExists
+//!     field in SUBSCRIBE_OK and SUBSCRIBE_ERROR: "Any other value is a
+//!     protocol error and MUST terminate the session with a Protocol
+//!     Violation". Draft-08 replaced the field, so this one is draft-07's
+//!     alone.
 //!
 //! `InvalidField` is shared by a dozen unrelated malformations, only some of
 //! which the draft answers with a close, so a session cannot be ended on it

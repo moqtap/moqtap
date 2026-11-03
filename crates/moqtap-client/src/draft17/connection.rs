@@ -253,24 +253,10 @@ impl From<crate::transport::DialError> for ConnectionError {
     /// Maps a dial failure onto the variants this error already has, so a
     /// caller matches `InvalidAddress` or `TlsConfig`.
     ///
-    /// # `LocalSocket` joins `InvalidAddress`, and that is the answer being kept
-    ///
-    /// A socket this machine would not open has a variant of its own on
-    /// [`DialError`](crate::transport::DialError), and it still arrives here.
-    /// Not laziness about the churn — `InvalidAddress` is one of the
-    /// variants the facade reads as
-    /// [`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade), which
-    /// `is_local` answers **true** for, and a failed bind is this side's by
-    /// definition. Routing it to `Transport` would read better in prose and
-    /// would publish this machine's missing IPv6 stack as the relay's doing.
-    ///
-    /// The phase is not lost, only unread on this path. A caller measuring
-    /// which stage of a dial died reads
-    /// [`DialError::phase`](crate::transport::DialError::phase) off the dial
-    /// itself; a caller who arrived at this type named a `host:port` and asked
-    /// for a connection, not for a measurement, and a public variant here for
-    /// a distinction nothing on this path reads is churn with no reader, which
-    /// is why this impl stays flat.
+    /// A `LocalSocket` failure maps to `InvalidAddress`, which the facade reads
+    /// as this side's failure
+    /// ([`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade)). The dial
+    /// phase stays on [`DialError::phase`](crate::transport::DialError::phase).
     fn from(e: crate::transport::DialError) -> Self {
         match e {
             // Two variants, one arm, deliberately — see above.
@@ -1029,8 +1015,8 @@ pub enum RequestOrigin {
 /// Four of them. REQUEST_UPDATE modifies the request its stream carries
 /// (Section 9.10). NAMESPACE and NAMESPACE_DONE report and withdraw the
 /// namespaces a SUBSCRIBE_NAMESPACE asked for, on that request's own response
-/// stream (Sections 9.18 to 9.20), and PUBLISH_BLOCKED names a track in that
-/// namespace the publisher cannot offer (Section 9.21) — draft-17 has no
+/// stream (Section 9.18 to Section 9.20), and PUBLISH_BLOCKED names a track in
+/// that namespace the publisher cannot offer (Section 9.21) — draft-17 has no
 /// SUBSCRIBE_TRACKS, so all three share one stream.
 ///
 /// `Endpoint::receive_message` already closes the session over all four when
@@ -1070,10 +1056,10 @@ pub const fn starts_a_request_stream(ty: MessageType) -> bool {
         | MessageType::SubscribeNamespace => true,
         // These travel on a request stream too — NAMESPACE, NAMESPACE_DONE and
         // PUBLISH_BLOCKED on the response stream of the SUBSCRIBE_NAMESPACE
-        // that asked for them (Sections 9.18 to 9.21), REQUEST_UPDATE on the
-        // stream of the request it modifies (Section 9.10) — but none of them
-        // may *begin* one, which is the only question asked here. SETUP is the
-        // control stream's own type varint and belongs to no bidirectional
+        // that asked for them (Section 9.18 to Section 9.21), REQUEST_UPDATE on
+        // the stream of the request it modifies (Section 9.10) — but none of
+        // them may *begin* one, which is the only question asked here. SETUP is
+        // the control stream's own type varint and belongs to no bidirectional
         // stream at all; GOAWAY drains the whole session.
         MessageType::Setup
         | MessageType::GoAway
@@ -3006,8 +2992,8 @@ impl Connection {
     /// decoded because the peer broke a rule draft-17 answers with a close.
     ///
     /// Every variant listed here comes from a sentence in the draft that names
-    /// the consequence: the reason phrase and GOAWAY URI maxima (Sections
-    /// 1.4.4 and 9.5), the KVP value maximum and the delta-encoded
+    /// the consequence: the reason phrase and GOAWAY URI maxima (Section 1.4.4
+    /// and Section 9.5), the KVP value maximum and the delta-encoded
     /// type overflow (Section 1.4.3), the duplicate-parameter rule (Section
     /// 9.3), and the Track Namespace field, count and length rules
     /// (Section 2.4.1). Each of those reads "MUST close the session with a

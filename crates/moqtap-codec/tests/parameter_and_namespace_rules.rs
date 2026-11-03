@@ -203,7 +203,8 @@ fn a_repeated_parameter_type_is_refused_unless_it_is_the_authorization_token() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Sections 9.3.6 / 9.3.10 and 10.2.8 / 10.2.12 — uint8 ranges
+// draft-17 Section 9.3.6 / draft-17 Section 9.3.10 and
+// draft-18 Section 10.2.8 / draft-18 Section 10.2.12 — uint8 ranges
 // ─────────────────────────────────────────────────────────────
 
 /// FORWARD and GROUP_ORDER are refused outside the values their definitions
@@ -331,7 +332,8 @@ fn an_oversized_uint8_parameter_is_refused_not_truncated() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Sections 9.5 / 10.4 and 1.4.4 — GOAWAY URI and reason phrase
+// draft-17 Section 9.5 / draft-18 Section 10.4 and draft-17 Section 1.4.4 —
+// GOAWAY URI and reason phrase
 // ─────────────────────────────────────────────────────────────
 
 /// A GOAWAY declaring a New Session URI over the maximum is refused on decode,

@@ -100,8 +100,9 @@ fn client_config() -> ClientConfig {
 /// group 6 object 9, inclusive at both ends.
 ///
 /// Written as an Absolute Range, Location Filter Type 0x04, so the inclusive
-/// end is on the wire and visible to the assertion: draft-23 Sections 3.2 and
-/// 3.3.1 make the range inclusive, so a range ending at 200 writes 200.
+/// end is on the wire and visible to the assertion: draft-23 Section 3.2 and
+/// draft-23 Section 3.3.1 make the range inclusive, so a range ending at 200
+/// writes 200.
 fn fill_range() -> LocationFilter {
     LocationFilter::range_to(4, 0, 2, 200).expect("the end group is in range")
 }

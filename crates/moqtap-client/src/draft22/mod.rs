@@ -29,10 +29,10 @@
 //!   report from the publisher on a subscription's stream, answered with
 //!   nothing and not counted against `MAX_REQUEST_UPDATES`. It arrives as
 //!   [`ClientEvent::PublishStateNotify`](event::ClientEvent::PublishStateNotify).
-//! * **Ranges are inclusive at both ends** (Sections 3.2, 3.3.1, 9.12).
-//!   Draft-19's fetch end was "the last Object, plus 1; or 0 to indicate the
-//!   entire Group"; both conventions are deleted, and nothing in this module
-//!   carries the arithmetic forward.
+//! * **Ranges are inclusive at both ends** (Section 3.2, Section 3.3.1,
+//!   Section 9.12). Draft-19's fetch end was "the last Object, plus 1; or 0 to
+//!   indicate the entire Group"; both conventions are deleted, and nothing in
+//!   this module carries the arithmetic forward.
 //! * **`INCLUDE_PROPERTIES` (0x35) is new** (Section 9.20.21): a uint8 opt-out
 //!   from Track Properties on the responding OK, default 1.
 //! * Three code points went: `SUBSCRIPTION_ENDED` (PUBLISH_DONE 0x3),

@@ -363,9 +363,9 @@ fn a_priority_range_above_the_field_is_reported() {
 
 /// A property filter naming an odd Property Type is reported.
 ///
-/// Sections 10.2.13 and 10.2.14: the Property Type "MUST be even, i.e. a single
-/// integer value (see Figure 2), otherwise the endpoint MUST reject this with
-/// REQUEST_ERROR with error code INVALID_FILTER".
+/// Draft-19 Section 10.2.13 and draft-19 Section 10.2.14: the Property Type
+/// "MUST be even, i.e. a single integer value (see Figure 2), otherwise the
+/// endpoint MUST reject this with REQUEST_ERROR with error code INVALID_FILTER".
 ///
 /// The parity is the Key-Value-Pair convention: an even Type carries a bare
 /// varint and an odd one carries bytes, so an odd Property Type names a property

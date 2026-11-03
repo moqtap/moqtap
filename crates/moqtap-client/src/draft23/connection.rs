@@ -294,24 +294,10 @@ impl From<crate::transport::DialError> for ConnectionError {
     /// Maps a dial failure onto the variants this error already has, so a
     /// caller matches `InvalidAddress` or `TlsConfig`.
     ///
-    /// # `LocalSocket` joins `InvalidAddress`, and that is the answer being kept
-    ///
-    /// A socket this machine would not open has a variant of its own on
-    /// [`DialError`](crate::transport::DialError), and it still arrives here.
-    /// Not laziness about the churn — `InvalidAddress` is one of the
-    /// variants the facade reads as
-    /// [`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade), which
-    /// `is_local` answers **true** for, and a failed bind is this side's by
-    /// definition. Routing it to `Transport` would read better in prose and
-    /// would publish this machine's missing IPv6 stack as the relay's doing.
-    ///
-    /// The phase is not lost, only unread on this path. A caller measuring
-    /// which stage of a dial died reads
-    /// [`DialError::phase`](crate::transport::DialError::phase) off the dial
-    /// itself; a caller who arrived at this type named a `host:port` and asked
-    /// for a connection, not for a measurement, and a public variant here for
-    /// a distinction nothing on this path reads is churn with no reader, which
-    /// is why this impl stays flat.
+    /// A `LocalSocket` failure maps to `InvalidAddress`, which the facade reads
+    /// as this side's failure
+    /// ([`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade)). The dial
+    /// phase stays on [`DialError::phase`](crate::transport::DialError::phase).
     fn from(e: crate::transport::DialError) -> Self {
         match e {
             // Two variants, one arm, deliberately — see above.
@@ -1143,7 +1129,7 @@ pub enum RequestOrigin {
 /// All five of the messages Table 5 marks "Request" without their beginning one:
 /// REQUEST_UPDATE modifies the request its stream carries (Section 9.5),
 /// NAMESPACE and NAMESPACE_DONE report namespaces on the SUBSCRIBE_NAMESPACE
-/// stream that asked for them (Sections 9.15 and 9.16), PUBLISH_SKIPPED
+/// stream that asked for them (Section 9.15 and Section 9.16), PUBLISH_SKIPPED
 /// names a track on the SUBSCRIBE_TRACKS stream that asked for it (Section
 /// 9.17), and PUBLISH_STATE_NOTIFY reports a change on the
 /// subscription's own stream (Section 9.10).
@@ -2864,8 +2850,8 @@ impl Connection {
 
     /// Send a FETCH for one range, carried as a `LOCATION_FILTER` parameter.
     ///
-    /// **The range is inclusive at both ends** (draft-23 Sections 3.2 and
-    /// 3.3.1), and nothing here adds or subtracts one.
+    /// **The range is inclusive at both ends** (draft-23 Section 3.2 and
+    /// draft-23 Section 3.3.1), and nothing here adds or subtracts one.
     pub async fn fetch_range(
         &mut self,
         track_namespace: TrackNamespace,
@@ -3206,7 +3192,7 @@ impl Connection {
     /// endpoint kept the order when the subscription asked for the fill — see
     /// [`Endpoint::fill_group_order`](crate::draft23::endpoint::Endpoint::fill_group_order)
     /// and [`fill::group_order`](crate::draft23::fill::group_order) for the
-    /// three-step resolution Sections 3.4 and 9.19.8 define.
+    /// three-step resolution Section 3.4 and Section 9.19.8 define.
     ///
     /// Doing it here rather than leaving it to the caller is the difference
     /// between an error and a wrong answer: a reader started in the wrong
@@ -3684,10 +3670,11 @@ impl Connection {
             // of 0, it MUST close the session with a PROTOCOL_VIOLATION."
             CodecError::EmptyTrackName => Some(SessionErrorCode::ProtocolViolation),
             // The delta encodings: a Key-Value-Pair or Message Parameter Type
-            // (Sections 8.3 and 9.19), a Location Filter's end Group (Section
-            // 9.19.9), a subgroup Object ID (Section 11.3.1), and a fetch
-            // stream's Group and Object IDs (Sections 11.4.1.1 and 11.4.2.1).
-            // Each "MUST close the session with DELTA_ENCODING_OVERFLOW".
+            // (Section 8.3 and Section 9.19), a Location Filter's end Group
+            // (Section 9.19.9), a subgroup Object ID (Section 11.3.1), and a
+            // fetch stream's Group and Object IDs (Section 11.4.1.1 and
+            // Section 11.4.2.1). Each "MUST close the session with
+            // DELTA_ENCODING_OVERFLOW".
             CodecError::KeyDeltaOverflow(..)
             | CodecError::FilterEndGroupOverflow { .. }
             | CodecError::ObjectIdOverflow(..)
@@ -3716,8 +3703,8 @@ impl Connection {
             // Value or Length/Value does not match the serialization defined by
             // that Type, the receiver MUST close the session with
             // MALFORMED_KEY_VALUE." A Setup Option, a Property, or an Error
-            // Detail. Sections 10.4, 10.5 and 10.6 state the same code for the
-            // Track Property value ranges.
+            // Detail. Section 10.4, Section 10.5 and Section 10.6 state the
+            // same code for the Track Property value ranges.
             CodecError::KeyValueFormatting { .. }
             | CodecError::MalformedErrorDetail { .. }
             | CodecError::TrackPropertyValueOutOfRange { .. } => {
@@ -3739,19 +3726,19 @@ impl Connection {
             // these messages it MUST close the session with INVALID_FIELD."
             CodecError::TrackPropertiesNotPermitted => Some(SessionErrorCode::InvalidField),
             // Section 6.4.1 for an unknown stream type and Section 11 for an
-            // unknown datagram type, and Sections 11.3.1 and 11.2.1 for the
-            // Type values they list as invalid: each "MUST close the session
-            // with INVALID_STREAM_HEADER".
+            // unknown datagram type, and Section 11.3.1 and Section 11.2.1 for
+            // the Type values they list as invalid: each "MUST close the
+            // session with INVALID_STREAM_HEADER".
             CodecError::UnknownStreamType(_)
             | CodecError::UnknownDatagramType(_)
             | CodecError::InvalidStreamTypeValue { .. }
             | CodecError::InvalidDatagramTypeValue { .. } => {
                 Some(SessionErrorCode::InvalidStreamHeader)
             }
-            // Sections 11.4.1, 11.4.1.1 and 11.4.2.2: an undefined Serialization
-            // Flags value above 127, and an entry that refers to a prior Object
-            // there is none of, each "MUST close the session with
-            // MALFORMED_OBJECT".
+            // Section 11.4.1, Section 11.4.1.1 and Section 11.4.2.2: an
+            // undefined Serialization Flags value above 127, and an entry that
+            // refers to a prior Object there is none of, each "MUST close the
+            // session with MALFORMED_OBJECT".
             CodecError::MalformedObject { .. } => Some(SessionErrorCode::MalformedObject),
             // Section 11.1.1: "If an endpoint receives any other value, it
             // SHOULD close the session with INVALID_OBJECT_STATUS (Section

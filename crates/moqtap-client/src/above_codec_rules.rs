@@ -1898,11 +1898,11 @@ pub enum CodecRule {
     /// parameter ends a draft-16 session with one code and a draft-17 session
     /// with the other.
     ///
-    /// Draft-23 raises it for a LOCATION_FILTER (Section 9.19.9) or
-    /// FILL_PARAMETERS (Section 9.19.15) value whose fields run past the end
-    /// of the message. Neither carries a length of its own, so the body is
-    /// shorter than the message's fields, and draft-23 Section 9 answers that:
-    /// "If the length does not match the length of the Message Body, the
+    /// Draft-23 raises it for a LOCATION_FILTER (draft-23 Section 9.19.9) or
+    /// FILL_PARAMETERS (draft-23 Section 9.19.15) value whose fields run past
+    /// the end of the message. Neither carries a length of its own, so the body
+    /// is shorter than the message's fields, and draft-23 Section 9 answers
+    /// that: "If the length does not match the length of the Message Body, the
     /// receiver MUST close the session with MALFORMED_MESSAGE."
     ///
     /// The later run cites the same sentence [`Self::KeyValueFormatting`] does,
@@ -1958,10 +1958,13 @@ pub enum CodecRule {
     /// invalid.
     ///
     /// Drafts 16 through 23, five runs: the section moves twice and the wording
-    /// changes twice, and the moves and the changes do not coincide. Sections
-    /// 10.4.2 on drafts 16 and 17, 11.4.2 on 18, 19 and 20, and 11.3.1 on
-    /// drafts 21 through 23; drafts 16 through 19 enumerate the code points
-    /// after the sentence and drafts 20 through 23 state the bit pattern alone.
+    /// changes twice, and the moves and the changes do not coincide:
+    /// draft-16 Section 10.4.2 and draft-17 Section 10.4.2;
+    /// draft-18 Section 11.4.2, draft-19 Section 11.4.2 and
+    /// draft-20 Section 11.4.2; and draft-21 Section 11.3.1,
+    /// draft-22 Section 11.3.1 and draft-23 Section 11.3.1. Drafts 16 through
+    /// 19 enumerate the code points after the sentence and drafts 20 through
+    /// 23 state the bit pattern alone.
     /// Draft-23's sentence answers with INVALID_STREAM_HEADER instead of
     /// PROTOCOL_VIOLATION.
     ///
@@ -1980,9 +1983,11 @@ pub enum CodecRule {
     ///
     /// Drafts 16 through 23, five runs, cut where
     /// [`CodecRule::InvalidStreamTypeValue`]'s are cut and at different
-    /// numbers: Sections 10.3.1 on drafts 16 and 17, 11.3.1 on 18, 19 and 20,
-    /// and 11.2.1 on drafts 21 through 23. Draft-23's sentence answers with
-    /// INVALID_STREAM_HEADER.
+    /// numbers: draft-16 Section 10.3.1 and draft-17 Section 10.3.1;
+    /// draft-18 Section 11.3.1, draft-19 Section 11.3.1 and
+    /// draft-20 Section 11.3.1; and draft-21 Section 11.2.1,
+    /// draft-22 Section 11.2.1 and draft-23 Section 11.2.1. Draft-23's
+    /// sentence answers with INVALID_STREAM_HEADER.
     ///
     /// Draft-21 is why the two rules cannot share a run. It splits the section
     /// that held both, so the datagram sentence lands at 11.2.1 and the stream

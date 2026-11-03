@@ -96,8 +96,8 @@ fn client_config() -> ClientConfig {
 ///
 /// Written as a four-field filter so the inclusive end is on the wire and
 /// visible to the assertion. Draft-19's encoder would have written 10 for the
-/// last object of a range ending at 9; draft-20 Sections 5.1.2 and 10.13 make
-/// the range inclusive and this writes 9.
+/// last object of a range ending at 9; draft-20 Section 5.1.2 and
+/// draft-20 Section 10.13 make the range inclusive and this writes 9.
 fn fill_range() -> LocationFilter {
     LocationFilter::range_to(4, 0, 2, 9).expect("the end group is in range")
 }

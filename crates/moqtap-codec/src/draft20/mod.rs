@@ -23,7 +23,7 @@
 //!   entire Group"; both conventions are deleted. This change is absent from
 //!   the draft's own change log, and a draft-19 encoder ported forward with its
 //!   end-location arithmetic intact fetches one object too many
-//!   (Sections 5.1.2, 10.13, 10.14)
+//!   (Section 5.1.2, Section 10.13, Section 10.14)
 //! - **`FILL_PARAMETERS` (0x23) is new**: a length-prefixed parameter whose
 //!   value is a nested parameter block, and whose mere presence on a SUBSCRIBE
 //!   or a REQUEST_UPDATE asks the publisher to open a fill fetch stream
@@ -42,8 +42,8 @@
 //! - The data-plane headers rename their leading field `Type` to `Type Flags`
 //!   and move the validity rules out of the figure into prose. The field list,
 //!   order, widths and the set of valid values are all unchanged; what changed
-//!   is the receive path. Sections 11.3.1 and 11.4.2 give **different** rule
-//!   sets — subgroup's reserved bit 4 must be 1, datagram's must be 0, and
+//!   is the receive path. Section 11.3.1 and Section 11.4.2 give **different**
+//!   rule sets — subgroup's reserved bit 4 must be 1, datagram's must be 0, and
 //!   subgroup has no "unspecified bit" clause because bits 0-6 are all
 //!   specified for it
 //! - A fetch stream gains a third End of Range marker, `End of Timed-Out

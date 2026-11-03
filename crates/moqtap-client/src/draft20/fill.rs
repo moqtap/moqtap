@@ -30,11 +30,11 @@
 //! # Ranges are inclusive
 //!
 //! Draft-19's fetch end was "the last Object, plus 1; or 0 to indicate the
-//! entire Group". Draft-20 Sections 5.1.2 and 10.13 both say the Location
-//! filter "specifies an inclusive range of Locations", and both draft-19
-//! conventions are gone. **Nothing in this module adds or subtracts one from
-//! an end location**, and a caller porting draft-19 arithmetic forward fetches
-//! one object too many.
+//! entire Group". Draft-20 Section 5.1.2 and draft-20 Section 10.13 both say
+//! the Location filter "specifies an inclusive range of Locations", and both
+//! draft-19 conventions are gone. **Nothing in this module adds or subtracts
+//! one from an end location**, and a caller porting draft-19 arithmetic forward
+//! fetches one object too many.
 
 use moqtap_codec::draft20::data_stream::GroupOrder;
 use moqtap_codec::draft20::message::{

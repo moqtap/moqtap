@@ -2,10 +2,12 @@
 //! Draft-23 error and status code registries, checked against the draft.
 //!
 //! The code points asserted here are the `Name`/`Code`/`Specification` tables
-//! in draft-23's IANA Considerations: Tables 20 through 23, Sections 16.12.1
-//! (Session Termination Error Codes), 16.12.2 (REQUEST_ERROR Codes), 16.12.3
-//! (PUBLISH_DONE Codes) and 16.12.4 (Stream Reset Error Codes), and Table 19,
-//! Section 16.11 (Error Detail Types). Each registry is pinned as a full list.
+//! in draft-23's IANA Considerations: Tables 20 through 23,
+//! draft-23 Section 16.12.1 (Session Termination Error Codes),
+//! draft-23 Section 16.12.2 (REQUEST_ERROR Codes), draft-23 Section 16.12.3
+//! (PUBLISH_DONE Codes) and draft-23 Section 16.12.4 (Stream Reset Error
+//! Codes), and Table 19, draft-23 Section 16.11 (Error Detail Types). Each
+//! registry is pinned as a full list.
 //!
 //! Every table also carries a `0x7f * N + 0x9D` row reserved for greasing
 //! (Section 13), which `from_u64` answers `None` for.

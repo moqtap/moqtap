@@ -570,7 +570,7 @@ impl EndpointError {
             // offer one, so a client that sends one is telling a server where
             // to reconnect, which it has no standing to do.
             EndpointError::GoAwayUriAtServer => Some(SessionErrorCode::ProtocolViolation),
-            // Sections 8.8 and 8.13 name this code in the sentence that
+            // Section 8.8 and Section 8.13 name this code in the sentence that
             // states the rule, and name no other. A close carrying
             // PROTOCOL_VIOLATION would tell the peer a different thing went
             // wrong.
@@ -728,10 +728,10 @@ pub struct Endpoint {
     /// What Full Track Name the peer has attached each Track Alias to, per
     /// Request ID.
     ///
-    /// Sections 8.8 and 8.13 forbid one alias naming two tracks at once, and the
-    /// "at once" is what makes this a table rather than a set: an alias the
-    /// peer used for a track whose subscription has ended is free again. The
-    /// table therefore records the binding and reads liveness back off the
+    /// Section 8.8 and Section 8.13 forbid one alias naming two tracks at once,
+    /// and the "at once" is what makes this a table rather than a set: an alias
+    /// the peer used for a track whose subscription has ended is free again.
+    /// The table therefore records the binding and reads liveness back off the
     /// subscription's own state machine, rather than keeping a second copy of
     /// it that every path ending a subscription would have to remember to
     /// prune.
@@ -897,9 +897,9 @@ impl Endpoint {
         VarInt::from_u64(alias).ok()
     }
 
-    /// The refusal Sections 8.8 and 8.13 require when `alias` already names a
-    /// different track whose subscription is still live, or `None` when it is
-    /// free.
+    /// The refusal Section 8.8 and Section 8.13 require when `alias` already
+    /// names a different track whose subscription is still live, or `None` when
+    /// it is free.
     ///
     /// # Why the set is read rather than kept
     ///

@@ -526,7 +526,7 @@ impl serde::Serialize for TransportProfile {
 /// [`TransportProfile::apply_to`] refuses, at the moment a leg installs one,
 /// and it is the check every path through this crate already makes. A **file**
 /// is the case it covers badly. A consumer that reads a profile and does not
-/// install it — a scenario checker, a `--dry-run`, a configuration linter —
+/// install it — a profile checker, a `--dry-run`, a configuration linter —
 /// has nowhere for that refusal to happen, so an unusable profile is accepted,
 /// stored and reported valid, and the run built on it is believed. Running the
 /// validator on the way in makes *a profile that parsed is a profile that
@@ -1830,7 +1830,7 @@ mod tests {
     /// later where it is applied.
     ///
     /// The non-finite row is the one this exists for. A consumer that reads a
-    /// profile and never installs it — a scenario checker, a `--dry-run` —
+    /// profile and never installs it — a profile checker, a `--dry-run` —
     /// has no later moment at which `validate` would run, so without a check
     /// on the read the value would be accepted, stored, reported valid, and
     /// believed.

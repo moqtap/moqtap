@@ -99,24 +99,10 @@ impl From<crate::transport::DialError> for ConnectionError {
     /// Maps a dial failure onto the variants this error already has, so a
     /// caller matches `InvalidAddress` or `TlsConfig`.
     ///
-    /// # `LocalSocket` joins `InvalidAddress`, and that is the answer being kept
-    ///
-    /// A socket this machine would not open has a variant of its own on
-    /// [`DialError`](crate::transport::DialError), and it still arrives here.
-    /// Not laziness about the churn — `InvalidAddress` is one of the
-    /// variants the facade reads as
-    /// [`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade), which
-    /// `is_local` answers **true** for, and a failed bind is this side's by
-    /// definition. Routing it to `Transport` would read better in prose and
-    /// would publish this machine's missing IPv6 stack as the relay's doing.
-    ///
-    /// The phase is not lost, only unread on this path. A caller measuring
-    /// which stage of a dial died reads
-    /// [`DialError::phase`](crate::transport::DialError::phase) off the dial
-    /// itself; a caller who arrived at this type named a `host:port` and asked
-    /// for a connection, not for a measurement, and a public variant here for
-    /// a distinction nothing on this path reads is churn with no reader, which
-    /// is why this impl stays flat.
+    /// A `LocalSocket` failure maps to `InvalidAddress`, which the facade reads
+    /// as this side's failure
+    /// ([`ErrorCause::Facade`](crate::dispatch::ErrorCause::Facade)). The dial
+    /// phase stays on [`DialError::phase`](crate::transport::DialError::phase).
     fn from(e: crate::transport::DialError) -> Self {
         match e {
             // Two variants, one arm, deliberately — see above.
@@ -1809,17 +1795,18 @@ impl Connection {
             // receives an unknown stream or datagram type MUST close the
             // session." One sentence covering two tables, which is why both
             // variants sit here.
-            // A Content Exists field that is neither zero nor one, Sections 9.8
-            // and 9.13: "Any other value is a protocol error and MUST terminate
-            // the session with a PROTOCOL_VIOLATION".
+            // A Content Exists field that is neither zero nor one, Section 9.8
+            // and Section 9.13: "Any other value is a protocol error and MUST
+            // terminate the session with a PROTOCOL_VIOLATION".
             CodecError::InvalidContentExists(_) => Some(SessionErrorCode::ProtocolViolation),
-            // A Forward field that is neither zero nor one. Sections 9.7 and
-            // 9.10 use the sentence above; Section 9.13 says "Any value other
-            // than 0 or 1 is a PROTOCOL_VIOLATION". Section 9.14 names the two
-            // legal values without a consequence and is answered the same way,
-            // for the reason given on the variant. Draft-15 replaces the field
-            // with the FORWARD parameter, which carries the same rule in a
-            // different shape and reports it as `ParameterValueOutOfRange`.
+            // A Forward field that is neither zero nor one. Section 9.7 and
+            // Section 9.10 use the sentence above; Section 9.13 says "Any value
+            // other than 0 or 1 is a PROTOCOL_VIOLATION". Section 9.14 names
+            // the two legal values without a consequence and is answered the
+            // same way, for the reason given on the variant. Draft-15 replaces
+            // the field with the FORWARD parameter, which carries the same rule
+            // in a different shape and reports it as
+            // `ParameterValueOutOfRange`.
             CodecError::InvalidForward(_) => Some(SessionErrorCode::ProtocolViolation),
             CodecError::UnknownStreamType(_) | CodecError::UnknownDatagramType(_) => {
                 Some(SessionErrorCode::ProtocolViolation)

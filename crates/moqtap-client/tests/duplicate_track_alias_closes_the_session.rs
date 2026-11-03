@@ -405,7 +405,7 @@ macro_rules! duplicate_track_alias_gates {
                 assert_eq!(
                     err.session_error_code(),
                     Some(SessionErrorCode::DuplicateTrackAlias),
-                    "Sections {} and {} answer {what} with DUPLICATE_TRACK_ALIAS and \
+                    "Section {} and Section {} answer {what} with DUPLICATE_TRACK_ALIAS and \
                      with no other code; the endpoint offered {:?}",
                     $ok_sec,
                     $pub_sec,

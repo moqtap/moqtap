@@ -239,8 +239,8 @@ fn subscribe_with_parameter(parameter_type: u64, value: &[u8]) -> Vec<u8> {
 }
 
 /// [`subscribe_with_parameter`] in draft-23's framing: a `vi64` Message Length
-/// (Section 9, Figure 6), and FILL_PARAMETERS written with no length ahead of
-/// its count (Section 9.19.15).
+/// (draft-23 Section 9, Figure 6), and FILL_PARAMETERS written with no length
+/// ahead of its count (draft-23 Section 9.19.15).
 #[cfg(feature = "draft23")]
 fn subscribe_with_parameter_d23(parameter_type: u64, value: &[u8]) -> Vec<u8> {
     use moqtap_codec::varint::{Moqt18, VarInt};
@@ -262,9 +262,9 @@ fn subscribe_with_parameter_d23(parameter_type: u64, value: &[u8]) -> Vec<u8> {
 ///
 /// Returned as data rather than written out per draft, because drafts 19 and 20
 /// gave these five parameters the same codepoints, the same field order and the
-/// same delta arithmetic — draft-20 only replaced the prose of Section 5.1.3
-/// with the figures of Section 5.1.4. A rule that did not change is one the new
-/// draft still has to be held to.
+/// same delta arithmetic — draft-20 only replaced the prose of
+/// draft-19 Section 5.1.3 with the figures of draft-20 Section 5.1.4. A rule
+/// that did not change is one the new draft still has to be held to.
 ///
 /// The third trigger, the delta overflow, is deliberately **not** here: getting
 /// it wrong fails an assertion rather than panicking, and putting it in the same
@@ -820,11 +820,11 @@ fn a_malformed_range_filter_nested_in_fill_parameters_renders_draft23() {
 /// The positive control for the Range Filters: a well-formed one still renders
 /// as ranges, and renders them with the draft's own two baselines.
 ///
-/// Section 5.1.3's worked example: ranges 3-5 and 10-15 are written `3, 2, 5,
-/// 5`, because a Start counts from the prior Range's **End** and an End counts
-/// from the Start beside it. A fallback that swallowed everything, or a reader
-/// with one running baseline, would decode the same four integers as 3-5 and
-/// 8-13 — well formed, in range, and wrong.
+/// Draft-20 Section 5.1.4's worked example: ranges 3-5 and 10-15 are written
+/// `3, 2, 5, 5`, because a Start counts from the prior Range's **End** and an
+/// End counts from the Start beside it. A fallback that swallowed everything,
+/// or a reader with one running baseline, would decode the same four integers
+/// as 3-5 and 8-13 — well formed, in range, and wrong.
 #[cfg(feature = "draft20")]
 #[test]
 fn a_well_formed_draft_20_range_filter_still_renders_its_ranges() {
@@ -855,11 +855,11 @@ fn a_well_formed_draft_20_range_filter_still_renders_its_ranges() {
 /// The positive control for the Range Filters: a well-formed one still renders
 /// as ranges, and renders them with the draft's own two baselines.
 ///
-/// Section 3.4's worked example: ranges 3-5 and 10-15 are written `3, 2, 5,
-/// 5`, because a Start counts from the prior Range's **End** and an End counts
-/// from the Start beside it. A fallback that swallowed everything, or a reader
-/// with one running baseline, would decode the same four integers as 3-5 and
-/// 8-13 — well formed, in range, and wrong.
+/// Draft-21 Section 8.6's worked example: ranges 3-5 and 10-15 are written
+/// `3, 2, 5, 5`, because a Start counts from the prior Range's **End** and an
+/// End counts from the Start beside it. A fallback that swallowed everything,
+/// or a reader with one running baseline, would decode the same four integers
+/// as 3-5 and 8-13 — well formed, in range, and wrong.
 #[cfg(feature = "draft21")]
 #[test]
 fn a_well_formed_draft_20_range_filter_still_renders_its_ranges_draft21() {
@@ -891,11 +891,11 @@ fn a_well_formed_draft_20_range_filter_still_renders_its_ranges_draft21() {
 /// The positive control for the Range Filters: a well-formed one still renders
 /// as ranges, and renders them with the draft's own two baselines.
 ///
-/// Section 3.4's worked example: ranges 3-5 and 10-15 are written `3, 2, 5,
-/// 5`, because a Start counts from the prior Range's **End** and an End counts
-/// from the Start beside it. A fallback that swallowed everything, or a reader
-/// with one running baseline, would decode the same four integers as 3-5 and
-/// 8-13 — well formed, in range, and wrong.
+/// Draft-22 Section 8.6's worked example: ranges 3-5 and 10-15 are written
+/// `3, 2, 5, 5`, because a Start counts from the prior Range's **End** and an
+/// End counts from the Start beside it. A fallback that swallowed everything,
+/// or a reader with one running baseline, would decode the same four integers
+/// as 3-5 and 8-13 — well formed, in range, and wrong.
 #[cfg(feature = "draft22")]
 #[test]
 fn a_well_formed_draft_20_range_filter_still_renders_its_ranges_draft22() {
@@ -1523,8 +1523,8 @@ fn a_well_formed_setup_token_is_still_named_by_every_draft_that_has_one() {
 ///
 /// The negative control for the loop above, and the reason draft-11 is not in
 /// it: reading a setup 0x01 as a Token on this draft would refuse paths the
-/// draft permits. Section 8.2.1: "since Setup parameters use a separate
-/// namespace, it is impossible for these parameters to appear in Setup
+/// draft permits. Draft-11 Section 8.2.1: "since Setup parameters use a
+/// separate namespace, it is impossible for these parameters to appear in Setup
 /// messages."
 #[cfg(feature = "draft11")]
 #[test]

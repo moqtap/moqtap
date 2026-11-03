@@ -2,9 +2,10 @@
 
 //! Draft-23 allows namespace subscriptions whose prefixes overlap.
 //!
-//! The PREFIX_OVERLAP sentences of earlier drafts are gone from draft-23
-//! Sections 3.6, 4.2, 9.5.2 and 9.19.20, and so is the code itself (Section
-//! 12.3). Section 3.6: "If a Track matches more than one SUBSCRIBE_TRACKS, the
+//! The PREFIX_OVERLAP sentences of earlier drafts are gone from
+//! draft-23 Section 3.6, draft-23 Section 4.2, draft-23 Section 9.5.2 and
+//! draft-23 Section 9.19.20, and so is the code itself (Section 12.3).
+//! Section 3.6: "If a Track matches more than one SUBSCRIBE_TRACKS, the
 //! publisher sends a PUBLISH for each." So an overlapping SUBSCRIBE_NAMESPACE
 //! or SUBSCRIBE_TRACKS, and a REQUEST_UPDATE moving a prefix onto another
 //! subscription's, is answered like any other.

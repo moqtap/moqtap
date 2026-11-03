@@ -8,14 +8,15 @@
 //!
 //! # What a caller feels
 //!
-//! * **A FETCH is answered by REQUEST_OK** (Sections 1.5 and 9.3). Type 0x18
-//!   is reserved, so [`Connection::respond_ok`](connection::Connection::respond_ok)
-//!   answers a FETCH, and the first REQUEST_OK on a FETCH's stream is its
-//!   FETCH_OK; a later one answers a REQUEST_UPDATE.
+//! * **A FETCH is answered by REQUEST_OK** (Section 1.5 and Section 9.3). Type
+//!   0x18 is reserved, so
+//!   [`Connection::respond_ok`](connection::Connection::respond_ok) answers a
+//!   FETCH, and the first REQUEST_OK on a FETCH's stream is its FETCH_OK; a
+//!   later one answers a REQUEST_UPDATE.
 //! * **`PAUSED` (0x11) carries the pause**, 1 for paused (Section 9.19.18).
 //!   The facade's `Forward` choice is written as PAUSED.
 //! * **Overlapping namespace subscriptions are accepted**: draft-23 has no
-//!   PREFIX_OVERLAP (Sections 3.6, 4.2 and 12.3).
+//!   PREFIX_OVERLAP (Section 3.6, Section 4.2 and Section 12.3).
 //! * **Session close codes are the draft-23 ones** (Section 12.2):
 //!   [`EndpointError::session_error_code`](endpoint::EndpointError::session_error_code)
 //!   and

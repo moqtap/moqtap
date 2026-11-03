@@ -470,8 +470,9 @@ mod draft23 {
         })
     }
 
-    /// Section 8.3: "The maximum length of a value is 2^16-1 bytes." Setup
-    /// Options are Key-Value-Pairs, so their writer holds the value to it.
+    /// Draft-23 Section 8.3: "The maximum length of a value is 2^16-1 bytes."
+    /// Setup Options are Key-Value-Pairs, so their writer holds the value to
+    /// it.
     #[test]
     fn a_setup_option_past_the_maximum_is_refused_by_the_rule_it_broke() {
         let message =
@@ -482,9 +483,9 @@ mod draft23 {
         assert!(buf.is_empty());
     }
 
-    /// Message Parameters are not Key-Value-Pairs, and Section 9.19 bounds
-    /// them by the message alone: "the total length of a control message is
-    /// limited by MAX_CONTROL_MESSAGE_SIZE (Section 9.1.8)."
+    /// Message Parameters are not Key-Value-Pairs, and draft-23 Section 9.19
+    /// bounds them by the message alone: "the total length of a control message
+    /// is limited by MAX_CONTROL_MESSAGE_SIZE (Section 9.1.8)."
     #[test]
     fn a_message_parameter_is_bounded_by_the_message_alone() {
         let message = subscribe(vec![opaque(super::PAST_THE_MAXIMUM)]);

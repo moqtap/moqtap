@@ -2,10 +2,10 @@
 //!
 //! The committed vectors are all well formed, so they show what the codec
 //! accepts and never what it must refuse. These tests supply the other half:
-//! the type values MoQ Transport draft-17 Sections 10.4.2 and 10.3.1 list as
-//! invalid, the payload a status datagram may not carry, and the fetch object
-//! layout of Section 10.4.4, whose fields are named by a flags word rather than
-//! all being present.
+//! the type values MoQ Transport draft-17 Section 10.4.2 and
+//! draft-17 Section 10.3.1 list as invalid, the payload a status datagram may
+//! not carry, and the fetch object layout of Section 10.4.4, whose fields are
+//! named by a flags word rather than all being present.
 //!
 //! Each sweep builds its bytes from the draft's figures directly rather than
 //! from the masks the codec uses, so a mask edited to match a wrong idea of the

@@ -1012,7 +1012,7 @@ pub(crate) struct ShapeRecorder {
     /// proxy figure beside it — which is the failure a second set of call
     /// sites would make inevitable and silent.
     ///
-    /// `None` is not a degraded mode. A session constructed directly belongs
+    /// `None` is not a fallback mode. A session constructed directly belongs
     /// to no proxy, so there is no aggregate for it to be part of, and it
     /// reports only its own [`ShapeStats`].
     proxy: Option<Arc<ProxyRecorder>>,

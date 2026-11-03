@@ -395,7 +395,7 @@ fn status_object_is_framed() {
 }
 
 #[test]
-fn wrong_draft_degrades_to_one_error_then_passthrough() {
+fn wrong_draft_falls_back_to_one_error_then_passthrough() {
     // A stream opening with another draft's subgroup stream type, handed
     // to this draft's framer. The proxy freezes the draft at session
     // start, so this really happens; it must cost observability, never
@@ -618,7 +618,7 @@ fn an_object_many_times_the_cap_still_lets_framing_resume() {
 ///
 /// Latching bypass on the middle object would silently cost every later
 /// object on the stream its addressability, without so much as an error to
-/// say so: one oversized object would degrade the whole stream instead of
+/// say so: one oversized object would cost the whole stream instead of
 /// only itself.
 ///
 /// One draft rather than a sweep — ten mebibytes per draft is the whole
@@ -672,7 +672,7 @@ fn object_beyond_measuring_reach_bypasses_but_keeps_every_byte() {
     // Drafts 07-13 decode an object's extension block by copying it out of
     // the buffer, so the pad that lets the framer measure an unarrived
     // payload also bounds that copy. An object longer than `buffered + cap`
-    // is therefore not measurable on those drafts and the stream degrades
+    // is therefore not measurable on those drafts and the stream falls back
     // to passthrough — bytes intact, addressability gone. Lifting this
     // needs the codec to reject an extension length longer than the bytes
     // present; until then it is a documented limit, not an accident.

@@ -104,8 +104,9 @@ fn client_config() -> ClientConfig {
 ///
 /// Written as an Absolute Range, Location Filter Type 0x04, so the inclusive
 /// end is on the wire and visible to the assertion. Draft-19's encoder would
-/// have written 201 for the last object of a range ending at 200; draft-22
-/// Sections 3.2 and 3.3.1 make the range inclusive and this writes 200.
+/// have written 201 for the last object of a range ending at 200;
+/// draft-22 Section 3.2 and draft-22 Section 3.3.1 make the range inclusive and
+/// this writes 200.
 fn fill_range() -> LocationFilter {
     LocationFilter::range_to(4, 0, 2, 200).expect("the end group is in range")
 }

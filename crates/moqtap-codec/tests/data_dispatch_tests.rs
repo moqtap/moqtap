@@ -2004,7 +2004,8 @@ fn an_end_of_range_marker_reports_the_priority_in_force_on_every_draft() {
         // that "the Group ID and Object ID fields are present" and this codec
         // applies Section 11.4.4.1's ordinary arithmetic to them, so the same
         // 9 after an Object in group 1 is group 1 + 9 + 1 = 11. Draft-21 moved
-        // both sentences, to Sections 11.4.1.2 and 11.4.1.1, and reworded
+        // both sentences, to draft-21 Section 11.4.1.2 and
+        // draft-21 Section 11.4.1.1, and reworded
         // neither, and draft-22 keeps them there, so both read the marker
         // draft-20's way.
         //

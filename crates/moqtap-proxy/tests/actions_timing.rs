@@ -51,7 +51,7 @@
 //! ## Paired comparison does not rescue an accuracy pair
 //!
 //! Scheduler noise is not additive for an accuracy pair: under load both
-//! arms degrade to the same tens of milliseconds, so the separation
+//! arms slow to the same tens of milliseconds, so the separation
 //! collapses. The noise is a ceiling both arms hit.
 //!
 //! Pairing still works for the claims in group 3 above, because those pairs
@@ -824,7 +824,7 @@ async fn calibration_a_five_millisecond_delay_is_measured_as_five_milliseconds()
     ///
     /// **Do not tune this to make a loaded run green.** The separation does
     /// move between an idle box and a loaded one: under load the wheel arm
-    /// degrades to the control's own level and the separation vanishes,
+    /// slows to the control's own level and the separation vanishes,
     /// which is why this whole test is `#[ignore]`d rather than margined.
     /// There is no value here that is both meaningful and load-proof:
     /// anything above ~10 ms is passed by the `tokio::time::sleep`
@@ -898,7 +898,7 @@ async fn calibration_a_five_millisecond_delay_is_measured_as_five_milliseconds()
          interleaved with them on this runtime. The wheel has to beat the timer it was written \
          to replace by at least {MARGIN:?}; {:?} is not a difference. This is a calibration \
          measurement: **first check the machine was quiet**, because under CPU saturation both \
-         arms degrade together and this separation collapses to zero without anything having \
+         arms slow together and this separation collapses to zero without anything having \
          regressed. On a quiet box, a red run here means the release path regressed — widen the \
          gap between the mechanisms, do not widen MARGIN",
         errors.count,

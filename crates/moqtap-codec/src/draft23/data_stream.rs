@@ -16,10 +16,10 @@
 //!   - bit 3 (0x08): DEFAULT_PRIORITY (no priority byte)
 //!   - bit 5 (0x20): STATUS (status byte replaces payload)
 //!
-//! Sections 11.3.1 and 11.2.1 each list the Type Flags values an endpoint
-//! refuses with INVALID_STREAM_HEADER, and the two lists differ: bit 4 MUST be
-//! 1 on a subgroup header and 0 on a datagram. A non-minimally encoded Type
-//! Flags value is accepted on receive and never emitted.
+//! Section 11.3.1 and Section 11.2.1 each list the Type Flags values an
+//! endpoint refuses with INVALID_STREAM_HEADER, and the two lists differ: bit 4
+//! MUST be 1 on a subgroup header and 0 on a datagram. A non-minimally encoded
+//! Type Flags value is accepted on receive and never emitted.
 //!
 //! An Object has an empty payload unless its status is registered as
 //! permitting one (Section 11.1.1); [`SubgroupObjectReader::write_object`]
@@ -502,7 +502,7 @@ impl PriorGaps {
     /// Properties included, refusing the conditions one Object shows on its
     /// own.
     ///
-    /// Sections 10.8 and 10.9 make the Track malformed when "An Object
+    /// Section 10.8 and Section 10.9 make the Track malformed when "An Object
     /// contains more than one instance of Prior Group ID Gap", when "An Object
     /// has a Prior Group ID Gap larger than the Group ID", and the same two
     /// for Prior Object ID Gap against the Object ID. Each is
@@ -584,7 +584,7 @@ impl SubgroupObjectReader {
     /// [`DatagramHeader::decode`] does a datagram.
     ///
     /// Refuses, with [`CodecError::MalformedTrack`], the Prior Group ID Gap
-    /// and Prior Object ID Gap conditions of Sections 10.8 and 10.9 this
+    /// and Prior Object ID Gap conditions of Section 10.8 and Section 10.9 this
     /// stream shows: those [`PriorGaps::from_properties`] refuses, "A Group
     /// contains more than one Object with different values for Prior Group ID
     /// Gap", and "An endpoint receives an Object with a Prior Object ID Gap
@@ -1452,7 +1452,7 @@ struct FetchObjectLayout {
 /// ```
 ///
 /// This holds what is on the wire: the deltas, not the IDs they resolve to.
-/// [`FetchObjectReader`] resolves them (Sections 11.4.1.1 and 11.4.2.1).
+/// [`FetchObjectReader`] resolves them (Section 11.4.1.1 and Section 11.4.2.1).
 ///
 /// An entry may be an indicator rather than an Object: [`Self::end_of_range`]
 /// and [`Self::end_marker`] say which.
@@ -1752,7 +1752,7 @@ impl FetchObjectReader {
     /// too, and is refused the same way.
     ///
     /// [`CodecError::DeltaDecodingOverflow`] for an ID below 0 or above
-    /// 2^64-1 (Sections 11.4.1.1 and 11.4.2.1).
+    /// 2^64-1 (Section 11.4.1.1 and Section 11.4.2.1).
     pub fn read_object_header(&mut self, buf: &mut impl Buf) -> Result<FetchObject, CodecError> {
         let header = FetchObjectHeader::decode(buf)?;
 
