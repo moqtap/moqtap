@@ -30,6 +30,7 @@
 
 mod clock;
 mod collect;
+mod egress;
 #[cfg(test)]
 mod golden_tests;
 mod pack;
@@ -48,6 +49,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 pub use clock::DRIFT;
+pub use egress::Proxy;
 pub use relay_cap::MAX_RELAYS_PER_MONTH;
 pub use sampling::{RATE_WINDOW_SECS, TARGET_GROUPS_PER_SEC};
 
@@ -91,6 +93,9 @@ pub enum Error {
     /// The endpoint is not an `https` origin, or an `http` one on a loopback host.
     #[error("the endpoint must be an https origin, or http on a loopback host")]
     InvalidEndpoint,
+    /// The proxy, given or from `HTTPS_PROXY`, is not an `http` or `https` URL.
+    #[error("the proxy must be an http or https URL")]
+    InvalidProxy,
     /// The relay URL is not an `https`, `http` or `moqt` URL.
     #[error("not a relay URL")]
     InvalidRelayUrl,
@@ -167,6 +172,7 @@ pub struct MonitorBuilder {
     source: String,
     key: String,
     endpoint: String,
+    proxy: Proxy,
     detail: Detail,
     interval: Duration,
 }
@@ -177,6 +183,7 @@ impl std::fmt::Debug for MonitorBuilder {
             .field("source", &self.source)
             .field("key", &"<redacted>")
             .field("endpoint", &self.endpoint)
+            .field("proxy", &self.proxy)
             .field("detail", &self.detail)
             .finish()
     }
@@ -186,6 +193,14 @@ impl MonitorBuilder {
     /// The ingest origin. Defaults to [`DEFAULT_ENDPOINT`].
     pub fn endpoint(mut self, origin: impl Into<String>) -> Self {
         self.endpoint = origin.into();
+        self
+    }
+
+    /// How uploads reach the endpoint. Defaults to [`Proxy::FromEnv`]. Through
+    /// a proxy, they go in an HTTP `CONNECT` tunnel, so the key is sent only
+    /// inside it.
+    pub fn proxy(mut self, proxy: Proxy) -> Self {
+        self.proxy = proxy;
         self
     }
 
@@ -220,8 +235,9 @@ impl MonitorBuilder {
             .map_err(|_| Error::InvalidKey)?;
         key.set_sensitive(true);
         let endpoint = endpoint_origin(&self.endpoint).ok_or(Error::InvalidEndpoint)?;
+        let proxy = egress::route(&endpoint, &self.proxy, |name| std::env::var(name).ok())?;
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| Error::NoRuntime)?;
-        let client = upload::client().map_err(|e| Error::Setup(e.to_string()))?;
+        let client = egress::client(proxy).map_err(|e| Error::Setup(e.to_string()))?;
         let mut id = [0u8; 16];
         ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut id)
             .map_err(|_| Error::Setup("system random source".into()))?;
@@ -276,6 +292,7 @@ impl Monitor {
             source: source.into(),
             key: key.into(),
             endpoint: DEFAULT_ENDPOINT.to_string(),
+            proxy: Proxy::FromEnv,
             detail: Detail::Group,
             interval: UPLOAD_INTERVAL,
         }

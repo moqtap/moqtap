@@ -11,14 +11,11 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER, USER_AGENT};
 use hyper::{Request, StatusCode};
-use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
 use tokio::sync::Notify;
 
 use crate::clock::ClockWindow;
 use crate::collect::Collector;
+use crate::egress::HttpClient;
 use crate::pack::{pack, HeadFields, Mode, Sealed};
 use crate::relay_cap::RelayLedger;
 use crate::wire::MAX_LOST_SEQS;
@@ -219,17 +216,6 @@ impl Outbox {
             None => false,
         }
     }
-}
-
-type HttpClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
-
-pub(crate) fn client() -> Result<HttpClient, rustls::Error> {
-    let https = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_provider_and_webpki_roots(rustls::crypto::ring::default_provider())?
-        .https_or_http()
-        .enable_http1()
-        .build();
-    Ok(Client::builder(TokioExecutor::new()).build(https))
 }
 
 enum Outcome {

@@ -80,6 +80,21 @@ unreachable uploads are retried with backoff, up to a bounded backlog. If
 ingest refuses the key (401 or 403) or the path (404), the monitor stops and
 `stats().state` says why.
 
+## Proxies and certificates
+
+Uploads use the proxy in `HTTPS_PROXY` (or `https_proxy`) unless `NO_PROXY`
+(or `no_proxy`) names the endpoint's host. They go through an HTTP `CONNECT`
+tunnel, so the proxy never sees the key; credentials in the proxy URL
+(`http://user:password@proxy:3128`) are sent as `Proxy-Authorization`.
+`MonitorBuilder::proxy` overrides the environment: `Proxy::Direct`, or
+`Proxy::Url` with an `http://` or `https://` proxy. Any other proxy URL makes
+`start` fail with `Error::InvalidProxy`.
+
+Ingest's certificate is checked by the operating system's verifier, so root
+certificates installed on the machine, such as an enterprise's, are trusted.
+On Linux, a host with no CA store (a slim or distroless image without
+`ca-certificates`) verifies against Mozilla's root certificates instead.
+
 ## License
 
 [Functional Source License 1.1, MIT Future License](./LICENSE) (`FSL-1.1-MIT`).

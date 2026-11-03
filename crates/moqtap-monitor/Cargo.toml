@@ -17,16 +17,23 @@ bytes = { workspace = true }
 flate2 = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
-hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "tls12", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+hyper-rustls = { version = "0.27.7", default-features = false, features = ["http1", "tls12", "ring"] }
+hyper-util = { version = "0.1.12", features = ["client-legacy", "client-proxy", "http1", "tokio"] }
 ring = "0.17"
 rustls = { workspace = true }
+rustls-platform-verifier = "0.7"
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tower-service = "0.3"
 url = "2"
+
+[target.'cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple")))'.dependencies]
+webpki-root-certs = "1"
 
 [dev-dependencies]
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["server", "tokio"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 tokio = { workspace = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
