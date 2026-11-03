@@ -1,0 +1,1674 @@
+{
+  "fixtures": [
+    {
+      "name": "basic",
+      "file": "basic.bin",
+      "bodyBytes": 1291,
+      "expect": {
+        "ok": true
+      },
+      "read": {
+        "ok": true,
+        "body": {
+          "side": "source",
+          "preamble": {
+            "v": 2,
+            "i": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "em": [
+              {
+                "first": 0,
+                "n": 4
+              }
+            ],
+            "seal": {
+              "seq": 0,
+              "fromUs": 7200000000,
+              "throughUs": 7215000000,
+              "ms": 15000
+            }
+          },
+          "batch": {
+            "v": 2,
+            "instanceId": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "seq": 0,
+            "idempotencyKey": "998ec06a866c2ca9ec2eefc4e0fdf3ae739d146543a23665b5909ee5eafc2209",
+            "final": false,
+            "clk": {
+              "baseUs": 7200000000,
+              "epoch": 0,
+              "resUs": 1,
+              "sample": {
+                "oUs": 1761688800041500,
+                "rUs": 18250,
+                "atUs": 7198000000,
+                "pop": "FRA"
+              },
+              "app": null
+            },
+            "tail": {
+              "lastRseq": 3,
+              "preDrop": {
+                "records": 0,
+                "objects": 0
+              },
+              "conn": []
+            },
+            "conns": [
+              {
+                "c": 0,
+                "draft": 14,
+                "relay": "https://relay-a.example.net"
+              }
+            ],
+            "t": "source-batch",
+            "source": "enc-fra-1",
+            "monitor": {
+              "name": "moqtap-reference",
+              "version": "2.0.0"
+            },
+            "tracks": [
+              {
+                "id": 0,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "766964656f",
+                "trackKey": "7973027728501289496",
+                "tkMatches": true,
+                "k": 0,
+                "span": [
+                  7200001000,
+                  7200300000
+                ],
+                "xg": []
+              },
+              {
+                "id": 1,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "617564696f",
+                "trackKey": "13261813283898417230",
+                "tkMatches": true,
+                "k": 0,
+                "span": [
+                  7200002000,
+                  7200242000
+                ],
+                "xg": []
+              }
+            ],
+            "gdec": [],
+            "start": {
+              "monoUs": 7195000000,
+              "wallMs": 1761696055000
+            }
+          },
+          "runs": [
+            {
+              "rseq": 1,
+              "entries": [
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": true,
+                  "foKnown": true,
+                  "eog": true,
+                  "end": "na",
+                  "gs": true,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "100",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 8,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200001000,
+                  "dt": [
+                    333,
+                    333,
+                    334,
+                    333,
+                    333,
+                    334,
+                    333
+                  ],
+                  "b": 41210,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": true,
+                  "c": 0,
+                  "ti": 1,
+                  "g": "100",
+                  "path": null,
+                  "sub": null,
+                  "sid": null,
+                  "o0": "0",
+                  "n": 13,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200002000,
+                  "dt": [
+                    200,
+                    200,
+                    200,
+                    200,
+                    200,
+                    200,
+                    200,
+                    200,
+                    200,
+                    200,
+                    200,
+                    200
+                  ],
+                  "b": 2080,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": true,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": true,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "101",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 2,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200267667,
+                  "dt": [
+                    333
+                  ],
+                  "b": 9870,
+                  "rc": null,
+                  "tl": null
+                }
+              ]
+            }
+          ],
+          "marks": [
+            {
+              "rseq": 2,
+              "entries": [
+                {
+                  "kind": "eot",
+                  "c": 0,
+                  "ti": 0,
+                  "g": "101",
+                  "o": "2",
+                  "g2": null,
+                  "o2": null,
+                  "n": null,
+                  "tUs": 7200301000,
+                  "path": null,
+                  "sid": null
+                }
+              ]
+            }
+          ],
+          "paces": [
+            {
+              "rseq": 3,
+              "entries": [
+                {
+                  "c": 0,
+                  "ti": 0,
+                  "first": [
+                    [
+                      69,
+                      1
+                    ]
+                  ],
+                  "later": [
+                    [
+                      71,
+                      7
+                    ],
+                    [
+                      72,
+                      1
+                    ]
+                  ]
+                },
+                {
+                  "c": 0,
+                  "ti": 1,
+                  "first": [],
+                  "later": [
+                    [
+                      62,
+                      12
+                    ]
+                  ]
+                }
+              ]
+            }
+          ],
+          "events": [
+            {
+              "rseq": 0,
+              "c": 0,
+              "ti": null,
+              "e": "conn_open",
+              "code": null,
+              "atUs": 7197000000
+            }
+          ],
+          "records": []
+        }
+      }
+    },
+    {
+      "name": "names-as-bytes",
+      "file": "names-as-bytes.bin",
+      "bodyBytes": 1059,
+      "expect": {
+        "ok": true
+      },
+      "read": {
+        "ok": true,
+        "body": {
+          "side": "source",
+          "preamble": {
+            "v": 2,
+            "i": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "em": [
+              {
+                "first": 0,
+                "n": 1
+              }
+            ],
+            "seal": {
+              "seq": 0,
+              "fromUs": 7200000000,
+              "throughUs": 7215000000,
+              "ms": 15000
+            }
+          },
+          "batch": {
+            "v": 2,
+            "instanceId": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "seq": 0,
+            "idempotencyKey": "998ec06a866c2ca9ec2eefc4e0fdf3ae739d146543a23665b5909ee5eafc2209",
+            "final": false,
+            "clk": {
+              "baseUs": 7200000000,
+              "epoch": 0,
+              "resUs": 1,
+              "sample": {
+                "oUs": 1761688800041500,
+                "rUs": 18250,
+                "atUs": 7198000000,
+                "pop": "FRA"
+              },
+              "app": null
+            },
+            "tail": {
+              "lastRseq": 0,
+              "preDrop": {
+                "records": 0,
+                "objects": 0
+              },
+              "conn": []
+            },
+            "conns": [
+              {
+                "c": 0,
+                "draft": 14,
+                "relay": "https://relay-a.example.net"
+              }
+            ],
+            "t": "source-batch",
+            "source": "enc-fra-1",
+            "monitor": {
+              "name": "moqtap-reference",
+              "version": "2.0.0"
+            },
+            "tracks": [
+              {
+                "id": 0,
+                "ns": [
+                  "6578616d706c652e636f6d"
+                ],
+                "name": "fffe0080",
+                "trackKey": "15383660523126157101",
+                "tkMatches": true,
+                "k": 0,
+                "span": null,
+                "xg": []
+              },
+              {
+                "id": 1,
+                "ns": [
+                  "6578616d706c652e636f6d"
+                ],
+                "name": "",
+                "trackKey": "2303933728247975262",
+                "tkMatches": true,
+                "k": 0,
+                "span": null,
+                "xg": []
+              },
+              {
+                "id": 2,
+                "ns": [
+                  "",
+                  "78"
+                ],
+                "name": "79",
+                "trackKey": "7162354330296625442",
+                "tkMatches": true,
+                "k": 0,
+                "span": null,
+                "xg": []
+              },
+              {
+                "id": 3,
+                "ns": [],
+                "name": "",
+                "trackKey": "12634128529936681850",
+                "tkMatches": true,
+                "k": 0,
+                "span": null,
+                "xg": []
+              }
+            ],
+            "gdec": [],
+            "start": null
+          },
+          "runs": [
+            {
+              "rseq": 0,
+              "entries": [
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "7",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000500,
+                  "dt": [],
+                  "b": 1,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 0,
+                  "ti": 1,
+                  "g": "7",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000600,
+                  "dt": [],
+                  "b": 1,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 0,
+                  "ti": 2,
+                  "g": "7",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000700,
+                  "dt": [],
+                  "b": 1,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 0,
+                  "ti": 3,
+                  "g": "7",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000800,
+                  "dt": [],
+                  "b": 1,
+                  "rc": null,
+                  "tl": null
+                }
+              ]
+            }
+          ],
+          "marks": [],
+          "paces": [],
+          "events": [],
+          "records": []
+        }
+      }
+    },
+    {
+      "name": "zero-length-normal",
+      "file": "zero-length-normal.bin",
+      "bodyBytes": 988,
+      "expect": {
+        "ok": true
+      },
+      "read": {
+        "ok": true,
+        "body": {
+          "side": "source",
+          "preamble": {
+            "v": 2,
+            "i": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "em": [
+              {
+                "first": 0,
+                "n": 1
+              }
+            ],
+            "seal": {
+              "seq": 0,
+              "fromUs": 7200000000,
+              "throughUs": 7215000000,
+              "ms": 15000
+            }
+          },
+          "batch": {
+            "v": 2,
+            "instanceId": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "seq": 0,
+            "idempotencyKey": "998ec06a866c2ca9ec2eefc4e0fdf3ae739d146543a23665b5909ee5eafc2209",
+            "final": false,
+            "clk": {
+              "baseUs": 7200000000,
+              "epoch": 0,
+              "resUs": 1,
+              "sample": {
+                "oUs": 1761688800041500,
+                "rUs": 18250,
+                "atUs": 7198000000,
+                "pop": "FRA"
+              },
+              "app": null
+            },
+            "tail": {
+              "lastRseq": 0,
+              "preDrop": {
+                "records": 0,
+                "objects": 0
+              },
+              "conn": []
+            },
+            "conns": [
+              {
+                "c": 0,
+                "draft": 10,
+                "relay": "https://relay-a.example.net"
+              },
+              {
+                "c": 1,
+                "draft": 14,
+                "relay": "https://relay-b.example.net"
+              },
+              {
+                "c": 2,
+                "draft": 22,
+                "relay": "moqt://relay-c.example.net:4443"
+              }
+            ],
+            "t": "source-batch",
+            "source": "enc-fra-1",
+            "monitor": {
+              "name": "moqtap-reference",
+              "version": "2.0.0"
+            },
+            "tracks": [
+              {
+                "id": 0,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "766964656f",
+                "trackKey": "7973027728501289496",
+                "tkMatches": true,
+                "k": 0,
+                "span": null,
+                "xg": []
+              }
+            ],
+            "gdec": [],
+            "start": null
+          },
+          "runs": [
+            {
+              "rseq": 0,
+              "entries": [
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "9",
+                  "path": null,
+                  "sub": "1",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 3,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000100,
+                  "dt": [
+                    10,
+                    10
+                  ],
+                  "b": 0,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "9",
+                  "path": null,
+                  "sub": null,
+                  "sid": null,
+                  "o0": "3",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200004000,
+                  "dt": [],
+                  "b": 0,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 1,
+                  "ti": 0,
+                  "g": "9",
+                  "path": null,
+                  "sub": "1",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 3,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000101,
+                  "dt": [
+                    10,
+                    10
+                  ],
+                  "b": 0,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 1,
+                  "ti": 0,
+                  "g": "9",
+                  "path": null,
+                  "sub": null,
+                  "sid": null,
+                  "o0": "3",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200004001,
+                  "dt": [],
+                  "b": 0,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 2,
+                  "ti": 0,
+                  "g": "9",
+                  "path": null,
+                  "sub": "1",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 3,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000102,
+                  "dt": [
+                    10,
+                    10
+                  ],
+                  "b": 0,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 2,
+                  "ti": 0,
+                  "g": "9",
+                  "path": null,
+                  "sub": null,
+                  "sid": null,
+                  "o0": "3",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200004002,
+                  "dt": [],
+                  "b": 0,
+                  "rc": null,
+                  "tl": null
+                }
+              ]
+            }
+          ],
+          "marks": [],
+          "paces": [],
+          "events": [],
+          "records": []
+        }
+      }
+    },
+    {
+      "name": "negative-dt",
+      "file": "negative-dt.bin",
+      "bodyBytes": 897,
+      "expect": {
+        "ok": true
+      },
+      "read": {
+        "ok": true,
+        "body": {
+          "side": "source",
+          "preamble": {
+            "v": 2,
+            "i": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "em": [
+              {
+                "first": 0,
+                "n": 1
+              }
+            ],
+            "seal": {
+              "seq": 0,
+              "fromUs": 7200000000,
+              "throughUs": 7215000000,
+              "ms": 15000
+            }
+          },
+          "batch": {
+            "v": 2,
+            "instanceId": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "seq": 0,
+            "idempotencyKey": "998ec06a866c2ca9ec2eefc4e0fdf3ae739d146543a23665b5909ee5eafc2209",
+            "final": false,
+            "clk": {
+              "baseUs": 7200000000,
+              "epoch": 0,
+              "resUs": 1,
+              "sample": {
+                "oUs": 1761688800041500,
+                "rUs": 18250,
+                "atUs": 7198000000,
+                "pop": "FRA"
+              },
+              "app": {
+                "oUs": 1761688800000000,
+                "eUs": 2500
+              }
+            },
+            "tail": {
+              "lastRseq": 0,
+              "preDrop": {
+                "records": 0,
+                "objects": 0
+              },
+              "conn": []
+            },
+            "conns": [
+              {
+                "c": 0,
+                "draft": 14,
+                "relay": "https://relay-a.example.net"
+              }
+            ],
+            "t": "source-batch",
+            "source": "enc-fra-1",
+            "monitor": {
+              "name": "moqtap-reference",
+              "version": "2.0.0"
+            },
+            "tracks": [
+              {
+                "id": 0,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "766964656f",
+                "trackKey": "7973027728501289496",
+                "tkMatches": true,
+                "k": 0,
+                "span": null,
+                "xg": []
+              }
+            ],
+            "gdec": [],
+            "start": null
+          },
+          "runs": [
+            {
+              "rseq": 0,
+              "entries": [
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "1",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 4,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200050000,
+                  "dt": [
+                    -1,
+                    4,
+                    -103
+                  ],
+                  "b": 40,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "2",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 2,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200010000,
+                  "dt": [
+                    -1
+                  ],
+                  "b": 20,
+                  "rc": null,
+                  "tl": null
+                }
+              ]
+            }
+          ],
+          "marks": [],
+          "paces": [],
+          "events": [],
+          "records": []
+        }
+      }
+    },
+    {
+      "name": "u64-ids",
+      "file": "u64-ids.bin",
+      "bodyBytes": 903,
+      "expect": {
+        "ok": true
+      },
+      "read": {
+        "ok": true,
+        "body": {
+          "side": "source",
+          "preamble": {
+            "v": 2,
+            "i": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "em": [
+              {
+                "first": 0,
+                "n": 1
+              }
+            ],
+            "seal": {
+              "seq": 0,
+              "fromUs": 7200000000,
+              "throughUs": 7215000000,
+              "ms": 15000
+            }
+          },
+          "batch": {
+            "v": 2,
+            "instanceId": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "seq": 0,
+            "idempotencyKey": "998ec06a866c2ca9ec2eefc4e0fdf3ae739d146543a23665b5909ee5eafc2209",
+            "final": false,
+            "clk": {
+              "baseUs": 7200000000,
+              "epoch": 0,
+              "resUs": 1,
+              "sample": {
+                "oUs": 1761688800041500,
+                "rUs": 18250,
+                "atUs": 7198000000,
+                "pop": "FRA"
+              },
+              "app": null
+            },
+            "tail": {
+              "lastRseq": 0,
+              "preDrop": {
+                "records": 0,
+                "objects": 0
+              },
+              "conn": []
+            },
+            "conns": [
+              {
+                "c": 7,
+                "draft": 22,
+                "relay": "https://relay-a.example.net"
+              }
+            ],
+            "t": "source-batch",
+            "source": "enc-fra-1",
+            "monitor": {
+              "name": "moqtap-reference",
+              "version": "2.0.0"
+            },
+            "tracks": [
+              {
+                "id": 0,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "766964656f",
+                "trackKey": "7973027728501289496",
+                "tkMatches": true,
+                "k": 0,
+                "span": null,
+                "xg": []
+              }
+            ],
+            "gdec": [
+              {
+                "c": 7,
+                "ti": 0,
+                "n": 2
+              }
+            ],
+            "start": null
+          },
+          "runs": [
+            {
+              "rseq": 0,
+              "entries": [
+                {
+                  "cont": false,
+                  "xid": true,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 7,
+                  "ti": 0,
+                  "g": "18446744073709551615",
+                  "path": null,
+                  "sub": "9223372036854775808",
+                  "sid": null,
+                  "o0": "18446744073709551612",
+                  "n": 3,
+                  "oid": [
+                    "18446744073709551612",
+                    "18446744073709551614",
+                    "18446744073709551615"
+                  ],
+                  "osub": null,
+                  "t0Us": 7200000001,
+                  "dt": [
+                    0,
+                    0
+                  ],
+                  "b": 3,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": true,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": true,
+                  "c": 7,
+                  "ti": 0,
+                  "g": "0",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 4,
+                  "oid": [
+                    "0",
+                    "5",
+                    "6",
+                    "40"
+                  ],
+                  "osub": null,
+                  "t0Us": 7200000100,
+                  "dt": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "b": 4,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 7,
+                  "ti": 0,
+                  "g": "5",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000200,
+                  "dt": [],
+                  "b": 1,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 7,
+                  "ti": 0,
+                  "g": "3",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "2",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200000300,
+                  "dt": [],
+                  "b": 1,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": true,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": false,
+                  "c": 7,
+                  "ti": 0,
+                  "g": "3",
+                  "path": null,
+                  "sub": null,
+                  "sid": null,
+                  "o0": "4",
+                  "n": 3,
+                  "oid": [
+                    "4",
+                    "9",
+                    "18446744073709551615"
+                  ],
+                  "osub": null,
+                  "t0Us": 7200000400,
+                  "dt": [
+                    0,
+                    0
+                  ],
+                  "b": 3,
+                  "rc": null,
+                  "tl": null
+                }
+              ]
+            }
+          ],
+          "marks": [],
+          "paces": [],
+          "events": [],
+          "records": []
+        }
+      }
+    },
+    {
+      "name": "sampled-cont",
+      "file": "sampled-cont.bin",
+      "bodyBytes": 917,
+      "expect": {
+        "ok": true
+      },
+      "read": {
+        "ok": true,
+        "body": {
+          "side": "source",
+          "preamble": {
+            "v": 2,
+            "i": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "em": [
+              {
+                "first": 51,
+                "n": 1
+              }
+            ],
+            "seal": {
+              "seq": 4,
+              "fromUs": 7260000000,
+              "throughUs": 7275000000,
+              "ms": 15000
+            }
+          },
+          "batch": {
+            "v": 2,
+            "instanceId": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "seq": 4,
+            "idempotencyKey": "2cd1ebc7a28c513f9650c70e25827ac25bcfa6e937958b4b418c7e0ba1683833",
+            "final": false,
+            "clk": {
+              "baseUs": 7200000000,
+              "epoch": 0,
+              "resUs": 1,
+              "sample": {
+                "oUs": 1761688800041500,
+                "rUs": 18250,
+                "atUs": 7198000000,
+                "pop": "FRA"
+              },
+              "app": null
+            },
+            "tail": {
+              "lastRseq": 51,
+              "preDrop": {
+                "records": 0,
+                "objects": 0
+              },
+              "conn": []
+            },
+            "conns": [
+              {
+                "c": 0,
+                "draft": 14,
+                "relay": "https://relay-a.example.net"
+              }
+            ],
+            "t": "source-batch",
+            "source": "enc-fra-1",
+            "monitor": {
+              "name": "moqtap-reference",
+              "version": "2.0.0"
+            },
+            "tracks": [
+              {
+                "id": 0,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "617564696f",
+                "trackKey": "13261813283898417230",
+                "tkMatches": true,
+                "k": 2,
+                "span": [
+                  7260000000,
+                  7274990000
+                ],
+                "xg": [
+                  "1001",
+                  "1002",
+                  "1003",
+                  "1004",
+                  "1100"
+                ]
+              }
+            ],
+            "gdec": [
+              {
+                "c": 0,
+                "ti": 0,
+                "n": 1
+              }
+            ],
+            "start": null
+          },
+          "runs": [
+            {
+              "rseq": 51,
+              "entries": [
+                {
+                  "cont": true,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": true,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "1000",
+                  "path": null,
+                  "sub": null,
+                  "sid": null,
+                  "o0": "0",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7260000000,
+                  "dt": [],
+                  "b": 160,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": true,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "1005",
+                  "path": null,
+                  "sub": null,
+                  "sid": null,
+                  "o0": "0",
+                  "n": 1,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7260050000,
+                  "dt": [],
+                  "b": 160,
+                  "rc": null,
+                  "tl": null
+                }
+              ]
+            }
+          ],
+          "marks": [],
+          "paces": [],
+          "events": [],
+          "records": []
+        }
+      }
+    },
+    {
+      "name": "final-unmapped",
+      "file": "final-unmapped.bin",
+      "bodyBytes": 782,
+      "expect": {
+        "ok": true
+      },
+      "read": {
+        "ok": true,
+        "body": {
+          "side": "source",
+          "preamble": {
+            "v": 2,
+            "i": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "em": [
+              {
+                "first": 120,
+                "n": 1
+              }
+            ],
+            "seal": {
+              "seq": 9,
+              "fromUs": 7335000000,
+              "throughUs": 7350000000,
+              "ms": 15000
+            }
+          },
+          "batch": {
+            "v": 2,
+            "instanceId": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "seq": 9,
+            "idempotencyKey": "7527fef94e6574bba643816a2e777e909d8034f6725df704b7120804d4700109",
+            "final": true,
+            "clk": {
+              "baseUs": 7200000000,
+              "epoch": 1,
+              "resUs": 1,
+              "sample": null,
+              "app": null
+            },
+            "tail": {
+              "lastRseq": 120,
+              "preDrop": {
+                "records": 2,
+                "objects": 31
+              },
+              "conn": [
+                {
+                  "c": 0,
+                  "objects": 4812,
+                  "bytes": 3901224
+                }
+              ]
+            },
+            "conns": [
+              {
+                "c": 0,
+                "draft": 14,
+                "relay": "https://relay-a.example.net"
+              }
+            ],
+            "t": "source-batch",
+            "source": "enc-fra-1",
+            "monitor": {
+              "name": "moqtap-reference",
+              "version": "2.0.0"
+            },
+            "tracks": [
+              {
+                "id": 0,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "766964656f",
+                "trackKey": "7973027728501289496",
+                "tkMatches": true,
+                "k": 0,
+                "span": null,
+                "xg": []
+              }
+            ],
+            "gdec": [],
+            "start": null
+          },
+          "runs": [],
+          "marks": [],
+          "paces": [],
+          "events": [],
+          "records": [
+            {
+              "rseq": 120,
+              "t": "end",
+              "record": {
+                "t": "end",
+                "reason": "shutdown",
+                "rseq": 120
+              },
+              "raw": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "refuse-instance-mismatch",
+      "file": "refuse-instance-mismatch.bin",
+      "bodyBytes": 835,
+      "expect": {
+        "ok": false,
+        "reason": "bad-instance-id"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-instance-id"
+      }
+    },
+    {
+      "name": "refuse-seal-mismatch",
+      "file": "refuse-seal-mismatch.bin",
+      "bodyBytes": 835,
+      "expect": {
+        "ok": false,
+        "reason": "seal-mismatch"
+      },
+      "read": {
+        "ok": false,
+        "reason": "seal-mismatch"
+      }
+    },
+    {
+      "name": "refuse-rseq-gap",
+      "file": "refuse-rseq-gap.bin",
+      "bodyBytes": 835,
+      "expect": {
+        "ok": false,
+        "reason": "rseq-mismatch"
+      },
+      "read": {
+        "ok": false,
+        "reason": "rseq-mismatch"
+      }
+    },
+    {
+      "name": "refuse-rseq-twice",
+      "file": "refuse-rseq-twice.bin",
+      "bodyBytes": 927,
+      "expect": {
+        "ok": false,
+        "reason": "rseq-mismatch"
+      },
+      "read": {
+        "ok": false,
+        "reason": "rseq-mismatch"
+      }
+    },
+    {
+      "name": "refuse-undeclared-conn",
+      "file": "refuse-undeclared-conn.bin",
+      "bodyBytes": 834,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-undeclared-track",
+      "file": "refuse-undeclared-track.bin",
+      "bodyBytes": 834,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-non-minimal-leb",
+      "file": "refuse-non-minimal-leb.bin",
+      "bodyBytes": 834,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-trailing-bytes",
+      "file": "refuse-trailing-bytes.bin",
+      "bodyBytes": 835,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-xid-consecutive",
+      "file": "refuse-xid-consecutive.bin",
+      "bodyBytes": 836,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-no-raw-frame",
+      "file": "refuse-no-raw-frame.bin",
+      "bodyBytes": 820,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-stream-end",
+      "file": "refuse-stream-end.bin",
+      "bodyBytes": 834,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-mark-not-in-draft",
+      "file": "refuse-mark-not-in-draft.bin",
+      "bodyBytes": 831,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
+      "name": "refuse-tk-unknown",
+      "file": "refuse-tk-unknown.bin",
+      "bodyBytes": 823,
+      "expect": {
+        "ok": false,
+        "reason": "no-batch-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "no-batch-record"
+      }
+    },
+    {
+      "name": "refuse-source-mismatch",
+      "file": "refuse-source-mismatch.bin",
+      "bodyBytes": 835,
+      "expect": {
+        "ok": false,
+        "reason": "source-mismatch"
+      },
+      "read": {
+        "ok": false,
+        "reason": "source-mismatch"
+      }
+    },
+    {
+      "name": "refuse-bad-idempotency-key",
+      "file": "refuse-bad-idempotency-key.bin",
+      "bodyBytes": 835,
+      "expect": {
+        "ok": false,
+        "reason": "bad-idempotency-key"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-idempotency-key"
+      }
+    },
+    {
+      "name": "refuse-viewer-body",
+      "file": "refuse-viewer-body.bin",
+      "bodyBytes": 927,
+      "expect": {
+        "ok": false,
+        "reason": "wrong-path"
+      },
+      "read": {
+        "ok": false,
+        "reason": "wrong-path"
+      }
+    },
+    {
+      "name": "refuse-em-adjacent",
+      "file": "refuse-em-adjacent.bin",
+      "bodyBytes": 791,
+      "expect": {
+        "ok": false,
+        "preamble": "bad-preamble"
+      },
+      "read": {
+        "ok": false,
+        "preamble": "bad-preamble"
+      }
+    },
+    {
+      "name": "refuse-bad-preamble",
+      "file": "refuse-bad-preamble.bin",
+      "bodyBytes": 791,
+      "expect": {
+        "ok": false,
+        "preamble": "bad-preamble"
+      },
+      "read": {
+        "ok": false,
+        "preamble": "bad-preamble"
+      }
+    }
+  ]
+}

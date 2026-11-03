@@ -1,125 +1,158 @@
-//! The upload body: an 8-byte preamble, then length-prefixed JSON frames,
-//! gzipped as one unit.
+//! The upload body: an 8-byte header, an uncompressed preamble frame
+//! `{v, i, em, seal}`, then length-prefixed frames, gzipped as one unit: the
+//! batch record, and fact records each carrying `rseq`. A `run`, `mark` or
+//! `pace` record is a small JSON descriptor followed by one raw frame of
+//! LEB128 columns.
 //!
-//! The JSON is written by hand so that a body is byte-for-byte what the
-//! ingest's reference writer produces for the same input: keys in a fixed
-//! order, and numbers in ECMAScript's `Number.prototype.toString` form.
+//! The JSON is written by hand so that a body is byte-for-byte what ingest's
+//! reference writer produces for the same input: keys in a fixed order, every
+//! number an integer.
 
 use std::fmt::Write as _;
 use std::io::Write as _;
+use std::sync::Arc;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use ring::digest;
 
-/// Rows one `grp` or `obj` record may hold.
-pub(crate) const MAX_COLUMN_ROWS: usize = 512;
 /// Tracks one body may declare.
 pub(crate) const MAX_BODY_TRACKS: usize = 256;
-/// Relays one body may declare.
-pub(crate) const MAX_BODY_RELAYS: usize = 32;
-/// `grp` rows one body may hold.
-pub(crate) const MAX_BODY_GROUP_ROWS: usize = 50_000;
+/// Connections one body may declare.
+pub(crate) const MAX_BODY_CONNS: usize = 32;
+/// Entries one `run`, `mark` or `pace` record may hold.
+pub(crate) const MAX_RECORD_ENTRIES: usize = 65_536;
+/// The highest connection ordinal.
+pub(crate) const MAX_CONN_ORDINAL: u64 = u32::MAX as u64;
 /// The byte seal: a body is sealed before its gzipped frames pass this.
 pub(crate) const SEAL_BYTES: usize = 32 * 1024;
-/// The ingest edge refuses a body larger than this, preamble included.
-pub(crate) const EDGE_CAP_BYTES: usize = 96 * 1024;
-/// Highest body-local relay number.
-pub(crate) const MAX_RELAY_C: usize = 255;
-/// Highest body-local track id.
-pub(crate) const MAX_TRACK_ID: usize = 65_535;
-/// Seqs one body may list as lost.
-pub(crate) const MAX_LOST_SEQS: usize = 256;
-/// The largest MoQT group or object id: a QUIC varint.
-pub(crate) const MAX_MOQT_ID: u64 = (1 << 62) - 1;
+/// MoQT's limit on namespace fields.
+pub(crate) const MAX_NAMESPACE_FIELDS: usize = 32;
+/// MoQT's limit on a full track name, namespace and name together, in bytes.
+pub(crate) const MAX_FULL_NAME_BYTES: usize = 4096;
+/// The largest id a QUIC varint carries: the limit up to draft 16.
+pub(crate) const MAX_VARINT_ID: u64 = (1 << 62) - 1;
 /// The largest integer a JSON number carries exactly.
-pub(crate) const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
+pub(crate) const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+/// Time quantum of `dt`, µs.
+pub(crate) const DT_QUANTUM_US: i64 = 100;
 
 const BODY_MAGIC: [u8; 4] = *b"MQTC";
-const BODY_VERSION: u8 = 1;
+const BODY_VERSION: u8 = 2;
 const FLAG_GZIP: u8 = 0x01;
-pub(crate) const PREAMBLE_BYTES: usize = 8;
+const HEADER_BYTES: usize = 8;
+const FRAME_RAW: u32 = 0x8000_0000;
 
-/// How integer column elements are written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum IdForm {
-    /// A JSON number while exactly representable, else a decimal string.
-    Auto,
-    /// Always a decimal string.
-    #[cfg_attr(not(test), allow(dead_code))]
-    String,
+const FL_CONT: u8 = 0x01;
+const FL_XID: u8 = 0x02;
+const FL_FO: u8 = 0x04;
+const FL_FO_KNOWN: u8 = 0x08;
+const FL_EOG: u8 = 0x10;
+/// `end` = 3, not applicable: a source run has no stream end.
+const FL_END_NA: u8 = 3 << 5;
+const FL_GS: u8 = 0x80;
+
+/// A full track name, by its bytes, with its `track_key`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Track {
+    pub ns: Vec<Vec<u8>>,
+    pub name: Vec<u8>,
+    pub tk: u64,
 }
 
-/// The device's clock against the server's, as a body was sealed.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Clock {
-    /// Offset `server - device`, ms.
-    pub o: f64,
-    /// Round trip of the sample `o` came from, ms.
-    pub r: f64,
-    /// Samples in the window.
-    pub n: u64,
-    /// That sample's age when the body was sealed, s.
-    pub a: f64,
+impl Track {
+    pub(crate) fn new(ns: Vec<Vec<u8>>, name: Vec<u8>) -> Self {
+        let tk = track_key(&ns, &name);
+        Track { ns, name, tk }
+    }
 }
 
-/// The fields of a `source-batch` record.
-#[derive(Clone, Debug)]
-pub(crate) struct Head<'a> {
-    pub ts: u64,
-    pub wall: u64,
-    pub per_object: bool,
-    pub source: &'a str,
-    pub instance_id: &'a str,
-    pub seq: u64,
-    pub is_final: bool,
-    pub lost: &'a [u64],
-    pub dropped: u64,
-    pub clock: Option<Clock>,
-    pub monitor_name: &'a str,
-    pub monitor_version: &'a str,
+/// `u32be(field count)`, then for each namespace field and the name,
+/// `u32be(len) ‖ bytes`.
+pub(crate) fn canonical_track_bytes(ns: &[Vec<u8>], name: &[u8]) -> Vec<u8> {
+    let mut out =
+        Vec::with_capacity(8 + ns.iter().map(|f| 4 + f.len()).sum::<usize>() + name.len());
+    out.extend_from_slice(&(ns.len() as u32).to_be_bytes());
+    for part in ns.iter().map(Vec::as_slice).chain(std::iter::once(name)) {
+        out.extend_from_slice(&(part.len() as u32).to_be_bytes());
+        out.extend_from_slice(part);
+    }
+    out
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct RelayRec<'a> {
-    pub c: usize,
-    pub relay: &'a str,
-    pub draft: Option<u64>,
-    pub open_ts: Option<u64>,
-    pub close_ts: Option<u64>,
-    pub close_code: Option<u64>,
+/// The backend's `track_hash`: the first 8 bytes, big-endian, of SHA-256
+/// over the canonical full track name.
+pub(crate) fn track_key(ns: &[Vec<u8>], name: &[u8]) -> u64 {
+    let d = digest::digest(&digest::SHA256, &canonical_track_bytes(ns, name));
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&d.as_ref()[..8]);
+    u64::from_be_bytes(b)
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct TrackRec<'a> {
-    pub id: usize,
-    pub ns: &'a [String],
-    pub name: &'a str,
-    pub k: u8,
+/// Unsigned LEB128 columns; `z` and `t` are zigzag forms.
+#[derive(Debug, Default)]
+pub(crate) struct Leb(pub Vec<u8>);
+
+impl Leb {
+    pub(crate) fn byte(&mut self, b: u8) {
+        self.0.push(b);
+    }
+
+    pub(crate) fn u(&mut self, mut v: u64) {
+        while v >= 0x80 {
+            self.0.push((v as u8 & 0x7f) | 0x80);
+            v >>= 7;
+        }
+        self.0.push(v as u8);
+    }
+
+    /// The wrapping difference `to - from`, as a signed zigzag.
+    pub(crate) fn z(&mut self, to: u64, from: u64) {
+        self.t(to.wrapping_sub(from) as i64);
+    }
+
+    pub(crate) fn t(&mut self, v: i64) {
+        self.u(((v << 1) ^ (v >> 63)) as u64);
+    }
 }
 
-/// One `grp` row. Times are device wall µs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct GrpRow {
-    pub c: usize,
-    pub tr: usize,
-    pub g: u64,
-    pub fo: u64,
-    pub send_us: i64,
-    pub span_us: i64,
-    pub objects: u64,
-    pub bytes: u64,
+/// Bytes `u` takes for `v`.
+pub(crate) fn leb_len(v: u64) -> usize {
+    (64 - v.max(1).leading_zeros() as usize).div_ceil(7)
 }
 
-/// One `obj` row.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ObjRow {
-    pub c: usize,
-    pub tr: usize,
-    pub g: u64,
-    pub o: u64,
-    pub bytes: u64,
-    pub send_us: i64,
+/// Bytes `t` takes for `v`.
+pub(crate) fn zigzag_len(v: i64) -> usize {
+    leb_len(((v << 1) ^ (v >> 63)) as u64)
+}
+
+/// Standard padded base64.
+pub(crate) fn base64(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = u32::from(c[0]) << 16
+            | u32::from(*c.get(1).unwrap_or(&0)) << 8
+            | u32::from(*c.get(2).unwrap_or(&0));
+        out.push(A[(n >> 18) as usize & 63] as char);
+        out.push(A[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { A[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { A[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+/// `xg`: the groups, sorted and distinct, as base64 of `u(g0)` then
+/// `u(g_i - g_{i-1} - 1)`.
+pub(crate) fn xg_field(groups: &[u64]) -> String {
+    let mut sorted = groups.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    let mut w = Leb::default();
+    for (i, g) in sorted.iter().enumerate() {
+        w.u(if i == 0 { *g } else { g - sorted[i - 1] - 1 });
+    }
+    base64(&w.0)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,6 +160,8 @@ pub(crate) enum EventKind {
     StreamReset,
     RequestError,
     PublishDone,
+    ConnOpen,
+    ConnClose,
 }
 
 impl EventKind {
@@ -135,35 +170,173 @@ impl EventKind {
             EventKind::StreamReset => "stream_reset",
             EventKind::RequestError => "request_error",
             EventKind::PublishDone => "publish_done",
+            EventKind::ConnOpen => "conn_open",
+            EventKind::ConnClose => "conn_close",
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PevRec {
-    pub ts: u64,
-    pub c: usize,
-    pub tr: Option<usize>,
+/// Mark kinds a source writes, by their wire index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum MarkKind {
+    Eog = 0,
+    Eot = 1,
+    Eotg = 2,
+    Eosg = 3,
+    Dne = 4,
+    Pgg = 8,
+    Pog = 9,
+}
+
+impl MarkKind {
+    /// The drafts the kind exists in.
+    pub(crate) fn drafts(self) -> (u64, u64) {
+        match self {
+            MarkKind::Eog => (7, 23),
+            MarkKind::Eot => (8, 23),
+            MarkKind::Eotg => (7, 10),
+            MarkKind::Eosg => (7, 7),
+            MarkKind::Dne => (7, 15),
+            MarkKind::Pgg => (11, 23),
+            MarkKind::Pog => (14, 23),
+        }
+    }
+
+    fn has_n(self) -> bool {
+        matches!(self, MarkKind::Pgg | MarkKind::Pog)
+    }
+}
+
+/// One run: ids and times as captured, times in device mono µs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RunIn {
+    pub cont: bool,
+    pub fo: bool,
+    pub eog: bool,
+    pub gs: bool,
+    pub c: u64,
+    pub ti: usize,
+    pub g: u64,
+    /// `None` for a datagram.
+    pub sub: Option<u64>,
+    pub ids: Vec<u64>,
+    pub times: Vec<i64>,
+    pub b: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MarkIn {
+    pub kind: MarkKind,
+    pub c: u64,
+    pub ti: usize,
+    pub g: u64,
+    pub o: u64,
+    /// The gap of `pgg`/`pog`.
+    pub n: u64,
+    pub t: i64,
+}
+
+/// A sparse histogram, keys strictly ascending, counts positive.
+pub(crate) type Hist = Vec<(u32, u64)>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PaceIn {
+    pub c: u64,
+    pub ti: usize,
+    pub first: Hist,
+    pub later: Hist,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PevIn {
+    pub c: u64,
+    pub ti: Option<usize>,
     pub e: EventKind,
     pub code: Option<u64>,
+    pub at_us: i64,
 }
 
-/// A columnar record, in body order.
-#[derive(Clone, Debug)]
-pub(crate) enum DataRec {
-    Grp(Vec<GrpRow>, IdForm),
-    Obj(Vec<ObjRow>, IdForm),
+/// A fact record, in body order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Record {
+    Pev(PevIn),
+    Runs(Vec<RunIn>),
+    Marks(Vec<MarkIn>),
+    Paces(Vec<PaceIn>),
+    End(&'static str),
 }
 
-/// Everything one body holds.
-#[derive(Clone, Debug)]
-pub(crate) struct BodySpec<'a> {
-    pub head: Head<'a>,
-    pub relays: Vec<RelayRec<'a>>,
-    pub tracks: Vec<TrackRec<'a>>,
-    pub data: Vec<DataRec>,
-    pub events: Vec<PevRec>,
-    pub end: Option<&'a str>,
+/// An exchange sample: `server - mono` offset, round trip, mono time, PoP.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClockSample {
+    pub o_us: i64,
+    pub r_us: u64,
+    pub at_us: i64,
+    pub pop: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Clk {
+    pub base_us: i64,
+    pub epoch: u64,
+    pub res_us: u64,
+    pub sample: Option<ClockSample>,
+    /// An integrator's UTC offset and its bound, µs.
+    pub app: Option<(i64, u64)>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Tail {
+    pub last_rseq: Option<u64>,
+    pub pre_drop_records: u64,
+    pub pre_drop_objects: u64,
+    /// Cumulative objects and bytes per connection ordinal.
+    pub conn: Vec<(u64, u64, u64)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ConnRec {
+    pub c: u64,
+    pub draft: Option<u64>,
+    pub relay: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TrackRec {
+    pub ns: Vec<Vec<u8>>,
+    pub name: Vec<u8>,
+    pub tk: u64,
+    pub k: u8,
+    pub span: Option<(i64, i64)>,
+    pub xg: Vec<u64>,
+}
+
+/// The `source-batch` record, but for `clk`, which is attached when the body
+/// is first sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Batch {
+    pub source: String,
+    pub instance_id: String,
+    pub seq: u64,
+    pub is_final: bool,
+    pub monitor_name: &'static str,
+    pub monitor_version: &'static str,
+    pub tail: Tail,
+    pub conns: Vec<ConnRec>,
+    /// Ids are positions.
+    pub tracks: Vec<TrackRec>,
+    /// `(c, ti, n)`.
+    pub gdec: Vec<(u64, usize, u64)>,
+    /// The instance's start: mono µs and wall ms.
+    pub start: Option<(i64, i64)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Seal {
+    pub seq: u64,
+    pub from_us: i64,
+    pub through_us: i64,
+    pub ms: u64,
 }
 
 /// `sha256("source:" + source + ":" + instanceId + ":" + seq)`, lowercase hex.
@@ -181,338 +354,380 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
     s
 }
 
-/// The frame stream of a body: what gets gzipped behind the preamble.
-pub(crate) fn encode_frames(spec: &BodySpec<'_>) -> Vec<u8> {
-    let mut frames = Vec::new();
-    let mut push = |json: String| {
-        let len = u32::try_from(json.len()).unwrap_or(u32::MAX) & 0x7fff_ffff;
-        frames.extend_from_slice(&len.to_be_bytes());
-        frames.extend_from_slice(json.as_bytes());
-    };
-    push(batch_json(&spec.head));
-    for r in &spec.relays {
-        push(relay_json(r));
-    }
-    for t in &spec.tracks {
-        push(track_json(t));
-    }
-    for d in &spec.data {
-        match d {
-            DataRec::Grp(rows, form) => push(grp_json(rows, *form)),
-            DataRec::Obj(rows, form) => push(obj_json(rows, *form)),
+fn push_frame(out: &mut Vec<u8>, payload: &[u8], raw: bool) {
+    let len = payload.len() as u32 | if raw { FRAME_RAW } else { 0 };
+    out.extend_from_slice(&len.to_be_bytes());
+    out.extend_from_slice(payload);
+}
+
+/// The preamble frame's JSON. `em` ranges ascend with a gap between them.
+pub(crate) fn preamble_json(instance_id: &str, em: &[(u64, u64)], seal: &Seal) -> String {
+    let mut j = Obj::new();
+    j.int("v", 2);
+    j.str("i", instance_id);
+    let ranges: Vec<String> = em.iter().map(|(f, n)| format!("[{f},{n}]")).collect();
+    j.raw("em", &format!("[{}]", ranges.join(",")));
+    let mut s = Obj::new();
+    s.int("seq", seal.seq.into());
+    s.int("from_us", seal.from_us.into());
+    s.int("through_us", seal.through_us.into());
+    s.int("ms", seal.ms.into());
+    j.raw("seal", &s.finish());
+    j.finish()
+}
+
+/// The frames of the fact records, each numbered from `first_rseq`.
+pub(crate) fn record_frames(records: &[Record], base_us: i64, first_rseq: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (i, r) in records.iter().enumerate() {
+        let rseq = first_rseq + i as u64;
+        match r {
+            Record::Pev(e) => push_frame(&mut out, pev_json(e, rseq).as_bytes(), false),
+            Record::Runs(runs) => {
+                push_frame(&mut out, descriptor("run", 2, runs.len(), rseq).as_bytes(), false);
+                push_frame(&mut out, &encode_runs(base_us, runs), true);
+            }
+            Record::Marks(marks) => {
+                push_frame(&mut out, descriptor("mark", 1, marks.len(), rseq).as_bytes(), false);
+                push_frame(&mut out, &encode_marks(base_us, marks), true);
+            }
+            Record::Paces(paces) => {
+                push_frame(&mut out, descriptor("pace", 1, paces.len(), rseq).as_bytes(), false);
+                push_frame(&mut out, &encode_paces(paces), true);
+            }
+            Record::End(reason) => {
+                let mut j = Obj::new();
+                j.str("t", "end");
+                j.str("reason", reason);
+                j.int("rseq", rseq.into());
+                push_frame(&mut out, j.finish().as_bytes(), false);
+            }
         }
     }
-    for e in &spec.events {
-        push(pev_json(e));
-    }
-    if let Some(reason) = spec.end {
-        let mut o = Obj::new();
-        o.str("t", "end");
-        o.str("reason", reason);
-        push(o.finish());
-    }
-    frames
-}
-
-pub(crate) fn gzip(frames: &[u8]) -> Vec<u8> {
-    let mut enc = GzEncoder::new(Vec::with_capacity(frames.len() / 3), Compression::default());
-    // Writing into a Vec cannot fail.
-    let _ = enc.write_all(frames);
-    enc.finish().unwrap_or_default()
-}
-
-/// A whole body: the preamble, then the gzipped frames.
-pub(crate) fn encode_body(gzipped: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(PREAMBLE_BYTES + gzipped.len());
-    out.extend_from_slice(&BODY_MAGIC);
-    out.extend_from_slice(&[BODY_VERSION, FLAG_GZIP, 0, 0]);
-    out.extend_from_slice(gzipped);
     out
 }
 
-fn batch_json(h: &Head<'_>) -> String {
-    let mut o = Obj::new();
-    o.str("t", "source-batch");
-    o.int("v", 1);
-    o.int("ts", h.ts as i128);
-    o.int("wall", h.wall as i128);
-    o.str("lvl", if h.per_object { "headers+sizes" } else { "baseline" });
-    o.str("source", h.source);
-    o.str("instanceId", h.instance_id);
-    o.int("seq", h.seq as i128);
-    o.str("idempotencyKey", &idempotency_key(h.source, h.instance_id, h.seq));
-    o.bool("final", h.is_final);
-    let mut lost = String::from("[");
-    for (i, s) in h.lost.iter().enumerate() {
-        if i > 0 {
-            lost.push(',');
-        }
-        let _ = write!(lost, "{s}");
-    }
-    lost.push(']');
-    o.raw("lost", &lost);
-    o.int("dropped", h.dropped as i128);
-    if let Some(c) = h.clock {
-        let mut clock = Obj::new();
-        clock.num("o", c.o);
-        clock.num("r", c.r);
-        clock.int("n", c.n as i128);
-        clock.num("a", c.a);
-        o.raw("clock", &clock.finish());
-    }
-    let mut m = Obj::new();
-    m.str("name", h.monitor_name);
-    m.str("version", h.monitor_version);
-    o.raw("monitor", &m.finish());
-    o.finish()
+/// The frames after the preamble: the batch record, then the records'.
+pub(crate) fn frames(batch: &Batch, clk: &Clk, records: &[u8]) -> Vec<u8> {
+    let json = batch_json(batch, clk);
+    let mut out = Vec::with_capacity(4 + json.len() + records.len());
+    push_frame(&mut out, json.as_bytes(), false);
+    out.extend_from_slice(records);
+    out
 }
 
-fn relay_json(r: &RelayRec<'_>) -> String {
-    let mut o = Obj::new();
-    o.str("t", "relay");
-    o.int("c", r.c as i128);
-    o.str("relay", r.relay);
-    for (k, v) in [
-        ("draft", r.draft),
-        ("openTs", r.open_ts),
-        ("closeTs", r.close_ts),
-        ("closeCode", r.close_code),
-    ] {
-        if let Some(v) = v {
-            o.int(k, v as i128);
-        }
-    }
-    o.finish()
+/// A whole body: header, preamble frame, then the frames, gzipped when asked.
+pub(crate) fn body(preamble: &str, frames: &[u8], gzipped: bool) -> Vec<u8> {
+    let payload = if gzipped { gzip(frames) } else { frames.to_vec() };
+    let mut out = Vec::with_capacity(HEADER_BYTES + 4 + preamble.len() + payload.len());
+    out.extend_from_slice(&BODY_MAGIC);
+    out.extend_from_slice(&[BODY_VERSION, if gzipped { FLAG_GZIP } else { 0 }, 0, 0]);
+    push_frame(&mut out, preamble.as_bytes(), false);
+    out.extend_from_slice(&payload);
+    out
 }
 
-fn track_json(t: &TrackRec<'_>) -> String {
-    let mut o = Obj::new();
-    o.str("t", "track");
-    o.int("id", t.id as i128);
-    let mut ns = String::from("[");
-    for (i, f) in t.ns.iter().enumerate() {
-        if i > 0 {
-            ns.push(',');
-        }
-        push_str(&mut ns, f);
-    }
-    ns.push(']');
-    o.raw("ns", &ns);
-    o.str("name", t.name);
-    o.int("k", t.k as i128);
-    o.finish()
+pub(crate) fn gzip(frames: &[u8]) -> Vec<u8> {
+    let mut gz = GzEncoder::new(Vec::with_capacity(frames.len() / 2 + 64), Compression::default());
+    let _ = gz.write_all(frames);
+    gz.finish().unwrap_or_default()
 }
 
-fn pev_json(e: &PevRec) -> String {
-    let mut o = Obj::new();
-    o.str("t", "pev");
-    o.int("ts", e.ts as i128);
-    o.int("c", e.c as i128);
-    if let Some(tr) = e.tr {
-        o.int("tr", tr as i128);
+fn descriptor(t: &str, v: i64, n: usize, rseq: u64) -> String {
+    let mut j = Obj::new();
+    j.str("t", t);
+    j.int("v", v.into());
+    j.int("n", n as i128);
+    j.int("rseq", rseq.into());
+    j.finish()
+}
+
+fn pev_json(e: &PevIn, rseq: u64) -> String {
+    let mut j = Obj::new();
+    j.str("t", "pev");
+    j.int("v", 2);
+    j.int("c", e.c.into());
+    if let Some(ti) = e.ti {
+        j.int("ti", ti as i128);
     }
-    o.str("e", e.e.as_str());
+    j.str("e", e.e.as_str());
     if let Some(code) = e.code {
-        o.int("code", code as i128);
+        j.int("code", code.into());
     }
-    o.finish()
+    j.int("at_us", e.at_us.into());
+    j.int("rseq", rseq.into());
+    j.finish()
 }
 
-/// `g` is absolute on a (c, tr) pair's first row, then a delta from that
-/// pair's previous row; `t0` is a delta from the previous row, the first from
-/// `base`; `fo` is omitted when every value is 0.
-fn grp_json(rows: &[GrpRow], form: IdForm) -> String {
-    let base = rows.first().map_or(0, |r| r.send_us);
-    let mut cols: [Col; 8] = Default::default();
-    let mut last = Vec::<((usize, usize), u64)>::new();
-    let mut prev_send = base;
-    for r in rows {
-        let prev = pair_last(&mut last, (r.c, r.tr), r.g);
-        cols[0].int(r.c as i128);
-        cols[1].int(r.tr as i128);
-        cols[2].id(prev.map_or(r.g as i128, |p| r.g as i128 - p as i128), form);
-        cols[3].id(r.fo as i128, form);
-        cols[4].int(r.send_us as i128 - prev_send as i128);
-        prev_send = r.send_us;
-        cols[5].int(r.span_us as i128);
-        cols[6].int(r.objects as i128);
-        cols[7].int(r.bytes as i128);
+fn batch_json(b: &Batch, clk: &Clk) -> String {
+    let mut j = Obj::new();
+    j.str("t", "source-batch");
+    j.int("v", 2);
+    j.str("source", &b.source);
+    j.str("instanceId", &b.instance_id);
+    j.int("seq", b.seq.into());
+    j.str("idempotencyKey", &idempotency_key(&b.source, &b.instance_id, b.seq));
+    j.bool("final", b.is_final);
+    let mut m = Obj::new();
+    m.str("name", b.monitor_name);
+    m.str("version", b.monitor_version);
+    j.raw("monitor", &m.finish());
+    j.raw("clk", &clk_json(clk));
+    j.raw("tail", &tail_json(&b.tail));
+    let conns: Vec<String> = b.conns.iter().map(conn_json).collect();
+    j.raw("conn", &format!("[{}]", conns.join(",")));
+    let tracks: Vec<String> = b.tracks.iter().enumerate().map(|(i, t)| track_json(i, t)).collect();
+    j.raw("trk", &format!("[{}]", tracks.join(",")));
+    if !b.gdec.is_empty() {
+        let rows: Vec<String> = b.gdec.iter().map(|(c, ti, n)| format!("[{c},{ti},{n}]")).collect();
+        j.raw("gdec", &format!("[{}]", rows.join(",")));
     }
-    let with_fo = rows.iter().any(|r| r.fo != 0);
-    let names = ["c", "tr", "g", "fo", "t0", "d", "n", "b"];
-    let mut c = Obj::new();
-    for (name, col) in names.iter().zip(cols) {
-        if *name == "fo" && !with_fo {
-            continue;
+    if let Some((mono_us, wall_ms)) = b.start {
+        let mut s = Obj::new();
+        s.int("mono_us", mono_us.into());
+        s.int("wall_ms", wall_ms.into());
+        j.raw("start", &s.finish());
+    }
+    j.finish()
+}
+
+fn clk_json(c: &Clk) -> String {
+    let mut j = Obj::new();
+    j.int("base_us", c.base_us.into());
+    j.int("epoch", c.epoch.into());
+    j.int("res_us", c.res_us.into());
+    if let Some(s) = &c.sample {
+        j.int("o_us", s.o_us.into());
+        j.int("r_us", s.r_us.into());
+        j.int("at_us", s.at_us.into());
+        if let Some(pop) = &s.pop {
+            j.str("pop", pop);
         }
-        c.raw(name, &col.finish());
     }
-    let mut o = Obj::new();
-    o.str("t", "grp");
-    o.int("v", 1);
-    o.int("base", base as i128);
-    o.raw("cols", &c.finish());
-    o.finish()
+    if let Some((o_us, e_us)) = c.app {
+        let mut a = Obj::new();
+        a.int("o_us", o_us.into());
+        a.int("e_us", e_us.into());
+        j.raw("app", &a.finish());
+    }
+    j.finish()
 }
 
-/// `g` as in `grp`; `o` is absolute on a pair's first row and whenever its
-/// group changes, else a delta from the pair's previous object; `at` as `t0`.
-fn obj_json(rows: &[ObjRow], form: IdForm) -> String {
-    let base = rows.first().map_or(0, |r| r.send_us);
-    let mut cols: [Col; 6] = Default::default();
-    let mut last = Vec::<((usize, usize), (u64, u64))>::new();
-    let mut prev_send = base;
-    for r in rows {
-        let key = (r.c, r.tr);
-        let prev = match last.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, v)) => Some(std::mem::replace(v, (r.g, r.o))),
+fn tail_json(t: &Tail) -> String {
+    let mut j = Obj::new();
+    if let Some(r) = t.last_rseq {
+        j.int("last_rseq", r.into());
+    }
+    let mut d = Obj::new();
+    d.int("records", t.pre_drop_records.into());
+    d.int("objects", t.pre_drop_objects.into());
+    j.raw("pre_drop", &d.finish());
+    let rows: Vec<String> = t.conn.iter().map(|(c, o, b)| format!("[{c},{o},{b}]")).collect();
+    j.raw("conn", &format!("[{}]", rows.join(",")));
+    j.finish()
+}
+
+fn conn_json(c: &ConnRec) -> String {
+    let mut j = Obj::new();
+    j.int("c", c.c.into());
+    if let Some(d) = c.draft {
+        j.int("draft", d.into());
+    }
+    j.str("relay", &c.relay);
+    j.finish()
+}
+
+/// The gzipped size of a `trk` list of `tracks`, without spans or excluded
+/// groups.
+pub(crate) fn track_list_gz_len(tracks: &[Arc<Track>]) -> usize {
+    if tracks.is_empty() {
+        return 0;
+    }
+    let list: Vec<String> = tracks
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let rec = TrackRec {
+                ns: t.ns.clone(),
+                name: t.name.clone(),
+                tk: t.tk,
+                k: 0,
+                span: None,
+                xg: Vec::new(),
+            };
+            track_json(i, &rec)
+        })
+        .collect();
+    gzip(list.join(",").as_bytes()).len()
+}
+
+fn track_json(id: usize, t: &TrackRec) -> String {
+    let mut j = Obj::new();
+    j.int("id", id as i128);
+    let ns: Vec<String> = t.ns.iter().map(|f| json_string(&base64(f))).collect();
+    j.raw("ns", &format!("[{}]", ns.join(",")));
+    j.str("name", &base64(&t.name));
+    j.str("tk", &format!("{:016x}", t.tk));
+    j.int("k", t.k.into());
+    if let Some((lo, hi)) = t.span {
+        j.raw("span", &format!("[{lo},{hi}]"));
+    }
+    if !t.xg.is_empty() {
+        j.str("xg", &xg_field(&t.xg));
+    }
+    j.finish()
+}
+
+/// The `run` columns: `fl c ti g sk [sub] o0 n [oid…] t0 dt… b`.
+pub(crate) fn encode_runs(base_us: i64, runs: &[RunIn]) -> Vec<u8> {
+    let mut w = Leb::default();
+    let mut last_g: Vec<(usize, u64)> = Vec::new();
+    let mut last_t0 = base_us;
+    for r in runs {
+        let n = r.ids.len();
+        let xid = r.ids.windows(2).any(|p| p[0].checked_add(1) != Some(p[1]));
+        w.byte(
+            flag(r.cont, FL_CONT)
+                | flag(xid, FL_XID)
+                | flag(r.fo, FL_FO)
+                | FL_FO_KNOWN
+                | flag(r.eog, FL_EOG)
+                | FL_END_NA
+                | flag(r.gs, FL_GS),
+        );
+        w.u(r.c);
+        w.u(r.ti as u64);
+        let prev = match last_g.iter_mut().find(|(ti, _)| *ti == r.ti) {
+            Some(slot) => std::mem::replace(&mut slot.1, r.g),
             None => {
-                last.push((key, (r.g, r.o)));
-                None
+                last_g.push((r.ti, r.g));
+                0
             }
         };
-        cols[0].int(r.c as i128);
-        cols[1].int(r.tr as i128);
-        cols[2].id(prev.map_or(r.g as i128, |(g, _)| r.g as i128 - g as i128), form);
-        let o = match prev {
-            Some((g, o)) if g == r.g => r.o as i128 - o as i128,
-            _ => r.o as i128,
-        };
-        cols[3].id(o, form);
-        cols[4].int(r.bytes as i128);
-        cols[5].int(r.send_us as i128 - prev_send as i128);
-        prev_send = r.send_us;
+        w.z(r.g, prev);
+        match r.sub {
+            None => w.u(0),
+            Some(s) => {
+                w.u(1);
+                w.u(s);
+            }
+        }
+        w.u(r.ids[0]);
+        w.u(n as u64);
+        if xid {
+            for p in r.ids.windows(2) {
+                match r.sub {
+                    None => w.z(p[1], p[0]),
+                    Some(_) => w.u(p[1] - p[0] - 1),
+                }
+            }
+        }
+        let t0 = r.times[0];
+        w.t(t0 - last_t0);
+        last_t0 = t0;
+        let mut q = 0;
+        for &t in &r.times[1..] {
+            let qi = (t - t0).div_euclid(DT_QUANTUM_US);
+            w.t(qi - q);
+            q = qi;
+        }
+        w.u(r.b);
     }
-    let mut c = Obj::new();
-    for (name, col) in ["c", "tr", "g", "o", "s", "at"].iter().zip(cols) {
-        c.raw(name, &col.finish());
-    }
-    let mut o = Obj::new();
-    o.str("t", "obj");
-    o.int("v", 1);
-    o.int("base", base as i128);
-    o.raw("cols", &c.finish());
-    o.finish()
+    w.0
 }
 
-fn pair_last(last: &mut Vec<((usize, usize), u64)>, key: (usize, usize), g: u64) -> Option<u64> {
-    match last.iter_mut().find(|(k, _)| *k == key) {
-        Some((_, v)) => Some(std::mem::replace(v, g)),
-        None => {
-            last.push((key, g));
-            None
-        }
-    }
-}
-
-#[derive(Default)]
-struct Col(String);
-
-impl Col {
-    fn sep(&mut self) {
-        self.0.push(if self.0.is_empty() { '[' } else { ',' });
-    }
-    fn int(&mut self, v: i128) {
-        self.sep();
-        let _ = write!(self.0, "{v}");
-    }
-    fn id(&mut self, v: i128, form: IdForm) {
-        self.sep();
-        let safe = (-(MAX_SAFE_INTEGER as i128)..=MAX_SAFE_INTEGER as i128).contains(&v);
-        if form == IdForm::Auto && safe {
-            let _ = write!(self.0, "{v}");
-        } else {
-            let _ = write!(self.0, "\"{v}\"");
-        }
-    }
-    fn finish(mut self) -> String {
-        if self.0.is_empty() {
-            self.0.push('[');
-        }
-        self.0.push(']');
-        self.0
+fn flag(on: bool, bit: u8) -> u8 {
+    if on {
+        bit
+    } else {
+        0
     }
 }
 
+/// The `mark` columns: `kind c ti g o [n] t`.
+pub(crate) fn encode_marks(base_us: i64, marks: &[MarkIn]) -> Vec<u8> {
+    let mut w = Leb::default();
+    let mut last_t = base_us;
+    for m in marks {
+        w.u(m.kind as u64);
+        w.u(m.c);
+        w.u(m.ti as u64);
+        w.u(m.g);
+        w.u(m.o);
+        if m.kind.has_n() {
+            w.u(m.n);
+        }
+        w.t(m.t - last_t);
+        last_t = m.t;
+    }
+    w.0
+}
+
+/// The `pace` columns: `c ti first later`, each histogram
+/// `u(pairs) [u(key delta) u(count)]…`.
+pub(crate) fn encode_paces(paces: &[PaceIn]) -> Vec<u8> {
+    let mut w = Leb::default();
+    for p in paces {
+        w.u(p.c);
+        w.u(p.ti as u64);
+        for h in [&p.first, &p.later] {
+            w.u(h.len() as u64);
+            let mut last = None;
+            for &(key, count) in h {
+                w.u(u64::from(key - last.unwrap_or(0)));
+                w.u(count);
+                last = Some(key);
+            }
+        }
+    }
+    w.0
+}
+
+/// A JSON object, keys in the order written.
 struct Obj(String);
 
 impl Obj {
     fn new() -> Self {
         Obj(String::from("{"))
     }
+
     fn key(&mut self, k: &str) {
         if self.0.len() > 1 {
             self.0.push(',');
         }
-        push_str(&mut self.0, k);
+        self.0.push_str(&json_string(k));
         self.0.push(':');
     }
+
     fn str(&mut self, k: &str, v: &str) {
         self.key(k);
-        push_str(&mut self.0, v);
+        self.0.push_str(&json_string(v));
     }
+
     fn int(&mut self, k: &str, v: i128) {
         self.key(k);
         let _ = write!(self.0, "{v}");
     }
-    fn num(&mut self, k: &str, v: f64) {
-        self.key(k);
-        self.0.push_str(&js_number(v));
-    }
+
     fn bool(&mut self, k: &str, v: bool) {
         self.key(k);
         self.0.push_str(if v { "true" } else { "false" });
     }
+
     fn raw(&mut self, k: &str, json: &str) {
         self.key(k);
         self.0.push_str(json);
     }
+
     fn finish(mut self) -> String {
         self.0.push('}');
         self.0
     }
 }
 
-/// A JSON string as `JSON.stringify` writes it.
-fn push_str(out: &mut String, s: &str) {
-    out.push('"');
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-}
-
-/// A finite number as ECMAScript prints it. Rust's `Display` already gives the
-/// shortest round-trip digits; ECMAScript differs only in switching to
-/// exponent form outside `[1e-6, 1e21)` and in printing `-0` as `0`.
-pub(crate) fn js_number(v: f64) -> String {
-    if !v.is_finite() {
-        return "null".to_string();
-    }
-    if v == 0.0 {
-        return "0".to_string();
-    }
-    let a = v.abs();
-    if (1e-6..1e21).contains(&a) {
-        return format!("{v}");
-    }
-    let s = format!("{v:e}");
-    match s.split_once('e') {
-        Some((m, e)) if !e.starts_with('-') => format!("{m}e+{e}"),
-        _ => s,
-    }
+/// A string as `JSON.stringify` writes it.
+fn json_string(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| String::from("\"\""))
 }
 
 #[cfg(test)]
@@ -520,46 +735,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn numbers_print_as_ecmascript_does() {
-        for (v, js) in [
-            (18.0, "18"),
-            (-41.5, "-41.5"),
-            (-0.0, "0"),
-            (0.1 + 0.2, "0.30000000000000004"),
-            (1e21, "1e+21"),
-            (1.5e-7, "1.5e-7"),
-            (123456789012.345, "123456789012.345"),
-            (0.000001, "0.000001"),
-        ] {
-            assert_eq!(js_number(v), js, "{v}");
+    fn leb_and_zigzag_are_minimal() {
+        let enc = |f: &dyn Fn(&mut Leb)| {
+            let mut w = Leb::default();
+            f(&mut w);
+            w.0
+        };
+        assert_eq!(enc(&|w| w.u(0)), [0]);
+        assert_eq!(enc(&|w| w.u(127)), [127]);
+        assert_eq!(enc(&|w| w.u(128)), [0x80, 1]);
+        assert_eq!(enc(&|w| w.u(u64::MAX)).len(), 10);
+        assert_eq!(enc(&|w| w.t(-1)), [1]);
+        assert_eq!(enc(&|w| w.t(1)), [2]);
+        assert_eq!(enc(&|w| w.z(0, u64::MAX)), [2], "a wrapping +1");
+        assert_eq!(enc(&|w| w.z(u64::MAX, 0)), [1], "a wrapping -1");
+        for v in [0u64, 1, 127, 128, 16_383, 16_384, u64::MAX] {
+            assert_eq!(leb_len(v), enc(&|w| w.u(v)).len(), "{v}");
+        }
+        for v in [0i64, -1, 63, -64, 64, i64::MIN, i64::MAX] {
+            assert_eq!(zigzag_len(v), enc(&|w| w.t(v)).len(), "{v}");
         }
     }
 
     #[test]
-    fn strings_escape_as_json_stringify_does() {
-        let mut s = String::new();
-        push_str(&mut s, "a\"b\\c\n\u{1}\u{7f}é\u{2028}");
-        assert_eq!(s, "\"a\\\"b\\\\c\\n\\u0001\u{7f}é\u{2028}\"");
+    fn base64_is_standard_and_padded() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(&[0xff, 0xfe, 0x00, 0x80]), "//4AgA==");
     }
 
     #[test]
-    fn ids_past_two_to_the_53_become_strings() {
-        let mut c = Col::default();
-        c.id(MAX_SAFE_INTEGER as i128, IdForm::Auto);
-        c.id(MAX_SAFE_INTEGER as i128 + 1, IdForm::Auto);
-        c.id(-(MAX_SAFE_INTEGER as i128) - 1, IdForm::Auto);
-        c.id(3, IdForm::String);
-        assert_eq!(
-            c.finish(),
-            "[9007199254740991,\"9007199254740992\",\"-9007199254740992\",\"3\"]"
-        );
+    fn strings_escape_as_json_stringify_does() {
+        assert_eq!(json_string("a\"b\\c\n\u{1}é/"), "\"a\\\"b\\\\c\\n\\u0001é/\"");
     }
 
     #[test]
     fn idempotency_key_is_sha256_of_the_triple() {
-        // sha256("source:s:i:0")
-        let k = idempotency_key("s", "i", 0);
-        assert_eq!(k.len(), 64);
-        assert_eq!(k, hex(digest::digest(&digest::SHA256, b"source:s:i:0").as_ref()));
+        assert_eq!(
+            idempotency_key("enc-fra-1", "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1", 0),
+            "998ec06a866c2ca9ec2eefc4e0fdf3ae739d146543a23665b5909ee5eafc2209"
+        );
     }
 }

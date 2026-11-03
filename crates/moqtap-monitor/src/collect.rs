@@ -1,193 +1,246 @@
-//! What the producer reports, held until the next seal: open groups per relay
-//! connection and track, closed group rows, object rows and events.
+//! What the producer reports, held until the next seal: per interval, an
+//! open run per flow `(connection, track, group, subgroup)`, the runs that
+//! ended, marks, events, pacing and group facts.
 //!
-//! Every collection is bounded. Past a bound, input is refused (`rejected`)
-//! or a row is not kept (`dropped`); nothing grows without limit.
+//! An interval is cut (sealed) at the timer, at a clock break, and before it
+//! would outgrow one body: the byte seal, the flow cap, or a body's
+//! connection or track cap. Nothing is dropped for being late or old; the
+//! few bounds that refuse input are named below.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::sampling::{in_sample, producer_k, Rate};
-use crate::wire::{EventKind, MAX_MOQT_ID, MAX_SAFE_INTEGER};
+use crate::hist::key_of;
+use crate::wire::track_list_gz_len;
+use crate::wire::{
+    leb_len, zigzag_len, EventKind, MarkKind, Track, DT_QUANTUM_US, MAX_BODY_CONNS,
+    MAX_BODY_TRACKS, MAX_CONN_ORDINAL, MAX_FULL_NAME_BYTES, MAX_NAMESPACE_FIELDS, MAX_SAFE_INTEGER,
+    MAX_VARINT_ID, SEAL_BYTES,
+};
 
 /// Relay connections open at once.
 pub(crate) const MAX_CONNECTIONS: usize = 256;
-/// Tracks one connection may report.
+/// Distinct tracks one connection may report over its life.
 pub(crate) const MAX_TRACKS_PER_CONNECTION: usize = 1024;
-/// Groups of one track receiving objects at once.
-const MAX_OPEN_GROUPS: usize = 4;
-/// Group ids below a track's newest that are remembered, so a late object is
-/// not reported as a new group. An object of an older group is not reported.
-const RECENT_GROUPS: u64 = 64;
-/// Closed group rows waiting for a seal.
-pub(crate) const MAX_PENDING_GROUPS: usize = 100_000;
-/// Object rows waiting for a seal.
-pub(crate) const MAX_PENDING_OBJECTS: usize = 200_000;
-/// Events waiting for a seal.
-const MAX_PENDING_EVENTS: usize = 10_000;
-/// Rows that make the monitor try an early seal against the byte seal.
-pub(crate) const EARLY_PACK_ROWS: usize = 4096;
-/// MoQT's limit on namespace fields.
-const MAX_NAMESPACE_FIELDS: usize = 32;
-/// MoQT's limit on a full track name, namespace and name together, in bytes.
-const MAX_FULL_NAME_BYTES: usize = 4096;
+/// Open runs in one interval; past it the interval is sealed early.
+pub(crate) const MAX_FLOWS: usize = 4096;
+/// Events and marks one interval holds; past it they are dropped and counted.
+const MAX_FACTS: usize = 10_000;
+/// Room kept under the byte seal for what the estimate does not see.
+const SEAL_SLACK: usize = 2048;
+/// A track's `span` in a body.
+const SPAN_BYTES: usize = 34;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct TrackName {
-    pub ns: Vec<String>,
-    pub name: String,
-}
+pub(crate) type TrackRef = Arc<Track>;
 
-#[derive(Clone, Debug)]
-pub(crate) struct PendingGroup {
-    pub conn: u64,
-    pub track: Arc<TrackName>,
-    pub k: u8,
+/// A flow: the unit a run belongs to.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Flow {
+    pub c: u64,
+    pub track: TrackRef,
     pub g: u64,
-    pub fo: u64,
-    pub first_us: i64,
-    pub last_us: i64,
-    pub objects: u64,
-    pub bytes: u64,
+    pub sub: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PendingObject {
-    pub conn: u64,
-    pub track: Arc<TrackName>,
-    pub k: u8,
+pub(crate) struct Run {
+    /// Creation order within the interval, shared with [`Clear`]s.
+    pub order: u64,
+    pub flow: Flow,
+    pub ids: Vec<u64>,
+    pub times: Vec<i64>,
+    pub b: u64,
+    pub gs: bool,
+    pub fo: bool,
+    pub eog: bool,
+}
+
+/// A point after which a flow's next run continues nothing.
+#[derive(Clone, Debug)]
+pub(crate) enum Clear {
+    Track(u64, TrackRef),
+    Conn(u64),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Mark {
+    pub c: u64,
+    pub track: TrackRef,
+    pub kind: MarkKind,
     pub g: u64,
     pub o: u64,
-    pub bytes: u64,
+    pub n: u64,
+    pub t: i64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Event {
+    pub c: u64,
+    pub track: Option<TrackRef>,
+    pub e: EventKind,
+    pub code: Option<u64>,
     pub at_us: i64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PendingEvent {
-    pub conn: u64,
-    pub ts: u64,
-    pub track: Option<(Arc<TrackName>, u8)>,
-    pub e: EventKind,
-    pub code: Option<u64>,
-}
-
-/// A connection as its `relay` record states it.
-#[derive(Clone, Debug)]
-pub(crate) struct RelayInfo {
+pub(crate) struct ConnInfo {
     pub origin: String,
     pub draft: Option<u64>,
-    pub open_ts: u64,
-    pub close_ts: Option<u64>,
-    pub close_code: Option<u64>,
 }
 
-#[derive(Debug)]
-struct OpenGroup {
-    g: u64,
-    fo: u64,
-    k: u8,
-    first_us: i64,
-    last_us: i64,
-    objects: u64,
-    bytes: u64,
-    last_ms: f64,
+/// A track's groups in one interval: each group's first handoff time.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TrackGroups {
+    pub first: HashMap<u64, i64>,
+    /// First and last handoff.
+    pub span: Option<(i64, i64)>,
 }
 
+/// Gaps by bucket key: before a `starts_group` object, and before the others.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Pace {
+    pub first: BTreeMap<u32, u64>,
+    pub later: BTreeMap<u32, u64>,
+}
+
+/// One sealed interval, ready to pack.
 #[derive(Debug)]
+pub(crate) struct Interval {
+    pub from_us: i64,
+    pub through_us: i64,
+    pub epoch: u64,
+    pub seal_ms: u64,
+    pub is_final: bool,
+    pub runs: Vec<Run>,
+    pub clears: Vec<(u64, Clear)>,
+    pub marks: Vec<Mark>,
+    pub events: Vec<Event>,
+    pub pace: HashMap<(u64, TrackRef), Pace>,
+    pub gdec: HashMap<(u64, TrackRef), u64>,
+    pub groups: HashMap<TrackRef, TrackGroups>,
+    /// The connections the interval references.
+    pub conns: BTreeMap<u64, ConnInfo>,
+    /// The tracks the body lists, in order.
+    pub tracks: Vec<TrackRef>,
+    pub dropped_records: u64,
+}
+
+/// The interval being collected.
+#[derive(Debug)]
+struct Open {
+    from_us: i64,
+    epoch: u64,
+    order: u64,
+    open: HashMap<Flow, Run>,
+    runs: Vec<Run>,
+    clears: Vec<(u64, Clear)>,
+    marks: Vec<Mark>,
+    events: Vec<Event>,
+    pace: HashMap<(u64, TrackRef), Pace>,
+    gdec: HashMap<(u64, TrackRef), u64>,
+    groups: HashMap<TrackRef, TrackGroups>,
+    conns: BTreeMap<u64, ConnInfo>,
+    tracks: Vec<TrackRef>,
+    listed: HashSet<TrackRef>,
+    dropped_records: u64,
+    /// The body's gzipped size, estimated: the tracks listed at the start
+    /// as measured, everything added since at its uncompressed size.
+    bytes: usize,
+}
+
+impl Open {
+    fn new(from_us: i64, epoch: u64, active: Vec<TrackRef>, list_gz: usize) -> Self {
+        let mut o = Open {
+            from_us,
+            epoch,
+            order: 0,
+            open: HashMap::new(),
+            runs: Vec::new(),
+            clears: Vec::new(),
+            marks: Vec::new(),
+            events: Vec::new(),
+            pace: HashMap::new(),
+            gdec: HashMap::new(),
+            groups: HashMap::new(),
+            conns: BTreeMap::new(),
+            tracks: Vec::new(),
+            listed: HashSet::new(),
+            dropped_records: 0,
+            bytes: 600 + list_gz,
+        };
+        for t in active {
+            if o.listed.insert(Arc::clone(&t)) {
+                o.tracks.push(t);
+            }
+        }
+        o
+    }
+
+    fn list(&mut self, t: &TrackRef) {
+        if self.listed.insert(Arc::clone(t)) {
+            let names: usize = t.ns.iter().map(|f| f.len() * 4 / 3 + 6).sum();
+            self.bytes += 56 + names + t.name.len() * 4 / 3;
+            self.tracks.push(Arc::clone(t));
+        }
+    }
+
+    fn has_facts(&self) -> bool {
+        !(self.open.is_empty()
+            && self.runs.is_empty()
+            && self.marks.is_empty()
+            && self.events.is_empty())
+    }
+
+    fn next_order(&mut self) -> u64 {
+        self.order += 1;
+        self.order
+    }
+
+    fn end_runs(&mut self, keep: impl Fn(&Flow) -> bool) {
+        let ended: Vec<Flow> = self.open.keys().filter(|f| !keep(f)).cloned().collect();
+        for f in ended {
+            if let Some(r) = self.open.remove(&f) {
+                self.runs.push(r);
+            }
+        }
+    }
+
+    fn seal(mut self, through_us: i64, seal_ms: u64, is_final: bool) -> Interval {
+        self.end_runs(|_| false);
+        self.runs.sort_by_key(|r| r.order);
+        Interval {
+            from_us: self.from_us,
+            through_us: through_us.max(self.from_us),
+            epoch: self.epoch,
+            seal_ms,
+            is_final,
+            runs: self.runs,
+            clears: self.clears,
+            marks: self.marks,
+            events: self.events,
+            pace: self.pace,
+            gdec: self.gdec,
+            groups: self.groups,
+            conns: self.conns,
+            tracks: self.tracks,
+            dropped_records: self.dropped_records,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
 struct Pair {
-    track: Arc<TrackName>,
-    k: u8,
-    open: Vec<OpenGroup>,
-    /// The newest group id started.
-    high: Option<u64>,
-    /// Bit `i` is group `high - i`: started at all, and reported.
-    started: u64,
-    reported: u64,
-    rate: Rate,
-}
-
-/// What is known of a group that is not open.
-enum History {
-    New,
-    /// Started before: reported, or sampled out.
-    Started {
-        reported: bool,
-    },
-    /// `RECENT_GROUPS` or more below the newest.
-    Old,
-}
-
-impl Pair {
-    fn new(track: Arc<TrackName>) -> Self {
-        Pair {
-            track,
-            k: 0,
-            open: Vec::new(),
-            high: None,
-            started: 0,
-            reported: 0,
-            rate: Rate::new(),
-        }
-    }
-
-    fn history(&self, g: u64) -> History {
-        let Some(high) = self.high.filter(|&h| g <= h) else { return History::New };
-        let d = high - g;
-        if d >= RECENT_GROUPS {
-            History::Old
-        } else if self.started >> d & 1 == 1 {
-            History::Started { reported: self.reported >> d & 1 == 1 }
-        } else {
-            History::New
-        }
-    }
-
-    /// Record that group `g`, new by [`Pair::history`], started.
-    fn note(&mut self, g: u64, reported: bool) {
-        let bit = u64::from(reported);
-        match self.high {
-            Some(h) if g <= h => {
-                self.started |= 1 << (h - g);
-                self.reported |= bit << (h - g);
-            }
-            _ => {
-                let shift = self.high.map_or(RECENT_GROUPS, |h| g - h);
-                if shift >= RECENT_GROUPS {
-                    self.started = 1;
-                    self.reported = bit;
-                } else {
-                    self.started = self.started << shift | 1;
-                    self.reported = self.reported << shift | bit;
-                }
-                self.high = Some(g);
-            }
-        }
-    }
+    last_at: Option<i64>,
+    last_group: Option<u64>,
 }
 
 #[derive(Debug)]
 struct Conn {
-    info: RelayInfo,
-    closed: bool,
-    pairs: Vec<Pair>,
-    index: HashMap<u64, Vec<usize>>,
-}
-
-/// The rows taken for a seal.
-#[derive(Debug, Default)]
-pub(crate) struct Taken {
-    pub groups: Vec<PendingGroup>,
-    pub objects: Vec<PendingObject>,
-    pub events: Vec<PendingEvent>,
-    pub relays: HashMap<u64, RelayInfo>,
-}
-
-impl Taken {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.groups.is_empty() && self.objects.is_empty() && self.events.is_empty()
-    }
+    info: ConnInfo,
+    active: HashSet<TrackRef>,
+    pairs: HashMap<TrackRef, Pair>,
 }
 
 /// Why a call was refused.
@@ -197,21 +250,6 @@ pub(crate) enum Refused {
     Closed,
 }
 
-#[derive(Debug)]
-pub(crate) struct Collector {
-    per_object: bool,
-    conns: BTreeMap<u64, Conn>,
-    next_conn: u64,
-    groups: Vec<PendingGroup>,
-    objects: Vec<PendingObject>,
-    events: Vec<PendingEvent>,
-    pub dropped: u64,
-    pub over_relay_cap: u64,
-    pub rejected: u64,
-    rows_since_pack: usize,
-    pub stopped: bool,
-}
-
 /// What a report asks of the sealer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Wake {
@@ -219,659 +257,520 @@ pub(crate) enum Wake {
     Seal,
 }
 
+/// One object as the integrator reported it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Handoff {
+    pub g: u64,
+    pub sub: Option<u64>,
+    pub o: u64,
+    pub size: u64,
+    pub starts_group: bool,
+    pub opens_subgroup: bool,
+    pub ends_group: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct Collector {
+    conns: BTreeMap<u64, Conn>,
+    next_conn: u64,
+    /// Tracks by a hash of their name parts.
+    names: HashMap<u64, Vec<TrackRef>>,
+    /// Connections each track is active on.
+    active: HashMap<TrackRef, usize>,
+    cur: Open,
+    /// Sealed intervals waiting for the sealer.
+    pub cuts: VecDeque<Interval>,
+    pub epoch: u64,
+    /// The seal interval in force, ms.
+    pub seal_ms: u64,
+    pub rejected: u64,
+    pub stopped: bool,
+    /// A clock break was seen: a clock exchange is due.
+    pub probe_due: bool,
+    breaks: crate::clock::BreakCheck,
+    /// Mono µs of the latest call.
+    last_mono: i64,
+    /// The last measured track list and its gzipped size.
+    list_gz: (Vec<TrackRef>, usize),
+}
+
 impl Collector {
-    pub(crate) fn new(per_object: bool) -> Self {
+    pub(crate) fn new(seal_ms: u64) -> Self {
         Collector {
-            per_object,
             conns: BTreeMap::new(),
             next_conn: 0,
-            groups: Vec::new(),
-            objects: Vec::new(),
-            events: Vec::new(),
-            dropped: 0,
-            over_relay_cap: 0,
+            names: HashMap::new(),
+            active: HashMap::new(),
+            cur: Open::new(0, 0, Vec::new(), 0),
+            list_gz: (Vec::new(), 0),
+            cuts: VecDeque::new(),
+            epoch: 0,
+            seal_ms,
             rejected: 0,
-            rows_since_pack: 0,
             stopped: false,
+            probe_due: false,
+            breaks: crate::clock::BreakCheck::default(),
+            last_mono: 0,
         }
     }
 
-    pub(crate) fn open_connections(&self) -> usize {
-        self.conns.values().filter(|c| !c.closed).count()
+    fn refuse<T>(&mut self, r: Refused) -> Result<T, Refused> {
+        self.rejected += 1;
+        Err(r)
     }
 
-    pub(crate) fn open(&mut self, origin: String, open_ts: u64) -> Option<u64> {
-        if self.stopped || self.open_connections() >= MAX_CONNECTIONS {
-            return None;
+    /// Check the clocks at a captured time. A break seals what came before
+    /// under the old epoch and starts the next.
+    pub(crate) fn observe(&mut self, mono_us: i64, wall_us: Option<i64>) -> Wake {
+        self.last_mono = self.last_mono.max(mono_us);
+        let Some(wall) = wall_us else { return Wake::No };
+        if !self.breaks.check(wall, mono_us) {
+            return Wake::No;
         }
-        let id = self.next_conn;
-        self.next_conn += 1;
-        self.conns.insert(
-            id,
-            Conn {
-                info: RelayInfo { origin, draft: None, open_ts, close_ts: None, close_code: None },
-                closed: false,
-                pairs: Vec::new(),
-                index: HashMap::new(),
-            },
-        );
-        Some(id)
+        self.cut(mono_us, false);
+        self.epoch += 1;
+        self.cur.epoch = self.epoch;
+        self.probe_due = true;
+        Wake::Seal
     }
 
-    pub(crate) fn set_draft(&mut self, conn: u64, draft: u64) -> Result<(), Refused> {
-        if draft > MAX_SAFE_INTEGER as u64 {
-            return self.refuse(Refused::Input).map(drop);
+    /// Seal the open interval at `through_us`. An interval with no facts and
+    /// no listed track is not sealed, unless `is_final`.
+    pub(crate) fn cut(&mut self, through_us: i64, is_final: bool) -> bool {
+        if !is_final && !self.cur.has_facts() && self.cur.tracks.is_empty() {
+            return false;
         }
-        match self.conns.get_mut(&conn) {
-            Some(c) if !c.closed => {
-                c.info.draft = Some(draft);
-                Ok(())
-            }
-            _ => self.refuse(Refused::Closed).map(drop),
+        let active: Vec<TrackRef> = self.active_tracks();
+        let same = active.len() == self.list_gz.0.len()
+            && active.iter().zip(&self.list_gz.0).all(|(a, b)| Arc::ptr_eq(a, b));
+        if !same {
+            self.list_gz = (active.clone(), track_list_gz_len(&active));
         }
+        let next = Open::new(through_us.max(self.cur.from_us), self.epoch, active, self.list_gz.1);
+        let done = std::mem::replace(&mut self.cur, next);
+        self.cuts.push_back(done.seal(through_us, self.seal_ms, is_final));
+        self.prune();
+        true
     }
 
-    /// Close a connection. A close code past 2^53 - 1 is refused, and the
-    /// connection closes without one.
-    pub(crate) fn close(&mut self, conn: u64, ts: u64, code: Option<u64>) -> Result<(), Refused> {
-        let Some(c) = self.conns.get_mut(&conn) else { return Ok(()) };
-        if c.closed {
-            return Ok(());
-        }
-        let valid = code.is_none_or(|v| v <= MAX_SAFE_INTEGER as u64);
-        c.closed = true;
-        c.info.close_ts = Some(ts);
-        c.info.close_code = code.filter(|_| valid);
-        let mut closed = Vec::new();
-        for p in &mut c.pairs {
-            close_all(conn, p, &mut closed);
-        }
-        self.push_groups(closed);
-        if valid {
-            Ok(())
-        } else {
-            self.refuse(Refused::Input).map(drop)
-        }
-    }
-
-    /// One object the producer's MoQ library accepted.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn object_sent<S: AsRef<str>>(
-        &mut self,
-        conn: u64,
-        ns: &[S],
-        name: &str,
-        g: u64,
-        o: u64,
-        size: u64,
-        at_us: i64,
-        mono_ms: f64,
-    ) -> Result<Wake, Refused> {
-        if self.stopped {
-            return self.refuse(Refused::Closed);
-        }
-        if !(0..=MAX_SAFE_INTEGER).contains(&at_us)
-            || g > MAX_MOQT_ID
-            || o > MAX_MOQT_ID
-            || size > MAX_SAFE_INTEGER as u64
-        {
-            return self.refuse(Refused::Input);
-        }
-        let per_object = self.per_object;
-        let Some(c) = self.conns.get_mut(&conn) else { return self.refuse(Refused::Closed) };
-        if c.closed {
-            return self.refuse(Refused::Closed);
-        }
-        let Some(pi) = c.pair(ns, name) else { return self.refuse(Refused::Input) };
-
-        let mut closed = Vec::new();
-        let mut object_row = None;
-        let mut late = false;
-        let p = &mut c.pairs[pi];
-        if let Some(open) = p.open.iter_mut().find(|x| x.g == g) {
-            open.last_us = open.last_us.max(at_us);
-            open.objects += 1;
-            open.bytes = (open.bytes + size).min(MAX_SAFE_INTEGER as u64);
-            open.last_ms = mono_ms;
-            if per_object {
-                object_row = Some(open.k);
-            }
-        } else {
-            match p.history(g) {
-                History::Started { reported } => late = reported,
-                History::Old => late = true,
-                History::New => {
-                    if p.rate.advance(mono_ms) {
-                        let k = producer_k(&p.rate, p.k);
-                        if k != p.k {
-                            set_k(conn, p, k, &mut closed);
-                        }
-                    }
-                    p.rate.add(g);
-                    let keep = in_sample(g, p.k);
-                    p.note(g, keep);
-                    if keep {
-                        p.open.push(OpenGroup {
-                            g,
-                            fo: o,
-                            k: p.k,
-                            first_us: at_us,
-                            last_us: at_us,
-                            objects: 1,
-                            bytes: size,
-                            last_ms: mono_ms,
-                        });
-                        if p.open.len() > MAX_OPEN_GROUPS {
-                            let oldest = p.open.remove(0);
-                            closed.push(row(conn, &p.track, oldest));
-                        }
-                        if per_object {
-                            object_row = Some(p.k);
-                        }
-                    }
+    fn active_tracks(&self) -> Vec<TrackRef> {
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        for c in self.conns.values() {
+            for t in &c.active {
+                if seen.insert(Arc::clone(t)) {
+                    out.push(Arc::clone(t));
                 }
             }
         }
-        if late {
-            self.dropped += 1;
-        }
-        if let Some(k) = object_row {
-            let track = Arc::clone(&self.conns[&conn].pairs[pi].track);
-            if self.objects.len() >= MAX_PENDING_OBJECTS {
-                self.dropped += 1;
-            } else {
-                self.objects.push(PendingObject { conn, track, k, g, o, bytes: size, at_us });
-                self.rows_since_pack += 1;
-            }
-        }
-        self.push_groups(closed);
-        Ok(self.wake())
+        out.sort_by(|a, b| (&a.ns, &a.name).cmp(&(&b.ns, &b.name)));
+        out
     }
 
-    /// A `pev` event. A `publish_done` also closes the track's open groups.
-    pub(crate) fn event<S: AsRef<str>>(
-        &mut self,
-        conn: u64,
-        track: Option<(&[S], &str)>,
-        e: EventKind,
-        code: Option<u64>,
-        ts: u64,
-    ) -> Result<Wake, Refused> {
-        if self.stopped {
-            return self.refuse(Refused::Closed);
-        }
-        if code.is_some_and(|v| v > MAX_SAFE_INTEGER as u64) {
-            return self.refuse(Refused::Input);
-        }
-        let Some(c) = self.conns.get_mut(&conn) else { return self.refuse(Refused::Closed) };
-        if c.closed {
-            return self.refuse(Refused::Closed);
-        }
-        let mut closed = Vec::new();
-        let track = match track {
-            None => None,
-            Some((ns, name)) => {
-                let Some(pi) = c.pair(ns, name) else { return self.refuse(Refused::Input) };
-                let p = &mut c.pairs[pi];
-                if e == EventKind::PublishDone {
-                    close_all(conn, p, &mut closed);
-                }
-                Some((Arc::clone(&p.track), p.k))
-            }
-        };
-        if self.events.len() >= MAX_PENDING_EVENTS {
-            self.dropped += 1;
-        } else {
-            self.events.push(PendingEvent { conn, ts, track, e, code });
-        }
-        self.push_groups(closed);
-        Ok(self.wake())
-    }
-
-    /// Close the groups that are done and take every row for a seal. A
-    /// track's newest group stays open unless it has been idle for `idle_ms`
-    /// or `all` is set.
-    pub(crate) fn take(&mut self, mono_ms: f64, idle_ms: f64, all: bool) -> Taken {
-        let mut closed = Vec::new();
-        for (&id, c) in &mut self.conns {
-            for p in &mut c.pairs {
-                p.open.sort_by(|a, b| a.first_us.cmp(&b.first_us).then(a.g.cmp(&b.g)));
-                let keep_last =
-                    !all && p.open.last().is_some_and(|x| mono_ms - x.last_ms < idle_ms);
-                let keep = usize::from(keep_last);
-                let n = p.open.len().saturating_sub(keep);
-                for g in p.open.drain(..n) {
-                    closed.push(row(id, &p.track, g));
-                }
-            }
-        }
-        self.push_groups(closed);
-        self.rows_since_pack = 0;
-        self.take_rows()
-    }
-
-    /// Take the rows for an early seal, leaving open groups as they are.
-    pub(crate) fn take_early(&mut self) -> Taken {
-        self.rows_since_pack = 0;
-        self.take_rows()
-    }
-
-    /// Put back rows an early seal did not use, ahead of newer ones.
-    pub(crate) fn restore(&mut self, t: Taken) {
-        let Taken { mut groups, mut objects, mut events, .. } = t;
-        groups.append(&mut self.groups);
-        objects.append(&mut self.objects);
-        events.append(&mut self.events);
-        self.groups = groups;
-        self.objects = objects;
-        self.events = events;
-    }
-
-    /// Forget closed connections nothing pending refers to.
-    pub(crate) fn prune(&mut self) {
-        let groups = &self.groups;
-        let objects = &self.objects;
-        let events = &self.events;
-        self.conns.retain(|id, c| {
-            !c.closed
-                || groups.iter().any(|r| r.conn == *id)
-                || objects.iter().any(|r| r.conn == *id)
-                || events.iter().any(|r| r.conn == *id)
+    /// Forget names nothing refers to any more.
+    fn prune(&mut self) {
+        self.names.retain(|_, v| {
+            v.retain(|t| Arc::strong_count(t) > 1);
+            !v.is_empty()
         });
     }
 
-    /// Drop everything and refuse further input: the key or path was refused.
-    pub(crate) fn stop(&mut self) {
-        self.stopped = true;
-        self.conns.clear();
-        self.groups = Vec::new();
-        self.objects = Vec::new();
-        self.events = Vec::new();
+    /// Mono µs the open interval starts at.
+    pub(crate) fn open_from_us(&self) -> i64 {
+        self.cur.from_us
     }
 
-    fn take_rows(&mut self) -> Taken {
-        let groups = std::mem::take(&mut self.groups);
-        let objects = std::mem::take(&mut self.objects);
-        let events = std::mem::take(&mut self.events);
-        let mut relays = HashMap::new();
-        let ids = groups.iter().map(|r| r.conn).chain(objects.iter().map(|r| r.conn));
-        for id in ids.chain(events.iter().map(|r| r.conn)) {
-            if let Some(c) = self.conns.get(&id) {
-                relays.entry(id).or_insert_with(|| c.info.clone());
-            }
+    pub(crate) fn open(&mut self, origin: String, mono_us: i64) -> Option<(u64, Wake)> {
+        if self.stopped || self.conns.len() >= MAX_CONNECTIONS || self.next_conn > MAX_CONN_ORDINAL
+        {
+            return None;
         }
-        Taken { groups, objects, events, relays }
+        let c = self.next_conn;
+        self.next_conn += 1;
+        let info = ConnInfo { origin, draft: None };
+        self.conns.insert(c, Conn { info, active: HashSet::new(), pairs: HashMap::new() });
+        let wake = self.room(c, None, 90);
+        self.push_event(Event {
+            c,
+            track: None,
+            e: EventKind::ConnOpen,
+            code: None,
+            at_us: mono_us,
+        });
+        Some((c, wake))
     }
 
-    fn push_groups(&mut self, rows: Vec<PendingGroup>) {
-        for r in rows {
-            if self.groups.len() >= MAX_PENDING_GROUPS {
-                self.dropped += 1;
-            } else {
-                self.groups.push(r);
-                self.rows_since_pack += 1;
-            }
+    /// Set a connection's draft. The open interval is sealed first when it
+    /// holds runs or marks on the connection, which were checked against
+    /// the draft known when they were reported.
+    pub(crate) fn set_draft(&mut self, c: u64, draft: u64) -> Result<Wake, Refused> {
+        if !(1..=65_535).contains(&draft) {
+            return self.refuse(Refused::Input);
         }
-    }
-
-    fn wake(&self) -> Wake {
-        if self.rows_since_pack >= EARLY_PACK_ROWS {
-            Wake::Seal
-        } else {
-            Wake::No
+        let Some(conn) = self.conns.get_mut(&c) else { return self.refuse(Refused::Closed) };
+        if conn.info.draft == Some(draft) {
+            return Ok(Wake::No);
         }
+        conn.info.draft = Some(draft);
+        let cur = &self.cur;
+        let checked = cur.marks.iter().any(|m| m.c == c)
+            || cur.runs.iter().any(|r| r.flow.c == c)
+            || cur.open.keys().any(|f| f.c == c);
+        let wake = if checked && self.cut(self.last_mono, false) { Wake::Seal } else { Wake::No };
+        if let Some(i) = self.cur.conns.get_mut(&c) {
+            i.draft = Some(draft);
+        }
+        Ok(wake)
     }
 
-    fn refuse(&mut self, why: Refused) -> Result<Wake, Refused> {
-        self.rejected += 1;
-        Err(why)
+    fn draft(&self, c: u64) -> Option<u64> {
+        self.conns.get(&c).and_then(|x| x.info.draft)
     }
-}
 
-impl Conn {
-    fn pair<S: AsRef<str>>(&mut self, ns: &[S], name: &str) -> Option<usize> {
+    /// Ids past 2^62 - 1 exist only from draft 17.
+    fn id_ok(&self, c: u64, id: u64) -> bool {
+        id <= MAX_VARINT_ID || self.draft(c).is_none_or(|d| d > 16)
+    }
+
+    /// The interned track for these name parts, or `None` past MoQT's limits.
+    fn track<N: AsRef<[u8]>>(&mut self, ns: &[N], name: &[u8]) -> Option<TrackRef> {
+        let bytes = name.len() + ns.iter().map(|f| f.as_ref().len()).sum::<usize>();
+        if ns.len() > MAX_NAMESPACE_FIELDS || bytes > MAX_FULL_NAME_BYTES {
+            return None;
+        }
         let mut h = DefaultHasher::new();
         ns.len().hash(&mut h);
         for f in ns {
             f.as_ref().hash(&mut h);
         }
         name.hash(&mut h);
-        let hash = h.finish();
-        if let Some(found) = self.index.get(&hash).and_then(|ix| {
-            ix.iter().copied().find(|&i| {
-                let t = &self.pairs[i].track;
-                t.name == name
-                    && t.ns.len() == ns.len()
-                    && t.ns.iter().zip(ns).all(|(a, b)| a == b.as_ref())
-            })
-        }) {
-            return Some(found);
-        }
-        if self.pairs.len() >= MAX_TRACKS_PER_CONNECTION || ns.len() > MAX_NAMESPACE_FIELDS {
-            return None;
-        }
-        let bytes = name.len() + ns.iter().map(|f| f.as_ref().len()).sum::<usize>();
-        if bytes > MAX_FULL_NAME_BYTES {
-            return None;
-        }
-        let track = TrackName {
-            ns: ns.iter().map(|f| f.as_ref().to_string()).collect(),
-            name: name.to_string(),
+        let key = h.finish();
+        let same = |t: &TrackRef| {
+            t.name == name
+                && t.ns.len() == ns.len()
+                && t.ns.iter().zip(ns).all(|(a, b)| a.as_slice() == b.as_ref())
         };
-        self.pairs.push(Pair::new(Arc::new(track)));
-        let i = self.pairs.len() - 1;
-        self.index.entry(hash).or_default().push(i);
-        Some(i)
+        let bucket = self.names.entry(key).or_default();
+        if let Some(t) = bucket.iter().find(|t| same(t)) {
+            return Some(Arc::clone(t));
+        }
+        let t =
+            Arc::new(Track::new(ns.iter().map(|f| f.as_ref().to_vec()).collect(), name.to_vec()));
+        bucket.push(Arc::clone(&t));
+        Some(t)
     }
-}
 
-/// A new exponent applies to groups that start after it. Open groups were
-/// sampled under the old one, so they close now and report under it.
-fn set_k(conn: u64, p: &mut Pair, k: u8, closed: &mut Vec<PendingGroup>) {
-    close_all(conn, p, closed);
-    p.k = k;
-}
-
-fn close_all(conn: u64, p: &mut Pair, closed: &mut Vec<PendingGroup>) {
-    for g in p.open.drain(..) {
-        closed.push(row(conn, &p.track, g));
+    /// Make room in the interval for a fact on `c` and `track` costing
+    /// `bytes`, sealing it first when the fact would not fit one body.
+    fn room(&mut self, c: u64, track: Option<&TrackRef>, bytes: usize) -> Wake {
+        let new_conn = !self.cur.conns.contains_key(&c);
+        let new_track = track.is_some_and(|t| !self.cur.listed.contains(t));
+        let full = (new_conn && self.cur.conns.len() >= MAX_BODY_CONNS)
+            || (new_track && self.cur.tracks.len() >= MAX_BODY_TRACKS)
+            || (self.cur.has_facts() && self.cur.bytes + bytes + SEAL_SLACK > SEAL_BYTES);
+        let wake = if full && self.cut(self.last_mono, false) { Wake::Seal } else { Wake::No };
+        if let Some(info) = self.conns.get(&c).map(|x| x.info.clone()) {
+            if !self.cur.conns.contains_key(&c) {
+                self.cur.bytes += 60 + info.origin.len();
+                self.cur.conns.insert(c, info);
+            }
+        }
+        if let Some(t) = track {
+            self.cur.list(t);
+        }
+        self.cur.bytes += bytes;
+        wake
     }
-}
 
-fn row(conn: u64, track: &Arc<TrackName>, g: OpenGroup) -> PendingGroup {
-    PendingGroup {
-        conn,
-        track: Arc::clone(track),
-        k: g.k,
-        g: g.g,
-        fo: g.fo,
-        first_us: g.first_us,
-        last_us: g.last_us,
-        objects: g.objects,
-        bytes: g.bytes,
+    /// One object the producer's MoQ library accepted.
+    pub(crate) fn object_sent<N: AsRef<[u8]>>(
+        &mut self,
+        c: u64,
+        ns: &[N],
+        name: &[u8],
+        h: Handoff,
+        at_us: i64,
+    ) -> Result<Wake, Refused> {
+        if self.stopped {
+            return self.refuse(Refused::Closed);
+        }
+        if !self.conns.contains_key(&c) {
+            return self.refuse(Refused::Closed);
+        }
+        let ids_ok =
+            self.id_ok(c, h.g) && self.id_ok(c, h.o) && h.sub.is_none_or(|s| self.id_ok(c, s));
+        if !ids_ok || h.size > MAX_SAFE_INTEGER {
+            return self.refuse(Refused::Input);
+        }
+        let Some(track) = self.track(ns, name) else { return self.refuse(Refused::Input) };
+        {
+            let conn = &self.conns[&c];
+            let new_pair = !conn.pairs.contains_key(&track);
+            let new_active = !self.active.contains_key(&track);
+            if (new_pair && conn.pairs.len() >= MAX_TRACKS_PER_CONNECTION)
+                || (new_active && self.active.len() >= MAX_BODY_TRACKS)
+            {
+                return self.refuse(Refused::Input);
+            }
+        }
+        let flow = Flow { c, track: Arc::clone(&track), g: h.g, sub: h.sub };
+        let cost = self.run_cost(&flow, &h, at_us);
+        let mut wake = self.room(c, Some(&track), cost);
+        if self.cur.open.len() >= MAX_FLOWS && !self.cur.open.contains_key(&flow) {
+            if self.cut(self.last_mono, false) {
+                wake = Wake::Seal;
+            }
+            self.room(c, Some(&track), cost);
+        }
+
+        let conn = self.conns.get_mut(&c).expect("checked above");
+        if conn.active.insert(Arc::clone(&track)) {
+            *self.active.entry(Arc::clone(&track)).or_default() += 1;
+        }
+        let pair = conn.pairs.entry(Arc::clone(&track)).or_default();
+        let gap = pair.last_at.map(|last| at_us.saturating_sub(last));
+        pair.last_at = Some(at_us);
+        let fell = pair.last_group.is_some_and(|last| h.g < last);
+        pair.last_group = Some(h.g);
+
+        let cur = &mut self.cur;
+        if let Some(gap) = gap {
+            let pace = cur.pace.entry((c, Arc::clone(&track))).or_default();
+            let hist = if h.starts_group { &mut pace.first } else { &mut pace.later };
+            let n = hist.entry(key_of(gap)).or_insert(0);
+            if *n == 0 {
+                cur.bytes += 4;
+            }
+            *n += 1;
+        }
+        if fell {
+            let n = cur.gdec.entry((c, Arc::clone(&track))).or_insert(0);
+            if *n == 0 {
+                cur.bytes += 12;
+            }
+            *n += 1;
+        }
+        if !cur.groups.contains_key(&track) {
+            cur.bytes += SPAN_BYTES;
+        }
+        let groups = cur.groups.entry(Arc::clone(&track)).or_default();
+        if groups.first.insert(h.g, at_us).is_none() {
+            cur.bytes += 2;
+        } else if let Some(t) = groups.first.get_mut(&h.g) {
+            *t = (*t).min(at_us);
+        }
+        groups.span = Some(match groups.span {
+            None => (at_us, at_us),
+            Some((lo, hi)) => (lo.min(at_us), hi.max(at_us)),
+        });
+
+        let breaks = match cur.open.get(&flow) {
+            None => false,
+            Some(run) => {
+                let last = *run.ids.last().expect("a run has an object");
+                let q = (at_us - run.times[0]).div_euclid(DT_QUANTUM_US);
+                h.o <= last
+                    || h.starts_group
+                    || h.opens_subgroup
+                    || i32::try_from(q).is_err()
+                    || run.b + h.size > MAX_SAFE_INTEGER
+            }
+        };
+        if breaks {
+            if let Some(run) = cur.open.remove(&flow) {
+                cur.runs.push(run);
+            }
+        }
+        match cur.open.get_mut(&flow) {
+            Some(run) => {
+                run.ids.push(h.o);
+                run.times.push(at_us);
+                run.b += h.size;
+            }
+            None => {
+                let order = cur.next_order();
+                cur.open.insert(
+                    flow.clone(),
+                    Run {
+                        order,
+                        flow: flow.clone(),
+                        ids: vec![h.o],
+                        times: vec![at_us],
+                        b: h.size,
+                        gs: h.starts_group,
+                        fo: h.opens_subgroup,
+                        eog: false,
+                    },
+                );
+            }
+        }
+        if h.ends_group {
+            if let Some(mut run) = cur.open.remove(&flow) {
+                run.eog = true;
+                cur.runs.push(run);
+            }
+        }
+        Ok(wake)
+    }
+
+    /// What one more object adds to the body, about.
+    fn run_cost(&self, flow: &Flow, h: &Handoff, at_us: i64) -> usize {
+        match self.cur.open.get(flow) {
+            Some(run) if h.o > *run.ids.last().unwrap_or(&0) => {
+                let q = (at_us - run.times[0]).div_euclid(DT_QUANTUM_US);
+                let prev =
+                    (run.times.last().unwrap_or(&at_us) - run.times[0]).div_euclid(DT_QUANTUM_US);
+                let gap = h.o - run.ids.last().unwrap_or(&0);
+                zigzag_len(q - prev) + if gap == 1 { 0 } else { leb_len(gap) + 1 }
+            }
+            _ => {
+                3 + leb_len(flow.c)
+                    + leb_len(h.g)
+                    + h.sub.map_or(0, leb_len)
+                    + leb_len(h.o)
+                    + 9
+                    + leb_len(h.size)
+            }
+        }
+    }
+
+    /// A status the producer sent, as a mark.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn mark<N: AsRef<[u8]>>(
+        &mut self,
+        c: u64,
+        ns: &[N],
+        name: &[u8],
+        kind: MarkKind,
+        g: u64,
+        o: u64,
+        n: u64,
+        t: i64,
+    ) -> Result<Wake, Refused> {
+        if self.stopped || !self.conns.contains_key(&c) {
+            return self.refuse(Refused::Closed);
+        }
+        let in_draft = match self.draft(c) {
+            Some(d) if (7..=23).contains(&d) => {
+                let (lo, hi) = kind.drafts();
+                (lo..=hi).contains(&d)
+            }
+            _ => true,
+        };
+        if !in_draft || !self.id_ok(c, g) || !self.id_ok(c, o) {
+            return self.refuse(Refused::Input);
+        }
+        let Some(track) = self.track(ns, name) else { return self.refuse(Refused::Input) };
+        if !self.cur.listed.contains(&track)
+            && !self.active.contains_key(&track)
+            && self.active.len() >= MAX_BODY_TRACKS
+        {
+            return self.refuse(Refused::Input);
+        }
+        let wake = self.room(c, Some(&track), 12 + leb_len(g) + leb_len(o));
+        if self.cur.marks.len() >= MAX_FACTS {
+            self.cur.dropped_records += 1;
+        } else {
+            self.cur.marks.push(Mark { c, track, kind, g, o, n, t });
+        }
+        Ok(wake)
+    }
+
+    /// A `pev` event. `publish_done` ends the track on the connection.
+    pub(crate) fn event<N: AsRef<[u8]>>(
+        &mut self,
+        c: u64,
+        track: Option<(&[N], &[u8])>,
+        e: EventKind,
+        code: Option<u64>,
+        at_us: i64,
+    ) -> Result<Wake, Refused> {
+        if self.stopped || !self.conns.contains_key(&c) {
+            return self.refuse(Refused::Closed);
+        }
+        if code.is_some_and(|v| v > MAX_SAFE_INTEGER) {
+            return self.refuse(Refused::Input);
+        }
+        let track = match track {
+            None => None,
+            Some((ns, name)) => match self.track(ns, name) {
+                Some(t) => Some(t),
+                None => return self.refuse(Refused::Input),
+            },
+        };
+        if let Some(t) = &track {
+            if !self.cur.listed.contains(t)
+                && !self.active.contains_key(t)
+                && self.active.len() >= MAX_BODY_TRACKS
+            {
+                return self.refuse(Refused::Input);
+            }
+        }
+        let wake = self.room(c, track.as_ref(), 90);
+        if let Some(t) = &track {
+            if matches!(e, EventKind::PublishDone | EventKind::StreamReset) {
+                self.clear(Clear::Track(c, Arc::clone(t)));
+            }
+            if e == EventKind::PublishDone {
+                self.deactivate(c, t);
+            }
+        }
+        self.push_event(Event { c, track, e, code, at_us });
+        Ok(wake)
+    }
+
+    fn push_event(&mut self, ev: Event) {
+        if self.cur.events.len() >= MAX_FACTS {
+            self.cur.dropped_records += 1;
+        } else {
+            self.cur.events.push(ev);
+        }
+    }
+
+    fn clear(&mut self, clear: Clear) {
+        let order = self.cur.next_order();
+        match &clear {
+            Clear::Track(c, t) => self.cur.end_runs(|f| !(f.c == *c && &f.track == t)),
+            Clear::Conn(c) => self.cur.end_runs(|f| f.c != *c),
+        }
+        self.cur.clears.push((order, clear));
+    }
+
+    fn deactivate(&mut self, c: u64, t: &TrackRef) {
+        let Some(conn) = self.conns.get_mut(&c) else { return };
+        if conn.active.remove(t) {
+            if let Some(n) = self.active.get_mut(t) {
+                *n -= 1;
+                if *n == 0 {
+                    self.active.remove(t);
+                }
+            }
+        }
+    }
+
+    /// Close a connection, with its close code. A code past 2^53 - 1 is
+    /// refused, and the connection closes without one.
+    pub(crate) fn close(&mut self, c: u64, code: Option<u64>, at_us: i64) -> Result<Wake, Refused> {
+        if !self.conns.contains_key(&c) {
+            return Ok(Wake::No);
+        }
+        let valid = code.is_none_or(|v| v <= MAX_SAFE_INTEGER);
+        let wake = self.room(c, None, 90);
+        self.clear(Clear::Conn(c));
+        let tracks: Vec<TrackRef> = self.conns[&c].active.iter().cloned().collect();
+        for t in &tracks {
+            self.deactivate(c, t);
+        }
+        self.conns.remove(&c);
+        let code = code.filter(|_| valid);
+        self.push_event(Event { c, track: None, e: EventKind::ConnClose, code, at_us });
+        if valid {
+            Ok(wake)
+        } else {
+            self.refuse(Refused::Input)
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sampling::{MAX_K, TARGET_GROUPS_PER_SEC};
-
-    const NS: [&str; 2] = ["live", "ch"];
-
-    fn collector() -> (Collector, u64) {
-        let mut c = Collector::new(false);
-        let id = c.open("https://relay.example".into(), 0).unwrap();
-        (c, id)
-    }
-
-    #[test]
-    fn a_group_reports_first_object_span_count_and_bytes() {
-        let (mut c, id) = collector();
-        c.object_sent(id, &NS, "v", 7, 3, 100, 1_000, 0.0).unwrap();
-        c.object_sent(id, &NS, "v", 7, 4, 50, 1_500, 1.0).unwrap();
-        c.object_sent(id, &NS, "v", 7, 5, 25, 1_200, 2.0).unwrap();
-        let t = c.take(3.0, 60_000.0, true);
-        assert_eq!(t.groups.len(), 1);
-        let g = &t.groups[0];
-        assert_eq!(
-            (g.g, g.fo, g.first_us, g.last_us, g.objects, g.bytes),
-            (7, 3, 1_000, 1_500, 3, 175)
-        );
-        assert_eq!(t.relays[&id].origin, "https://relay.example");
-    }
-
-    #[test]
-    fn the_newest_group_stays_open_across_a_seal() {
-        let (mut c, id) = collector();
-        c.object_sent(id, &NS, "v", 1, 0, 1, 0, 0.0).unwrap();
-        c.object_sent(id, &NS, "v", 2, 0, 1, 10, 1.0).unwrap();
-        let t = c.take(2.0, 60_000.0, false);
-        assert_eq!(t.groups.iter().map(|g| g.g).collect::<Vec<_>>(), vec![1]);
-        c.object_sent(id, &NS, "v", 2, 1, 1, 20, 3.0).unwrap();
-        let t = c.take(4.0, 60_000.0, true);
-        assert_eq!((t.groups[0].g, t.groups[0].objects), (2, 2));
-    }
-
-    #[test]
-    fn an_idle_group_closes_at_a_seal() {
-        let (mut c, id) = collector();
-        c.object_sent(id, &NS, "v", 1, 0, 1, 0, 0.0).unwrap();
-        assert_eq!(c.take(70_000.0, 60_000.0, false).groups.len(), 1);
-    }
-
-    #[test]
-    fn a_late_object_of_a_reported_group_is_dropped_not_reported_again() {
-        let (mut c, id) = collector();
-        c.object_sent(id, &NS, "v", 1, 0, 1, 0, 0.0).unwrap();
-        c.take(1.0, 60_000.0, true);
-        c.object_sent(id, &NS, "v", 1, 1, 1, 5, 2.0).unwrap();
-        assert!(c.take(3.0, 60_000.0, true).groups.is_empty());
-        assert_eq!(c.dropped, 1);
-    }
-
-    #[test]
-    fn a_late_object_of_an_old_group_never_makes_a_second_row() {
-        let (mut c, id) = collector();
-        for g in 0..70u64 {
-            c.object_sent(id, &NS, "v", g, 0, 1, g as i64, g as f64).unwrap();
-        }
-        // Group 0 is now 69 below the newest, group 60 nine below.
-        c.object_sent(id, &NS, "v", 0, 1, 1, 100, 70.0).unwrap();
-        c.object_sent(id, &NS, "v", 60, 1, 1, 100, 70.0).unwrap();
-        let t = c.take(71.0, 60_000.0, true);
-        let mut gs: Vec<u64> = t.groups.iter().map(|r| r.g).collect();
-        gs.sort_unstable();
-        assert_eq!(gs, (0..70).collect::<Vec<_>>());
-        assert_eq!(c.dropped, 2);
-        // Nor in a later body.
-        c.object_sent(id, &NS, "v", 3, 1, 1, 200, 80.0).unwrap();
-        c.object_sent(id, &NS, "v", 69, 1, 1, 200, 80.0).unwrap();
-        assert!(c.take(81.0, 60_000.0, true).groups.is_empty());
-        assert_eq!(c.dropped, 4);
-    }
-
-    #[test]
-    fn a_group_that_starts_out_of_order_is_reported_once() {
-        let (mut c, id) = collector();
-        for (g, o) in [(0, 0), (2, 0), (1, 0), (1, 1), (2, 1)] {
-            c.object_sent(id, &NS, "v", g, o, 1, 0, 0.0).unwrap();
-        }
-        let t = c.take(1.0, 60_000.0, true);
-        let mut rows: Vec<_> = t.groups.iter().map(|r| (r.g, r.objects)).collect();
-        rows.sort_unstable();
-        assert_eq!(rows, [(0, 1), (1, 2), (2, 2)]);
-        assert_eq!(c.dropped, 0);
-    }
-
-    #[test]
-    fn codes_and_drafts_past_2_53_are_refused() {
-        let (mut c, id) = collector();
-        let big = MAX_SAFE_INTEGER as u64 + 1;
-        c.object_sent(id, &NS, "v", 0, 0, 1, 0, 0.0).unwrap();
-        let none: Option<(&[&str], &str)> = None;
-        assert_eq!(c.event(id, none, EventKind::RequestError, Some(big), 1), Err(Refused::Input));
-        assert_eq!(c.set_draft(id, big), Err(Refused::Input));
-        c.set_draft(id, 16).unwrap();
-        assert_eq!(c.close(id, 2, Some(big)), Err(Refused::Input));
-        let t = c.take(3.0, 60_000.0, true);
-        assert!(t.events.is_empty());
-        let r = &t.relays[&id];
-        assert_eq!((r.draft, r.close_ts, r.close_code), (Some(16), Some(2), None));
-        assert_eq!(c.rejected, 3);
-    }
-
-    #[test]
-    fn bad_input_is_refused_and_counted() {
-        let (mut c, id) = collector();
-        assert_eq!(c.object_sent(id, &NS, "v", MAX_MOQT_ID + 1, 0, 1, 0, 0.0), Err(Refused::Input));
-        assert_eq!(c.object_sent(id, &NS, "v", 0, 0, u64::MAX, 0, 0.0), Err(Refused::Input));
-        assert_eq!(c.object_sent(id, &NS, "v", 0, 0, 1, -1, 0.0), Err(Refused::Input));
-        let long = "x".repeat(MAX_FULL_NAME_BYTES + 1);
-        assert_eq!(c.object_sent(id, &NS, &long, 0, 0, 1, 0, 0.0), Err(Refused::Input));
-        let many = vec!["f"; MAX_NAMESPACE_FIELDS + 1];
-        assert_eq!(c.object_sent(id, &many, "v", 0, 0, 1, 0, 0.0), Err(Refused::Input));
-        assert_eq!(c.object_sent(id + 1, &NS, "v", 0, 0, 1, 0, 0.0), Err(Refused::Closed));
-        assert_eq!(c.rejected, 6);
-    }
-
-    #[test]
-    fn a_closed_connection_refuses_objects_and_closes_its_groups() {
-        let (mut c, id) = collector();
-        c.object_sent(id, &NS, "v", 1, 0, 1, 0, 0.0).unwrap();
-        c.close(id, 5, Some(0)).unwrap();
-        assert_eq!(c.object_sent(id, &NS, "v", 2, 0, 1, 0, 0.0), Err(Refused::Closed));
-        let t = c.take(1.0, 60_000.0, false);
-        assert_eq!(t.groups.len(), 1);
-        assert_eq!((t.relays[&id].close_ts, t.relays[&id].close_code), (Some(5), Some(0)));
-        c.prune();
-        assert_eq!(c.conns.len(), 0);
-    }
-
-    #[test]
-    fn early_seal_is_asked_for_past_the_row_threshold() {
-        let mut c = Collector::new(true);
-        let id = c.open("https://r".into(), 0).unwrap();
-        let mut wake = Wake::No;
-        for o in 0..EARLY_PACK_ROWS as u64 {
-            wake = c.object_sent(id, &NS, "v", 0, o, 1, 0, 0.0).unwrap();
-        }
-        assert_eq!(wake, Wake::Seal);
-        let t = c.take_early();
-        assert_eq!(t.objects.len(), EARLY_PACK_ROWS);
-        c.restore(t);
-        assert_eq!(c.take(1.0, 60_000.0, true).objects.len(), EARLY_PACK_ROWS);
-    }
-
-    #[test]
-    fn publish_done_closes_the_track() {
-        let (mut c, id) = collector();
-        c.object_sent(id, &NS, "v", 1, 0, 1, 0, 0.0).unwrap();
-        c.event(id, Some((&NS[..], "v")), EventKind::PublishDone, Some(0), 3).unwrap();
-        let t = c.take(1.0, 60_000.0, false);
-        assert_eq!((t.groups.len(), t.events.len()), (1, 1));
-    }
-
-    #[test]
-    fn connections_are_bounded() {
-        let mut c = Collector::new(false);
-        for _ in 0..MAX_CONNECTIONS {
-            assert!(c.open("https://r".into(), 0).is_some());
-        }
-        assert!(c.open("https://r".into(), 0).is_none());
-    }
-
-    /// Group ids stepping by `step` and their send times, ms, for phases of
-    /// `(groups a second, seconds)`.
-    fn schedule(step: u64, phases: &[(u64, u64)]) -> Vec<(u64, f64)> {
-        let (mut out, mut t0, mut g) = (Vec::new(), 0.0, 0);
-        for &(rate, secs) in phases {
-            for i in 0..rate * secs {
-                out.push((g, t0 + i as f64 * 1000.0 / rate as f64));
-                g += step;
-            }
-            t0 += secs as f64 * 1000.0;
-        }
-        out
-    }
-
-    /// The groups the producer keeps, and its `k` as each group started.
-    fn producer(groups: &[(u64, f64)]) -> (Vec<u64>, Vec<u8>) {
-        let (mut c, id) = collector();
-        let (mut kept, mut ks) = (Vec::new(), Vec::new());
-        let mut next_seal = 60_000.0;
-        for &(g, ms) in groups {
-            if ms >= next_seal {
-                kept.extend(c.take(ms, 60_000.0, false).groups.iter().map(|r| r.g));
-                next_seal += 60_000.0;
-            }
-            c.object_sent(id, &NS, "a", g, 0, 1, (ms * 1000.0) as i64, ms).unwrap();
-            ks.push(c.conns[&id].pairs[0].k);
-        }
-        kept.extend(c.take(f64::MAX, 0.0, true).groups.iter().map(|r| r.g));
-        (kept, ks)
-    }
-
-    /// The browser monitor's rule (`monitor-browser` `GroupArrivals`), on
-    /// its own clock: `offset_ms` later than the producer's, and 10 s
-    /// intervals. Each interval's `k` is the highest the rate rule reached in
-    /// it, raised further until the interval holds at most the target. The
-    /// groups it keeps, and the interval `k` of each group.
-    fn viewer(groups: &[(u64, f64)], offset_ms: f64) -> (Vec<u64>, Vec<u8>) {
-        const INTERVAL_MS: f64 = 10_000.0;
-        let per_interval = TARGET_GROUPS_PER_SEC as usize * 10;
-        let mut rate = Rate::new();
-        let (mut kept, mut ks) = (Vec::new(), Vec::new());
-        let (mut interval, mut k, mut rule, mut held) = (None, 0u8, 0u8, Vec::<u64>::new());
-        let close = |k: u8, held: &mut Vec<u64>, kept: &mut Vec<u64>, ks: &mut Vec<u8>| {
-            kept.extend(held.iter().filter(|&&g| in_sample(g, k)));
-            ks.extend(std::iter::repeat_n(k, held.len()));
-            held.clear();
-        };
-        for &(g, ms) in groups {
-            let at = ms + offset_ms;
-            let i = (at / INTERVAL_MS).floor() as i64;
-            if interval != Some(i) {
-                close(k, &mut held, &mut kept, &mut ks);
-                interval = Some(i);
-                k = 0;
-            }
-            if rate.advance(at) {
-                rule = rate.viewer_k();
-            }
-            k = k.max(rule);
-            rate.add(g);
-            held.push(g);
-            while k < MAX_K && held.iter().filter(|&&g| in_sample(g, k)).count() > per_interval {
-                k += 1;
-            }
-        }
-        close(k, &mut held, &mut kept, &mut ks);
-        (kept, ks)
-    }
-
-    fn check(step: u64, phases: &[(u64, u64)]) {
-        let groups = schedule(step, phases);
-        let (pk, pks) = producer(&groups);
-        assert!(pk.len() < groups.len() || phases.iter().all(|p| p.0 <= 12), "{phases:?}");
-        let pk: std::collections::HashSet<u64> = pk.into_iter().collect();
-        for offset in [50.0, 7_371.7, 9_999.0] {
-            let (vk, vks) = viewer(&groups, offset);
-            for (i, (p, v)) in pks.iter().zip(&vks).enumerate() {
-                assert!(
-                    p <= v,
-                    "{phases:?} offset {offset}: group {} producer k {p} > viewer k {v}",
-                    groups[i].0
-                );
-            }
-            assert!(!vk.is_empty(), "{phases:?}");
-            let missing: Vec<_> = vk.iter().filter(|g| !pk.contains(g)).collect();
-            assert!(missing.is_empty(), "{phases:?} offset {offset}: viewer-only {missing:?}");
-        }
-    }
-
-    #[test]
-    fn a_steady_track_keeps_k_at_most_the_viewers() {
-        for rate in [5, 12, 30, 40, 50, 300] {
-            check(1, &[(rate, 120)]);
-        }
-        check(2, &[(30, 120)]);
-    }
-
-    #[test]
-    fn a_step_in_the_rate_keeps_k_at_most_the_viewers() {
-        check(1, &[(10, 60), (80, 60), (10, 60)]);
-        check(1, &[(80, 60), (5, 60)]);
-        check(1, &[(40, 60), (160, 60), (20, 60)]);
-        check(2, &[(20, 60), (100, 60), (15, 60)]);
-    }
-
-    #[test]
-    fn a_steady_track_settles_on_one_k() {
-        let groups = schedule(1, &[(50, 60)]);
-        let (_, ks) = producer(&groups);
-        // Raised once the window holds enough, then never changed.
-        let tail: std::collections::BTreeSet<_> = ks[ks.len() - 2_000..].iter().collect();
-        assert_eq!(tail.into_iter().collect::<Vec<_>>(), [&2]);
-    }
-}
+mod tests;

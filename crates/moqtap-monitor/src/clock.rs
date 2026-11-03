@@ -1,96 +1,98 @@
-//! The device clock against ingest's, from the four-timestamp exchange each
-//! upload makes: `t1` device send, `t2` ingest receive, `t3` ingest send,
-//! `t4` device receive.
+//! The device's monotonic clock against ingest's, from the four-timestamp
+//! exchange of each request: `t1` device send and `t4` device receive on the
+//! monotonic clock, `t2` ingest receive and `t3` ingest send, whole ms.
 //!
 //! ```text
 //! offset = ((t2 - t1) + (t3 - t4)) / 2
 //! delay  = (t4 - t1) - (t3 - t2)
 //! ```
+//!
+//! Wall time maps nothing. It is read beside the monotonic clock only to
+//! catch a break: a suspend, or a step of either clock.
 
-use std::collections::VecDeque;
+use std::time::Instant;
 
-use crate::wire::Clock;
+use crate::wire::ClockSample;
 
 /// The assumed drift between the device and ingest clocks, as a fraction:
 /// 100 ppm.
 pub const DRIFT: f64 = 100e-6;
 
-/// How long a sample stays a candidate, in ms.
-pub(crate) const WINDOW_MS: f64 = 10.0 * 60.0 * 1000.0;
+/// A change of wall minus monotonic time past this, beyond what [`DRIFT`]
+/// allows, is a clock break, µs.
+pub(crate) const B_BREAK_US: i64 = 20_000;
 
-#[derive(Clone, Copy, Debug)]
-struct Sample {
-    offset_ms: f64,
-    rtt_ms: f64,
-    mono_ms: f64,
+/// Ingest's whole-ms timestamps: a round trip can read up to this much
+/// under the truth, µs.
+const T23_QUANTUM_US: i64 = 1000;
+
+/// An exchange's sample, or `None` when it cannot be true.
+pub(crate) fn exchange(
+    t1_us: i64,
+    t2_ms: i64,
+    t3_ms: i64,
+    t4_us: i64,
+    pop: Option<String>,
+) -> Option<ClockSample> {
+    let (t2, t3) = (t2_ms.checked_mul(1000)?, t3_ms.checked_mul(1000)?);
+    let rtt = (t4_us - t1_us).checked_sub(t3.checked_sub(t2)?)?;
+    if t4_us < t1_us || t3 < t2 || rtt < -T23_QUANTUM_US {
+        return None;
+    }
+    let o_us = ((t2 - t1_us).checked_add(t3 - t4_us)?).div_euclid(2);
+    Some(ClockSample {
+        o_us,
+        r_us: rtt.max(0) as u64,
+        at_us: t1_us + (t4_us - t1_us) / 2,
+        pop: pop.filter(|p| valid_pop(p)),
+    })
 }
 
-/// The samples of the last ten minutes. A body carries the one with the
-/// smallest bound `rtt / 2 + DRIFT * age`.
+/// A PoP as the reader takes it: `[A-Za-z0-9-]{1,16}`.
+fn valid_pop(p: &str) -> bool {
+    (1..=16).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// Wall minus monotonic time at the last check.
 #[derive(Debug, Default)]
-pub(crate) struct ClockWindow {
-    samples: VecDeque<Sample>,
-    /// Device wall minus monotonic time when last checked, and the
-    /// monotonic time of that check, ms.
-    anchor: Option<(f64, f64)>,
+pub(crate) struct BreakCheck {
+    anchor: Option<(i64, i64)>,
 }
 
-impl ClockWindow {
-    /// Fold one exchange in. `wall_ms` and `mono_ms` are read together, at `t4`.
-    /// A sample that cannot be true (non-finite, or a negative round trip) is
-    /// ignored.
-    pub(crate) fn sample(&mut self, t1: f64, t2: f64, t3: f64, t4: f64, mono_ms: f64) {
-        if ![t1, t2, t3, t4, mono_ms].iter().all(|v| v.is_finite()) {
-            return;
-        }
-        self.check_step(t4, mono_ms);
-        let rtt_ms = (t4 - t1) - (t3 - t2);
-        if rtt_ms.is_nan() || rtt_ms < 0.0 {
-            return;
-        }
-        let offset_ms = ((t2 - t1) + (t3 - t4)) / 2.0;
-        self.samples.push_back(Sample { offset_ms, rtt_ms, mono_ms });
-        self.expire(mono_ms);
-    }
-
-    /// The clock for a body sealed now, or `None` with no usable sample.
-    pub(crate) fn best(&mut self, wall_ms: f64, mono_ms: f64) -> Option<Clock> {
-        self.check_step(wall_ms, mono_ms);
-        self.expire(mono_ms);
-        let bound = |s: &Sample| s.rtt_ms / 2.0 + DRIFT * (mono_ms - s.mono_ms).max(0.0);
-        let best = self.samples.iter().min_by(|a, b| bound(a).total_cmp(&bound(b)))?;
-        Some(Clock {
-            o: round3(best.offset_ms),
-            r: round3(best.rtt_ms),
-            n: self.samples.len() as u64,
-            a: round3((mono_ms - best.mono_ms).max(0.0) / 1000.0),
-        })
-    }
-
-    /// A wall-clock step makes every sample wrong: the window empties. A
-    /// step is wall minus monotonic time moving by more than the best round
-    /// trip plus `DRIFT` times the time since the last check, the rate the
-    /// two clocks may drift apart.
-    fn check_step(&mut self, wall_ms: f64, mono_ms: f64) {
-        let skew = wall_ms - mono_ms;
-        if let Some((anchor, at)) = self.anchor {
-            let best_rtt = self.samples.iter().map(|s| s.rtt_ms).fold(f64::INFINITY, f64::min);
-            if (skew - anchor).abs() > best_rtt + DRIFT * (mono_ms - at).abs() {
-                self.samples.clear();
-            }
-        }
-        self.anchor = Some((skew, mono_ms));
-    }
-
-    fn expire(&mut self, mono_ms: f64) {
-        while self.samples.front().is_some_and(|s| mono_ms - s.mono_ms > WINDOW_MS) {
-            self.samples.pop_front();
-        }
+impl BreakCheck {
+    /// True when wall minus monotonic time moved past [`B_BREAK_US`] plus
+    /// [`DRIFT`] times the time since the last check.
+    pub(crate) fn check(&mut self, wall_us: i64, mono_us: i64) -> bool {
+        let skew = wall_us - mono_us;
+        let broke = self.anchor.is_some_and(|(anchor, at)| {
+            let allowed = B_BREAK_US as f64 + DRIFT * (mono_us - at).abs() as f64;
+            (skew - anchor).abs() as f64 > allowed
+        });
+        self.anchor = Some((skew, mono_us));
+        broke
     }
 }
 
-fn round3(v: f64) -> f64 {
-    (v * 1000.0).round() / 1000.0
+/// The smallest non-zero step of the monotonic clock, µs, at least 1.
+pub(crate) fn resolution_us() -> u64 {
+    let mut best = u128::MAX;
+    for _ in 0..8 {
+        let a = Instant::now();
+        let mut b = Instant::now();
+        let mut spins = 0;
+        while b == a && spins < 1_000_000 {
+            b = Instant::now();
+            spins += 1;
+        }
+        let step = b.duration_since(a).as_nanos();
+        if step > 0 {
+            best = best.min(step);
+        }
+    }
+    if best == u128::MAX {
+        return 1;
+    }
+    (best.div_ceil(1000) as u64).max(1)
 }
 
 #[cfg(test)]
@@ -99,61 +101,48 @@ mod tests {
 
     #[test]
     fn offset_and_round_trip_from_four_timestamps() {
-        let mut w = ClockWindow::default();
-        // Device 5 s behind ingest, 20 ms each way, 2 ms at ingest.
-        w.sample(1_000.0, 6_020.0, 6_022.0, 1_042.0, 1_042.0);
-        let c = w.best(1_042.0, 1_042.0).unwrap();
-        assert_eq!(c, Clock { o: 5_000.0, r: 40.0, n: 1, a: 0.0 });
+        // Ingest 5 s ahead of mono, 20 ms each way, 2 ms at ingest.
+        let s = exchange(1_000_000, 6_020, 6_022, 1_042_000, Some("FRA".into())).unwrap();
+        assert_eq!(
+            s,
+            ClockSample {
+                o_us: 5_000_000,
+                r_us: 40_000,
+                at_us: 1_021_000,
+                pop: Some("FRA".into())
+            }
+        );
     }
 
     #[test]
-    fn keeps_the_smallest_bound_not_the_smallest_round_trip() {
-        let mut w = ClockWindow::default();
-        // 10 ms round trip, then one of 30 ms nine minutes later.
-        w.sample(0.0, 5.0, 5.0, 10.0, 10.0);
-        let later = 10.0 + 9.0 * 60_000.0;
-        w.sample(later - 30.0, later - 10.0, later - 10.0, later, later);
-        // Bounds: 5 + 54 ms against 15 ms: the newer one wins.
-        let c = w.best(later, later).unwrap();
-        assert_eq!((c.r, c.n, c.a), (30.0, 2, 0.0));
-        // Right after the first, the first wins.
-        let mut w = ClockWindow::default();
-        w.sample(0.0, 5.0, 5.0, 10.0, 10.0);
-        w.sample(10.0, 25.0, 25.0, 40.0, 40.0);
-        assert_eq!(w.best(40.0, 40.0).unwrap().r, 10.0);
+    fn a_round_trip_under_a_millisecond_reads_as_zero() {
+        // 300 µs over loopback, but t2 and t3 fall on either side of a ms.
+        let s = exchange(10_000_000, 20_000, 20_001, 10_000_300, None).unwrap();
+        assert_eq!(s.r_us, 0);
+        assert!(exchange(10_000_000, 20_000, 20_003, 10_000_300, None).is_none());
+        assert!(exchange(10, 1, 0, 20, None).is_none(), "t3 before t2");
     }
 
     #[test]
-    fn samples_older_than_ten_minutes_expire() {
-        let mut w = ClockWindow::default();
-        w.sample(0.0, 5.0, 5.0, 10.0, 10.0);
-        assert!(w.best(10.0 + WINDOW_MS + 1.0, 10.0 + WINDOW_MS + 1.0).is_none());
+    fn a_pop_that_does_not_read_is_dropped() {
+        let s = exchange(0, 0, 0, 10, Some("FRA 1".into())).unwrap();
+        assert_eq!(s.pop, None);
     }
 
     #[test]
-    fn a_wall_clock_step_empties_the_window() {
-        let mut w = ClockWindow::default();
-        w.sample(0.0, 5.0, 5.0, 10.0, 10.0);
-        // Wall jumps 2 s ahead of monotonic time.
-        assert!(w.best(2_020.0, 20.0).is_none());
+    fn a_step_of_wall_time_is_a_break_and_drift_is_not() {
+        let mut b = BreakCheck::default();
+        assert!(!b.check(1_000_000_000, 0));
+        // 60 s later, the wall clock 3 ms ahead: within 20 ms + 6 ms.
+        assert!(!b.check(1_060_003_000, 60_000_000));
+        // A 2 s step.
+        assert!(b.check(1_062_003_000, 60_000_100));
+        // Monotonic time stopped for a suspend of a minute.
+        assert!(b.check(1_122_003_000, 60_000_200));
     }
 
     #[test]
-    fn drift_within_the_drift_bound_is_not_a_step() {
-        let mut w = ClockWindow::default();
-        // A 2 ms round trip, then a minute in which the wall clock gains
-        // 1.2 ms (20 ppm) on monotonic time: under 2 ms + 6 ms.
-        w.sample(0.0, 1.0, 1.0, 2.0, 2.0);
-        let later = 2.0 + 60_000.0;
-        assert_eq!(w.best(later + 1.2, later).map(|c| c.n), Some(1));
-        // 9 ms in the next minute is past 2 ms + 6 ms.
-        assert!(w.best(later + 60_000.0 + 10.2, later + 60_000.0).is_none());
-    }
-
-    #[test]
-    fn a_negative_round_trip_is_ignored() {
-        let mut w = ClockWindow::default();
-        w.sample(0.0, 50.0, 60.0, 5.0, 5.0);
-        assert!(w.best(5.0, 5.0).is_none());
+    fn resolution_is_at_least_a_microsecond() {
+        assert!(resolution_us() >= 1);
     }
 }

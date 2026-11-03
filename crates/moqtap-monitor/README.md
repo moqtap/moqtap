@@ -2,18 +2,18 @@
 
 Producer monitoring for [MoQT](https://datatracker.ietf.org/doc/draft-ietf-moq-transport/)
 publishers: encoders, ingest and origin services that publish to one or more
-relays. Your code reports each object after your MoQ library has accepted it;
+relays. Your code reports each object as it hands it to your MoQ library;
 the monitor uploads the reports to moqtap Insight, which shows end-to-end
 latency for the viewer sessions that received the same objects.
 
 It works with any MoQ stack. It does not touch your connections, and object
-payloads never leave the process: only names, ids, sizes and send times do.
+payloads never leave the process: only names, ids, sizes and handoff times do.
 
 ## Usage
 
 ```rust,no_run
 use std::time::Duration;
-use moqtap_monitor::Monitor;
+use moqtap_monitor::{Delivery, Monitor, Sent};
 
 # async fn run() -> Result<(), moqtap_monitor::Error> {
 let key = std::env::var("MOQTAP_SOURCE_KEY").expect("source key");
@@ -21,9 +21,19 @@ let monitor = Monitor::builder("encoder-fra-1", key).start()?;
 
 // One handle per relay connection.
 let relay = monitor.connection("https://relay.example.net/moq")?;
+relay.set_draft(14).ok();
 
-// After your MoQ library accepted object 0 of group 42:
-let _ = relay.object_sent(&["live", "channel-7"], "video", 42, 0, 18_000, None);
+// As your MoQ library takes each object:
+let sent = Sent {
+    group: 42,
+    delivery: Delivery::Subgroup(0),
+    object: 0,
+    size: 18_000,
+    starts_group: true,
+    opens_subgroup: true,
+    ends_group: false,
+};
+let _ = relay.object_sent(&["live", "channel-7"], "video", sent, None);
 
 // When publishing ends, and when the connection closes:
 let _ = relay.publish_done(&["live", "channel-7"], "video", 0);
@@ -44,41 +54,83 @@ The monitor runs on Tokio; `start()` spawns its tasks on the current runtime.
 
 ## What is reported
 
-- **`object_sent(namespace, track, group, object, size, at)`**: one object,
-  after your library accepted it. `size` is the payload in bytes; `at` is when
-  it was handed over (`None` means now).
+- **`object_sent(namespace, track, sent, at)`**: one object, once per relay
+  connection, as it is handed to your MoQ library. Each call counts as one
+  publication, even when it repeats ids, so report a re-publication again
+  and a library's own re-sends (per subscription, FETCH answers) not at all.
+  `at` is when it was handed over (`None` means now).
+  - `starts_group`: the first object your application publishes in the
+    group. `opens_subgroup`: the first object of its subgroup.
+    `ends_group`: the group's last object. Set them from your library's
+    group and subgroup calls; ids alone never decide them.
+  - A zero-length object is reported with `size: 0`.
+- **`status_sent`**: a status sent in place of an object (End of Group, End
+  of Track, and the others of your draft).
+- **`gap_sent`**: a Prior Group ID Gap or Prior Object ID Gap you declared.
 - **`stream_reset`, `request_error`, `track_request_error`, `publish_done`**:
-  optional events, with their codes. A code past 2^53 - 1 is refused.
-- **`set_draft`**: the MoQT draft the connection negotiated, when you know it.
+  events, with their codes. A code past 2^53 - 1 is refused.
+- **`set_draft`**: the MoQT draft the connection negotiated. With it, ids past
+  2^62 - 1 are refused on drafts up to 16, and a status or gap the draft does
+  not have is refused. Without it, any 64-bit id is taken.
+
+Names are byte strings: the namespace fields and track name exactly as your
+library sends them, `&str` or `&[u8]`, empty or not UTF-8. They must be what
+viewers subscribe to, field for field, or no latency can be matched.
 
 Only the origin of a relay URL is kept (`https://relay.example.net`); the
-path, query and userinfo never leave the process.
-
-By default each group is reported once, with its first object, send time,
-duration, object count and bytes (`Detail::Group`). An object of a group
-already reported, or of a group 64 or more below its track's newest, is not
-reported; it is counted in `stats().dropped`. `Detail::Object` also
-reports every object, on plans that include per-object detail.
+path, query and userinfo never leave the process. A reconnect is a new
+`connection()`.
 
 ## Uploads and limits
 
-Reports are uploaded every 60 seconds, in one upload for all of the source's
-relay connections, and sooner when an upload reaches its size limit.
+Reports are sealed every 15 seconds (`MonitorBuilder::seal_interval`, 5 to
+60 seconds) into one upload for all of the source's relay connections, and
+sooner when an upload reaches its size limit. While someone watches a session
+this source feeds, ingest can ask for shorter intervals for a while.
 
-On a fast track the monitor reports only groups whose id is a multiple of
-2^k, with k chosen from the track's group rate so that it still reports more
-than `moqtap_monitor::TARGET_GROUPS_PER_SEC` groups a second.
+On a fast track the monitor reports a sample of whole groups, chosen so that
+it still reports more than `moqtap_monitor::TARGET_GROUPS_PER_SEC` groups a
+second, and states which groups it left out. The viewer side reports every
+group, and those left out are shown as sampled.
 
 A source reports at most 64 relay origins in a calendar month (UTC;
 `moqtap_monitor::MAX_RELAYS_PER_MONTH`). Reports for a further origin are not
 sent and are counted in `stats().over_relay_cap`; they are sent again from the
-next month.
+next month. At most 256 tracks may be published at once, and 1024 over the
+life of one connection.
 
 Reporting never blocks on the network and never panics. Invalid input is
-refused with `Rejected` and counted; memory is bounded, and when ingest is
-unreachable uploads are retried with backoff, up to a bounded backlog. If
-ingest refuses the key (401 or 403) or the path (404), the monitor stops and
-`stats().state` says why.
+refused with `Rejected` and counted in `stats().rejected`.
+
+## Delivery
+
+Every sealed upload is kept until ingest accepts it, up to 16 MiB of them
+(`MonitorBuilder::buffer_bytes`); past that the oldest is given up and
+counted in `stats().bodies_lost`. `buffer_bytes(0)` turns the buffer off: an
+upload that is not accepted at once is given up.
+
+- Network errors, timeouts, 408, 425, 429 and 5xx are retried with the same
+  upload, backing off up to a minute; `Retry-After` is honoured up to a
+  minute.
+- If ingest refuses the key (401 or 403) or the path (404), the monitor keeps
+  collecting and keeping the data, and tries the oldest upload again every
+  minute. `stats().state` is `Refused` with the status until one is accepted.
+- Any other 4xx means ingest will never take that upload: it is given up and
+  counted in `stats().bodies_lost`.
+
+A retried upload is byte-for-byte the one first sent, so ingest counts it
+once.
+
+**Call `shutdown` before the process exits.** It seals the last upload and
+sends everything kept, waiting at most the timeout you give it. Dropping the
+`Monitor` does not wait: whatever is unsent when the runtime stops is lost.
+
+## Clock
+
+Times are taken from the monotonic clock and placed on ingest's clock by a
+short exchange with every upload, plus one when the monitor starts. If your
+application has a clock synchronised to UTC, such as PTP,
+`MonitorBuilder::app_clock` hands it to the monitor too.
 
 ## Proxies and certificates
 

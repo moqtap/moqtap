@@ -1,13 +1,12 @@
 //! The relay cap. Ingest refuses, whole, a source body that would bring its
 //! source past [`MAX_RELAYS_PER_MONTH`] relay origins in a UTC month of
 //! ingest's clock. The monitor counts the origins of its own bodies against
-//! that month, which it learns from ingest's receive time, and sends no row
-//! for an origin past the cap.
+//! that month, which it learns from ingest's receive time, and sends no
+//! record for an origin past the cap.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::clock::DRIFT;
-use crate::collect::Taken;
 
 /// Distinct relay origins a source may report in one UTC month.
 pub const MAX_RELAYS_PER_MONTH: usize = 64;
@@ -25,16 +24,13 @@ pub(crate) struct RelayLedger {
 }
 
 impl RelayLedger {
-    /// Takes out of `taken` the rows of connections whose origin is past the
-    /// cap, oldest connection first in line; returns how many rows.
-    pub(crate) fn cap(&self, taken: &mut Taken) -> u64 {
-        let mut conns: Vec<_> =
-            taken.relays.iter().map(|(id, r)| (*id, r.origin.as_str())).collect();
-        conns.sort_unstable();
+    /// The connections, of `(ordinal, origin)` in ordinal order, whose
+    /// origin is past the cap, the oldest connection first in line.
+    pub(crate) fn denied(&self, conns: &[(u64, &str)]) -> HashSet<u64> {
         let room = MAX_RELAYS_PER_MONTH.saturating_sub(self.origins.len());
         let mut added: HashSet<&str> = HashSet::new();
-        let mut denied: HashSet<u64> = HashSet::new();
-        for (id, origin) in conns {
+        let mut denied = HashSet::new();
+        for &(id, origin) in conns {
             if self.origins.contains(origin) || added.contains(origin) {
                 continue;
             }
@@ -44,15 +40,7 @@ impl RelayLedger {
                 denied.insert(id);
             }
         }
-        if denied.is_empty() {
-            return 0;
-        }
-        let before = taken.groups.len() + taken.objects.len() + taken.events.len();
-        taken.groups.retain(|r| !denied.contains(&r.conn));
-        taken.objects.retain(|r| !denied.contains(&r.conn));
-        taken.events.retain(|r| !denied.contains(&r.conn));
-        taken.relays.retain(|id, _| !denied.contains(id));
-        (before - taken.groups.len() - taken.objects.len() - taken.events.len()) as u64
+        denied
     }
 
     /// A body was sealed with `origins`.
@@ -110,22 +98,6 @@ impl RelayLedger {
     }
 }
 
-/// Distinct origins in `relays`, in connection order.
-pub(crate) fn origins_of<'a>(
-    conns: impl Iterator<Item = &'a u64>,
-    relays: &HashMap<u64, crate::collect::RelayInfo>,
-) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for id in conns {
-        if let Some(r) = relays.get(id) {
-            if !out.contains(&r.origin) {
-                out.push(r.origin.clone());
-            }
-        }
-    }
-    out
-}
-
 /// Months since 1970-01 of the UTC date at `ms`.
 fn utc_month(ms: f64) -> Option<i64> {
     if !ms.is_finite() || ms.abs() > 8.64e15 {
@@ -147,57 +119,22 @@ fn utc_month(ms: f64) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::collect::{PendingEvent, PendingGroup, RelayInfo, TrackName};
-    use crate::wire::EventKind;
-    use std::sync::Arc;
 
-    fn info(origin: &str) -> RelayInfo {
-        RelayInfo {
-            origin: origin.into(),
-            draft: None,
-            open_ts: 0,
-            close_ts: None,
-            close_code: None,
-        }
+    fn conns(origins: std::ops::Range<u64>) -> Vec<(u64, String)> {
+        origins.map(|i| (i, format!("https://r{i}.example"))).collect()
     }
 
-    fn group(conn: u64, g: u64) -> PendingGroup {
-        PendingGroup {
-            conn,
-            track: Arc::new(TrackName { ns: vec!["n".into()], name: "v".into() }),
-            k: 0,
-            g,
-            fo: 0,
-            first_us: 0,
-            last_us: 0,
-            objects: 1,
-            bytes: 1,
-        }
+    fn denied(ledger: &RelayLedger, c: &[(u64, String)]) -> HashSet<u64> {
+        let refs: Vec<(u64, &str)> = c.iter().map(|(i, o)| (*i, o.as_str())).collect();
+        ledger.denied(&refs)
     }
 
-    /// One connection per origin `r0..rN`, each with `rows` groups and an event.
-    fn taken(origins: std::ops::Range<u64>, rows: u64) -> Taken {
-        let mut t = Taken::default();
-        for i in origins {
-            t.relays.insert(i, info(&format!("https://r{i}.example")));
-            for g in 0..rows {
-                t.groups.push(group(i, g));
-            }
-            t.events.push(PendingEvent {
-                conn: i,
-                ts: 0,
-                track: None,
-                e: EventKind::RequestError,
-                code: Some(1),
-            });
-        }
-        t
-    }
-
-    fn names(t: &Taken) -> Vec<String> {
-        let mut ids: Vec<_> = t.relays.keys().copied().collect();
-        ids.sort_unstable();
-        origins_of(ids.iter(), &t.relays)
+    fn allowed(ledger: &RelayLedger, c: &[(u64, String)]) -> Vec<String> {
+        let d = denied(ledger, c);
+        let mut out: Vec<String> =
+            c.iter().filter(|(i, _)| !d.contains(i)).map(|(_, o)| o.clone()).collect();
+        out.dedup();
+        out
     }
 
     #[test]
@@ -219,17 +156,15 @@ mod tests {
     #[test]
     fn origins_past_the_cap_send_nothing_and_are_counted() {
         let mut ledger = RelayLedger::default();
-        let mut t = taken(0..70, 2);
-        assert_eq!(ledger.cap(&mut t), 6 * 3);
-        assert_eq!(t.relays.len(), MAX_RELAYS_PER_MONTH);
-        assert!(t.groups.iter().all(|r| r.conn < 64) && t.events.iter().all(|r| r.conn < 64));
-        ledger.sealed(&names(&t));
+        let c = conns(0..70);
+        let d = denied(&ledger, &c);
+        assert_eq!(d.len(), 6);
+        assert!(d.iter().all(|&i| i >= 64));
+        ledger.sealed(&allowed(&ledger, &c));
         assert_eq!(ledger.origins.len(), MAX_RELAYS_PER_MONTH);
 
         // Counted origins keep reporting; a new one does not.
-        let mut t = taken(60..66, 1);
-        assert_eq!(ledger.cap(&mut t), 2 * 2);
-        assert_eq!(names(&t).len(), 4);
+        assert_eq!(denied(&ledger, &conns(60..66)).len(), 2);
     }
 
     #[test]
@@ -238,15 +173,13 @@ mod tests {
             origins: (0..63).map(|i| format!("o{i}")).collect(),
             ..Default::default()
         };
-        let mut t = Taken::default();
-        t.relays.insert(1, info("https://a.example"));
-        t.relays.insert(2, info("https://a.example"));
-        t.relays.insert(3, info("https://b.example"));
-        for c in 1..=3 {
-            t.groups.push(group(c, 0));
-        }
-        assert_eq!(ledger.cap(&mut t), 1);
-        assert_eq!(names(&t), ["https://a.example"]);
+        let c = vec![
+            (1, "https://a.example".to_string()),
+            (2, "https://a.example".to_string()),
+            (3, "https://b.example".to_string()),
+        ];
+        assert_eq!(denied(&ledger, &c), HashSet::from([3]));
+        assert_eq!(allowed(&ledger, &c), ["https://a.example"]);
     }
 
     #[test]
@@ -289,14 +222,12 @@ mod tests {
         // allowed for, so the month holds.
         ledger.advance(1_000.0 + day, std::iter::empty());
         assert_eq!(ledger.origins.len(), 64);
-        let mut t = taken(100..101, 1);
-        assert_eq!(ledger.cap(&mut t), 2);
+        assert_eq!(denied(&ledger, &conns(100..101)).len(), 1);
 
         let queued = [vec!["o5".to_string()]];
         ledger.advance(1_000.0 + day * 1.001, queued.iter().map(|q| q.as_slice()));
         assert_eq!(ledger.origins.iter().collect::<Vec<_>>(), ["o5"]);
-        let mut t = taken(100..101, 1);
-        assert_eq!(ledger.cap(&mut t), 0);
+        assert!(denied(&ledger, &conns(100..101)).is_empty());
 
         // With no answer yet, nothing moves.
         let mut fresh = RelayLedger::default();

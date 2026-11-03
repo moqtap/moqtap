@@ -1,367 +1,390 @@
-//! Ingest's golden source bodies, rebuilt with this crate's encoder from
-//! the same inputs: the frame streams must be byte-identical. Gzip output is
-//! not compared, since two compressors may differ; the frames under it are.
+//! Ingest's golden v2 source bodies, rebuilt with this crate's encoder from
+//! the same inputs: every accepted body must be byte-identical. The goldens
+//! are not gzipped, so the whole body is compared. `track-keys.json` pins
+//! `track_key` and the sampling level.
 
-use std::io::Read as _;
 use std::path::PathBuf;
 
+use crate::sampling::level;
 use crate::wire::{
-    encode_frames, BodySpec, Clock, DataRec, EventKind, GrpRow, Head, IdForm, ObjRow, PevRec,
-    RelayRec, TrackRec, PREAMBLE_BYTES,
+    body, canonical_track_bytes, frames, hex, preamble_json, record_frames, track_key, Batch, Clk,
+    ClockSample, ConnRec, EventKind, MarkIn, MarkKind, PaceIn, PevIn, Record, RunIn, Seal, Tail,
+    TrackRec,
 };
 
-const T0_US: i64 = 1_761_696_000_000_000;
-const WALL_MS: u64 = 1_761_696_060_000;
-const INSTANCE: &str = "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1";
 const SOURCE: &str = "enc-fra-1";
-const CLOCK: Clock = Clock { o: -41.5, r: 18.0, n: 6, a: 37.0 };
+const INSTANCE: &str = "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1";
+const BASE: i64 = 7_200_000_000;
+const SEAL_MS: u64 = 15_000;
+const U64: u64 = u64::MAX;
+const RELAY: &str = "https://relay-a.example.net/moq?token=never-stored";
 
 fn dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source/v2")
 }
 
-fn manifest() -> serde_json::Value {
+fn fixture(name: &str) -> Vec<u8> {
+    std::fs::read(dir().join(format!("{name}.bin"))).expect("fixture")
+}
+
+fn clk() -> Clk {
+    Clk {
+        base_us: BASE,
+        epoch: 0,
+        res_us: 1,
+        sample: Some(ClockSample {
+            o_us: 1_761_696_000_000_000 - BASE + 41_500,
+            r_us: 18_250,
+            at_us: BASE - 2_000_000,
+            pop: Some("FRA".into()),
+        }),
+        app: None,
+    }
+}
+
+fn track(ns: &[&[u8]], name: &[u8], k: u8) -> TrackRec {
+    let ns: Vec<Vec<u8>> = ns.iter().map(|f| f.to_vec()).collect();
+    TrackRec { tk: track_key(&ns, name), ns, name: name.to_vec(), k, span: None, xg: Vec::new() }
+}
+
+fn video() -> TrackRec {
+    track(&[b"example.com", b"live"], b"video", 0)
+}
+
+fn audio() -> TrackRec {
+    track(&[b"example.com", b"live"], b"audio", 0)
+}
+
+fn conn(c: u64, draft: u64, relay: &str) -> ConnRec {
+    ConnRec { c, draft: Some(draft), relay: relay.into() }
+}
+
+struct Spec {
+    seq: u64,
+    first: u64,
+    conns: Vec<ConnRec>,
+    tracks: Vec<TrackRec>,
+    records: Vec<Record>,
+    clk: Clk,
+    tail: Option<Tail>,
+    is_final: bool,
+    gdec: Vec<(u64, usize, u64)>,
+    start: Option<(i64, i64)>,
+}
+
+impl Spec {
+    fn new(conns: Vec<ConnRec>, tracks: Vec<TrackRec>, records: Vec<Record>) -> Self {
+        Spec {
+            seq: 0,
+            first: 0,
+            conns,
+            tracks,
+            records,
+            clk: clk(),
+            tail: None,
+            is_final: false,
+            gdec: Vec::new(),
+            start: None,
+        }
+    }
+
+    fn build(self) -> Vec<u8> {
+        let n = self.records.len() as u64;
+        let tail = self
+            .tail
+            .unwrap_or(Tail { last_rseq: (self.first + n).checked_sub(1), ..Tail::default() });
+        let batch = Batch {
+            source: SOURCE.into(),
+            instance_id: INSTANCE.into(),
+            seq: self.seq,
+            is_final: self.is_final,
+            monitor_name: "moqtap-reference",
+            monitor_version: "2.0.0",
+            tail,
+            conns: self.conns,
+            tracks: self.tracks,
+            gdec: self.gdec,
+            start: self.start,
+        };
+        let seal = Seal {
+            seq: self.seq,
+            from_us: BASE + self.seq as i64 * SEAL_MS as i64 * 1000,
+            through_us: BASE + (self.seq as i64 + 1) * SEAL_MS as i64 * 1000,
+            ms: SEAL_MS,
+        };
+        let em = if n > 0 { vec![(self.first, n)] } else { Vec::new() };
+        let records = record_frames(&self.records, BASE, self.first);
+        body(&preamble_json(INSTANCE, &em, &seal), &frames(&batch, &self.clk, &records), false)
+    }
+}
+
+/// `t0 + i * step`, floored, as the reference writer computes it.
+fn times(t0: f64, step: f64, n: usize) -> Vec<i64> {
+    (0..n).map(|i| (t0 + i as f64 * step).floor() as i64).collect()
+}
+
+fn ids(from: u64, n: u64) -> Vec<u64> {
+    (from..from + n).collect()
+}
+
+fn run(
+    c: u64,
+    ti: usize,
+    g: u64,
+    sub: Option<u64>,
+    ids: Vec<u64>,
+    times: Vec<i64>,
+    b: u64,
+) -> RunIn {
+    RunIn { cont: false, fo: false, eog: false, gs: false, c, ti, g, sub, ids, times, b }
+}
+
+fn base(off: f64) -> f64 {
+    BASE as f64 + off
+}
+
+fn check(name: &str, built: Vec<u8>) {
+    let want = fixture(name);
+    if built != want {
+        let at = built
+            .iter()
+            .zip(&want)
+            .position(|(a, b)| a != b)
+            .unwrap_or(built.len().min(want.len()));
+        let show = |b: &[u8]| {
+            String::from_utf8_lossy(&b[at.saturating_sub(40)..(at + 80).min(b.len())]).into_owned()
+        };
+        panic!("{name}: differs at byte {at}\n built: {}\n  want: {}", show(&built), show(&want));
+    }
+}
+
+#[test]
+fn basic() {
+    let mut v = video();
+    v.span = Some((BASE + 1_000, BASE + 300_000));
+    let mut a = audio();
+    a.span = Some((BASE + 2_000, BASE + 242_000));
+    let mut s = Spec::new(
+        vec![conn(0, 14, RELAY)],
+        vec![v, a],
+        vec![
+            Record::Pev(PevIn {
+                c: 0,
+                ti: None,
+                e: EventKind::ConnOpen,
+                code: None,
+                at_us: BASE - 3_000_000,
+            }),
+            Record::Runs(vec![
+                RunIn {
+                    gs: true,
+                    fo: true,
+                    eog: true,
+                    ..run(0, 0, 100, Some(0), ids(0, 8), times(base(1_000.4), 33_333.3, 8), 41_210)
+                },
+                RunIn {
+                    gs: true,
+                    ..run(0, 1, 100, None, ids(0, 13), times(base(2_000.9), 20_000.0, 13), 2_080)
+                },
+                RunIn {
+                    gs: true,
+                    fo: true,
+                    ..run(0, 0, 101, Some(0), ids(0, 2), times(base(267_667.0), 33_333.3, 2), 9_870)
+                },
+            ]),
+            Record::Marks(vec![MarkIn {
+                kind: MarkKind::Eot,
+                c: 0,
+                ti: 0,
+                g: 101,
+                o: 2,
+                n: 0,
+                t: BASE + 301_000,
+            }]),
+            Record::Paces(vec![
+                PaceIn { c: 0, ti: 0, first: vec![(69, 1)], later: vec![(71, 7), (72, 1)] },
+                PaceIn { c: 0, ti: 1, first: vec![], later: vec![(62, 12)] },
+            ]),
+        ],
+    );
+    s.start = Some((BASE - 5_000_000, 1_761_696_055_000));
+    check("basic", s.build());
+}
+
+#[test]
+fn names_as_bytes() {
+    let tracks = vec![
+        track(&[b"example.com"], &[0xff, 0xfe, 0x00, 0x80], 0),
+        track(&[b"example.com"], b"", 0),
+        track(&[b"", b"x"], b"y", 0),
+        track(&[], b"", 0),
+    ];
+    let runs = (0..4)
+        .map(|ti| run(0, ti, 7, Some(0), vec![0], vec![BASE + 500 + ti as i64 * 100], 1))
+        .collect();
+    check(
+        "names-as-bytes",
+        Spec::new(vec![conn(0, 14, RELAY)], tracks, vec![Record::Runs(runs)]).build(),
+    );
+}
+
+#[test]
+fn zero_length_normal() {
+    let conns = vec![
+        conn(0, 10, "https://relay-a.example.net"),
+        conn(1, 14, "https://relay-b.example.net"),
+        conn(2, 22, "moqt://relay-c.example.net:4443"),
+    ];
+    let runs = (0..3u64)
+        .flat_map(|c| {
+            [
+                run(c, 0, 9, Some(1), ids(0, 3), times(base(100.0 + c as f64), 1_000.0, 3), 0),
+                run(c, 0, 9, None, vec![3], vec![BASE + 4_000 + c as i64], 0),
+            ]
+        })
+        .collect();
+    check("zero-length-normal", Spec::new(conns, vec![video()], vec![Record::Runs(runs)]).build());
+}
+
+#[test]
+fn negative_dt() {
+    let t = |off: f64| base(off).floor() as i64;
+    let mut s = Spec::new(
+        vec![conn(0, 14, RELAY)],
+        vec![video()],
+        vec![Record::Runs(vec![
+            run(
+                0,
+                0,
+                1,
+                Some(0),
+                ids(0, 4),
+                vec![t(50_000.0), t(49_950.5), t(50_301.0), t(40_000.0)],
+                40,
+            ),
+            run(0, 0, 2, Some(0), ids(0, 2), vec![t(10_000.99), t(9_999.0)], 20),
+        ])],
+    );
+    s.clk.app = Some((1_761_696_000_000_000 - BASE, 2_500));
+    check("negative-dt", s.build());
+}
+
+#[test]
+fn u64_ids() {
+    let mut s = Spec::new(
+        vec![conn(7, 22, "https://relay-a.example.net")],
+        vec![video()],
+        vec![Record::Runs(vec![
+            run(
+                7,
+                0,
+                U64,
+                Some(1 << 63),
+                vec![U64 - 3, U64 - 1, U64],
+                times(base(1.0), 10.0, 3),
+                3,
+            ),
+            RunIn {
+                gs: true,
+                ..run(7, 0, 0, Some(0), vec![0, 5, 6, 40], times(base(100.0), 10.0, 4), 4)
+            },
+            run(7, 0, 5, Some(0), vec![0], vec![BASE + 200], 1),
+            run(7, 0, 3, Some(0), vec![2], vec![BASE + 300], 1),
+            run(7, 0, 3, None, vec![4, 9, U64], times(base(400.0), 10.0, 3), 3),
+        ])],
+    );
+    s.gdec = vec![(7, 0, 2)];
+    check("u64-ids", s.build());
+}
+
+#[test]
+fn sampled_cont() {
+    let mut a = track(&[b"example.com", b"live"], b"audio", 2);
+    a.span = Some((BASE + 60_000_000, BASE + 74_990_000));
+    a.xg = vec![1001, 1002, 1004, 1003, 1100];
+    let mut s = Spec::new(
+        vec![conn(0, 14, RELAY)],
+        vec![a],
+        vec![Record::Runs(vec![
+            RunIn {
+                gs: true,
+                cont: true,
+                ..run(0, 0, 1000, None, vec![0], vec![BASE + 60_000_000], 160)
+            },
+            RunIn { gs: true, ..run(0, 0, 1005, None, vec![0], vec![BASE + 60_050_000], 160) },
+        ])],
+    );
+    s.seq = 4;
+    s.first = 51;
+    s.gdec = vec![(0, 0, 1)];
+    check("sampled-cont", s.build());
+}
+
+#[test]
+fn final_unmapped() {
+    let mut s = Spec::new(vec![conn(0, 14, RELAY)], vec![video()], vec![Record::End("shutdown")]);
+    s.seq = 9;
+    s.first = 120;
+    s.is_final = true;
+    s.clk = Clk { base_us: BASE, epoch: 1, res_us: 1, sample: None, app: None };
+    s.tail = Some(Tail {
+        last_rseq: Some(120),
+        pre_drop_records: 2,
+        pre_drop_objects: 31,
+        conn: vec![(0, 4_812, 3_901_224)],
+    });
+    check("final-unmapped", s.build());
+}
+
+fn unhex(s: &str) -> Vec<u8> {
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex")).collect()
+}
+
+#[test]
+fn track_keys_and_levels() {
+    let text = std::fs::read_to_string(dir().join("track-keys.json")).expect("track-keys.json");
+    let golden: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    let cases = golden["cases"].as_array().expect("cases");
+    assert!(cases.len() >= 6);
+    for c in cases {
+        let ns: Vec<Vec<u8>> = c["ns"]
+            .as_array()
+            .expect("ns")
+            .iter()
+            .map(|f| unhex(f.as_str().expect("hex")))
+            .collect();
+        let name = unhex(c["name"].as_str().expect("name"));
+        assert_eq!(hex(&canonical_track_bytes(&ns, &name)), c["canonical"].as_str().unwrap());
+        let tk = track_key(&ns, &name);
+        assert_eq!(format!("{tk:016x}"), c["tk"].as_str().unwrap());
+        for l in c["levels"].as_array().expect("levels") {
+            let g: u64 = l[0].as_str().expect("group").parse().expect("u64");
+            assert_eq!(u64::from(level(tk, g)), l[1].as_u64().unwrap(), "{tk:016x} {g}");
+        }
+    }
+}
+
+#[test]
+fn every_accepted_golden_is_rebuilt() {
     let text = std::fs::read_to_string(dir().join("manifest.json")).expect("manifest.json");
-    serde_json::from_str(&text).expect("manifest is JSON")
-}
-
-fn entry(name: &str) -> serde_json::Value {
-    manifest()["fixtures"]
+    let manifest: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    let accepted: Vec<&str> = manifest["fixtures"]
         .as_array()
         .expect("fixtures")
         .iter()
-        .find(|f| f["name"] == name)
-        .unwrap_or_else(|| panic!("{name} is not in the manifest"))
-        .clone()
-}
-
-/// The fixture's frame stream: preamble stripped, gunzipped when flagged.
-fn fixture_frames(name: &str) -> Vec<u8> {
-    let body = std::fs::read(dir().join(format!("{name}.bin"))).expect("fixture");
-    assert_eq!(&body[..4], b"MQTC");
-    assert_eq!(body[4], 1);
-    let rest = &body[PREAMBLE_BYTES..];
-    if body[5] & 1 == 1 {
-        let mut out = Vec::new();
-        flate2::read::GzDecoder::new(rest).read_to_end(&mut out).expect("gzip");
-        out
-    } else {
-        rest.to_vec()
-    }
-}
-
-fn ns() -> Vec<String> {
-    vec!["live".into(), "channel-7".into()]
-}
-
-fn head() -> Head<'static> {
-    Head {
-        ts: 720_000,
-        wall: WALL_MS,
-        per_object: false,
-        source: SOURCE,
-        instance_id: INSTANCE,
-        seq: 12,
-        is_final: false,
-        lost: &[],
-        dropped: 0,
-        clock: Some(CLOCK),
-        monitor_name: "moqtap-reference",
-        monitor_version: "1.0.0",
-    }
-}
-
-fn relay(c: usize, url: &str) -> RelayRec<'_> {
-    RelayRec { c, relay: url, draft: Some(14), open_ts: None, close_ts: None, close_code: None }
-}
-
-/// A 2 s GOP video track and a 20 ms audio track, `count` groups each from `g0`.
-fn group_rows(c: usize, count: i128, g0: i128, step: i128, fo: u64) -> Vec<(GrpRow, i128)> {
-    let mut rows = Vec::new();
-    for i in 0..count {
-        let send = T0_US + i as i64 * 2_000_000 + c as i64 * 150;
-        let video = GrpRow {
-            c,
-            tr: 1,
-            g: 0,
-            fo,
-            send_us: send,
-            span_us: 1_966_667,
-            objects: 60,
-            bytes: 812_000 + i as u64 * 17,
-        };
-        rows.push((video, g0 + i * step));
-        let audio = GrpRow {
-            c,
-            tr: 2,
-            g: 0,
-            fo: 0,
-            send_us: send + 40,
-            span_us: 1_980_000,
-            objects: 100,
-            bytes: 32_000,
-        };
-        rows.push((audio, g0 * 100 + i * step));
-    }
-    rows
-}
-
-fn set_g(rows: Vec<(GrpRow, i128)>) -> Vec<GrpRow> {
-    rows.into_iter().map(|(r, g)| GrpRow { g: u64::try_from(g).expect("id"), ..r }).collect()
-}
-
-/// mulberry32, as the fixtures' object rows are seeded.
-fn random(seed: u32) -> impl FnMut() -> f64 {
-    let mut a = seed;
-    move || {
-        a = a.wrapping_add(0x6d2b_79f5);
-        let mut t = a;
-        t = (t ^ (t >> 15)).wrapping_mul(t | 1);
-        t ^= t.wrapping_add((t ^ (t >> 7)).wrapping_mul(t | 61));
-        f64::from(t ^ (t >> 14)) / 4_294_967_296.0
-    }
-}
-
-fn object_rows(count: usize, seed: u32) -> Vec<ObjRow> {
-    let mut next = random(seed);
-    let mut rows = Vec::new();
-    let mut send = T0_US;
-    let (mut g, mut o) = (5000u64, 0u64);
-    for _ in 0..count {
-        if o == 60 {
-            g += 1;
-            o = 0;
-        }
-        send += 16_000 + (next() * 2_000.0).floor() as i64;
-        let bytes = 900 + (next() * 40_000.0).floor() as u64;
-        rows.push(ObjRow { c: 0, tr: 1, g, o, bytes, send_us: send });
-        o += 1;
-    }
-    rows
-}
-
-fn chunks<T: Clone>(rows: &[T]) -> Vec<Vec<T>> {
-    rows.chunks(512).map(<[T]>::to_vec).collect()
-}
-
-fn object_body(n: usize, seed: u32) -> Vec<u8> {
-    let objs = object_rows(n * 512, seed);
-    let mut grp: Vec<GrpRow> = Vec::new();
-    for r in &objs {
-        match grp.last_mut() {
-            Some(last) if last.g == r.g => {
-                last.span_us = r.send_us - last.send_us;
-                last.objects += 1;
-                last.bytes += r.bytes;
-            }
-            _ => grp.push(GrpRow {
-                c: 0,
-                tr: 1,
-                g: r.g,
-                fo: 0,
-                send_us: r.send_us,
-                span_us: 0,
-                objects: 1,
-                bytes: r.bytes,
-            }),
-        }
-    }
-    let ns = ns();
-    let mut data: Vec<DataRec> =
-        chunks(&grp).into_iter().map(|r| DataRec::Grp(r, IdForm::Auto)).collect();
-    data.extend(chunks(&objs).into_iter().map(|r| DataRec::Obj(r, IdForm::Auto)));
-    encode_frames(&BodySpec {
-        head: Head { per_object: true, ..head() },
-        relays: vec![relay(0, "https://relay-a.example.net/moq")],
-        tracks: vec![TrackRec { id: 1, ns: &ns, name: "video-1080p", k: 0 }],
-        data,
-        events: vec![],
-        end: None,
-    })
-}
-
-fn two_tracks(ns: &[String], audio_k: u8) -> Vec<TrackRec<'_>> {
-    vec![
-        TrackRec { id: 1, ns, name: "video-1080p", k: 0 },
-        TrackRec { id: 2, ns, name: "audio-opus", k: audio_k },
-    ]
-}
-
-fn check(name: &str, frames: Vec<u8>) {
-    let want = fixture_frames(name);
-    let e = entry(name);
-    assert_eq!(e["frameBytes"].as_u64(), Some(want.len() as u64), "{name}: manifest");
-    if frames != want {
-        let at = frames.iter().zip(&want).position(|(a, b)| a != b).unwrap_or(frames.len());
-        let from = at.saturating_sub(40);
-        panic!(
-            "{name}: frames differ at byte {at}\n ours: {}\n want: {}",
-            String::from_utf8_lossy(&frames[from..(at + 80).min(frames.len())]),
-            String::from_utf8_lossy(&want[from..(at + 80).min(want.len())]),
-        );
-    }
-}
-
-#[test]
-fn group_one_relay() {
-    let ns = ns();
-    let mut r = relay(0, "https://relay-a.example.net/moq?jwt=dropped");
-    r.open_ts = Some(1200);
-    check(
-        "group-one-relay",
-        encode_frames(&BodySpec {
-            head: head(),
-            relays: vec![r],
-            tracks: two_tracks(&ns, 0),
-            data: vec![DataRec::Grp(set_g(group_rows(0, 30, 1000, 1, 0)), IdForm::Auto)],
-            events: vec![],
-            end: None,
-        }),
-    );
-}
-
-#[test]
-fn group_two_relays() {
-    let ns = ns();
-    let mut b = relay(7, "https://Relay-B.example.net:443/moq");
-    b.close_ts = Some(59_000);
-    b.close_code = Some(0);
-    let rows: Vec<(GrpRow, i128)> = group_rows(0, 30, 1000, 1, 0)
-        .into_iter()
-        .chain(group_rows(7, 30, 1000, 1, 0))
-        .map(|(r, g)| if r.tr == 2 { (r, g * 4) } else { (r, g) })
+        .filter(|f| f["expect"]["ok"] == true)
+        .map(|f| f["name"].as_str().expect("name"))
         .collect();
-    check(
-        "group-two-relays",
-        encode_frames(&BodySpec {
-            head: head(),
-            relays: vec![relay(0, "https://relay-a.example.net/moq"), b],
-            tracks: two_tracks(&ns, 2),
-            data: vec![DataRec::Grp(set_g(rows), IdForm::Auto)],
-            events: vec![PevRec {
-                ts: 58_000,
-                c: 7,
-                tr: Some(1),
-                e: EventKind::PublishDone,
-                code: Some(0),
-            }],
-            end: None,
-        }),
+    assert_eq!(
+        accepted,
+        [
+            "basic",
+            "names-as-bytes",
+            "zero-length-normal",
+            "negative-dt",
+            "u64-ids",
+            "sampled-cont",
+            "final-unmapped"
+        ]
     );
-}
-
-#[test]
-fn group_decimal_ids() {
-    let ns = ns();
-    let first = set_g(group_rows(0, 4, 4_611_686_018_427_387_000 / 100, 1, 0));
-    let second: Vec<GrpRow> = group_rows(0, 4, (1i128 << 62) - 10, 1, 0)
-        .into_iter()
-        .filter(|(r, _)| r.tr == 1)
-        .map(|(r, g)| GrpRow { g: g as u64, ..r })
-        .collect();
-    check(
-        "group-decimal-ids",
-        encode_frames(&BodySpec {
-            head: head(),
-            relays: vec![relay(0, "https://relay-a.example.net")],
-            tracks: two_tracks(&ns, 0),
-            data: vec![DataRec::Grp(first, IdForm::String), DataRec::Grp(second, IdForm::Auto)],
-            events: vec![],
-            end: None,
-        }),
-    );
-}
-
-#[test]
-fn group_first_object() {
-    let ns = ns();
-    check(
-        "group-first-object",
-        encode_frames(&BodySpec {
-            head: head(),
-            relays: vec![relay(0, "https://relay-a.example.net")],
-            tracks: two_tracks(&ns, 0),
-            data: vec![DataRec::Grp(set_g(group_rows(0, 3, 1000, 1, 3)), IdForm::Auto)],
-            events: vec![],
-            end: None,
-        }),
-    );
-}
-
-#[test]
-fn group_final() {
-    let ns = ns();
-    check(
-        "group-final",
-        encode_frames(&BodySpec {
-            head: Head { is_final: true, lost: &[3, 9], dropped: 41, ..head() },
-            relays: vec![relay(0, "https://relay-a.example.net")],
-            tracks: two_tracks(&ns, 0),
-            data: vec![DataRec::Grp(set_g(group_rows(0, 2, 1000, 1, 0)), IdForm::Auto)],
-            events: vec![],
-            end: Some("shutdown"),
-        }),
-    );
-}
-
-#[test]
-fn group_bad_sample() {
-    let ns = ns();
-    let rows = [8u64, 9, 16]
-        .iter()
-        .enumerate()
-        .map(|(i, &g)| GrpRow {
-            c: 0,
-            tr: 1,
-            g,
-            fo: 0,
-            send_us: T0_US + i as i64 * 1000,
-            span_us: 900,
-            objects: 1,
-            bytes: 100,
-        })
-        .collect();
-    check(
-        "group-bad-sample",
-        encode_frames(&BodySpec {
-            head: head(),
-            relays: vec![relay(0, "https://relay-a.example.net")],
-            tracks: vec![TrackRec { id: 1, ns: &ns, name: "video-1080p", k: 3 }],
-            data: vec![DataRec::Grp(rows, IdForm::Auto)],
-            events: vec![],
-            end: None,
-        }),
-    );
-}
-
-#[test]
-fn object_sealed() {
-    let n = entry("object-sealed")["param"].as_u64().expect("param") as usize;
-    check("object-sealed", object_body(n, 1));
-}
-
-#[test]
-fn object_seal_exceeded() {
-    let n = entry("object-seal-exceeded")["param"].as_u64().expect("param") as usize;
-    check("object-seal-exceeded", object_body(n, 2));
-}
-
-#[test]
-fn every_accepted_fixture_is_rebuilt_here() {
-    let covered = [
-        "group-one-relay",
-        "group-two-relays",
-        "group-decimal-ids",
-        "group-first-object",
-        "group-final",
-        "group-bad-sample",
-        "object-sealed",
-        "object-seal-exceeded",
-    ];
-    for f in manifest()["fixtures"].as_array().expect("fixtures") {
-        if f["expect"]["ok"] == true {
-            let name = f["name"].as_str().expect("name");
-            assert!(covered.contains(&name), "{name} has no rebuild test");
-        }
-    }
 }

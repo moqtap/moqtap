@@ -1,8 +1,8 @@
-//! The two background tasks: the sealer turns rows into bodies every
-//! interval (sooner near the byte seal), and the sender posts them in order,
-//! one at a time, retrying with backoff.
+//! The two background tasks: the sealer turns intervals into bodies at the
+//! seal interval (sooner when the collector cuts one), and the sender posts
+//! them in order, one at a time, keeping each until ingest accepts it.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -13,29 +13,45 @@ use hyper::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER, USER_
 use hyper::{Request, StatusCode};
 use tokio::sync::Notify;
 
-use crate::clock::ClockWindow;
+use crate::clock::exchange;
 use crate::collect::Collector;
 use crate::egress::HttpClient;
-use crate::pack::{pack, HeadFields, Mode, Sealed};
+use crate::pack::{Head, Packer, Sealed};
 use crate::relay_cap::RelayLedger;
-use crate::wire::MAX_LOST_SEQS;
+use crate::wire::{body, frames, Clk, ClockSample};
 use crate::State;
 
-/// Sealed bodies kept while ingest cannot be reached. Past it the oldest is
-/// given up and listed as lost.
-pub(crate) const MAX_QUEUED_BODIES: usize = 64;
+/// The seal interval unless the builder names another.
+pub(crate) const DEFAULT_SEAL: Duration = Duration::from_secs(15);
+/// The shortest seal interval, configured or asked for by ingest.
+pub(crate) const MIN_SEAL: Duration = Duration::from_secs(5);
+/// The shortest seal interval ingest may ask for.
+const MIN_DIRECTED_SEAL: Duration = Duration::from_secs(1);
+/// The longest seal interval.
+pub(crate) const MAX_SEAL: Duration = Duration::from_secs(60);
+/// Sealed bodies kept until ingest accepts them, in bytes.
+pub(crate) const DEFAULT_BUFFER_BYTES: usize = 16 * 1024 * 1024;
+
+/// Clock epochs whose latest sample is kept for bodies still unsent.
+const KEPT_EPOCHS: usize = 4;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const FIRST_BACKOFF: Duration = Duration::from_secs(1);
-const MAX_BACKOFF: Duration = Duration::from_secs(300);
-const MAX_RETRY_AFTER: Duration = Duration::from_secs(3600);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// Retries back off from one retry unit (1 s) to 60, and a refused body is
+/// sent again every 60.
+const MAX_BACKOFF_UNITS: u32 = 60;
+const REFUSED_RETRY_UNITS: u32 = 60;
 
 const RECV_HEADER: &str = "x-moqtap-recv-ms";
 const SEND_HEADER: &str = "x-moqtap-send-ms";
+const POP_HEADER: &str = "x-moqtap-pop";
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
+const USER_AGENT_VALUE: &str = concat!("moqtap-monitor/", env!("CARGO_PKG_VERSION"));
 
 pub(crate) const MONITOR_NAME: &str = "moqtap-monitor";
 pub(crate) const MONITOR_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// An integrator's UTC clock: now in UTC µs, and its error bound in µs.
+pub(crate) type AppClock = Arc<dyn Fn() -> Option<(i64, u64)> + Send + Sync>;
 
 pub(crate) struct Config {
     pub source: String,
@@ -44,17 +60,89 @@ pub(crate) struct Config {
     /// `scheme://host[:port]`, no trailing slash.
     pub endpoint: String,
     pub interval: Duration,
+    /// 0: a body that is not accepted at once is given up.
+    pub buffer_bytes: usize,
+    pub retry_unit: Duration,
+    pub app_clock: Option<AppClock>,
+    pub res_us: u64,
+    pub start_wall_ms: i64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
+pub(crate) struct Entry {
+    pub sealed: Sealed,
+    /// The bytes sent, fixed at the first send.
+    pub frozen: Option<Arc<Vec<u8>>>,
+}
+
+impl Entry {
+    fn size(&self) -> usize {
+        self.frozen.as_ref().map_or(self.sealed.raw_len, |b| b.len())
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct Outbox {
-    pub queue: VecDeque<Arc<Sealed>>,
-    pub lost: VecDeque<u64>,
-    pub lost_total: u64,
+    pub queue: VecDeque<Entry>,
+    pub bytes: usize,
+    /// The body being posted.
+    pub in_flight: Option<u64>,
     pub sent: u64,
-    pub clock: ClockWindow,
-    pub state: Option<State>,
+    pub lost: u64,
+    pub dropped: u64,
+    pub over_relay_cap: u64,
+    pub state: State,
     pub relays: RelayLedger,
+    /// The latest exchange of each recent clock epoch.
+    pub samples: BTreeMap<u64, ClockSample>,
+    /// Ingest's seal interval, ms, and when it lapses.
+    pub directive: Option<(u64, Instant)>,
+}
+
+impl Default for Outbox {
+    fn default() -> Self {
+        Outbox {
+            queue: VecDeque::new(),
+            bytes: 0,
+            in_flight: None,
+            sent: 0,
+            lost: 0,
+            dropped: 0,
+            over_relay_cap: 0,
+            state: State::Running,
+            relays: RelayLedger::default(),
+            samples: BTreeMap::new(),
+            directive: None,
+        }
+    }
+}
+
+impl Outbox {
+    /// Give up the oldest bodies not in flight while the buffer is past `cap`.
+    fn enforce(&mut self, cap: usize) {
+        while self.bytes > cap && self.queue.len() > 1 {
+            let i = usize::from(self.queue.front().map(|e| e.sealed.seq) == self.in_flight);
+            if i >= self.queue.len() {
+                break;
+            }
+            if let Some(gone) = self.queue.remove(i) {
+                self.give_up(gone);
+            }
+        }
+    }
+
+    fn give_up(&mut self, gone: Entry) {
+        self.bytes = self.bytes.saturating_sub(gone.size());
+        self.relays.given_up(&gone.sealed.origins);
+        self.lost += 1;
+    }
+
+    fn take(&mut self, seq: u64) -> Option<Entry> {
+        let i = self.queue.iter().position(|e| e.sealed.seq == seq)?;
+        let e = self.queue.remove(i)?;
+        self.bytes = self.bytes.saturating_sub(e.size());
+        Some(e)
+    }
 }
 
 pub(crate) struct Shared {
@@ -64,14 +152,25 @@ pub(crate) struct Shared {
     pub outbox: Mutex<Outbox>,
     pub seal_now: Notify,
     pub send_now: Notify,
+    /// Wakes the sender from a wait: a clock exchange is due, or shutdown.
+    pub kick: Notify,
+    pub directive_changed: Notify,
     pub shutting_down: AtomicBool,
     pub sealer_done: AtomicBool,
     pub shutdown: Notify,
 }
 
 impl Shared {
-    pub(crate) fn mono_ms(&self) -> f64 {
-        self.start.elapsed().as_secs_f64() * 1000.0
+    /// Monotonic µs since the monitor started.
+    pub(crate) fn mono_us(&self) -> i64 {
+        self.mono_of(Instant::now())
+    }
+
+    pub(crate) fn mono_of(&self, at: Instant) -> i64 {
+        match at.checked_duration_since(self.start) {
+            Some(d) => i64::try_from(d.as_micros()).unwrap_or(i64::MAX),
+            None => -i64::try_from((self.start - at).as_micros()).unwrap_or(i64::MAX),
+        }
     }
 
     pub(crate) fn collector(&self) -> MutexGuard<'_, Collector> {
@@ -81,27 +180,66 @@ impl Shared {
     pub(crate) fn outbox(&self) -> MutexGuard<'_, Outbox> {
         self.outbox.lock().unwrap_or_else(|e| e.into_inner())
     }
+
+    /// The seal interval in force: the configured one, shortened while an
+    /// ingest directive holds.
+    fn interval(&self) -> Duration {
+        let own = self.cfg.interval;
+        match self.outbox().directive {
+            Some((ms, until)) if Instant::now() < until => {
+                own.min(Duration::from_millis(ms).max(MIN_DIRECTED_SEAL))
+            }
+            _ => own,
+        }
+    }
 }
 
-pub(crate) fn wall_ms() -> Option<f64> {
-    SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs_f64() * 1000.0)
+pub(crate) fn wall_us() -> Option<i64> {
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    i64::try_from(d.as_micros()).ok()
 }
 
 pub(crate) async fn sealer(shared: Arc<Shared>) {
-    let mut next_seq = 0u64;
-    let mut next = tokio::time::Instant::now() + shared.cfg.interval;
+    let mut packer = Packer::new(Head {
+        source: shared.cfg.source.clone(),
+        instance_id: shared.cfg.instance_id.clone(),
+        start: (0, shared.cfg.start_wall_ms),
+        monitor_name: MONITOR_NAME,
+        monitor_version: MONITOR_VERSION,
+    });
+    let mut timer_from = Instant::now();
     loop {
-        let mode = tokio::select! {
-            _ = tokio::time::sleep_until(next) => {
-                next = tokio::time::Instant::now() + shared.cfg.interval;
-                Mode::All
-            }
-            _ = shared.seal_now.notified() => Mode::Early,
-            _ = shared.shutdown.notified() => Mode::Final,
+        let interval = shared.interval();
+        let from = {
+            let mut c = shared.collector();
+            c.seal_ms = interval.as_millis() as u64;
+            c.open_from_us()
         };
-        let mode = if shared.shutting_down.load(Ordering::SeqCst) { Mode::Final } else { mode };
-        seal(&shared, mode, &mut next_seq).await;
-        if mode == Mode::Final || shared.collector().stopped {
+        let opened = shared.start + Duration::from_micros(from.max(0) as u64);
+        let deadline = tokio::time::Instant::from_std(opened.max(timer_from) + interval);
+        let is_final = tokio::select! {
+            _ = tokio::time::sleep_until(deadline) => {
+                timer_from = Instant::now();
+                let mono = shared.mono_us();
+                let mut c = shared.collector();
+                c.observe(mono, wall_us());
+                c.cut(mono, false);
+                false
+            }
+            _ = shared.seal_now.notified() => false,
+            _ = shared.directive_changed.notified() => false,
+            _ = shared.shutdown.notified() => true,
+        };
+        let is_final = is_final || shared.shutting_down.load(Ordering::SeqCst);
+        if is_final {
+            let mono = shared.mono_us();
+            let mut c = shared.collector();
+            c.observe(mono, wall_us());
+            c.cut(mono, true);
+            c.stopped = true;
+        }
+        drain(&shared, &mut packer);
+        if is_final {
             break;
         }
     }
@@ -109,112 +247,43 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
     shared.send_now.notify_one();
 }
 
-async fn seal(shared: &Shared, mode: Mode, next_seq: &mut u64) {
-    // Read together, before any lock: the clock window compares the two.
-    let mono = shared.mono_ms();
-    let wall = wall_ms().unwrap_or(0.0);
-    let idle_ms = shared.cfg.interval.as_secs_f64() * 1000.0;
-    let clock = shared.outbox().clock.best(wall, mono);
-    let mut taken = {
-        let mut c = shared.collector();
-        if c.stopped {
-            return;
-        }
-        let taken = match mode {
-            Mode::Early => c.take_early(),
-            Mode::All => c.take(mono, idle_ms, false),
-            Mode::Final => c.take(mono, 0.0, true),
+/// Pack every interval the collector has sealed.
+fn drain(shared: &Shared, packer: &mut Packer) {
+    loop {
+        let (iv, probe) = {
+            let mut c = shared.collector();
+            (c.cuts.pop_front(), c.probe_due)
         };
-        if taken.is_empty() && mode != Mode::Final {
-            c.prune();
-            return;
+        if probe {
+            shared.kick.notify_one();
         }
-        taken
-    };
-    let capped = {
+        let Some(iv) = iv else { return };
+        let mono = shared.mono_us();
+        let denied: HashSet<u64> = {
+            let mut o = shared.outbox();
+            let o = &mut *o;
+            o.relays
+                .advance(mono as f64 / 1000.0, o.queue.iter().map(|e| e.sealed.origins.as_slice()));
+            let conns: Vec<(u64, &str)> =
+                iv.conns.iter().map(|(c, i)| (*c, i.origin.as_str())).collect();
+            o.relays.denied(&conns)
+        };
+        let app = shared.cfg.app_clock.as_ref().and_then(|f| {
+            let (utc_us, e_us) = f()?;
+            Some((utc_us.checked_sub(shared.mono_us())?, e_us))
+        });
+        let packed = packer.pack(iv, &denied, app);
         let mut o = shared.outbox();
-        let o = &mut *o;
-        o.relays.advance(mono, o.queue.iter().map(|b| b.origins.as_slice()));
-        o.relays.cap(&mut taken)
-    };
-    let dropped = {
-        let mut c = shared.collector();
-        c.dropped += capped;
-        c.over_relay_cap += capped;
-        c.dropped
-    };
-    let head = {
-        let o = shared.outbox();
-        HeadFields {
-            source: shared.cfg.source.clone(),
-            instance_id: shared.cfg.instance_id.clone(),
-            ts: mono as u64,
-            wall: wall as u64,
-            lost: o.lost.iter().copied().collect(),
-            dropped,
-            clock,
-            monitor_name: MONITOR_NAME,
-            monitor_version: MONITOR_VERSION,
+        o.over_relay_cap += packed.over_relay_cap;
+        o.dropped = packer.dropped();
+        o.relays.sealed(&packed.sealed.origins);
+        o.bytes += packed.sealed.raw_len;
+        o.queue.push_back(Entry { sealed: packed.sealed, frozen: None });
+        if shared.cfg.buffer_bytes > 0 {
+            o.enforce(shared.cfg.buffer_bytes);
         }
-    };
-    // Packing gzips each trial body, so it runs off the runtime's threads.
-    let mut seq = *next_seq;
-    let packed = match tokio::task::spawn_blocking(move || {
-        let packed = pack(taken, &head, &mut seq, mode);
-        (packed, seq)
-    })
-    .await
-    {
-        Ok((packed, seq)) => {
-            *next_seq = seq;
-            packed
-        }
-        Err(_) => return,
-    };
-    {
-        let mut c = shared.collector();
-        c.dropped += packed.dropped;
-        if let Some(rest) = packed.leftover {
-            c.restore(rest);
-        }
-        c.prune();
-    }
-    if packed.bodies.is_empty() {
-        return;
-    }
-    {
-        let mut o = shared.outbox();
-        for b in packed.bodies {
-            o.relays.sealed(&b.origins);
-            o.queue.push_back(Arc::new(b));
-        }
-        while o.queue.len() > MAX_QUEUED_BODIES {
-            if let Some(gone) = o.queue.pop_front() {
-                o.relays.given_up(&gone.origins);
-                o.note_lost(gone.seq);
-            }
-        }
-    }
-    shared.send_now.notify_one();
-}
-
-impl Outbox {
-    fn note_lost(&mut self, seq: u64) {
-        self.lost_total += 1;
-        self.lost.push_back(seq);
-        while self.lost.len() > MAX_LOST_SEQS {
-            self.lost.pop_front();
-        }
-    }
-
-    fn remove(&mut self, seq: u64) -> bool {
-        match self.queue.iter().position(|b| b.seq == seq) {
-            Some(i) => {
-                self.queue.remove(i);
-                true
-            }
-            None => false,
-        }
+        drop(o);
+        shared.send_now.notify_one();
     }
 }
 
@@ -222,120 +291,253 @@ enum Outcome {
     /// With ingest's receive time, when it stated one.
     Accepted(Option<f64>),
     Retry(Option<Duration>),
-    Refused,
-    Stop(u16),
+    Refused(u16),
+    GiveUp,
 }
 
 pub(crate) async fn sender(shared: Arc<Shared>, client: HttpClient) {
+    let unit = shared.cfg.retry_unit;
     let mut attempt = 0u32;
+    let mut probed_epoch = None;
+    probe(&shared, &client).await;
     loop {
-        let next = shared.outbox().queue.front().cloned();
-        let Some(body) = next else {
+        if std::mem::take(&mut shared.collector().probe_due) {
+            probe(&shared, &client).await;
+        }
+        let head = shared.outbox().queue.front().map(|e| (e.sealed.seq, e.sealed.epoch));
+        let Some((seq, epoch)) = head else {
             if shared.sealer_done.load(Ordering::SeqCst) {
                 break;
             }
-            shared.send_now.notified().await;
+            tokio::select! {
+                _ = shared.send_now.notified() => {}
+                _ = shared.kick.notified() => {}
+            }
             continue;
         };
-        match post(&shared, &client, &body).await {
-            Outcome::Accepted(recv_ms) => {
-                attempt = 0;
-                let mut o = shared.outbox();
-                if o.remove(body.seq) {
-                    o.sent += 1;
+        let current = shared.collector().epoch;
+        let sampled = shared.outbox().samples.contains_key(&epoch);
+        if !sampled && epoch == current && probed_epoch != Some(epoch) {
+            probed_epoch = Some(epoch);
+            probe(&shared, &client).await;
+        }
+        let Some(bytes) = freeze(&shared, seq) else { continue };
+        shared.outbox().in_flight = Some(seq);
+        let outcome = post(&shared, &client, seq, bytes).await;
+        let keep = shared.cfg.buffer_bytes > 0;
+        let wait = {
+            let mut o = shared.outbox();
+            o.in_flight = None;
+            match outcome {
+                Outcome::Accepted(recv_ms) => {
+                    attempt = 0;
+                    if let Some(e) = o.take(seq) {
+                        o.sent += 1;
+                        o.state = State::Running;
+                        let o = &mut *o;
+                        let queued = o.queue.iter().map(|e| e.sealed.origins.as_slice());
+                        o.relays.accepted(
+                            recv_ms,
+                            shared.mono_us() as f64 / 1000.0,
+                            &e.sealed.origins,
+                            queued,
+                        );
+                    }
+                    None
                 }
-                let o = &mut *o;
-                let queued = o.queue.iter().map(|b| b.origins.as_slice());
-                o.relays.accepted(recv_ms, shared.mono_ms(), &body.origins, queued);
-            }
-            Outcome::Refused => {
-                attempt = 0;
-                let mut o = shared.outbox();
-                if o.remove(body.seq) {
-                    o.note_lost(body.seq);
+                Outcome::GiveUp => {
+                    attempt = 0;
+                    if let Some(e) = o.take(seq) {
+                        o.give_up(e);
+                    }
+                    None
+                }
+                Outcome::Refused(status) => {
+                    o.state = State::Refused { status };
+                    if keep {
+                        Some(unit * REFUSED_RETRY_UNITS)
+                    } else {
+                        if let Some(e) = o.take(seq) {
+                            o.give_up(e);
+                        }
+                        None
+                    }
+                }
+                Outcome::Retry(after) => {
+                    if keep {
+                        let cap = unit * MAX_BACKOFF_UNITS;
+                        let wait = after.map_or_else(|| backoff(unit, attempt), |a| a.min(cap));
+                        attempt = attempt.saturating_add(1);
+                        Some(wait)
+                    } else {
+                        if let Some(e) = o.take(seq) {
+                            o.give_up(e);
+                        }
+                        None
+                    }
                 }
             }
-            Outcome::Stop(status) => {
-                shared.collector().stop();
-                let mut o = shared.outbox();
-                o.queue.clear();
-                o.state = Some(State::Stopped { status });
-                drop(o);
-                shared.shutdown.notify_one();
-                break;
-            }
-            Outcome::Retry(after) => {
-                let wait = after.unwrap_or_else(|| backoff(attempt));
-                attempt = attempt.saturating_add(1);
-                tokio::time::sleep(wait).await;
+        };
+        if let Some(wait) = wait {
+            tokio::select! {
+                _ = tokio::time::sleep(wait) => {}
+                _ = shared.kick.notified() => {}
             }
         }
     }
 }
 
-/// Exponential from one second to five minutes, each wait drawn from its
-/// upper half so that many monitors do not retry in step.
-fn backoff(attempt: u32) -> Duration {
-    let full = FIRST_BACKOFF.saturating_mul(1u32 << attempt.min(16)).min(MAX_BACKOFF);
-    let mut b = [0u8; 2];
-    let _ = ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b);
-    let frac = 0.5 + f64::from(u16::from_le_bytes(b)) / f64::from(u16::MAX) / 2.0;
-    full.mul_f64(frac)
+/// The head body's bytes: built at its first send, with the latest clock
+/// sample of its epoch, and the same on every send after.
+fn freeze(shared: &Shared, seq: u64) -> Option<Arc<Vec<u8>>> {
+    let (sealed, sample) = {
+        let o = shared.outbox();
+        let e = o.queue.front().filter(|e| e.sealed.seq == seq)?;
+        if let Some(b) = &e.frozen {
+            return Some(Arc::clone(b));
+        }
+        let sample = o.samples.get(&e.sealed.epoch).cloned();
+        (e.sealed.clone(), sample)
+    };
+    let clk = Clk {
+        base_us: sealed.base_us,
+        epoch: sealed.epoch,
+        res_us: shared.cfg.res_us,
+        sample,
+        app: sealed.app,
+    };
+    let bytes =
+        Arc::new(body(&sealed.preamble, &frames(&sealed.batch, &clk, &sealed.records), true));
+    let mut o = shared.outbox();
+    let o = &mut *o;
+    let e = o.queue.iter_mut().find(|e| e.sealed.seq == seq)?;
+    if e.frozen.is_none() {
+        o.bytes = o.bytes.saturating_sub(e.sealed.raw_len) + bytes.len();
+        e.frozen = Some(Arc::clone(&bytes));
+    }
+    e.frozen.clone()
 }
 
-async fn post(shared: &Shared, client: &HttpClient, body: &Sealed) -> Outcome {
-    let cfg = &shared.cfg;
-    let uri = format!("{}/v1/source?i={}", cfg.endpoint, cfg.instance_id);
-    let req = Request::post(uri)
-        .header(AUTHORIZATION, cfg.key.clone())
-        .header(CONTENT_TYPE, "application/octet-stream")
-        .header(IDEMPOTENCY_HEADER, &body.idempotency_key)
-        .header(USER_AGENT, concat!("moqtap-monitor/", env!("CARGO_PKG_VERSION")))
-        .body(Full::new(Bytes::from(body.body.clone())));
-    let Ok(req) = req else { return Outcome::Refused };
+/// Full jitter: uniform up to one unit doubled per attempt, capped at 60.
+fn backoff(unit: Duration, attempt: u32) -> Duration {
+    let full = unit.saturating_mul(1u32 << attempt.min(16)).min(unit * MAX_BACKOFF_UNITS);
+    let mut b = [0u8; 4];
+    let _ = ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b);
+    full.mul_f64(f64::from(u32::from_le_bytes(b)) / f64::from(u32::MAX))
+}
 
-    let t1 = wall_ms();
+/// A clock exchange with no body, for a sample before the next body is sent.
+async fn probe(shared: &Shared, client: &HttpClient) {
+    let cfg = &shared.cfg;
+    let req = Request::post(format!("{}/v1/clock", cfg.endpoint))
+        .header(AUTHORIZATION, cfg.key.clone())
+        .header(USER_AGENT, USER_AGENT_VALUE)
+        .body(Full::new(Bytes::new()));
+    let Ok(req) = req else { return };
+    let _ = exchange_with(shared, client, req).await;
+}
+
+/// Send `req`, take the reply's clock sample, and return the status,
+/// headers and body.
+async fn exchange_with(
+    shared: &Shared,
+    client: &HttpClient,
+    req: Request<Full<Bytes>>,
+) -> Option<(StatusCode, hyper::HeaderMap, Bytes)> {
+    let epoch = shared.collector().epoch;
+    let t1 = shared.mono_us();
     let resp = match tokio::time::timeout(REQUEST_TIMEOUT, client.request(req)).await {
         Ok(Ok(resp)) => resp,
-        _ => return Outcome::Retry(None),
+        _ => return None,
     };
-    let t4 = wall_ms();
-    let mono = shared.mono_ms();
+    let t4 = shared.mono_us();
+    let wall = wall_us();
     let status = resp.status();
-    let headers = resp.headers();
-    let num = |name: &str| -> Option<f64> {
-        headers.get(name)?.to_str().ok()?.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+    let headers = resp.headers().clone();
+    let int = |name: &str| -> Option<i64> { headers.get(name)?.to_str().ok()?.trim().parse().ok() };
+    let pop = headers.get(POP_HEADER).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let sample = match (int(RECV_HEADER), int(SEND_HEADER)) {
+        (Some(t2), Some(t3)) => exchange(t1, t2, t3, t4, pop),
+        _ => None,
     };
-    let recv_ms = num(RECV_HEADER);
-    if let (Some(t1), Some(t2), Some(t3), Some(t4)) = (t1, recv_ms, num(SEND_HEADER), t4) {
-        shared.outbox().clock.sample(t1, t2, t3, t4, mono);
+    let broke = {
+        let mut c = shared.collector();
+        let wake = c.observe(t4, wall);
+        wake == crate::collect::Wake::Seal || c.epoch != epoch
+    };
+    if broke {
+        shared.seal_now.notify_one();
+    } else if let Some(s) = sample {
+        let mut o = shared.outbox();
+        o.samples.insert(epoch, s);
+        while o.samples.len() > KEPT_EPOCHS {
+            o.samples.pop_first();
+        }
     }
+    let body = tokio::time::timeout(
+        REQUEST_TIMEOUT,
+        Limited::new(resp.into_body(), MAX_RESPONSE_BYTES).collect(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .map(|b| b.to_bytes())
+    .unwrap_or_default();
+    Some((status, headers, body))
+}
+
+async fn post(shared: &Shared, client: &HttpClient, seq: u64, bytes: Arc<Vec<u8>>) -> Outcome {
+    let cfg = &shared.cfg;
+    let key = crate::wire::idempotency_key(&cfg.source, &cfg.instance_id, seq);
+    let req = Request::post(format!("{}/v1/source?i={}", cfg.endpoint, cfg.instance_id))
+        .header(AUTHORIZATION, cfg.key.clone())
+        .header(CONTENT_TYPE, "application/octet-stream")
+        .header(IDEMPOTENCY_HEADER, key)
+        .header(USER_AGENT, USER_AGENT_VALUE)
+        .body(Full::new(Bytes::from((*bytes).clone())));
+    let Ok(req) = req else { return Outcome::GiveUp };
+    let Some((status, headers, reply)) = exchange_with(shared, client, req).await else {
+        return Outcome::Retry(None);
+    };
     let retry_after = headers
         .get(RETRY_AFTER)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(|s| Duration::from_secs(s).min(MAX_RETRY_AFTER));
-    let _ = tokio::time::timeout(
-        REQUEST_TIMEOUT,
-        Limited::new(resp.into_body(), MAX_RESPONSE_BYTES).collect(),
-    )
-    .await;
-
-    match classify(status, retry_after) {
-        Outcome::Accepted(_) => Outcome::Accepted(recv_ms),
-        other => other,
+        .map(|s| cfg.retry_unit.saturating_mul(u32::try_from(s).unwrap_or(u32::MAX)));
+    let outcome = classify(status, retry_after);
+    if let Outcome::Accepted(_) = outcome {
+        if let Some((ms, ttl)) = directive(&reply) {
+            shared.outbox().directive = Some((ms, Instant::now() + Duration::from_millis(ttl)));
+            shared.directive_changed.notify_one();
+        }
+        let recv_ms = headers
+            .get(RECV_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite());
+        return Outcome::Accepted(recv_ms);
     }
+    outcome
 }
 
-/// The ingest contract: every 4xx but 408, 425 and 429 is final for the
-/// body; 401, 403 and 404 are final for the key or the path, so nothing more
-/// is sent.
+/// `{seal_ms, ttl_ms}` from an accepted reply, both positive integers.
+fn directive(reply: &[u8]) -> Option<(u64, u64)> {
+    let v: serde_json::Value = serde_json::from_slice(reply).ok()?;
+    let ms = v.get("seal_ms")?.as_u64().filter(|&n| n > 0)?;
+    let ttl = v.get("ttl_ms")?.as_u64().filter(|&n| n > 0)?;
+    Some((ms, ttl))
+}
+
+/// 2xx accepts the body. 401, 403 and 404 refuse the key or the path: the
+/// body is kept and sent again later. 408, 425, 429 and every status that is
+/// not a 4xx are retried. Any other 4xx means ingest will never take the
+/// body.
 fn classify(status: StatusCode, retry_after: Option<Duration>) -> Outcome {
     match status.as_u16() {
         200..=299 => Outcome::Accepted(None),
-        401 | 403 | 404 => Outcome::Stop(status.as_u16()),
+        401 | 403 | 404 => Outcome::Refused(status.as_u16()),
         408 | 425 | 429 => Outcome::Retry(retry_after),
-        400..=499 => Outcome::Refused,
+        400..=499 => Outcome::GiveUp,
         _ => Outcome::Retry(retry_after),
     }
 }
@@ -349,17 +551,18 @@ mod tests {
         let kind = |s: u16| match classify(StatusCode::from_u16(s).unwrap(), None) {
             Outcome::Accepted(_) => "ok",
             Outcome::Retry(_) => "retry",
-            Outcome::Refused => "refused",
-            Outcome::Stop(_) => "stop",
+            Outcome::Refused(_) => "refused",
+            Outcome::GiveUp => "give up",
         };
         for (s, want) in [
             (202, "ok"),
-            (401, "stop"),
-            (403, "stop"),
-            (404, "stop"),
-            (400, "refused"),
-            (413, "refused"),
-            (405, "refused"),
+            (401, "refused"),
+            (403, "refused"),
+            (404, "refused"),
+            (400, "give up"),
+            (405, "give up"),
+            (413, "give up"),
+            (422, "give up"),
             (408, "retry"),
             (425, "retry"),
             (429, "retry"),
@@ -371,11 +574,24 @@ mod tests {
     }
 
     #[test]
-    fn backoff_doubles_to_a_cap() {
+    fn backoff_has_full_jitter_up_to_a_cap() {
+        let unit = Duration::from_secs(1);
         for a in 0..20 {
-            let full = FIRST_BACKOFF.saturating_mul(1 << a.min(16)).min(MAX_BACKOFF);
-            let d = backoff(a);
-            assert!(d >= full / 2 && d <= full, "{a}: {d:?}");
+            let full = unit.saturating_mul(1 << a.min(16)).min(unit * 60);
+            assert!(backoff(unit, a) <= full, "{a}");
         }
+        assert!(backoff(unit, 30) <= Duration::from_secs(60));
+    }
+
+    #[test]
+    fn a_directive_needs_both_fields() {
+        assert_eq!(
+            directive(br#"{"ok":true,"seal_ms":5000,"ttl_ms":60000}"#),
+            Some((5000, 60_000))
+        );
+        assert_eq!(directive(br#"{"ok":true}"#), None);
+        assert_eq!(directive(br#"{"seal_ms":5000}"#), None);
+        assert_eq!(directive(br#"{"seal_ms":0,"ttl_ms":1}"#), None);
+        assert_eq!(directive(b"not json"), None);
     }
 }

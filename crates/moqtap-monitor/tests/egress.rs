@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::{read_body, Mock};
-use moqtap_monitor::{Error, Monitor, Proxy};
+use moqtap_monitor::{Delivery, Error, Monitor, Proxy, Sent};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -65,7 +65,19 @@ fn builder(mock: &Mock, proxy: Proxy) -> moqtap_monitor::MonitorBuilder {
     Monitor::builder(SOURCE, KEY)
         .endpoint(mock.endpoint())
         .proxy(proxy)
-        .seal_interval(Duration::from_millis(150))
+        .test_timing(Duration::from_millis(150), Duration::from_millis(20))
+}
+
+fn sent() -> Sent {
+    Sent {
+        group: 0,
+        delivery: Delivery::Subgroup(0),
+        object: 0,
+        size: 100,
+        starts_group: true,
+        opens_subgroup: true,
+        ends_group: false,
+    }
 }
 
 #[tokio::test]
@@ -74,13 +86,14 @@ async fn uploads_go_through_the_tunnel_and_the_key_stays_inside_it() {
     let proxy = ConnectProxy::start("200 Connection established", "alice:s%3Acret@").await;
     let m = builder(&mock, Proxy::Url(proxy.url.clone())).start().expect("start");
     let relay = m.connection("https://relay.example.net/moq").expect("conn");
-    relay.object_sent(&["live"], "video", 0, 0, 100, None).expect("report");
+    relay.object_sent(&["live"], "video", sent(), None).expect("report");
     relay.close(Some(0)).expect("close");
     let stats = m.shutdown(Duration::from_secs(5)).await;
     assert_eq!(stats.bodies_queued, 0);
 
-    let captured = mock.captured();
+    let captured = mock.uploads();
     assert!(!captured.is_empty());
+    assert!(!mock.clocks().is_empty(), "the clock probe goes through the tunnel too");
     for c in &captured {
         assert_eq!(c.header("authorization"), Some(format!("Bearer {KEY}").as_str()));
         assert!(c.uri.starts_with("/v1/source?i="), "{}", c.uri);
@@ -103,7 +116,7 @@ async fn a_refused_tunnel_keeps_the_body_queued() {
     let proxy = ConnectProxy::start("407 Proxy Authentication Required", "").await;
     let m = builder(&mock, Proxy::Url(proxy.url.clone())).start().expect("start");
     let relay = m.connection("https://relay.example.net/moq").expect("conn");
-    relay.object_sent(&["live"], "video", 0, 0, 100, None).expect("report");
+    relay.object_sent(&["live"], "video", sent(), None).expect("report");
     // A second CONNECT means the 407 came back as a retry.
     let end = tokio::time::Instant::now() + Duration::from_secs(5);
     while proxy.heads().len() < 2 && tokio::time::Instant::now() < end {
@@ -123,7 +136,7 @@ async fn direct_ignores_the_proxy_and_bad_proxies_are_refused_at_start() {
     let mock = Mock::start().await;
     let m = builder(&mock, Proxy::Direct).start().expect("start");
     let relay = m.connection("https://relay.example.net/moq").expect("conn");
-    relay.object_sent(&["live"], "video", 0, 0, 100, None).expect("report");
+    relay.object_sent(&["live"], "video", sent(), None).expect("report");
     m.shutdown(Duration::from_secs(5)).await;
     assert!(!mock.captured().is_empty());
 
