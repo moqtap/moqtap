@@ -43,6 +43,7 @@
 
 use super::types::ObjectStatus;
 use crate::error::CodecError;
+use crate::object_properties::{ObjectProperty, PropertyValue};
 use crate::varint::VarInt;
 use bytes::{Buf, BufMut};
 
@@ -103,21 +104,9 @@ fn decoded_status(code: u64) -> Result<ObjectStatus, CodecError> {
 /// code. `None` means the Object carried a payload, which is Normal by
 /// definition and always permitted.
 ///
-/// # Why the readers do not apply this themselves
-///
-/// A deliberate contrast with the payload rule beside it. A status next to a
-/// payload has no encoding — the status field and the payload occupy the same
-/// position on the wire — so a writer refuses that pair as unrepresentable.
-/// Extensions next to a status encode perfectly well: the block sits between
-/// the extensions length and the status field and reads back byte for byte. The
-/// frame is well formed and merely non-conforming, which is a judgement about
-/// what a peer may send, not about what the bytes mean.
-///
-/// A decoder that refused it could not report the violation, and a writer that
-/// refused it could not reproduce a capture containing one — including the
-/// committed `subgroup-extensions-status-object` vector, which is exactly this
-/// frame. The rule addresses an endpoint *receiving* such an Object, so the
-/// endpoint is where it is enforced. This predicate is what it asks.
+/// [`SubgroupObjectReader::read_object`] and
+/// [`SubgroupObjectReader::write_object`] refuse an Object this answers `false`
+/// for; [`SubgroupObjectReader::read_object_meta`] frames it.
 fn extensions_permitted_at(status: Option<u64>, extensions_len: u64) -> bool {
     match status {
         None => true,
@@ -549,11 +538,11 @@ impl SubgroupObject {
     ///
     /// `false` for exactly one shape: a non-empty extension block on an Object
     /// whose status is not [`ObjectStatus::Normal`]. See
-    /// `extensions_permitted_at` for the rule and for why neither
-    /// [`SubgroupObjectReader::read_object`] nor
-    /// [`SubgroupObjectReader::write_object`] applies it — this is the codec's
-    /// way of reporting the violation to the endpoint that must act on it,
-    /// rather than refusing bytes that are well formed.
+    /// `extensions_permitted_at` for the rule.
+    ///
+    /// [`SubgroupObjectReader::read_object`] and
+    /// [`SubgroupObjectReader::write_object`] refuse an object this answers
+    /// `false` for; [`SubgroupObjectReader::read_object_meta`] frames it.
     pub fn extensions_permitted(&self) -> bool {
         extensions_permitted_at(
             self.object_status.map(|s| s.as_u64()),
@@ -658,6 +647,75 @@ impl SubgroupObjectMeta {
     }
 }
 
+/// Prior Group ID Gap, Extension Header Type 0x3C (Section 11.3).
+pub const PRIOR_GROUP_ID_GAP: u64 = 0x3C;
+/// Prior Object ID Gap, Extension Header Type 0x3E (Section 11.4).
+pub const PRIOR_OBJECT_ID_GAP: u64 = 0x3E;
+
+/// The Prior Group ID Gap and Prior Object ID Gap one Object carries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PriorGaps {
+    /// Prior Group ID Gap, if present.
+    pub group: Option<u64>,
+    /// Prior Object ID Gap, if present.
+    pub object: Option<u64>,
+}
+
+impl PriorGaps {
+    /// Read the two gaps from an Object's parsed extension headers, refusing
+    /// the conditions one Object shows on its own.
+    ///
+    /// Section 11.3 makes the Track malformed when "An Object contains more
+    /// than one instance of Prior Group ID Gap" and when "An Object has a Prior
+    /// Group ID Gap larger than the Group ID". Section 11.4 says the same two
+    /// for Prior Object ID Gap against the Object ID. Each is
+    /// [`CodecError::MalformedTrack`].
+    pub fn from_properties(
+        properties: &[ObjectProperty<'_>],
+        group_id: u64,
+        object_id: u64,
+    ) -> Result<Self, CodecError> {
+        let mut gaps = Self::default();
+        collect_gaps(properties, &mut gaps)?;
+        if let Some(gap) = gaps.group.filter(|&gap| gap > group_id) {
+            return Err(CodecError::MalformedTrack {
+                detail: format!("Prior Group ID Gap {gap} is larger than Group ID {group_id}"),
+            });
+        }
+        if let Some(gap) = gaps.object.filter(|&gap| gap > object_id) {
+            return Err(CodecError::MalformedTrack {
+                detail: format!("Prior Object ID Gap {gap} is larger than Object ID {object_id}"),
+            });
+        }
+        Ok(gaps)
+    }
+}
+
+fn collect_gaps(properties: &[ObjectProperty<'_>], gaps: &mut PriorGaps) -> Result<(), CodecError> {
+    for property in properties {
+        let slot = match (&property.value, property.property_type) {
+            (PropertyValue::Immutable { properties, .. }, _) => {
+                collect_gaps(properties, gaps)?;
+                continue;
+            }
+            (PropertyValue::Varint(value), PRIOR_GROUP_ID_GAP) => {
+                (&mut gaps.group, *value, "Group")
+            }
+            (PropertyValue::Varint(value), PRIOR_OBJECT_ID_GAP) => {
+                (&mut gaps.object, *value, "Object")
+            }
+            _ => continue,
+        };
+        let (field, value, which) = slot;
+        if field.replace(value).is_some() {
+            return Err(CodecError::MalformedTrack {
+                detail: format!("an Object contains more than one Prior {which} ID Gap"),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Stateful reader/writer for draft-16 subgroup objects. Mirrors the
 /// draft-15 semantics (delta-encoded object IDs and header-typed
 /// extension presence).
@@ -665,15 +723,39 @@ impl SubgroupObjectMeta {
 pub struct SubgroupObjectReader {
     extensions_present: bool,
     prev_object_id: Option<u64>,
+    group_id: u64,
+    group_gap: Option<u64>,
 }
 
 impl SubgroupObjectReader {
     pub fn new(header: &SubgroupHeader) -> Self {
-        Self { extensions_present: header.has_extensions(), prev_object_id: None }
+        Self {
+            extensions_present: header.has_extensions(),
+            prev_object_id: None,
+            group_id: header.group_id.into_inner(),
+            group_gap: None,
+        }
     }
 
+    /// Decode the next object whole, payload included.
+    ///
+    /// Refuses, with [`CodecError::InvalidField`], extension headers on an
+    /// object whose status is not Normal: Section 10.2.1.2, "If an endpoint
+    /// receives extension headers on Objects with status that is not Normal, it
+    /// MUST close the session with a PROTOCOL_VIOLATION."
+    /// [`Self::read_object_meta`] frames such an object without judging it.
+    ///
+    /// Refuses, with [`CodecError::MalformedTrack`], the Prior Group ID Gap
+    /// and Prior Object ID Gap conditions of Section 11.3 and Section 11.4
+    /// this stream shows: those [`PriorGaps::from_properties`] refuses, "A
+    /// Group contains more than one Object with different values for Prior
+    /// Group ID Gap", and "An endpoint receives an Object with a Prior Object
+    /// ID Gap covering an Object it previously received" for an Object earlier
+    /// on this stream. [`Self::read_object_meta`] does not read extension
+    /// headers and applies none of them.
     pub fn read_object(&mut self, buf: &mut impl Buf) -> Result<SubgroupObject, CodecError> {
         let delta = VarInt::decode(buf)?.into_inner();
+        let prior_object_id = self.prev_object_id;
         // The first object's field is its absolute Object ID; every later
         // object encodes the gap to its predecessor, biased by one because
         // two objects on a subgroup stream cannot share an ID.
@@ -704,17 +786,56 @@ impl SubgroupObjectReader {
             let payload = crate::types::read_bytes(buf, payload_length_val)?;
             (None, payload)
         };
-        crate::object_properties::parse_object_properties(
+        let properties = crate::object_properties::parse_object_properties(
             crate::version::DraftVersion::Draft16,
             &extension_headers,
         )?;
-        Ok(SubgroupObject {
+        let gaps = PriorGaps::from_properties(&properties, self.group_id, object_id_val)?;
+        self.check_stream_gaps(gaps, prior_object_id, object_id_val)?;
+        let object = SubgroupObject {
             object_id,
             extension_headers,
             payload_length: payload_length_vi,
             object_status,
             payload,
-        })
+        };
+        if !object.extensions_permitted() {
+            return Err(CodecError::InvalidField);
+        }
+        Ok(object)
+    }
+
+    fn check_stream_gaps(
+        &mut self,
+        gaps: PriorGaps,
+        prior_object_id: Option<u64>,
+        object_id: u64,
+    ) -> Result<(), CodecError> {
+        if let Some(gap) = gaps.group {
+            match self.group_gap {
+                Some(seen) if seen != gap => {
+                    return Err(CodecError::MalformedTrack {
+                        detail: format!(
+                            "two Objects in Group {} carry different Prior Group ID Gap values",
+                            self.group_id
+                        ),
+                    });
+                }
+                _ => self.group_gap = Some(gap),
+            }
+        }
+        // Object IDs rise along a subgroup stream, so the latest earlier
+        // Object is the only one a gap below this Object can reach.
+        if let (Some(gap), Some(prior)) = (gaps.object, prior_object_id) {
+            if gap > 0 && prior >= object_id - gap {
+                return Err(CodecError::MalformedTrack {
+                    detail: format!(
+                        "Prior Object ID Gap {gap} of Object {object_id} covers Object {prior}"
+                    ),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Decode the next object's framing without copying its payload.
@@ -801,20 +922,11 @@ impl SubgroupObjectReader {
             return Err(CodecError::InvalidField);
         }
 
-        // Extensions on a non-Normal status are NOT refused here, though
-        // Section 10.2.1.2 forbids them. The two rules differ in kind. A status
-        // beside a payload has no encoding at all — the status field and the
-        // payload occupy the same position — so writing one is impossible
-        // rather than merely wrong. Extensions beside a status encode perfectly
-        // well; the frame is well formed and non-conforming, which is a
-        // judgement about what a peer may send, not about what these bytes
-        // mean.
-        //
-        // Refusing it here would also make this writer unable to reproduce a
-        // frame the decoder must be able to read, including the committed
-        // `subgroup-extensions-status-object` vector.
-        // [`SubgroupObject::extensions_permitted`] reports the violation
-        // instead, and the endpoint acts on it.
+        // Extension headers on a non-Normal status are a frame `read_object`
+        // refuses (Section 10.2.1.2), so they are not written either.
+        if !object.extensions_permitted() {
+            return Err(CodecError::InvalidField);
+        }
 
         let oid = object.object_id.into_inner();
         let delta = match self.prev_object_id {
@@ -1796,7 +1908,7 @@ mod tests {
         // subgroup-with-extensions
         "11010080000004deadbeef",
         // subgroup-nonempty-extensions
-        "1101008000023c0104deadbeef",
+        "1101058000023c0104deadbeef",
         // subgroup-status-end-of-group
         "100105800004deadbeef000003",
         // subgroup-status-end-of-track
@@ -1804,9 +1916,7 @@ mod tests {
         // subgroup-extensions-two-objects-empty
         "11010080000004deadbeef000002cafe",
         // subgroup-extensions-two-objects-nonempty
-        "1101008000023c0204deadbeef00023c0302cafe",
-        // subgroup-extensions-status-object
-        "1101008000023c010003",
+        "1101058000023c0204deadbeef00023c0202cafe",
         // subgroup-end-of-group
         "180105800004deadbeef",
         // subgroup-id-first-object
@@ -1921,25 +2031,58 @@ mod tests {
         // Vector `subgroup-extensions-two-objects-nonempty`: each
         // object carries a two-byte block, so the blob is those two bytes
         // with the `02` length prefix stripped.
-        let bytes = hex("1101008000023c0204deadbeef00023c0302cafe");
+        let bytes = hex("1101058000023c0204deadbeef00023c0202cafe");
         let (_, objects) = decode_all(&bytes);
         assert_eq!(objects.len(), 2);
         assert_eq!(objects[0].object_id.into_inner(), 0);
         assert_eq!(objects[1].object_id.into_inner(), 1);
         assert_eq!(objects[0].extension_headers, hex("3c02"));
-        assert_eq!(objects[1].extension_headers, hex("3c03"));
+        assert_eq!(objects[1].extension_headers, hex("3c02"));
         assert_eq!(objects[0].payload, hex("deadbeef"));
         assert_eq!(objects[1].payload, hex("cafe"));
     }
 
+    /// Read every object on a subgroup stream, returning the first error.
+    fn first_error(stream: &str) -> Option<CodecError> {
+        let bytes = hex(stream);
+        let mut cursor = &bytes[..];
+        let header = SubgroupHeader::decode(&mut cursor).unwrap();
+        let mut reader = SubgroupObjectReader::new(&header);
+        while cursor.has_remaining() {
+            if let Err(e) = reader.read_object(&mut cursor) {
+                return Some(e);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn prior_gaps_are_checked_per_object_and_along_the_stream() {
+        let malformed =
+            |stream| matches!(first_error(stream), Some(CodecError::MalformedTrack { .. }));
+        // Section 11.3: "An Object contains more than one instance of Prior
+        // Group ID Gap".
+        assert!(malformed("1101058000043c01000104deadbeef"));
+        // Section 11.4: Object 2's gap of 2 covers Object 0, received earlier.
+        assert!(malformed("11010580000004deadbeef01023e0202cafe"));
+        // Object 3's gap of 2 covers Objects 1 and 2, neither received.
+        assert_eq!(first_error("11010580000004deadbeef02023e0202cafe"), None);
+        // Equal Prior Group ID Gap values in one Group are fine.
+        assert_eq!(first_error("1101058000023c0204deadbeef00023c0202cafe"), None);
+    }
+
     #[test]
     fn status_object_carries_its_extensions_block() {
-        let (_, objects) = decode_all(&hex("1101008000023c010003"));
-        assert_eq!(objects.len(), 1);
-        assert_eq!(objects[0].extension_headers, hex("3c01"));
-        assert_eq!(objects[0].payload_length.into_inner(), 0);
-        assert_eq!(objects[0].object_status.map(ObjectStatus::as_u64), Some(3));
-        assert!(objects[0].payload.is_empty());
+        // Section 10.2.1.2 forbids extension headers on a non-Normal status, so
+        // the whole-object reader refuses the frame and the meta reader frames it.
+        let bytes = hex("1101058000023c010003");
+        let mut cursor = &bytes[..];
+        let header = SubgroupHeader::decode(&mut cursor).unwrap();
+        let mut reader = SubgroupObjectReader::new(&header);
+        assert!(matches!(reader.read_object(&mut &cursor[..]), Err(CodecError::InvalidField)));
+        let meta = SubgroupObjectReader::new(&header).read_object_meta(&mut &cursor[..]).unwrap();
+        assert_eq!(meta.extension_headers_len, 2);
+        assert_eq!(meta.status, Some(3));
     }
 
     // ── Object status ───────────────────────────────────────
@@ -2180,7 +2323,7 @@ mod tests {
 
     #[test]
     fn short_buffers_report_unexpected_end() {
-        let bytes = hex("1101008000023c0204deadbeef00023c0302cafe");
+        let bytes = hex("1101058000023c0204deadbeef00023c0202cafe");
         let mut cursor = &bytes[..];
         let header = SubgroupHeader::decode(&mut cursor).unwrap();
         let objects_start = bytes.len() - cursor.len();

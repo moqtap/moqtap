@@ -861,6 +861,14 @@ pub enum CodecError {
     /// 12.1) if any of the following conditions are detected", and Section
     /// 10.9 the same for Prior Object ID Gap. Only the conditions one Object,
     /// or one subgroup stream, shows are detected here.
+    ///
+    /// Drafts 14-22 state the same conditions, in draft-14 Section 11.1,
+    /// draft-14 Section 11.3, draft-15 Section 11.1, draft-15 Section 11.2,
+    /// draft-16 Section 11.3, draft-16 Section 11.4, draft-17 Section 11.7,
+    /// draft-17 Section 11.8, draft-18 Section 12.8, draft-18 Section 12.9,
+    /// draft-19 Section 12.8, draft-19 Section 12.9, draft-20 Section 12.8,
+    /// draft-20 Section 12.9, draft-21 Section 10.8, draft-21 Section 10.9,
+    /// draft-22 Section 10.8 and draft-22 Section 10.9.
     #[error("malformed track: {detail}")]
     MalformedTrack {
         /// Which condition was detected.

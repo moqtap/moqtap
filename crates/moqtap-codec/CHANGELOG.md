@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking.** `DraftVersion` gains `Draft23` (feature `draft23`, in `all-drafts`; ALPN `moqt-23`), and `DraftVersion::ALL` is a `[DraftVersion; 17]`.
 - **Breaking.** `AnyFetchEndOfRange` gains `Gone`, `EndOfGroup` and `EndOfTrack`, which only draft-23 produces.
-- **Breaking.** `CodecError` gains `ControlMessageExceedsLimit`, `MissingErrorDetail`, `MalformedErrorDetail`, `TokenAliasInSetup`, `EmptyTrackName`, `MalformedAuthToken`, `TrackPropertiesNotPermitted`, `DeltaDecodingOverflow`, `MalformedObject`, `MalformedTrack` and `UnknownObjectStatus`. Only draft-23 produces them.
+- **Breaking.** `CodecError` gains `ControlMessageExceedsLimit`, `MissingErrorDetail`, `MalformedErrorDetail`, `TokenAliasInSetup`, `EmptyTrackName`, `MalformedAuthToken`, `TrackPropertiesNotPermitted`, `DeltaDecodingOverflow`, `MalformedObject`, `MalformedTrack` and `UnknownObjectStatus`. Only draft-23 produces them, except `MalformedTrack`, which drafts 14-22 produce too.
 
 ### Added
 
@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Draft-23 fetch streams: the Object ID delta is +2 within a Group, End of Range Object IDs are delta-encoded, and there are three new indicators: End of Group (0x80), End of Track (0x81) and End of Gone Range (0x40C).
 - Draft-23 subgroup and datagram readers refuse an unassigned Object Status as `UnknownObjectStatus`. The readers that return a whole object refuse properties on a non-Normal status. They also refuse the Prior Group ID Gap and Prior Object ID Gap conditions that one Object, or one subgroup stream, shows.
 - Draft-23 SUBSCRIBE, PUBLISH, TRACK_STATUS and FETCH check for an empty Track Name after the rest of the message, so a DELTA_ENCODING_OVERFLOW or FIELD_LENGTH_EXCEEDED later in it is the error returned.
+
+### Fixed
+
+- Drafts 15-22: `SubgroupObjectReader::read_object` and `write_object` accepted properties (extension headers on drafts 15-16) on a non-Normal status, which each draft closes the session over. Both now refuse it with `InvalidField`, as draft-23 does.
+- Drafts 14-22: `SubgroupObjectReader::read_object`, and `DatagramHeader::decode_object` on drafts 17-22, refuse with `MalformedTrack` the Prior Group ID Gap and Prior Object ID Gap conditions draft-23's readers refuse, through a new `PriorGaps` in each module.
 
 ## [0.9.0] - 2026-10-29
 

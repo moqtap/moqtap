@@ -482,15 +482,16 @@ mod extensions_beside_a_non_normal_status {
         DatagramHeader, SubgroupHeader, SubgroupObject, SubgroupObjectReader,
     };
     use moqtap_codec::draft15::types::ObjectStatus;
+    use moqtap_codec::error::CodecError;
 
     /// The corpus frame this rule is about, shipped as
     /// `subgroup-extensions-status-object`.
     ///
     /// Subgroup type 0x11 — extensions present, Subgroup ID mode zero, priority
-    /// present — track alias 1, group 0, priority 0x80. Then one object: delta
+    /// present — track alias 1, group 5, priority 0x80. Then one object: delta
     /// 0, a two-byte extension block `3c 01` holding Prior Group ID Gap, a
     /// payload length of 0, and status 0x3, End of Group.
-    const CAPTURED_VIOLATION: &str = "1101008000023c010003";
+    const CAPTURED_VIOLATION: &str = "1101058000023c010003";
 
     fn extensions_header() -> SubgroupHeader {
         SubgroupHeader {
@@ -502,7 +503,8 @@ mod extensions_beside_a_non_normal_status {
         }
     }
 
-    /// The frame decodes, and the object reports itself as a violation.
+    /// The whole-object reader refuses the frame, and the writer will not
+    /// produce it.
     ///
     /// Draft-15 Section 10.2.1.2: "Any Object with status Normal can have
     /// extension headers. If an endpoint receives extension headers on Objects
@@ -510,106 +512,26 @@ mod extensions_beside_a_non_normal_status {
     /// PROTOCOL_VIOLATION." The status named is any status but Normal, which is
     /// broader than the rule drafts 11 through 14 state — there it is Object
     /// Does Not Exist alone, and extensions beside End of Group stay legal.
-    /// That difference is deliberate: those drafts refuse the narrow form on
-    /// decode, and drafts 15 through 20 report the broad one instead.
-    ///
-    /// The frame is well formed: every length is honest and every field parses.
-    /// What makes it a violation is what it says, not how it is framed, so the
-    /// decoder reports it and the endpoint acts on it. A decoder that refused it
-    /// could not report the violation at all.
-    ///
-    /// Observed by making `SubgroupObjectReader::read_object` call
-    /// `check_extensions_against_status_on_encode`, which fails this with:
-    ///
-    /// ```text
-    /// ---- extensions_beside_a_non_normal_status::a_captured_violation_decodes_and_reports_itself stdout ----
-    /// object decode: InvalidField
-    /// ```
-    ///
-    /// and by inverting the comparison in
-    /// `SubgroupObject::extensions_permitted` to `!=`, so the violation reports
-    /// itself as permitted, which fails it with:
-    ///
-    /// ```text
-    /// ---- extensions_beside_a_non_normal_status::a_captured_violation_decodes_and_reports_itself stdout ----
-    /// the object did not report extensions beside End of Group as forbidden
-    /// ```
-    ///
-    /// Dropping the status test the other way — leaving
-    /// `self.extension_headers.is_empty()` alone, so every object carrying
-    /// extensions reports forbidden — leaves this test passing and is caught by
-    /// `the_rule_is_about_the_pair_and_not_about_either_half` instead, with:
-    ///
-    /// ```text
-    /// ---- extensions_beside_a_non_normal_status::the_rule_is_about_the_pair_and_not_about_either_half stdout ----
-    /// extensions at Normal are permitted
-    /// ```
     #[test]
-    fn a_captured_violation_decodes_and_reports_itself() {
-        let bytes = hex(CAPTURED_VIOLATION);
-        let mut cursor = &bytes[..];
-
-        let header = SubgroupHeader::decode(&mut cursor).expect("header decode");
-        let mut reader = SubgroupObjectReader::new(&header);
-        let object = reader.read_object(&mut cursor).expect("object decode");
-
-        assert_eq!(
-            object.extension_headers,
-            hex("3c01"),
-            "the decoder dropped the extension bytes the capture carried"
-        );
-        assert_eq!(
-            object.object_status,
-            Some(ObjectStatus::EndOfGroup),
-            "the decoder lost the status that makes this frame a violation"
-        );
-        assert!(
-            !object.extensions_permitted(),
-            "the object did not report extensions beside End of Group as forbidden"
-        );
-        assert_eq!(cursor.remaining(), 0, "the frame did not decode whole");
-    }
-
-    /// And it re-encodes to the bytes it came from.
-    ///
-    /// This is the half that keeps the codec able to reproduce a capture, and
-    /// the half that fails if the subgroup writer is ever taught to refuse the
-    /// object. `write_object` is the only writer a subgroup object has — there
-    /// is no unchecked twin to fall back on — so a refusal there would leave a
-    /// captured violation impossible to re-emit. The corpus ships this exact
-    /// frame, and `vectors_re_encode_byte_identically` walks it.
-    ///
-    /// Observed by adding the refusal to `SubgroupObjectReader::write_object`,
-    /// which fails this with:
-    ///
-    /// ```text
-    /// ---- extensions_beside_a_non_normal_status::a_captured_violation_re_encodes_byte_for_byte stdout ----
-    /// the writer must be able to reproduce a frame the reader accepts: InvalidField
-    /// ```
-    ///
-    /// The same change takes the corpus walk down with it, which is the conflict
-    /// this shape exists to avoid:
-    ///
-    /// ```text
-    /// ---- draft15::data_stream::tests::vectors_re_encode_byte_identically stdout ----
-    /// write failed: InvalidField
-    /// ```
-    #[test]
-    fn a_captured_violation_re_encodes_byte_for_byte() {
+    fn a_captured_violation_is_refused_and_not_written() {
         let bytes = hex(CAPTURED_VIOLATION);
         let mut cursor = &bytes[..];
         let header = SubgroupHeader::decode(&mut cursor).expect("header decode");
         let mut reader = SubgroupObjectReader::new(&header);
-        let object = reader.read_object(&mut cursor).expect("object decode");
+        assert!(matches!(reader.read_object(&mut cursor), Err(CodecError::InvalidField)));
 
+        let object = SubgroupObject {
+            object_id: vi(0),
+            extension_headers: hex("3c01"),
+            payload_length: vi(0),
+            object_status: Some(ObjectStatus::EndOfGroup),
+            payload: Vec::new(),
+        };
+        assert!(!object.extensions_permitted());
         let mut out = Vec::new();
-        header.encode(&mut out);
         let mut writer = SubgroupObjectReader::new(&header);
-        writer.write_object(&object, &mut out).unwrap_or_else(|e| {
-            panic!("the writer must be able to reproduce a frame the reader accepts: {e:?}")
-        });
-
-        assert_eq!(out, bytes, "the object did not survive a decode/encode round trip");
+        assert_eq!(writer.write_object(&object, &mut out), Err(CodecError::InvalidField));
+        assert!(out.is_empty());
     }
 
     /// The framing-only reader answers the same question without the block.
@@ -765,8 +687,7 @@ mod extensions_beside_a_non_normal_status {
             );
         }
 
-        // And the permitted shape still writes, because the writer does not
-        // judge either way.
+        // And the permitted shape still writes.
         let header = extensions_header();
         let mut buf = Vec::new();
         let mut writer = SubgroupObjectReader::new(&header);

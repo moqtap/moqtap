@@ -419,8 +419,9 @@ fn a_non_existent_object_cannot_carry_extensions() {
         "the framing-only reader must refuse it too, got {meta:?}"
     );
 
-    // Subgroup stream, on an extensions-present type.
-    let header = subgroup_header(0x11);
+    // Subgroup stream, on an extensions-present type, in Group 5 so the Prior
+    // Group ID Gap of 1 is within the Group ID (draft-14 Section 11.1).
+    let header = SubgroupHeader { group_id: vi(5), ..subgroup_header(0x11) };
     let mut stream = Vec::new();
     // Written by hand: the writer now refuses to build this.
     stream.extend_from_slice(&hex("00 02 3c 01 00 01"));

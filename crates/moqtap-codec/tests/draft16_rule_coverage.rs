@@ -695,7 +695,7 @@ fn a_datagram_type_wider_than_one_byte_is_refused() {
 /// mode 0b00, priority present), then one object.
 fn subgroup_stream(extensions: &str, payload_length_and_tail: &str) -> Vec<u8> {
     let ext_len = extensions.len() / 2;
-    hex(&format!("1101008000{ext_len:02x}{extensions}{payload_length_and_tail}"))
+    hex(&format!("1101058000{ext_len:02x}{extensions}{payload_length_and_tail}"))
 }
 
 fn read_first_object(bytes: &[u8]) -> Result<SubgroupObject, CodecError> {
@@ -710,8 +710,7 @@ fn read_first_object_meta(bytes: &[u8]) -> Result<SubgroupObjectMeta, CodecError
     SubgroupObjectReader::new(&header).read_object_meta(&mut cursor)
 }
 
-/// An Object whose status is not Normal may not carry extensions — and the
-/// codec reports that rather than refusing to parse it.
+/// An Object whose status is not Normal may not carry extensions.
 ///
 /// Section 10.2.1.2: "Any Object with status Normal can have extension headers
 /// (Section 2.5). If an endpoint receives extension headers on Objects with
@@ -722,117 +721,45 @@ fn read_first_object_meta(bytes: &[u8]) -> Result<SubgroupObjectMeta, CodecError
 /// Track, so the rule reaches two codes rather than the single Object Does Not
 /// Exist that earlier drafts name — that status does not exist here at all.
 ///
-/// The frame is well formed: the extension block sits between its length and
-/// the status field and reads back byte for byte. So the rule is about what a
-/// peer may send, not about what the bytes mean. A decoder that refused it
-/// could not report the violation, and a writer that refused it could not
-/// reproduce a capture containing one — including the committed
-/// `transport/draft16/codec/data-streams/subgroup.json` vector
-/// `subgroup-extensions-status-object`, hex `1101008000023c010003`, which is
-/// exactly this frame. Drafts 17, 18 and 19 take the same position.
-///
-/// So both directions round-trip the bytes and `extensions_permitted` answers.
-/// This test pins that split: the predicate must be able to say "no" while the
-/// codec still carries the frame.
-///
-/// Making the predicate unconditional fails with:
-///
-/// ```text
-/// an End of Group object with extensions is a violation to report
-/// ```
-///
-/// and making the reader refuse the frame fails with:
-///
-/// ```text
-/// the frame is well formed and must parse: InvalidField
-/// ```
+/// The whole-object reader refuses the frame and the writer will not produce
+/// it; the meta reader frames it and `extensions_permitted` answers.
 #[test]
-fn extensions_on_a_non_normal_subgroup_object_parse_and_are_reported() {
-    for (status, name) in [(0x03u8, "End of Group"), (0x04, "End of Track")] {
-        let stream = subgroup_stream("3c01", &format!("00{status:02x}"));
-
-        let object = read_first_object(&stream)
-            .unwrap_or_else(|e| panic!("the frame is well formed and must parse: {e:?}"));
-        assert_eq!(object.extension_headers, hex("3c01"), "and the block survives the trip");
-        assert!(
-            !object.extensions_permitted(),
-            "an {name} object with extensions is a violation to report",
-        );
-
-        let meta = read_first_object_meta(&stream)
-            .unwrap_or_else(|e| panic!("the meta reader parses it too: {e:?}"));
-        assert!(
-            !meta.extensions_permitted(),
-            "and the meta reader reports it the same way on {name}",
-        );
-    }
-}
-
-/// The whole vector re-encodes byte for byte, which is the property a writer
-/// that refused the frame would destroy.
-///
-/// Refusing it in `write_object` fails with:
-///
-/// ```text
-/// a capture containing a violation must be reproducible: InvalidField
-/// ```
-#[test]
-fn the_extensions_status_object_vector_round_trips_byte_for_byte() {
-    let stream = hex("1101008000023c010003");
-    let mut cursor: &[u8] = &stream;
-    let header = SubgroupHeader::decode(&mut cursor).expect("type 0x11 is valid");
-    let object = SubgroupObjectReader::new(&header)
-        .read_object(&mut cursor)
-        .expect("the frame is well formed");
-
-    let mut buf = Vec::new();
-    header.encode(&mut buf);
-    SubgroupObjectReader::new(&header)
-        .write_object(&object, &mut buf)
-        .unwrap_or_else(|e| panic!("a capture containing a violation must be reproducible: {e:?}"));
-    assert_eq!(hex::encode(&buf), "1101008000023c010003");
-}
-
-/// The subgroup writer carries the same frame, and the predicate still reports
-/// it.
-///
-/// Deliberately not refused here, unlike the payload rule beside it: a status
-/// next to a payload has no encoding at all, while extensions next to a status
-/// encode fine. A writer that refused this could not reproduce a capture.
-///
-/// Making the writer refuse it fails with:
-///
-/// ```text
-/// an End of Group object with extensions is writable: InvalidField
-/// ```
-#[test]
-fn the_subgroup_writer_carries_a_non_normal_object_with_extensions() {
+fn extensions_on_a_non_normal_subgroup_object_are_refused() {
     let header = SubgroupHeader {
         header_type: 0x11,
         track_alias: varint(1),
-        group_id: varint(0),
+        group_id: varint(5),
         subgroup_id: varint(0),
         publisher_priority: Some(0x80),
     };
-    for (status, name) in
-        [(ObjectStatus::EndOfGroup, "End of Group"), (ObjectStatus::EndOfTrack, "End of Track")]
-    {
+    for (status, object_status, name) in [
+        (0x03u8, ObjectStatus::EndOfGroup, "End of Group"),
+        (0x04, ObjectStatus::EndOfTrack, "End of Track"),
+    ] {
+        let stream = subgroup_stream("3c01", &format!("00{status:02x}"));
+        assert!(
+            matches!(read_first_object(&stream), Err(CodecError::InvalidField)),
+            "an {name} object with extensions is refused",
+        );
+        let meta = read_first_object_meta(&stream)
+            .unwrap_or_else(|e| panic!("the meta reader frames it: {e:?}"));
+        assert!(!meta.extensions_permitted(), "and the meta reader reports it on {name}");
+
         let object = SubgroupObject {
             object_id: varint(0),
             extension_headers: hex("3c01"),
             payload_length: varint(0),
-            object_status: Some(status),
+            object_status: Some(object_status),
             payload: Vec::new(),
         };
-        assert!(
-            !object.extensions_permitted(),
-            "an {name} object with extensions is still a violation to report",
-        );
-
+        assert!(!object.extensions_permitted());
         let mut buf = Vec::new();
-        SubgroupObjectReader::new(&header)
-            .write_object(&object, &mut buf)
-            .unwrap_or_else(|e| panic!("an {name} object with extensions is writable: {e:?}"));
+        assert_eq!(
+            SubgroupObjectReader::new(&header).write_object(&object, &mut buf),
+            Err(CodecError::InvalidField),
+            "an {name} object with extensions is not written",
+        );
+        assert!(buf.is_empty());
     }
 }
 

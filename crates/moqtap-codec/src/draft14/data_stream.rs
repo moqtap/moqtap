@@ -20,6 +20,7 @@ use bytes::{Buf, BufMut};
 
 use super::types::ObjectStatus;
 use crate::error::CodecError;
+use crate::object_properties::{ObjectProperty, PropertyValue};
 use crate::varint::VarInt;
 
 /// Advance `buf` past `len` bytes without copying them.
@@ -387,6 +388,75 @@ impl SubgroupObjectMeta {
     }
 }
 
+/// Prior Group ID Gap, Extension Header Type 0x3C (Section 11.1).
+pub const PRIOR_GROUP_ID_GAP: u64 = 0x3C;
+/// Prior Object ID Gap, Extension Header Type 0x3E (Section 11.3).
+pub const PRIOR_OBJECT_ID_GAP: u64 = 0x3E;
+
+/// The Prior Group ID Gap and Prior Object ID Gap one Object carries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PriorGaps {
+    /// Prior Group ID Gap, if present.
+    pub group: Option<u64>,
+    /// Prior Object ID Gap, if present.
+    pub object: Option<u64>,
+}
+
+impl PriorGaps {
+    /// Read the two gaps from an Object's parsed extension headers, refusing
+    /// the conditions one Object shows on its own.
+    ///
+    /// Section 11.1 makes the Track malformed when "An Object contains more
+    /// than one instance of Prior Group ID Gap" and when "An Object has a Prior
+    /// Group ID Gap larger than the Group ID". Section 11.3 says the same two
+    /// for Prior Object ID Gap against the Object ID. Each is
+    /// [`CodecError::MalformedTrack`].
+    pub fn from_properties(
+        properties: &[ObjectProperty<'_>],
+        group_id: u64,
+        object_id: u64,
+    ) -> Result<Self, CodecError> {
+        let mut gaps = Self::default();
+        collect_gaps(properties, &mut gaps)?;
+        if let Some(gap) = gaps.group.filter(|&gap| gap > group_id) {
+            return Err(CodecError::MalformedTrack {
+                detail: format!("Prior Group ID Gap {gap} is larger than Group ID {group_id}"),
+            });
+        }
+        if let Some(gap) = gaps.object.filter(|&gap| gap > object_id) {
+            return Err(CodecError::MalformedTrack {
+                detail: format!("Prior Object ID Gap {gap} is larger than Object ID {object_id}"),
+            });
+        }
+        Ok(gaps)
+    }
+}
+
+fn collect_gaps(properties: &[ObjectProperty<'_>], gaps: &mut PriorGaps) -> Result<(), CodecError> {
+    for property in properties {
+        let slot = match (&property.value, property.property_type) {
+            (PropertyValue::Immutable { properties, .. }, _) => {
+                collect_gaps(properties, gaps)?;
+                continue;
+            }
+            (PropertyValue::Varint(value), PRIOR_GROUP_ID_GAP) => {
+                (&mut gaps.group, *value, "Group")
+            }
+            (PropertyValue::Varint(value), PRIOR_OBJECT_ID_GAP) => {
+                (&mut gaps.object, *value, "Object")
+            }
+            _ => continue,
+        };
+        let (field, value, which) = slot;
+        if field.replace(value).is_some() {
+            return Err(CodecError::MalformedTrack {
+                detail: format!("an Object contains more than one Prior {which} ID Gap"),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Stateful reader for the object fields on a subgroup stream.
 ///
 /// Object IDs on a subgroup stream are delta-encoded against the
@@ -397,20 +467,37 @@ impl SubgroupObjectMeta {
 pub struct SubgroupObjectReader {
     extensions_present: bool,
     prev_object_id: Option<u64>,
+    group_id: u64,
+    group_gap: Option<u64>,
 }
 
 impl SubgroupObjectReader {
     /// Create a reader from a parsed subgroup header.
     pub fn new(header: &SubgroupHeader) -> Self {
-        Self { extensions_present: header.stream_type.extensions_present(), prev_object_id: None }
+        Self {
+            extensions_present: header.stream_type.extensions_present(),
+            prev_object_id: None,
+            group_id: header.group_id.into_inner(),
+            group_gap: None,
+        }
     }
 
     /// Decode the next object from `buf`. Caller is responsible for
     /// ensuring the buffer contains a complete object (draft-14 objects
     /// are length-delimited by the payload-length field, so the buffer
     /// boundary is known once the header portion has been consumed).
+    ///
+    /// Refuses, with [`CodecError::MalformedTrack`], the Prior Group ID Gap
+    /// and Prior Object ID Gap conditions of Section 11.1 and Section 11.3
+    /// this stream shows: those [`PriorGaps::from_properties`] refuses, "A
+    /// Group contains more than one Object with different values for Prior
+    /// Group ID Gap", and "An endpoint receives an Object with a Prior Object
+    /// ID Gap covering an Object it previously received" for an Object earlier
+    /// on this stream. [`Self::read_object_meta`] does not read extension
+    /// headers and applies none of them.
     pub fn read_object(&mut self, buf: &mut impl Buf) -> Result<SubgroupObject, CodecError> {
         let delta = VarInt::decode(buf)?.into_inner();
+        let prior_object_id = self.prev_object_id;
         let object_id_val = match self.prev_object_id {
             None => delta,
             Some(prev) => prev
@@ -442,11 +529,46 @@ impl SubgroupObjectReader {
             extension_headers.len() as u64,
         )?;
 
-        crate::object_properties::parse_object_properties(
+        let properties = crate::object_properties::parse_object_properties(
             crate::version::DraftVersion::Draft14,
             &extension_headers,
         )?;
+        let gaps = PriorGaps::from_properties(&properties, self.group_id, object_id_val)?;
+        self.check_stream_gaps(gaps, prior_object_id, object_id_val)?;
         Ok(SubgroupObject { object_id, extension_headers, status, payload })
+    }
+
+    fn check_stream_gaps(
+        &mut self,
+        gaps: PriorGaps,
+        prior_object_id: Option<u64>,
+        object_id: u64,
+    ) -> Result<(), CodecError> {
+        if let Some(gap) = gaps.group {
+            match self.group_gap {
+                Some(seen) if seen != gap => {
+                    return Err(CodecError::MalformedTrack {
+                        detail: format!(
+                            "two Objects in Group {} carry different Prior Group ID Gap values",
+                            self.group_id
+                        ),
+                    });
+                }
+                _ => self.group_gap = Some(gap),
+            }
+        }
+        // Object IDs rise along a subgroup stream, so the latest earlier
+        // Object is the only one a gap below this Object can reach.
+        if let (Some(gap), Some(prior)) = (gaps.object, prior_object_id) {
+            if gap > 0 && prior >= object_id - gap {
+                return Err(CodecError::MalformedTrack {
+                    detail: format!(
+                        "Prior Object ID Gap {gap} of Object {object_id} covers Object {prior}"
+                    ),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Decode the next object's framing without copying its payload.
@@ -1314,7 +1436,7 @@ mod tests {
         let header = SubgroupHeader {
             stream_type: SubgroupStreamType::from_u8(0x11).unwrap(),
             track_alias: vi(1),
-            group_id: vi(0),
+            group_id: vi(5),
             subgroup_id: None,
             publisher_priority: 0,
         };

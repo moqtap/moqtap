@@ -1291,8 +1291,8 @@ impl DatagramHeader {
     /// "If an endpoint receives properties on an Object with status that is not
     /// Normal, it MUST close the session with INVALID_OBJECT_STATUS."
     ///
-    /// See [`SubgroupObject::properties_permitted`] for why the decoder reports
-    /// this instead of refusing it.
+    /// [`Self::decode`] reports this and [`Self::decode_object`] refuses it, as
+    /// the subgroup readers split it.
     pub fn properties_permitted(&self) -> bool {
         self.properties.is_empty() || self.status() == ObjectStatus::Normal
     }

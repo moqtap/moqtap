@@ -553,11 +553,11 @@ fn properties_are_not_written_beside_a_status_other_than_normal() {
     let back = d19::DatagramHeader::decode(&mut &buf[..]).expect("the Normal datagram parses back");
     assert_eq!(back.properties, properties, "the permitted block did not survive");
 
-    // The subgroup carrier reports the same rule rather than refusing it: the
-    // frame is well formed, so a codec that could not carry it could not
-    // reproduce a capture containing one.
+    // The subgroup carrier refuses it too, in the writer and in the
+    // whole-object reader. Group 5 keeps the Prior Group ID Gap of 1 within
+    // the Group ID.
     let stream =
-        d19::SubgroupHeader::decode(&mut &[SUBGROUP_WITH_PROPERTIES, 0x01, 0x00, 0x80][..])
+        d19::SubgroupHeader::decode(&mut &[SUBGROUP_WITH_PROPERTIES, 0x01, 0x05, 0x80][..])
             .expect("a draft-19 PROPERTIES subgroup header");
     let object = d19::SubgroupObject {
         object_id: vi(0),
@@ -571,13 +571,19 @@ fn properties_are_not_written_beside_a_status_other_than_normal() {
         "properties beside End of Group must be reported as forbidden"
     );
     let mut out = Vec::new();
-    d19::SubgroupObjectReader::new(&stream)
-        .write_object(&object, &mut out)
-        .expect("the subgroup carrier still writes the frame so a capture can be reproduced");
-    let back = d19::SubgroupObjectReader::new(&stream)
-        .read_object(&mut &out[..])
-        .expect("and reads it back");
-    assert!(!back.properties_permitted(), "the decoded object stopped reporting the violation");
+    assert!(
+        d19::SubgroupObjectReader::new(&stream).write_object(&object, &mut out).is_err(),
+        "the subgroup writer must refuse properties beside End of Group"
+    );
+    assert!(out.is_empty(), "a refused subgroup object left {out:02x?} behind");
+    let wire = [0x00, 0x02, 0x3c, 0x01, 0x00, 0x03];
+    assert!(
+        matches!(
+            d19::SubgroupObjectReader::new(&stream).read_object(&mut &wire[..]),
+            Err(moqtap_codec::error::CodecError::InvalidField)
+        ),
+        "the subgroup reader must refuse properties beside End of Group"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────
