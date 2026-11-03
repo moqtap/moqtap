@@ -49,6 +49,7 @@ mod pack;
 mod relay;
 mod relay_cap;
 mod sampling;
+mod time;
 mod upload;
 mod wire;
 
@@ -64,8 +65,11 @@ pub use clock::DRIFT;
 pub use egress::Proxy;
 pub use relay_cap::MAX_RELAYS_PER_MONTH;
 pub use sampling::TARGET_GROUPS_PER_SEC;
+#[doc(hidden)]
+pub use time::TestClock;
 
 use collect::{Collector, Handoff, Refused, Wake};
+use time::Clock;
 use upload::{AppClock, Config, Outbox, Shared};
 use wire::{EventKind, MarkKind};
 
@@ -250,6 +254,8 @@ pub struct MonitorBuilder {
     buffer_bytes: usize,
     retry_unit: Duration,
     app_clock: Option<AppClock>,
+    clock: Option<TestClock>,
+    roots: Option<Vec<Vec<u8>>>,
 }
 
 impl std::fmt::Debug for MonitorBuilder {
@@ -319,6 +325,21 @@ impl MonitorBuilder {
         self
     }
 
+    /// Run on `clock` instead of the system's clocks and timers.
+    #[doc(hidden)]
+    pub fn test_clock(mut self, clock: &TestClock) -> Self {
+        self.clock = Some(clock.clone());
+        self
+    }
+
+    /// Trust only these root certificates (DER) for the endpoint and an
+    /// `https` proxy, instead of the platform's verifier.
+    #[doc(hidden)]
+    pub fn test_roots(mut self, der: Vec<Vec<u8>>) -> Self {
+        self.roots = Some(der);
+        self
+    }
+
     /// Validate the configuration and start the background tasks on the
     /// current Tokio runtime.
     pub fn start(self) -> Result<Monitor, Error> {
@@ -345,14 +366,16 @@ impl MonitorBuilder {
         let endpoint = endpoint_origin(&self.endpoint).ok_or(Error::InvalidEndpoint)?;
         let proxy = egress::route(&endpoint, &self.proxy, |name| std::env::var(name).ok())?;
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| Error::NoRuntime)?;
-        let client = egress::client(proxy).map_err(|e| Error::Setup(e.to_string()))?;
+        let client = egress::client(proxy, self.roots.as_deref())
+            .map_err(|e| Error::Setup(e.to_string()))?;
         let mut id = [0u8; 16];
         ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut id)
             .map_err(|_| Error::Setup("system random source".into()))?;
 
-        let res_us = clock::resolution_us();
-        let start = Instant::now();
-        let wall = upload::wall_us();
+        let clock = self.clock.map_or(Clock::System, Clock::Manual);
+        let res_us = clock.resolution_us();
+        let start = clock.now();
+        let wall = clock.wall_us();
         let mut collector = Collector::new(self.interval.as_millis() as u64);
         collector.observe(0, wall);
         let shared = Arc::new(Shared {
@@ -368,6 +391,7 @@ impl MonitorBuilder {
                 res_us,
                 start_wall_ms: wall.unwrap_or(0).div_euclid(1000),
             },
+            clock,
             start,
             collector: Mutex::new(collector),
             outbox: Mutex::new(Outbox::default()),
@@ -379,6 +403,7 @@ impl MonitorBuilder {
             sealer_done: AtomicBool::new(false),
             shutdown: Notify::new(),
         });
+        shared.clock.sealer_started();
         let sealer = runtime.spawn(upload::sealer(Arc::clone(&shared)));
         let sender = runtime.spawn(upload::sender(Arc::clone(&shared), client));
         Ok(Monitor { shared, sealer: Some(sealer), sender: Some(sender) })
@@ -421,6 +446,8 @@ impl Monitor {
             buffer_bytes: DEFAULT_BUFFER_BYTES,
             retry_unit: Duration::from_secs(1),
             app_clock: None,
+            clock: None,
+            roots: None,
         }
     }
 
@@ -433,7 +460,7 @@ impl Monitor {
             return Err(Error::Stopped);
         }
         let mono = self.shared.mono_us();
-        let wall = upload::wall_us();
+        let wall = self.shared.wall_us();
         let mut c = self.shared.collector();
         if c.stopped {
             return Err(Error::Stopped);
@@ -442,7 +469,7 @@ impl Monitor {
         let (id, wake) = c.open(origin, mono).ok_or(Error::TooManyConnections)?;
         drop(c);
         if first == Wake::Seal || wake == Wake::Seal {
-            self.shared.seal_now.notify_one();
+            self.shared.wake_sealer();
         }
         Ok(Connection { shared: Arc::clone(&self.shared), id, closed: false })
     }
@@ -462,10 +489,10 @@ impl Monitor {
     /// the timeout passes is lost.
     pub async fn shutdown(mut self, timeout: Duration) -> Stats {
         self.signal_shutdown();
-        let deadline = tokio::time::Instant::now() + timeout;
+        let deadline = self.shared.clock.now() + timeout;
         for task in [self.sealer.take(), self.sender.take()].into_iter().flatten() {
             let abort = task.abort_handle();
-            if tokio::time::timeout_at(deadline, task).await.is_err() {
+            if self.shared.clock.until(deadline, task).await.is_none() {
                 abort.abort();
             }
         }
@@ -650,14 +677,14 @@ impl Connection {
     ) -> Result<(), Rejected> {
         let mono = self.shared.mono_us();
         let at_us = at.map_or(mono, |a| self.shared.mono_of(a));
-        let wall = upload::wall_us();
+        let wall = self.shared.wall_us();
         let (first, r) = {
             let mut c = self.shared.collector();
             let first = c.observe(mono, wall);
             (first, f(&mut c, at_us))
         };
         if first == Wake::Seal || r == Ok(Wake::Seal) {
-            self.shared.seal_now.notify_one();
+            self.shared.wake_sealer();
         }
         r.map(drop).map_err(rejected)
     }

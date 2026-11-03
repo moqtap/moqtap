@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
@@ -18,6 +18,7 @@ use crate::collect::Collector;
 use crate::egress::HttpClient;
 use crate::pack::{Head, Packer, Sealed};
 use crate::relay_cap::RelayLedger;
+use crate::time::Clock;
 use crate::wire::{body, frames, Clk, ClockSample};
 use crate::State;
 
@@ -147,6 +148,7 @@ impl Outbox {
 
 pub(crate) struct Shared {
     pub cfg: Config,
+    pub clock: Clock,
     pub start: Instant,
     pub collector: Mutex<Collector>,
     pub outbox: Mutex<Outbox>,
@@ -163,7 +165,7 @@ pub(crate) struct Shared {
 impl Shared {
     /// Monotonic µs since the monitor started.
     pub(crate) fn mono_us(&self) -> i64 {
-        self.mono_of(Instant::now())
+        self.mono_of(self.clock.now())
     }
 
     pub(crate) fn mono_of(&self, at: Instant) -> i64 {
@@ -181,22 +183,27 @@ impl Shared {
         self.outbox.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    pub(crate) fn wall_us(&self) -> Option<i64> {
+        self.clock.wall_us()
+    }
+
+    /// Wake the sealer to pack what the collector has cut.
+    pub(crate) fn wake_sealer(&self) {
+        self.clock.seal_asked();
+        self.seal_now.notify_one();
+    }
+
     /// The seal interval in force: the configured one, shortened while an
     /// ingest directive holds.
     fn interval(&self) -> Duration {
         let own = self.cfg.interval;
         match self.outbox().directive {
-            Some((ms, until)) if Instant::now() < until => {
+            Some((ms, until)) if self.clock.now() < until => {
                 own.min(Duration::from_millis(ms).max(MIN_DIRECTED_SEAL))
             }
             _ => own,
         }
     }
-}
-
-pub(crate) fn wall_us() -> Option<i64> {
-    let d = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
-    i64::try_from(d.as_micros()).ok()
 }
 
 pub(crate) async fn sealer(shared: Arc<Shared>) {
@@ -207,7 +214,8 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
         monitor_name: MONITOR_NAME,
         monitor_version: MONITOR_VERSION,
     });
-    let mut timer_from = Instant::now();
+    let mut timer_from = shared.clock.now();
+    let mut seen = shared.clock.seal_requests();
     loop {
         let interval = shared.interval();
         let from = {
@@ -216,13 +224,14 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
             c.open_from_us()
         };
         let opened = shared.start + Duration::from_micros(from.max(0) as u64);
-        let deadline = tokio::time::Instant::from_std(opened.max(timer_from) + interval);
+        let deadline = opened.max(timer_from) + interval;
+        shared.clock.sealer_parked(deadline, seen);
         let is_final = tokio::select! {
-            _ = tokio::time::sleep_until(deadline) => {
-                timer_from = Instant::now();
+            _ = shared.clock.sleep_until(deadline) => {
+                timer_from = shared.clock.now();
                 let mono = shared.mono_us();
                 let mut c = shared.collector();
-                c.observe(mono, wall_us());
+                c.observe(mono, shared.wall_us());
                 c.cut(mono, false);
                 false
             }
@@ -230,11 +239,12 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
             _ = shared.directive_changed.notified() => false,
             _ = shared.shutdown.notified() => true,
         };
+        seen = shared.clock.seal_requests();
         let is_final = is_final || shared.shutting_down.load(Ordering::SeqCst);
         if is_final {
             let mono = shared.mono_us();
             let mut c = shared.collector();
-            c.observe(mono, wall_us());
+            c.observe(mono, shared.wall_us());
             c.cut(mono, true);
             c.stopped = true;
         }
@@ -244,6 +254,7 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
         }
     }
     shared.sealer_done.store(true, Ordering::SeqCst);
+    shared.clock.sealer_done();
     shared.send_now.notify_one();
 }
 
@@ -380,7 +391,7 @@ pub(crate) async fn sender(shared: Arc<Shared>, client: HttpClient) {
         };
         if let Some(wait) = wait {
             tokio::select! {
-                _ = tokio::time::sleep(wait) => {}
+                _ = shared.clock.sleep(wait) => {}
                 _ = shared.kick.notified() => {}
             }
         }
@@ -446,12 +457,12 @@ async fn exchange_with(
 ) -> Option<(StatusCode, hyper::HeaderMap, Bytes)> {
     let epoch = shared.collector().epoch;
     let t1 = shared.mono_us();
-    let resp = match tokio::time::timeout(REQUEST_TIMEOUT, client.request(req)).await {
-        Ok(Ok(resp)) => resp,
+    let resp = match shared.clock.timeout(REQUEST_TIMEOUT, client.request(req)).await {
+        Some(Ok(resp)) => resp,
         _ => return None,
     };
     let t4 = shared.mono_us();
-    let wall = wall_us();
+    let wall = shared.wall_us();
     let status = resp.status();
     let headers = resp.headers().clone();
     let int = |name: &str| -> Option<i64> { headers.get(name)?.to_str().ok()?.trim().parse().ok() };
@@ -466,7 +477,7 @@ async fn exchange_with(
         wake == crate::collect::Wake::Seal || c.epoch != epoch
     };
     if broke {
-        shared.seal_now.notify_one();
+        shared.wake_sealer();
     } else if let Some(s) = sample {
         let mut o = shared.outbox();
         o.samples.insert(epoch, s);
@@ -474,15 +485,13 @@ async fn exchange_with(
             o.samples.pop_first();
         }
     }
-    let body = tokio::time::timeout(
-        REQUEST_TIMEOUT,
-        Limited::new(resp.into_body(), MAX_RESPONSE_BYTES).collect(),
-    )
-    .await
-    .ok()
-    .and_then(Result::ok)
-    .map(|b| b.to_bytes())
-    .unwrap_or_default();
+    let body = shared
+        .clock
+        .timeout(REQUEST_TIMEOUT, Limited::new(resp.into_body(), MAX_RESPONSE_BYTES).collect())
+        .await
+        .and_then(Result::ok)
+        .map(|b| b.to_bytes())
+        .unwrap_or_default();
     Some((status, headers, body))
 }
 
@@ -507,7 +516,9 @@ async fn post(shared: &Shared, client: &HttpClient, seq: u64, bytes: Arc<Vec<u8>
     let outcome = classify(status, retry_after);
     if let Outcome::Accepted(_) = outcome {
         if let Some((ms, ttl)) = directive(&reply) {
-            shared.outbox().directive = Some((ms, Instant::now() + Duration::from_millis(ttl)));
+            let until = shared.clock.now() + Duration::from_millis(ttl);
+            shared.outbox().directive = Some((ms, until));
+            shared.clock.seal_asked();
             shared.directive_changed.notify_one();
         }
         let recv_ms = headers

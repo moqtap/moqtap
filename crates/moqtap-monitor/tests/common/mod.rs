@@ -748,6 +748,8 @@ struct MockState {
     script: VecDeque<Reply>,
     clock_offset_ms: f64,
     pop: Option<String>,
+    /// Never answer the next upload.
+    hold: bool,
 }
 
 #[derive(Clone)]
@@ -785,6 +787,11 @@ impl Mock {
     /// Replies for the next uploads; `/v1/clock` is always answered 204.
     pub fn script(&self, replies: impl IntoIterator<Item = Reply>) {
         self.state.lock().unwrap().script.extend(replies);
+    }
+
+    /// Take the next upload and never answer it.
+    pub fn hold_next(&self) {
+        self.state.lock().unwrap().hold = true;
     }
 
     pub fn set_clock_offset_ms(&self, ms: f64) {
@@ -842,12 +849,15 @@ async fn handle(
     let reply = {
         let mut s = state.lock().unwrap();
         s.captured.push(Captured { method, uri, headers, body });
-        if clock {
-            Reply { status: 204, headers: vec![], body: String::new() }
+        if !clock && std::mem::take(&mut s.hold) {
+            None
+        } else if clock {
+            Some(Reply { status: 204, headers: vec![], body: String::new() })
         } else {
-            s.script.pop_front().unwrap_or(Reply::status(202))
+            Some(s.script.pop_front().unwrap_or(Reply::status(202)))
         }
     };
+    let Some(reply) = reply else { return std::future::pending().await };
     let mut resp = Response::builder()
         .status(reply.status)
         .header("x-moqtap-recv-ms", format!("{}", recv.floor()))

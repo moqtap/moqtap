@@ -5,7 +5,11 @@ mod common;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bytes::Bytes;
 use common::{read_body, Mock};
+use http_body_util::{BodyExt, Full};
+use hyper::{Request, Response};
+use hyper_util::rt::TokioIo;
 use moqtap_monitor::{Delivery, Error, Monitor, Proxy, Sent};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -144,4 +148,110 @@ async fn direct_ignores_the_proxy_and_bad_proxies_are_refused_at_start() {
         let e = builder(&mock, Proxy::Url(bad.into())).start();
         assert!(matches!(e, Err(Error::InvalidProxy)), "{bad}");
     }
+}
+
+/// Each request's path and body.
+type Seen = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+
+/// An https ingest with a self-signed certificate for 127.0.0.1: answers
+/// every request, keeping each `(path, body)`.
+struct TlsIngest {
+    endpoint: String,
+    cert: Vec<u8>,
+    seen: Seen,
+}
+
+impl TlsIngest {
+    async fn start() -> TlsIngest {
+        let ck = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).unwrap();
+        let cert = ck.cert.der().clone();
+        let key = rustls::pki_types::PrivatePkcs8KeyDer::from(ck.signing_key.serialize_der());
+        let server = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert.clone()], key.into())
+        .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("https://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let s = Arc::clone(&seen);
+        tokio::spawn(async move {
+            loop {
+                let Ok((tcp, _)) = listener.accept().await else { return };
+                let (acceptor, s) = (acceptor.clone(), Arc::clone(&s));
+                tokio::spawn(async move {
+                    let Ok(stream) = acceptor.accept(tcp).await else { return };
+                    let svc = hyper::service::service_fn(move |req: Request<_>| {
+                        let s = Arc::clone(&s);
+                        async move {
+                            let path = req.uri().to_string();
+                            let body: hyper::body::Incoming = req.into_body();
+                            let body = body.collect().await.map(|b| b.to_bytes().to_vec());
+                            let status = if path == "/v1/clock" { 204 } else { 202 };
+                            s.lock().unwrap().push((path, body.unwrap_or_default()));
+                            Ok::<_, std::convert::Infallible>(
+                                Response::builder()
+                                    .status(status)
+                                    .body(Full::new(Bytes::new()))
+                                    .unwrap(),
+                            )
+                        }
+                    });
+                    let conn = hyper::server::conn::http1::Builder::new();
+                    let _ = conn.serve_connection(TokioIo::new(stream), svc).await;
+                });
+            }
+        });
+        TlsIngest { endpoint, cert: cert.to_vec(), seen }
+    }
+
+    fn uploads(&self) -> Vec<Vec<u8>> {
+        let seen = self.seen.lock().unwrap();
+        seen.iter().filter(|(p, _)| p.starts_with("/v1/source")).map(|(_, b)| b.clone()).collect()
+    }
+}
+
+#[tokio::test]
+async fn test_roots_let_an_https_endpoint_be_reached_through_a_proxy() {
+    let ingest = TlsIngest::start().await;
+    let proxy = ConnectProxy::start("200 Connection established", "").await;
+    let m = Monitor::builder(SOURCE, KEY)
+        .endpoint(&ingest.endpoint)
+        .proxy(Proxy::Url(proxy.url.clone()))
+        .test_roots(vec![ingest.cert.clone()])
+        .test_timing(Duration::from_millis(150), Duration::from_millis(20))
+        .start()
+        .expect("start");
+    let relay = m.connection("https://relay.example.net/moq").expect("conn");
+    relay.object_sent(&["live"], "video", sent(), None).expect("report");
+    let stats = m.shutdown(Duration::from_secs(5)).await;
+    assert!(stats.bodies_sent > 0);
+    assert_eq!(stats.bodies_queued, 0);
+    for body in ingest.uploads() {
+        read_body(&body, SOURCE);
+    }
+    let target = ingest.endpoint.trim_start_matches("https://");
+    let heads = proxy.heads();
+    assert!(!heads.is_empty());
+    assert!(heads.iter().all(|h| h.starts_with(&format!("CONNECT {target} HTTP/1.1\r\n"))));
+}
+
+#[tokio::test]
+async fn without_test_roots_the_self_signed_endpoint_is_not_trusted() {
+    let ingest = TlsIngest::start().await;
+    let m = Monitor::builder(SOURCE, KEY)
+        .endpoint(&ingest.endpoint)
+        .proxy(Proxy::Direct)
+        .test_timing(Duration::from_millis(150), Duration::from_millis(20))
+        .start()
+        .expect("start");
+    let relay = m.connection("https://relay.example.net/moq").expect("conn");
+    relay.object_sent(&["live"], "video", sent(), None).expect("report");
+    let stats = m.shutdown(Duration::from_millis(500)).await;
+    assert_eq!(stats.bodies_sent, 0);
+    assert!(ingest.uploads().is_empty());
 }

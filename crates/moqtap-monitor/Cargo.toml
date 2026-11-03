@@ -10,7 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-exclude = ["tests/"]
+exclude = ["examples/", "tests/"]
 
 [dependencies]
 bytes = { workspace = true }

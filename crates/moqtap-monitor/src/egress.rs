@@ -110,14 +110,29 @@ impl HttpClient {
 
 /// A client that reaches ingest through `proxy`, or directly. The request
 /// with the key goes only inside the tunnel; the proxy sees the `CONNECT`.
-pub(crate) fn client(proxy: Option<Intercept>) -> Result<HttpClient, rustls::Error> {
+/// With `roots`, certificates are checked against those roots alone.
+pub(crate) fn client(
+    proxy: Option<Intercept>,
+    roots: Option<&[Vec<u8>]>,
+) -> Result<HttpClient, rustls::Error> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let verifier = verifier(Arc::clone(&provider))?;
-    let tls = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(verifier))
-        .with_no_client_auth();
+    let builder = rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
+        .with_safe_default_protocol_versions()?;
+    let tls = match roots {
+        Some(roots) => {
+            let mut store = rustls::RootCertStore::empty();
+            for der in roots {
+                store
+                    .add(der.clone().into())
+                    .map_err(|e| rustls::Error::General(format!("test root: {e}")))?;
+            }
+            builder.with_root_certificates(store).with_no_client_auth()
+        }
+        None => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier(provider)?))
+            .with_no_client_auth(),
+    };
     Ok(with_tls(proxy, tls))
 }
 
@@ -284,9 +299,10 @@ mod tests {
 
     #[test]
     fn the_platform_verifier_initialises() {
-        assert!(client(None).is_ok());
+        assert!(client(None, None).is_ok());
         let found = route(E, &Proxy::Url("http://proxy:3128".into()), env(&[])).unwrap();
-        assert!(client(found).is_ok());
+        assert!(client(found, None).is_ok());
+        assert!(client(None, Some(&[b"not a certificate".to_vec()])).is_err());
     }
 
     #[tokio::test]
