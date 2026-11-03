@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-03
+
 ### Changed
 
 - **Breaking.** `DraftVersion` gains `Draft23` (feature `draft23`, in `all-drafts`; ALPN `moqt-23`), and `DraftVersion::ALL` is a `[DraftVersion; 17]`.
@@ -15,15 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`draft23`**, a module and a feature. Its control messages have a vi64 Length, which `decode_with_limit` and `encode_with_limit` check against MAX_CONTROL_MESSAGE_SIZE (setup option 0x09, default 65535). FETCH is answered by REQUEST_OK, and message type 0x18 is reserved. REQUEST_ERROR carries Error Details (REDIRECT, UNSUPPORTED_PROPERTY). NAMESPACE carries parameters. FILL_PARAMETERS is a count. PAUSED (0x11) and SUBSCRIBE_TRACKS_ID (0x36) are new. The session, request, PUBLISH_DONE and stream reset codes follow draft-23.
-- Draft-23 fetch streams: the Object ID delta is +2 within a Group, End of Range Object IDs are delta-encoded, and there are three new indicators: End of Group (0x80), End of Track (0x81) and End of Gone Range (0x40C).
-- Draft-23 subgroup and datagram readers refuse an unassigned Object Status as `UnknownObjectStatus`. The readers that return a whole object refuse properties on a non-Normal status. They also refuse the Prior Group ID Gap and Prior Object ID Gap conditions that one Object, or one subgroup stream, shows.
-- Draft-23 SUBSCRIBE, PUBLISH, TRACK_STATUS and FETCH check for an empty Track Name after the rest of the message, so a DELTA_ENCODING_OVERFLOW or FIELD_LENGTH_EXCEEDED later in it is the error returned.
+- **`draft23`**, a module and a feature (in `all-drafts`): a vi64 control message Length checked against MAX_CONTROL_MESSAGE_SIZE (`decode_with_limit`, `encode_with_limit`), FETCH answered by REQUEST_OK, REQUEST_ERROR Error Details, NAMESPACE parameters, PAUSED and SUBSCRIBE_TRACKS_ID, draft-23's error codes, and fetch streams with the +2 Object ID delta, delta-encoded End of Range Object IDs and the End of Group, End of Track and End of Gone Range indicators. It refuses an empty Track Name, and its readers refuse an unassigned Object Status, properties on a non-Normal status and the Prior gap conditions.
+- `PriorGaps` in the `data_stream` module of drafts 14-23.
 
 ### Fixed
 
 - Drafts 15-22: `SubgroupObjectReader::read_object` and `write_object` accepted properties (extension headers on drafts 15-16) on a non-Normal status, which each draft closes the session over. Both now refuse it with `InvalidField`, as draft-23 does.
-- Drafts 14-22: `SubgroupObjectReader::read_object`, and `DatagramHeader::decode_object` on drafts 17-22, refuse with `MalformedTrack` the Prior Group ID Gap and Prior Object ID Gap conditions draft-23's readers refuse, through a new `PriorGaps` in each module.
+- Drafts 14-22: `SubgroupObjectReader::read_object`, and `DatagramHeader::decode_object` on drafts 17-22, accepted a Prior Group ID Gap or Prior Object ID Gap that makes the Track malformed. They now refuse it with `MalformedTrack`.
 
 ## [0.9.0] - 2026-10-29
 

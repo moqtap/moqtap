@@ -7,15 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-03
+
 ### Changed
 
 - **Breaking.** `DraftVersion` gains `Draft23` (see `moqtap-codec`), which stops a downstream `match` over its variants compiling.
 - **Breaking.** On draft-23 fetch streams, `ObjectMeta::end_of_range` can be `AnyFetchEndOfRange::Gone`, `EndOfGroup` or `EndOfTrack`. End of Group and End of Track carry the Location of the Object before them.
+- Requires `moqtap-codec` and `moqtap-client` 0.10.0 and `quinn-netem` 0.3.1.
 
 ### Added
 
 - Draft-23 (`moqt-23`), behind the `draft23` feature and in `all-drafts`.
 - On draft-23, eliding the Object before a fetch stream's End of Group or End of Track resets the destination stream and reports `ElideFixupLost`, because the marker cannot follow a different Object.
+
+### Fixed
+
+- A build with no draft feature enabled compiles again.
 
 ## [0.11.0] - 2026-10-30
 
