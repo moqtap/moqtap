@@ -77,9 +77,10 @@ Names are byte strings: the namespace fields and track name exactly as your
 library sends them, `&str` or `&[u8]`, empty or not UTF-8. They must be what
 viewers subscribe to, field for field, or no latency can be matched.
 
-Only the origin of a relay URL is kept (`https://relay.example.net`); the
-path, query and userinfo never leave the process. A reconnect is a new
-`connection()`.
+Of a relay URL, the scheme, host, port and path are kept
+(`https://relay.example.net/moq`); the query, fragment and userinfo never
+leave the process. Viewers' latency is matched on the same URL, path
+included. A reconnect is a new `connection()`.
 
 ## Uploads and limits
 
@@ -95,8 +96,9 @@ still more than the target each second, and states which groups it left
 out. The viewer side reports every group, and those left out are shown as
 sampled.
 
-A source reports at most 64 relay origins in a calendar month (UTC;
-`moqtap_monitor::MAX_RELAYS_PER_MONTH`). Reports for a further origin are not
+A source reports at most 64 relays in a calendar month (UTC;
+`moqtap_monitor::MAX_RELAYS_PER_MONTH`). A relay is its host: URLs that differ
+only in scheme, port or path are one relay. Reports for a further relay are not
 sent and are counted in `stats().over_relay_cap`; they are sent again from the
 next month. At most 256 tracks may be published at once, and 1024 over the
 life of one connection.

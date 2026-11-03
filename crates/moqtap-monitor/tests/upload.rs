@@ -34,7 +34,7 @@ fn bodies(mock: &Mock) -> Vec<Body> {
     let out: Vec<Body> = mock.uploads().iter().map(|c| read_body(&c.body, SOURCE)).collect();
     for c in out.iter().flat_map(|b| &b.conns) {
         let rest = c.relay.split_once("://").map_or("", |(_, r)| r);
-        assert!(!rest.is_empty() && !rest.contains(['/', '?', '#', '@']), "{}", c.relay);
+        assert!(!rest.is_empty() && !rest.contains(['?', '#', '@']), "{}", c.relay);
     }
     out
 }
@@ -132,7 +132,7 @@ async fn the_key_rides_only_in_the_header_and_every_body_reads_back() {
     let runs: Vec<_> = published(&bodies);
     assert_eq!(runs.len(), 3);
     for (g, (relay, track, group, ids)) in runs.iter().enumerate() {
-        assert_eq!(relay, "https://relay-a.example.net");
+        assert_eq!(relay, "https://relay-a.example.net/moq");
         assert_eq!(
             (track.as_slice(), *group, ids.clone()),
             (&b"video"[..], g as u64, vec![0, 1, 2, 3, 4])
@@ -583,9 +583,11 @@ async fn until_sent(m: &Monitor, n: u64) {
 async fn no_body_names_a_relay_past_the_monthly_cap() {
     let mock = Mock::start().await;
     let m = monitor(&mock);
-    let conns: Vec<_> = (0..70)
+    let mut conns: Vec<_> = (0..70)
         .map(|i| m.connection(&format!("https://relay-{i:02}.example.net/moq")).unwrap())
         .collect();
+    // Another port and path on a counted host: the same relay.
+    conns.push(m.connection("https://relay-00.example.net:4443/other").unwrap());
     for c in &conns {
         c.object_sent(&NS, "video", obj(0, 0, 10), None).unwrap();
         c.request_error(3).unwrap();
@@ -593,8 +595,9 @@ async fn no_body_names_a_relay_past_the_monthly_cap() {
     drop(conns);
     let stats = m.shutdown(Duration::from_secs(5)).await;
 
-    let want: std::collections::BTreeSet<String> =
-        (0..64).map(|i| format!("https://relay-{i:02}.example.net")).collect();
+    let mut want: std::collections::BTreeSet<String> =
+        (0..64).map(|i| format!("https://relay-{i:02}.example.net/moq")).collect();
+    want.insert("https://relay-00.example.net:4443/other".into());
     let bodies = bodies(&mock);
     let sent: std::collections::BTreeSet<String> =
         published(&bodies).into_iter().map(|(r, ..)| r).collect();

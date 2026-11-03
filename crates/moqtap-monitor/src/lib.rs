@@ -174,7 +174,8 @@ pub enum Error {
     /// The sampling target is outside 1 to [`MAX_SAMPLE_TARGET`] groups a second.
     #[error("the sampling target must be 1 to 1000000 groups a second")]
     InvalidSampleTarget,
-    /// The relay URL is not an `https`, `http` or `moqt` URL.
+    /// The relay URL is not an `https`, `http` or `moqt` URL, or its path
+    /// holds a space, a control character or a backslash.
     #[error("not a relay URL")]
     InvalidRelayUrl,
     /// Too many relay connections are open.
@@ -242,7 +243,7 @@ pub struct Stats {
     /// ([`Stats::over_relay_cap`]).
     pub dropped: u64,
     /// Of [`Stats::dropped`], reports not sent because their relay would
-    /// have taken the source past [`MAX_RELAYS_PER_MONTH`] origins this month.
+    /// have taken the source past [`MAX_RELAYS_PER_MONTH`] relay hosts this month.
     pub over_relay_cap: u64,
     /// Reports refused as invalid or for a closed connection.
     pub rejected: u64,
@@ -473,11 +474,11 @@ impl Monitor {
         }
     }
 
-    /// A new relay connection. Only the URL's origin is kept: the path,
-    /// query and userinfo never leave the process. A reconnect is a new
-    /// connection.
+    /// A new relay connection. The URL's scheme, host, port and path are
+    /// kept, normalised; its query, fragment and userinfo never leave the
+    /// process. A reconnect is a new connection.
     pub fn connection(&self, relay_url: &str) -> Result<Connection, Error> {
-        let origin = relay::relay_origin(relay_url).ok_or(Error::InvalidRelayUrl)?;
+        let origin = relay::relay_endpoint(relay_url).ok_or(Error::InvalidRelayUrl)?;
         if self.shared.shutting_down.load(Ordering::SeqCst) {
             return Err(Error::Stopped);
         }

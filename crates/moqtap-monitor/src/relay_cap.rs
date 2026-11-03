@@ -1,36 +1,39 @@
 //! The relay cap. Ingest refuses, whole, a source body that would bring its
-//! source past [`MAX_RELAYS_PER_MONTH`] relay origins in a UTC month of
-//! ingest's clock. The monitor counts the origins of its own bodies against
-//! that month, which it learns from ingest's receive time, and sends no
-//! record for an origin past the cap.
+//! source past [`MAX_RELAYS_PER_MONTH`] relay hosts in a UTC month of
+//! ingest's clock. The monitor counts the hosts of its own bodies' endpoints
+//! against that month, which it learns from ingest's receive time, and sends
+//! no record for a host past the cap.
 
 use std::collections::HashSet;
 
 use crate::clock::DRIFT;
+use crate::relay::relay_host;
 
-/// Distinct relay origins a source may report in one UTC month.
+/// Distinct relay hosts a source may report in one UTC month: endpoints that
+/// differ only in scheme, port or path are one relay.
 pub const MAX_RELAYS_PER_MONTH: usize = 64;
 
 #[derive(Debug, Default)]
 pub(crate) struct RelayLedger {
     /// Ingest's month, as months since 1970-01, once an accepted body said.
     month: Option<i64>,
-    /// Origins of the bodies ingest may count in `month`.
+    /// Hosts of the bodies ingest may count in `month`.
     origins: HashSet<String>,
-    /// Origins of bodies given up without an answer: ingest may have them.
+    /// Hosts of bodies given up without an answer: ingest may have them.
     unanswered: HashSet<String>,
     /// Ingest's latest receive time, and the monotonic time it was answered.
     heard: Option<(f64, f64)>,
 }
 
 impl RelayLedger {
-    /// The connections, of `(ordinal, origin)` in ordinal order, whose
-    /// origin is past the cap, the oldest connection first in line.
+    /// The connections, of `(ordinal, endpoint)` in ordinal order, whose
+    /// host is past the cap, the oldest connection first in line.
     pub(crate) fn denied(&self, conns: &[(u64, &str)]) -> HashSet<u64> {
         let room = MAX_RELAYS_PER_MONTH.saturating_sub(self.origins.len());
         let mut added: HashSet<&str> = HashSet::new();
         let mut denied = HashSet::new();
-        for &(id, origin) in conns {
+        for &(id, endpoint) in conns {
+            let origin = relay_host(endpoint);
             if self.origins.contains(origin) || added.contains(origin) {
                 continue;
             }
@@ -43,14 +46,14 @@ impl RelayLedger {
         denied
     }
 
-    /// A body was sealed with `origins`.
+    /// A body was sealed with the endpoints `origins`.
     pub(crate) fn sealed(&mut self, origins: &[String]) {
-        self.origins.extend(origins.iter().cloned());
+        self.origins.extend(hosts(origins.iter()));
     }
 
     /// A body was given up after it may have reached ingest.
     pub(crate) fn given_up(&mut self, origins: &[String]) {
-        self.unanswered.extend(origins.iter().cloned());
+        self.unanswered.extend(hosts(origins.iter()));
     }
 
     /// Ingest accepted a body with `origins` at `recv_ms`, answered at
@@ -90,12 +93,16 @@ impl RelayLedger {
             Some(m) if month > m => {
                 self.month = Some(month);
                 let mut next: HashSet<String> = std::mem::take(&mut self.unanswered);
-                next.extend(still.cloned());
+                next.extend(hosts(still));
                 self.origins = next;
             }
             Some(_) => {}
         }
     }
+}
+
+fn hosts<'a>(endpoints: impl Iterator<Item = &'a String>) -> Vec<String> {
+    endpoints.map(|e| relay_host(e).to_string()).collect()
 }
 
 /// Months since 1970-01 of the UTC date at `ms`.
@@ -180,6 +187,23 @@ mod tests {
         ];
         assert_eq!(denied(&ledger, &c), HashSet::from([3]));
         assert_eq!(allowed(&ledger, &c), ["https://a.example"]);
+    }
+
+    #[test]
+    fn a_relay_is_its_host() {
+        let mut ledger = RelayLedger {
+            origins: (0..63).map(|i| format!("o{i}")).collect(),
+            ..Default::default()
+        };
+        let c = vec![
+            (1, "https://a.example/moq".to_string()),
+            (2, "moqt://a.example:4443/other".to_string()),
+            (3, "https://b.example/x".to_string()),
+        ];
+        assert_eq!(denied(&ledger, &c), HashSet::from([3]));
+        ledger.sealed(&allowed(&ledger, &c));
+        assert!(ledger.origins.contains("a.example"));
+        assert!(denied(&ledger, &[(4, "https://a.example:8443/p".to_string())]).is_empty());
     }
 
     #[test]

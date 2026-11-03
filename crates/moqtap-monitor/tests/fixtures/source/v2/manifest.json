@@ -57,7 +57,7 @@
               {
                 "c": 0,
                 "draft": 14,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/moq"
               }
             ],
             "t": "source-batch",
@@ -340,7 +340,7 @@
               {
                 "c": 0,
                 "draft": 14,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/moq"
               }
             ],
             "t": "source-batch",
@@ -840,7 +840,7 @@
               {
                 "c": 0,
                 "draft": 14,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/moq"
               }
             ],
             "t": "source-batch",
@@ -1243,7 +1243,7 @@
               {
                 "c": 0,
                 "draft": 14,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/moq"
               }
             ],
             "t": "source-batch",
@@ -1406,7 +1406,7 @@
               {
                 "c": 0,
                 "draft": 14,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/moq"
               }
             ],
             "t": "source-batch",
@@ -7269,7 +7269,7 @@
               {
                 "c": 0,
                 "draft": 14,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/moq"
               }
             ],
             "t": "source-batch",
@@ -10350,7 +10350,7 @@
               {
                 "c": 0,
                 "draft": 14,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/moq"
               }
             ],
             "t": "source-batch",
@@ -10520,7 +10520,7 @@
               {
                 "c": 0,
                 "draft": 14,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/moq"
               }
             ],
             "t": "source-batch",
