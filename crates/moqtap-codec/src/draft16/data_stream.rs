@@ -1121,6 +1121,9 @@ impl DatagramHeader {
 
     /// Decode a datagram header, Type field included.
     ///
+    /// [`Self::decode_object`] is the read of a whole datagram, and applies
+    /// the Object rules this header-only read does not.
+    ///
     /// A Type spelled in more than one byte is refused first, for the reason
     /// given on [`SubgroupHeader::decode`].
     pub fn decode(buf: &mut impl Buf) -> Result<Self, CodecError> {
@@ -1170,6 +1173,43 @@ impl DatagramHeader {
             extension_headers,
             object_status,
         })
+    }
+
+    /// Decode one whole datagram: the header, then the payload that runs to the
+    /// end of `buf`, which must hold exactly one transport datagram.
+    ///
+    /// Unlike [`Self::decode`], this refuses an extension block that does not
+    /// parse, as [`crate::object_properties::parse_object_properties`] does,
+    /// and, with [`CodecError::MalformedTrack`], the Prior Group ID Gap and
+    /// Prior Object ID Gap conditions one Object shows (draft-16 Section 11.3,
+    /// draft-16 Section 11.4), through [`PriorGaps::from_properties`].
+    ///
+    /// It also refuses bytes after a status datagram's Object Status, with
+    /// [`CodecError::PayloadNotPermitted`]. draft-16 Section 10.3.1, of the
+    /// STATUS bit: "When set to 1, the Object Status field is present and there
+    /// is no Object Payload."
+    pub fn decode_object(buf: &mut impl Buf) -> Result<(Self, Vec<u8>), CodecError> {
+        let header = Self::decode(buf)?;
+        let properties = crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft16,
+            &header.extension_headers,
+        )?;
+        PriorGaps::from_properties(
+            &properties,
+            header.group_id.into_inner(),
+            header.object_id.into_inner(),
+        )?;
+        let payload = crate::types::read_bytes(buf, buf.remaining())?;
+        if let Some(status) = header.object_status {
+            if !payload.is_empty() {
+                return Err(CodecError::PayloadNotPermitted {
+                    status: status.as_u64(),
+                    len: payload.len(),
+                    detail: "its type states a status in place of a payload",
+                });
+            }
+        }
+        Ok((header, payload))
     }
 }
 
@@ -2326,5 +2366,70 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod datagram_gap_tests {
+    use super::*;
+
+    fn datagram(group: usize, object: usize, block: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        DatagramHeader {
+            datagram_type: 0x01,
+            track_alias: VarInt::from_usize(1),
+            group_id: VarInt::from_usize(group),
+            object_id: VarInt::from_usize(object),
+            publisher_priority: Some(0x80),
+            extension_headers: block.to_vec(),
+            object_status: None,
+        }
+        .encode(&mut bytes);
+        bytes.push(0xAA);
+        bytes
+    }
+
+    fn is_malformed_track(bytes: &[u8]) -> bool {
+        matches!(
+            DatagramHeader::decode_object(&mut &bytes[..]),
+            Err(CodecError::MalformedTrack { .. })
+        )
+    }
+
+    #[test]
+    fn decode_object_refuses_the_gap_conditions_one_datagram_shows() {
+        for bytes in [
+            datagram(1, 0, &[0x3C, 2]),
+            datagram(5, 0, &[0x3E, 1]),
+            datagram(5, 5, &[0x3C, 1, 0x00, 1]),
+        ] {
+            assert!(is_malformed_track(&bytes));
+            assert!(DatagramHeader::decode(&mut &bytes[..]).is_ok());
+        }
+        let (_, payload) =
+            DatagramHeader::decode_object(&mut &datagram(2, 1, &[0x3C, 2])[..]).unwrap();
+        assert_eq!(payload, vec![0xAA]);
+    }
+
+    #[test]
+    fn decode_object_refuses_a_payload_after_a_status_datagram() {
+        let mut wire = Vec::new();
+        DatagramHeader {
+            datagram_type: 0x20,
+            track_alias: VarInt::from_usize(1),
+            group_id: VarInt::from_usize(0),
+            object_id: VarInt::from_usize(0),
+            publisher_priority: Some(0x80),
+            extension_headers: Vec::new(),
+            object_status: Some(ObjectStatus::Normal),
+        }
+        .encode(&mut wire);
+        let (_, payload) = DatagramHeader::decode_object(&mut &wire[..]).unwrap();
+        assert!(payload.is_empty());
+        wire.push(0xAA);
+        assert!(matches!(
+            DatagramHeader::decode_object(&mut &wire[..]),
+            Err(CodecError::PayloadNotPermitted { len: 1, .. })
+        ));
     }
 }

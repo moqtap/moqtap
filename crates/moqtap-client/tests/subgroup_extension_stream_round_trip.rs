@@ -41,11 +41,11 @@ fn varint(v: u64) -> VarInt {
     VarInt::from_u64(v).unwrap()
 }
 
-/// Extension bytes chosen so a decoder that lands on them by mistake produces
-/// something visible rather than a coincidentally legal frame.
+/// One extension header, odd Type 0x0D holding the byte 0xAA: a block the
+/// reader parses, as a conforming peer's would be.
 /// Unread in a build that enables only drafts whose gates do not use it.
 #[allow(dead_code)]
-const EXTENSIONS: [u8; 3] = [0xAA, 0xBB, 0xCC];
+const EXTENSIONS: [u8; 3] = [0x0D, 0x01, 0xAA];
 
 /// Generates the round trip for one of the three drafts that gate the block on
 /// the stream type.

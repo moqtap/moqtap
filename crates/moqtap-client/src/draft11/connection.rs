@@ -11,7 +11,7 @@ use crate::transport::{RecvStream, SendStream, Transport, TransportError};
 use moqtap_codec::dispatch::{
     AnyControlMessage, AnyDatagramHeader, AnyFetchHeader, AnySubgroupHeader,
 };
-use moqtap_codec::draft11::data_stream::{FetchObjectHeader, ObjectHeader};
+use moqtap_codec::draft11::data_stream::{FetchObjectHeader, ObjectHeader, SubgroupGaps};
 use moqtap_codec::draft11::message::ControlMessage;
 use moqtap_codec::error::CodecError;
 use moqtap_codec::kvp::KeyValuePair;
@@ -371,6 +371,9 @@ pub struct FramedRecvStream {
     /// header has been read, which is the only order those two may be called
     /// in.
     subgroup_has_extensions: bool,
+    /// The Prior Group ID Gap values this subgroup stream's Objects carried.
+    /// Set by [`FramedRecvStream::read_subgroup_header`].
+    subgroup_gaps: Option<SubgroupGaps>,
 }
 
 impl FramedRecvStream {
@@ -380,6 +383,7 @@ impl FramedRecvStream {
             inner,
             buf: BytesMut::with_capacity(4096),
             subgroup_has_extensions: false,
+            subgroup_gaps: None,
             tracking: None,
         }
     }
@@ -492,6 +496,7 @@ impl FramedRecvStream {
                     match header {
                         AnySubgroupHeader::Draft11(ref d) => {
                             self.subgroup_has_extensions = d.stream_type.has_extensions();
+                            self.subgroup_gaps = Some(SubgroupGaps::new(d));
                         }
                         // Only this draft's header sets the flag. With draft 11 the only enabled
                         // draft `AnySubgroupHeader` has a single variant, the arm above is
@@ -549,6 +554,10 @@ impl FramedRecvStream {
     /// It is also what puts the rule binding extension headers to Object Status
     /// within reach on a subgroup stream. A reader that never reads the block
     /// cannot notice that a non-existent Object carried one.
+    ///
+    /// A Prior Group ID Gap larger than the stream's Group ID, or one that
+    /// differs from an earlier Object's on the stream, is returned as
+    /// [`CodecError::MalformedTrack`] (draft-11 Section 10.1).
     pub async fn read_subgroup_object(&mut self) -> Result<SubgroupObject, ConnectionError> {
         loop {
             let mut cursor = &self.buf[..];
@@ -562,6 +571,9 @@ impl FramedRecvStream {
                             return Err(ConnectionError::UnexpectedEnd);
                         }
                         continue;
+                    }
+                    if let Some(gaps) = &mut self.subgroup_gaps {
+                        gaps.check(&header).map_err(ConnectionError::Codec)?;
                     }
                     let payload = self.buf[header_consumed..total].to_vec();
                     self.buf.advance(total);
@@ -1725,6 +1737,9 @@ impl Connection {
             // and the session stays open.
             | CodecError::PayloadNotPermitted { .. }
             | CodecError::MalformedObjectProperties { .. }
+            // draft-11 Section 10.1 calls a track with a Prior Group ID Gap
+            // fault malformed and names no close, so the session stays open.
+            | CodecError::MalformedTrack { .. }
             // Raised only by the draft-23 codec.
             | CodecError::ControlMessageExceedsLimit { .. }
             | CodecError::MissingErrorDetail { .. }
@@ -1735,7 +1750,6 @@ impl Connection {
             | CodecError::TrackPropertiesNotPermitted
             | CodecError::DeltaDecodingOverflow { .. }
             | CodecError::MalformedObject { .. }
-            | CodecError::MalformedTrack { .. }
             | CodecError::UnknownObjectStatus(_)
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(

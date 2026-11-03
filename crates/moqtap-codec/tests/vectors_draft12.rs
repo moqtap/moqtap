@@ -5,8 +5,8 @@ mod test_vectors;
 use bytes::{Buf, BufMut};
 use moqtap_codec::dispatch::AnySubgroupHeader;
 use moqtap_codec::draft12::data_stream::{
-    DatagramHeader, DatagramStatusHeader, DatagramType, FetchHeader, FetchObjectHeader, StreamType,
-    SubgroupHeader,
+    Datagram, DatagramHeader, DatagramStatusHeader, DatagramType, FetchHeader, FetchObjectHeader,
+    StreamType, SubgroupHeader,
 };
 use moqtap_codec::draft12::message::ControlMessage;
 use moqtap_codec::error::CodecError;
@@ -263,6 +263,9 @@ fn run_datagram_vectors(relative_path: &str) {
         if let Some(expected) = &vector.decoded {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
+            // An endpoint reads a whole datagram, so the Object rules apply too.
+            Datagram::decode_object(&mut &bytes[..])
+                .unwrap_or_else(|e| panic!("[{}] datagram decode_object failed: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
 
             let type_id = VarInt::decode(&mut cursor).expect("datagram type varint").into_inner();
@@ -383,16 +386,9 @@ fn run_datagram_vectors(relative_path: &str) {
         if vector.error.is_some() {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
-            let mut cursor: &[u8] = &bytes;
-            // Either the stream type varint or the header itself; whichever
-            // failed is the failure this vector is evidence of.
-            let failure = match VarInt::decode(&mut cursor) {
-                Err(e) => Some(CodecError::from(e)),
-                Ok(_) => DatagramHeader::decode(&mut cursor).err(),
-            };
-            match failure {
-                Some(e) => vector.assert_error(&e),
-                None => panic!("[{}] expected decode error but succeeded", vector.id),
+            match Datagram::decode_object(&mut &bytes[..]) {
+                Ok(_) => panic!("[{}] expected decode error but succeeded", vector.id),
+                Err(e) => vector.assert_error(&e),
             }
         }
     }

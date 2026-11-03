@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking.** `MalformedTrackCondition` gains `PriorGroupIdGap`; an exhaustive match over it no longer compiles without it.
+
+### Added
+
+- Drafts 12-13: `Connection::withdraw_for_subgroup_stream`, which sends the UNSUBSCRIBE for the Malformed Track a subgroup stream reported, the Prior Group ID Gap fault included.
+
+### Fixed
+
+- Drafts 11-13: `FramedRecvStream::read_subgroup_object` accepted a Prior Group ID Gap larger than the Group ID, or one that differs from an earlier Object's on the same stream. It now returns `CodecError::MalformedTrack`, and the session stays open. It also refuses an extension block that does not parse, as drafts 14-23 do.
+
 ## [0.10.0] - 2026-11-03
 
 ### Changed

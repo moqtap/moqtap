@@ -869,7 +869,9 @@ pub enum CodecError {
     /// draft-17 Section 11.8, draft-18 Section 12.8, draft-18 Section 12.9,
     /// draft-19 Section 12.8, draft-19 Section 12.9, draft-20 Section 12.8,
     /// draft-20 Section 12.9, draft-21 Section 10.8, draft-21 Section 10.9,
-    /// draft-22 Section 10.8 and draft-22 Section 10.9.
+    /// draft-22 Section 10.8 and draft-22 Section 10.9. Drafts 11-13 state
+    /// only the Prior Group ID Gap ones: draft-11 Section 10.1,
+    /// draft-12 Section 10.1 and draft-13 Section 10.1.
     #[error("malformed track: {detail}")]
     MalformedTrack {
         /// Which condition was detected.

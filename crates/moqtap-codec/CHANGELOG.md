@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Whole-datagram readers that apply the Prior Gap rules: `Datagram::decode_object` on drafts 11-13, `DatagramObject::decode_object` on draft-14 and `DatagramHeader::decode_object` on drafts 15-16, with `PriorGaps` and `SubgroupGaps` in the `data_stream` module of drafts 11-13.
+
+### Fixed
+
+- Drafts 11-13: `AnySubgroupObjectReader::read_object` accepted a Prior Group ID Gap larger than the Group ID, and two Objects on one subgroup stream with different values, and no datagram reader refused a gap larger than the datagram's Group ID. `read_object` and the new `Datagram::decode_object` refuse them with `MalformedTrack`.
+- Drafts 14-16: no datagram reader refused the Prior Group ID Gap and Prior Object ID Gap conditions one Object shows. The new `decode_object` readers refuse them with `MalformedTrack`, as drafts 17-22 do.
+
 ## [0.10.0] - 2026-11-03
 
 ### Changed

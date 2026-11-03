@@ -581,18 +581,19 @@ macro_rules! legacy_subgroup_glue {
         }
     };
 
-    (gated_extensions $name:ident, $feat:literal, $draft:ident, $version:ident) => {
+    (gated_extensions $name:ident, $feat:literal, $draft:ident) => {
         #[cfg(feature = $feat)]
         mod $name {
             use super::conv;
             use super::{AnySubgroupObject, AnySubgroupObjectMeta};
             use crate::error::CodecError;
-            use crate::$draft::data_stream::ObjectHeader;
+            use crate::$draft::data_stream::{ObjectHeader, SubgroupGaps};
             use crate::$draft::types::ObjectStatus;
             use bytes::{Buf, BufMut};
 
             pub fn read_object(
                 extensions: bool,
+                gaps: &mut SubgroupGaps,
                 buf: &mut impl Buf,
             ) -> Result<AnySubgroupObject, CodecError> {
                 let header = ObjectHeader::decode_with_extensions(extensions, buf)?;
@@ -602,10 +603,7 @@ macro_rules! legacy_subgroup_glue {
                 } else {
                     (None, conv::take(buf, payload_length)?)
                 };
-                crate::object_properties::parse_object_properties(
-                    crate::version::DraftVersion::$version,
-                    &header.extensions,
-                )?;
+                gaps.check(&header)?;
                 Ok(AnySubgroupObject {
                     object_id: header.object_id.into_inner(),
                     extension_headers: header.extensions,
@@ -668,9 +666,9 @@ legacy_subgroup_glue!(no_extensions sg07, "draft07", draft07);
 legacy_subgroup_glue!(count_extensions sg08, "draft08", draft08);
 legacy_subgroup_glue!(length_extensions sg09, "draft09", draft09, Draft09);
 legacy_subgroup_glue!(length_extensions sg10, "draft10", draft10, Draft10);
-legacy_subgroup_glue!(gated_extensions sg11, "draft11", draft11, Draft11);
-legacy_subgroup_glue!(gated_extensions sg12, "draft12", draft12, Draft12);
-legacy_subgroup_glue!(gated_extensions sg13, "draft13", draft13, Draft13);
+legacy_subgroup_glue!(gated_extensions sg11, "draft11", draft11);
+legacy_subgroup_glue!(gated_extensions sg12, "draft12", draft12);
+legacy_subgroup_glue!(gated_extensions sg13, "draft13", draft13);
 
 /// Generates the conversion glue between one draft's stateful
 /// `SubgroupObjectReader` and the draft-neutral object types.
@@ -1719,8 +1717,9 @@ impl Resolved {
 // ── Subgroup object reader ──────────────────────────────────
 
 /// Per-draft reader state. Drafts 07-10 need none, drafts 11-13 need the
-/// stream type's extensions-present flag, drafts 14-23 own a stateful
-/// per-draft reader that tracks the Object ID delta.
+/// stream type's extensions-present flag and the Prior Group ID Gap values the
+/// stream's Objects carried, drafts 14-23 own a stateful per-draft reader that
+/// tracks the Object ID delta.
 #[derive(Debug, Clone)]
 enum SubgroupReaderState {
     #[cfg(feature = "draft07")]
@@ -1732,11 +1731,11 @@ enum SubgroupReaderState {
     #[cfg(feature = "draft10")]
     Draft10,
     #[cfg(feature = "draft11")]
-    Draft11 { extensions: bool },
+    Draft11 { extensions: bool, gaps: crate::draft11::data_stream::SubgroupGaps },
     #[cfg(feature = "draft12")]
-    Draft12 { extensions: bool },
+    Draft12 { extensions: bool, gaps: crate::draft12::data_stream::SubgroupGaps },
     #[cfg(feature = "draft13")]
-    Draft13 { extensions: bool },
+    Draft13 { extensions: bool, gaps: crate::draft13::data_stream::SubgroupGaps },
     #[cfg(feature = "draft14")]
     Draft14(crate::draft14::data_stream::SubgroupObjectReader),
     #[cfg(feature = "draft15")]
@@ -1792,17 +1791,20 @@ impl AnySubgroupObjectReader {
             #[cfg(feature = "draft10")]
             AnySubgroupHeader::Draft10(_) => SubgroupReaderState::Draft10,
             #[cfg(feature = "draft11")]
-            AnySubgroupHeader::Draft11(h) => {
-                SubgroupReaderState::Draft11 { extensions: subgroup_extensions_11(h)? }
-            }
+            AnySubgroupHeader::Draft11(h) => SubgroupReaderState::Draft11 {
+                extensions: subgroup_extensions_11(h)?,
+                gaps: crate::draft11::data_stream::SubgroupGaps::new(h),
+            },
             #[cfg(feature = "draft12")]
-            AnySubgroupHeader::Draft12(h) => {
-                SubgroupReaderState::Draft12 { extensions: subgroup_extensions_12(h)? }
-            }
+            AnySubgroupHeader::Draft12(h) => SubgroupReaderState::Draft12 {
+                extensions: subgroup_extensions_12(h)?,
+                gaps: crate::draft12::data_stream::SubgroupGaps::new(h),
+            },
             #[cfg(feature = "draft13")]
-            AnySubgroupHeader::Draft13(h) => {
-                SubgroupReaderState::Draft13 { extensions: subgroup_extensions_13(h)? }
-            }
+            AnySubgroupHeader::Draft13(h) => SubgroupReaderState::Draft13 {
+                extensions: subgroup_extensions_13(h)?,
+                gaps: crate::draft13::data_stream::SubgroupGaps::new(h),
+            },
             #[cfg(feature = "draft14")]
             AnySubgroupHeader::Draft14(h) => SubgroupReaderState::Draft14(
                 crate::draft14::data_stream::SubgroupObjectReader::new(h),
@@ -1904,7 +1906,10 @@ impl AnySubgroupObjectReader {
     /// callers that may be fed partial buffers must probe against a clone.
     ///
     /// Refuses a property block that does not parse, as
-    /// [`crate::object_properties::parse_object_properties`] does;
+    /// [`crate::object_properties::parse_object_properties`] does, and the
+    /// Prior Group ID Gap conditions one stream shows on drafts 11-23, and the
+    /// Prior Object ID Gap ones on drafts 14-23, as
+    /// [`CodecError::MalformedTrack`];
     /// [`read_object_meta`](Self::read_object_meta) does not read inside it.
     #[allow(unused_variables, unreachable_code)]
     pub fn read_object(&mut self, buf: &mut impl Buf) -> Result<AnySubgroupObject, CodecError> {
@@ -1918,11 +1923,17 @@ impl AnySubgroupObjectReader {
             #[cfg(feature = "draft10")]
             SubgroupReaderState::Draft10 => sg10::read_object(buf),
             #[cfg(feature = "draft11")]
-            SubgroupReaderState::Draft11 { extensions } => sg11::read_object(*extensions, buf),
+            SubgroupReaderState::Draft11 { extensions, gaps } => {
+                sg11::read_object(*extensions, gaps, buf)
+            }
             #[cfg(feature = "draft12")]
-            SubgroupReaderState::Draft12 { extensions } => sg12::read_object(*extensions, buf),
+            SubgroupReaderState::Draft12 { extensions, gaps } => {
+                sg12::read_object(*extensions, gaps, buf)
+            }
             #[cfg(feature = "draft13")]
-            SubgroupReaderState::Draft13 { extensions } => sg13::read_object(*extensions, buf),
+            SubgroupReaderState::Draft13 { extensions, gaps } => {
+                sg13::read_object(*extensions, gaps, buf)
+            }
             #[cfg(feature = "draft14")]
             SubgroupReaderState::Draft14(inner) => sg14::read_object(inner, buf),
             #[cfg(feature = "draft15")]
@@ -1969,11 +1980,17 @@ impl AnySubgroupObjectReader {
             #[cfg(feature = "draft10")]
             SubgroupReaderState::Draft10 => sg10::read_object_meta(buf),
             #[cfg(feature = "draft11")]
-            SubgroupReaderState::Draft11 { extensions } => sg11::read_object_meta(*extensions, buf),
+            SubgroupReaderState::Draft11 { extensions, .. } => {
+                sg11::read_object_meta(*extensions, buf)
+            }
             #[cfg(feature = "draft12")]
-            SubgroupReaderState::Draft12 { extensions } => sg12::read_object_meta(*extensions, buf),
+            SubgroupReaderState::Draft12 { extensions, .. } => {
+                sg12::read_object_meta(*extensions, buf)
+            }
             #[cfg(feature = "draft13")]
-            SubgroupReaderState::Draft13 { extensions } => sg13::read_object_meta(*extensions, buf),
+            SubgroupReaderState::Draft13 { extensions, .. } => {
+                sg13::read_object_meta(*extensions, buf)
+            }
             #[cfg(feature = "draft14")]
             SubgroupReaderState::Draft14(inner) => sg14::read_object_meta(inner, buf),
             #[cfg(feature = "draft15")]

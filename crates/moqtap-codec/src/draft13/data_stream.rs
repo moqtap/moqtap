@@ -6,8 +6,10 @@
 
 use super::types::ObjectStatus;
 use crate::error::CodecError;
+use crate::object_properties::{parse_object_properties, ObjectProperty, PropertyValue};
 use crate::types::read_bytes;
 use crate::varint::VarInt;
+use crate::version::DraftVersion;
 use bytes::{Buf, BufMut};
 
 /// Stream type IDs for draft-13 data streams.
@@ -538,6 +540,98 @@ impl ObjectHeader {
 }
 
 // ============================================================
+// Prior Group ID Gap
+// ============================================================
+
+/// Prior Group ID Gap, Extension Header Type 0x40 (draft-13 Section 10.1).
+pub const PRIOR_GROUP_ID_GAP: u64 = 0x40;
+
+/// The Prior Group ID Gap values one Object carries.
+///
+/// draft-13 Section 10.1: "A track with a Group that contains more than one
+/// Object with different values for Prior Group ID Gap or has a Prior Group ID
+/// Gap larger than the Group ID is considered malformed." Malformed Tracks are
+/// draft-13 Section 2.5. This draft does not limit an Object to one instance,
+/// so every value is kept.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PriorGaps {
+    /// Each Prior Group ID Gap, in wire order.
+    pub group: Vec<u64>,
+}
+
+impl PriorGaps {
+    /// Read the gaps from an Object's parsed extension headers, refusing one
+    /// larger than `group_id` with [`CodecError::MalformedTrack`].
+    pub fn from_properties(
+        properties: &[ObjectProperty<'_>],
+        group_id: u64,
+    ) -> Result<Self, CodecError> {
+        let group: Vec<u64> = properties
+            .iter()
+            .filter_map(|property| match (property.property_type, &property.value) {
+                (PRIOR_GROUP_ID_GAP, PropertyValue::Varint(value)) => Some(*value),
+                _ => None,
+            })
+            .collect();
+        if let Some(gap) = group.iter().copied().find(|&gap| gap > group_id) {
+            return Err(CodecError::MalformedTrack {
+                detail: format!("Prior Group ID Gap {gap} is larger than Group ID {group_id}"),
+            });
+        }
+        Ok(Self { group })
+    }
+
+    /// [`Self::from_properties`] on an extension block, refusing a block that
+    /// does not parse as [`crate::object_properties::parse_object_properties`]
+    /// does.
+    pub fn from_extensions(extensions: &[u8], group_id: u64) -> Result<Self, CodecError> {
+        let properties = parse_object_properties(DraftVersion::Draft13, extensions)?;
+        Self::from_properties(&properties, group_id)
+    }
+}
+
+/// The Prior Group ID Gap values the Objects of one subgroup stream carried.
+///
+/// A subgroup stream carries one Group, so its Objects are where "a Group that
+/// contains more than one Object with different values for Prior Group ID Gap"
+/// (draft-13 Section 10.1) shows on one stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubgroupGaps {
+    group_id: u64,
+    seen: Vec<u64>,
+}
+
+impl SubgroupGaps {
+    /// Track the Objects of the stream `header` opens.
+    pub fn new(header: &SubgroupHeader) -> Self {
+        Self { group_id: header.group_id.into_inner(), seen: Vec::new() }
+    }
+
+    /// Check the next Object on this stream, refusing with
+    /// [`CodecError::MalformedTrack`] a gap larger than the Group ID or one
+    /// that differs from a gap an earlier Object on the stream carried. The
+    /// values one Object carries are not compared with each other. Records the
+    /// Object only when it passes.
+    pub fn check(&mut self, object: &ObjectHeader) -> Result<PriorGaps, CodecError> {
+        let gaps = PriorGaps::from_extensions(&object.extensions, self.group_id)?;
+        if gaps.group.iter().any(|gap| self.seen.iter().any(|seen| seen != gap)) {
+            return Err(CodecError::MalformedTrack {
+                detail: format!(
+                    "two Objects in Group {} carry different Prior Group ID Gap values",
+                    self.group_id
+                ),
+            });
+        }
+        for &gap in &gaps.group {
+            if !self.seen.contains(&gap) {
+                self.seen.push(gap);
+            }
+        }
+        Ok(gaps)
+    }
+}
+
+// ============================================================
 // Datagram (types 0x00, 0x01)
 // ============================================================
 
@@ -828,6 +922,40 @@ impl Datagram {
         Ok(Self::Payload(header))
     }
 
+    /// Decode one whole datagram: [`Self::decode`], then the payload that runs
+    /// to the end of `buf`, which must hold exactly one transport datagram.
+    ///
+    /// Unlike [`Self::decode`], this refuses an extension block that does not
+    /// parse, as [`crate::object_properties::parse_object_properties`] does,
+    /// and, with [`CodecError::MalformedTrack`], a Prior Group ID Gap larger
+    /// than the datagram's Group ID, through [`PriorGaps::from_extensions`].
+    /// draft-13 Section 9.3 carries the Group ID and the extension headers in
+    /// one datagram, so this half of the draft-13 Section 10.1 rule shows in it.
+    ///
+    /// It also refuses bytes after a status datagram's Object Status, with
+    /// [`CodecError::PayloadNotPermitted`]. draft-13 Section 9.3.2: "An
+    /// OBJECT_DATAGRAM_STATUS is similar to OBJECT_DATAGRAM except it conveys
+    /// an Object Status and has no payload."
+    pub fn decode_object(buf: &mut impl Buf) -> Result<(Self, Vec<u8>), CodecError> {
+        let datagram = Self::decode(buf)?;
+        let (group_id, extensions) = match &datagram {
+            Self::Payload(header) => (header.group_id.into_inner(), &header.extensions),
+            Self::Status(header) => (header.group_id.into_inner(), &header.extensions),
+        };
+        PriorGaps::from_extensions(extensions, group_id)?;
+        let payload = read_bytes(buf, buf.remaining())?;
+        if let Self::Status(header) = &datagram {
+            if !payload.is_empty() {
+                return Err(CodecError::PayloadNotPermitted {
+                    status: header.object_status.as_u64(),
+                    len: payload.len(),
+                    detail: "its type states a status in place of a payload",
+                });
+            }
+        }
+        Ok((datagram, payload))
+    }
+
     /// Encode the datagram, type field included.
     pub fn encode(&self, buf: &mut impl BufMut) {
         let datagram_type = self.datagram_type();
@@ -988,5 +1116,124 @@ impl FetchObjectHeader {
             payload_length,
             object_status,
         })
+    }
+}
+
+#[cfg(test)]
+mod prior_gap_tests {
+    use super::*;
+
+    fn header(group: usize) -> SubgroupHeader {
+        SubgroupHeader {
+            stream_type: StreamType::SubgroupZeroExt,
+            track_alias: VarInt::from_usize(1),
+            group_id: VarInt::from_usize(group),
+            subgroup_id: VarInt::from_usize(0),
+            publisher_priority: 0x80,
+        }
+    }
+
+    fn gaps_block(gaps: &[usize]) -> Vec<u8> {
+        let mut block = Vec::new();
+        for &gap in gaps {
+            VarInt::from_usize(PRIOR_GROUP_ID_GAP as usize).encode(&mut block);
+            VarInt::from_usize(gap).encode(&mut block);
+        }
+        block
+    }
+
+    fn object(id: usize, gaps: &[usize]) -> ObjectHeader {
+        let extensions = gaps_block(gaps);
+        ObjectHeader {
+            object_id: VarInt::from_usize(id),
+            extension_headers_length: VarInt::from_usize(extensions.len()),
+            extensions,
+            payload_length: VarInt::from_usize(1),
+            object_status: ObjectStatus::Normal,
+        }
+    }
+
+    fn is_malformed_track<T>(result: Result<T, CodecError>) -> bool {
+        matches!(result, Err(CodecError::MalformedTrack { .. }))
+    }
+
+    #[test]
+    fn gap_larger_than_the_group_id_is_refused() {
+        assert!(is_malformed_track(SubgroupGaps::new(&header(1)).check(&object(0, &[2]))));
+        let gaps = SubgroupGaps::new(&header(2)).check(&object(0, &[2])).unwrap();
+        assert_eq!(gaps.group, vec![2]);
+    }
+
+    #[test]
+    fn objects_with_different_gaps_are_refused() {
+        let mut gaps = SubgroupGaps::new(&header(5));
+        gaps.check(&object(0, &[2])).unwrap();
+        gaps.check(&object(1, &[])).unwrap();
+        gaps.check(&object(2, &[2])).unwrap();
+        assert!(is_malformed_track(gaps.check(&object(3, &[3]))));
+    }
+
+    #[test]
+    fn values_within_one_object_are_not_compared() {
+        let mut gaps = SubgroupGaps::new(&header(5));
+        assert_eq!(gaps.check(&object(0, &[2, 3])).unwrap().group, vec![2, 3]);
+        assert!(is_malformed_track(gaps.check(&object(1, &[2]))));
+    }
+
+    #[test]
+    fn a_refused_object_is_not_recorded() {
+        let mut gaps = SubgroupGaps::new(&header(5));
+        assert!(is_malformed_track(gaps.check(&object(0, &[6]))));
+        gaps.check(&object(1, &[3])).unwrap();
+    }
+
+    fn datagram(group: usize, gaps: &[usize]) -> Vec<u8> {
+        let extensions = gaps_block(gaps);
+        let mut bytes = Vec::new();
+        Datagram::Payload(DatagramHeader {
+            track_alias: VarInt::from_usize(1),
+            group_id: VarInt::from_usize(group),
+            object_id: VarInt::from_usize(0),
+            publisher_priority: 0x80,
+            extension_headers_length: VarInt::from_usize(extensions.len()),
+            extensions,
+            end_of_group: false,
+        })
+        .encode(&mut bytes);
+        bytes.push(0xAA);
+        bytes
+    }
+
+    #[test]
+    fn decode_object_refuses_a_gap_larger_than_the_datagram_group_id() {
+        let wire = datagram(1, &[2]);
+        assert!(is_malformed_track(Datagram::decode_object(&mut &wire[..])));
+        assert!(Datagram::decode(&mut &wire[..]).is_ok());
+        let wire = datagram(2, &[2]);
+        let (decoded, payload) = Datagram::decode_object(&mut &wire[..]).unwrap();
+        assert_eq!(decoded.datagram_type(), DatagramType::DatagramExt);
+        assert_eq!(payload, vec![0xAA]);
+    }
+
+    #[test]
+    fn decode_object_refuses_a_payload_after_a_status_datagram() {
+        let mut wire = Vec::new();
+        Datagram::Status(DatagramStatusHeader {
+            track_alias: VarInt::from_usize(1),
+            group_id: VarInt::from_usize(0),
+            object_id: VarInt::from_usize(0),
+            publisher_priority: 0x80,
+            extension_headers_length: VarInt::from_usize(0),
+            extensions: Vec::new(),
+            object_status: ObjectStatus::Normal,
+        })
+        .encode(&mut wire);
+        let (_, payload) = Datagram::decode_object(&mut &wire[..]).unwrap();
+        assert!(payload.is_empty());
+        wire.push(0xAA);
+        assert!(matches!(
+            Datagram::decode_object(&mut &wire[..]),
+            Err(CodecError::PayloadNotPermitted { len: 1, .. })
+        ));
     }
 }

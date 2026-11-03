@@ -239,7 +239,9 @@ fn run_datagram_vectors(relative_path: &str) {
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
 
-            let hdr = DatagramHeader::decode(&mut cursor)
+            // An endpoint reads a whole datagram, so these runners use the
+            // reader that holds the payload as well as the header.
+            let (hdr, payload) = DatagramHeader::decode_object(&mut cursor)
                 .unwrap_or_else(|e| panic!("[{}] datagram decode failed: {e}", vector.id));
 
             assert_eq!(
@@ -297,7 +299,7 @@ fn run_datagram_vectors(relative_path: &str) {
             );
             if let Some(expected_hex) = js_str_opt(expected, "payload_hex") {
                 assert_eq!(
-                    hex::encode(cursor),
+                    hex::encode(&payload),
                     expected_hex,
                     "[{}] payload_hex mismatch",
                     vector.id
@@ -314,7 +316,7 @@ fn run_datagram_vectors(relative_path: &str) {
             if vector.is_canonical() {
                 let mut out = Vec::new();
                 hdr.encode(&mut out);
-                out.extend_from_slice(cursor);
+                out.extend_from_slice(&payload);
                 assert_eq!(
                     hex::encode(&out),
                     vector.hex,
@@ -328,7 +330,7 @@ fn run_datagram_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            match DatagramHeader::decode(&mut cursor) {
+            match DatagramHeader::decode_object(&mut cursor) {
                 Ok(_) => panic!("[{}] expected decode error but succeeded", vector.id),
                 Err(e) => vector.assert_error(&e),
             }

@@ -97,6 +97,14 @@ pub enum MalformedTrackCondition {
     /// Detected by [`crate::track_locations`], which records the Objects a
     /// track has carried and the ranges signalled as not existing.
     ExistenceContradicted,
+    /// "A track with a Group that contains more than one Object with different
+    /// values for Prior Group ID Gap or has a Prior Group ID Gap larger than
+    /// the Group ID is considered malformed" (draft-12 Section 10.1,
+    /// draft-13 Section 10.1).
+    ///
+    /// Detected by the codec's `SubgroupGaps`, which a subgroup stream reader
+    /// holds for one stream.
+    PriorGroupIdGap,
 }
 
 impl std::fmt::Display for MalformedTrackCondition {
@@ -110,6 +118,9 @@ impl std::fmt::Display for MalformedTrackCondition {
             }
             MalformedTrackCondition::ExistenceContradicted => {
                 f.write_str("an Object was both received and signalled as not existing")
+            }
+            MalformedTrackCondition::PriorGroupIdGap => {
+                f.write_str("an Object carried a Prior Group ID Gap its Group cannot have")
             }
         }
     }

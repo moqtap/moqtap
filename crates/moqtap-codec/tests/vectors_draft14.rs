@@ -253,7 +253,9 @@ fn run_datagram_vectors(relative_path: &str) {
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
 
-            let obj = DatagramObject::decode(&mut cursor)
+            // An endpoint reads a whole datagram, so these runners use the
+            // reader that applies the Object rules too.
+            let obj = DatagramObject::decode_object(&mut cursor)
                 .unwrap_or_else(|e| panic!("[{}] datagram decode failed: {e}", vector.id));
 
             assert_eq!(
@@ -330,7 +332,7 @@ fn run_datagram_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            match DatagramObject::decode(&mut cursor) {
+            match DatagramObject::decode_object(&mut cursor) {
                 Ok(_) => panic!("[{}] expected decode error but succeeded", vector.id),
                 Err(e) => vector.assert_error(&e),
             }

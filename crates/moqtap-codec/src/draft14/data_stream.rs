@@ -1166,6 +1166,9 @@ impl DatagramObject {
     /// Decode a datagram. The buffer must contain the full datagram —
     /// payload-bearing types extend to the end of the QUIC datagram,
     /// which the caller is responsible for delimiting.
+    ///
+    /// [`Self::decode_object`] also applies the Object rules this read does
+    /// not.
     pub fn decode(buf: &mut impl Buf) -> Result<Self, CodecError> {
         let type_val = VarInt::decode(buf)?.into_inner();
         if type_val > 0xFF {
@@ -1225,6 +1228,28 @@ impl DatagramObject {
             status,
             payload,
         })
+    }
+
+    /// [`Self::decode`], then the Object rules a whole datagram is checked
+    /// against.
+    ///
+    /// Refuses an extension block that does not parse, as
+    /// [`crate::object_properties::parse_object_properties`] does, and, with
+    /// [`CodecError::MalformedTrack`], the Prior Group ID Gap and Prior Object
+    /// ID Gap conditions one Object shows (draft-14 Section 11.1,
+    /// draft-14 Section 11.3), through [`PriorGaps::from_properties`].
+    pub fn decode_object(buf: &mut impl Buf) -> Result<Self, CodecError> {
+        let object = Self::decode(buf)?;
+        let properties = crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft14,
+            &object.extension_headers,
+        )?;
+        PriorGaps::from_properties(
+            &properties,
+            object.group_id.into_inner(),
+            object.object_id.into_inner(),
+        )?;
+        Ok(object)
     }
 }
 
@@ -1841,5 +1866,47 @@ mod tests {
         let mut unnamed = Vec::new();
         datagram(0x00, None, vec![0xDE, 0xAD]).encode_checked(&mut unnamed).unwrap();
         assert_eq!(named, unnamed, "naming Normal must ask for the bytes leaving it out asks for");
+    }
+}
+
+#[cfg(test)]
+mod datagram_gap_tests {
+    use super::*;
+
+    fn datagram(group: u64, object: u64, block: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        DatagramObject {
+            datagram_type: DatagramType::payload(true, true, false),
+            track_alias: VarInt::from_u64(1).unwrap(),
+            group_id: VarInt::from_u64(group).unwrap(),
+            object_id: VarInt::from_u64(object).unwrap(),
+            publisher_priority: 0x80,
+            extension_headers: block.to_vec(),
+            status: None,
+            payload: vec![0xAA],
+        }
+        .encode(&mut bytes);
+        bytes
+    }
+
+    fn is_malformed_track(bytes: &[u8]) -> bool {
+        matches!(
+            DatagramObject::decode_object(&mut &bytes[..]),
+            Err(CodecError::MalformedTrack { .. })
+        )
+    }
+
+    #[test]
+    fn decode_object_refuses_the_gap_conditions_one_datagram_shows() {
+        for bytes in [
+            datagram(1, 0, &[0x3C, 2]),
+            datagram(5, 0, &[0x3E, 1]),
+            datagram(5, 5, &[0x3C, 1, 0x3C, 1]),
+        ] {
+            assert!(is_malformed_track(&bytes));
+            assert!(DatagramObject::decode(&mut &bytes[..]).is_ok());
+        }
+        let wire = datagram(2, 1, &[0x3C, 2, 0x3E, 1]);
+        assert!(DatagramObject::decode_object(&mut &wire[..]).is_ok());
     }
 }
