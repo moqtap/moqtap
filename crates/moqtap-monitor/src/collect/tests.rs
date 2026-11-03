@@ -204,6 +204,12 @@ fn gz_len(s: &crate::pack::Sealed) -> usize {
     crate::wire::gzip(&crate::wire::frames(&s.batch, &probe, &s.records)).len()
 }
 
+/// The sender's part: names fixed at the first send, then the answer.
+fn sent_and_answered(s: &mut crate::pack::Sealed, accepted: bool) {
+    s.name_tracks();
+    s.answered(accepted);
+}
+
 #[test]
 fn a_long_track_list_leaves_room_for_many_objects() {
     for (tracks, name) in [
@@ -224,21 +230,155 @@ fn a_long_track_list_leaves_room_for_many_objects() {
             c.object_sent(id, &ns, n.as_bytes(), sent(0, 0), at).expect("taken");
         }
         c.cut(at, false);
-        c.cuts.clear();
+        let mut packer = Packer::new(head(), None);
+        for iv in c.cuts.drain(..) {
+            sent_and_answered(&mut packer.pack(iv, &HashSet::new(), None).sealed, true);
+        }
         for o in 1..=3000u64 {
             at += 1_000;
             c.observe(at, None);
             c.object_sent(id, &ns, names[0].as_bytes(), sent(0, o), at).expect("taken");
         }
         c.cut(at, false);
-        let mut packer = Packer::new(head());
         let bodies: Vec<_> =
             c.cuts.drain(..).map(|iv| packer.pack(iv, &HashSet::new(), None)).collect();
         assert!(bodies.len() <= 3, "{} bodies for {tracks} tracks", bodies.len());
-        for b in &bodies {
+        for mut b in bodies {
+            sent_and_answered(&mut b.sealed, true);
             assert_eq!(b.sealed.batch.tracks.len(), tracks);
             assert!(gz_len(&b.sealed) <= SEAL_BYTES, "{}", gz_len(&b.sealed));
         }
+    }
+}
+
+/// Names of `len` bytes that do not compress, 256 tracks of them. At 120
+/// bytes the list alone is past the byte seal.
+fn incompressible_names(len: usize) -> Vec<Vec<u8>> {
+    let mut x: u64 = 0x9e37_79b9;
+    (0..256)
+        .map(|_| {
+            (0..len)
+                .map(|_| {
+                    x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                    (x >> 56) as u8
+                })
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn a_track_list_past_the_seal_is_listed_by_key_once_its_names_are_accepted() {
+    let mut c = Collector::new(15_000);
+    let (id, _) = c.open("https://relay.example".into(), 0).expect("open");
+    let names = incompressible_names(120);
+    let mut at = 0;
+    for n in &names {
+        at += 1_000;
+        c.observe(at, None);
+        c.object_sent(id, &NS, n, sent(0, 0), at).expect("taken");
+    }
+    c.cut(at, false);
+    let mut packer = Packer::new(head(), None);
+    for iv in c.cuts.drain(..) {
+        let mut s = packer.pack(iv, &HashSet::new(), None).sealed;
+        sent_and_answered(&mut s, true);
+        assert!(s.batch.tracks.iter().all(|t| t.named == (t.span.is_some())), "named once");
+    }
+    for o in 1..=3000u64 {
+        at += 1_000;
+        c.observe(at, None);
+        c.object_sent(id, &NS, &names[0], sent(0, o), at).expect("taken");
+    }
+    c.cut(at, false);
+    let bodies: Vec<_> =
+        c.cuts.drain(..).map(|iv| packer.pack(iv, &HashSet::new(), None)).collect();
+    assert_eq!(bodies.len(), 1, "3000 objects fit one body");
+    for mut b in bodies {
+        sent_and_answered(&mut b.sealed, true);
+        assert_eq!(b.sealed.batch.tracks.len(), 256);
+        assert!(b.sealed.batch.tracks.iter().all(|t| !t.named));
+        assert!(gz_len(&b.sealed) <= SEAL_BYTES, "{}", gz_len(&b.sealed));
+    }
+}
+
+#[test]
+fn names_stay_in_every_body_until_one_carrying_them_is_accepted() {
+    let (mut c, id) = collector();
+    let mut packer = Packer::new(head(), None);
+    let mut bodies = Vec::new();
+    for b in 0..4u64 {
+        send(&mut c, id, "v", sent(b, 0), b as i64 * 100);
+        bodies.push(packer.pack(cut(&mut c, b as i64 * 100 + 50), &HashSet::new(), None).sealed);
+    }
+    let mut named = Vec::new();
+    // Ingest is down: the first body is sent, then given up.
+    for (b, accepted) in bodies.iter_mut().zip([false, true, true, true]) {
+        sent_and_answered(b, accepted);
+        named.push(b.batch.tracks[0].named);
+    }
+    assert_eq!(named, [true, true, false, false]);
+}
+
+/// Ingest refuses a larger body for good (413).
+const INGEST_MAX_BODY: usize = 96 * 1024;
+
+#[test]
+fn bodies_after_a_given_up_name_list_stay_under_the_ingest_cap() {
+    let mut c = Collector::new(15_000);
+    let (id, _) = c.open("https://relay.example".into(), 0).expect("open");
+    let names = incompressible_names(260);
+    let mut at = 0;
+    for n in &names {
+        at += 1_000;
+        c.observe(at, None);
+        c.object_sent(id, &NS, n, sent(0, 0), at).expect("taken");
+    }
+    c.cut(at, false);
+    let mut packer = Packer::new(head(), None);
+    let mut largest = 0;
+    for iv in c.cuts.drain(..) {
+        let mut s = packer.pack(iv, &HashSet::new(), None).sealed;
+        sent_and_answered(&mut s, false);
+        largest = largest.max(gz_len(&s));
+    }
+    assert!(largest > 64 * 1024, "the name list alone is past 64 KiB: {largest}");
+    assert!(largest <= INGEST_MAX_BODY, "{largest}");
+    // Every body until one carrying the names is accepted carries them.
+    let mut o = 0;
+    while c.cuts.len() < 2 {
+        o += 1;
+        assert!(o < 50_000, "no seal");
+        at += 1_000;
+        c.observe(at, None);
+        c.object_sent(id, &NS, &names[0], sent(0, o), at).expect("taken");
+    }
+    let mut sent_now: Vec<_> = Vec::new();
+    for iv in c.cuts.drain(..) {
+        let mut s = packer.pack(iv, &HashSet::new(), None).sealed;
+        s.name_tracks();
+        assert!(s.batch.tracks.iter().all(|t| t.named));
+        assert!(gz_len(&s) <= INGEST_MAX_BODY, "{}", gz_len(&s));
+        sent_now.push(s);
+    }
+    for s in &sent_now {
+        s.answered(true);
+    }
+    // Accepted: the open body is measured again and fills with objects.
+    for _ in 0..3000 {
+        o += 1;
+        at += 1_000;
+        c.observe(at, None);
+        c.object_sent(id, &NS, &names[0], sent(0, o), at).expect("taken");
+    }
+    c.cut(at, false);
+    let bodies: Vec<_> =
+        c.cuts.drain(..).map(|iv| packer.pack(iv, &HashSet::new(), None)).collect();
+    assert_eq!(bodies.len(), 1, "3000 objects fit one body");
+    for mut b in bodies {
+        sent_and_answered(&mut b.sealed, true);
+        assert!(b.sealed.batch.tracks.iter().all(|t| !t.named));
+        assert!(gz_len(&b.sealed) <= SEAL_BYTES, "{}", gz_len(&b.sealed));
     }
 }
 
@@ -341,7 +481,7 @@ fn packed_bodies_stay_under_the_byte_seal() {
         send(&mut c, id, "v", sent(i / 500, (i % 500) * 2), i as i64 * 3_000);
     }
     assert!(c.cuts.len() >= 2);
-    let mut packer = Packer::new(head());
+    let mut packer = Packer::new(head(), None);
     while let Some(iv) = c.cuts.pop_front() {
         let s = packer.pack(iv, &HashSet::new(), None).sealed;
         assert!(gz_len(&s) <= SEAL_BYTES, "{}", gz_len(&s));
@@ -349,17 +489,84 @@ fn packed_bodies_stay_under_the_byte_seal() {
     }
 }
 
+/// One-object groups, `per_sec` a second for `n` groups, on track `a`.
+fn one_object_groups(c: &mut Collector, id: u64, first: u64, n: u64, per_sec: u64, t0: i64) {
+    for i in 0..n {
+        let h = Handoff {
+            starts_group: true,
+            opens_subgroup: true,
+            ends_group: true,
+            ..sent(first + i, 0)
+        };
+        send(c, id, "a", h, t0 + (i * 1_000_000 / per_sec) as i64);
+    }
+}
+
 #[test]
-fn sampling_excludes_whole_groups_and_states_them() {
+fn without_a_target_every_group_is_reported() {
+    let (mut c, id) = collector();
+    one_object_groups(&mut c, id, 0, 1800, 120, 0);
+    c.cut(15_000_000, false);
+    let mut packer = Packer::new(head(), None);
+    let mut kept = 0;
+    while let Some(iv) = c.cuts.pop_front() {
+        let s = packer.pack(iv, &HashSet::new(), None).sealed;
+        assert_eq!(s.batch.smp, None);
+        assert!(s.batch.tracks.iter().all(|t| t.k == 0 && t.xg.is_empty()));
+        kept = s.batch.tail.conn[0].1;
+    }
+    assert_eq!(kept, 1800);
+}
+
+#[test]
+fn a_target_measures_from_the_first_handoff_or_the_body_start_to_the_seal() {
+    let (mut c, id) = collector();
+    // 240 groups at 120 a second from 1 ms, sealed at 2 s: about 120 a
+    // second over the body, k 1 under a target of 30.
+    one_object_groups(&mut c, id, 5_000, 240, 120, 1_000);
+    let mut packer = Packer::new(head(), Some(30));
+    let s = packer.pack(cut(&mut c, 2_000_000), &HashSet::new(), None).sealed;
+    let t = &s.batch.tracks[0];
+    let below: Vec<u64> = (5_000..5_240).filter(|&g| level(t.tk, g) < 1).collect();
+    assert_eq!((s.batch.smp, t.k), (Some(30), 1));
+    assert_eq!(t.xg, below);
+    // A burst of 60 groups in the last 100 ms of the next 2 s body, the
+    // track listed before: 30 a second over the whole body, under 9/8 of
+    // the target, so k falls back to 0.
+    one_object_groups(&mut c, id, 6_000, 60, 600, 3_900_000);
+    let s = packer.pack(cut(&mut c, 4_000_000), &HashSet::new(), None).sealed;
+    assert_eq!(s.batch.tracks[0].k, 0);
+}
+
+#[test]
+fn a_track_new_to_the_body_measures_from_its_first_handoff() {
+    use crate::sampling::{body_k, BodyGroups, LEVELS};
+    let (mut c, id) = collector();
+    // The same burst in the track's first body, from 0: 600 a second from
+    // its first handoff, 30 a second over the whole body.
+    one_object_groups(&mut c, id, 6_000, 60, 600, 1_900_000);
+    let mut packer = Packer::new(head(), Some(30));
+    let s = packer.pack(cut(&mut c, 2_000_000), &HashSet::new(), None).sealed;
+    let t = &s.batch.tracks[0];
+    let mut by_level = [0u32; LEVELS];
+    for g in 6_000..6_060 {
+        by_level[usize::from(level(t.tk, g))] += 1;
+    }
+    let k_over = |span_us| body_k(&BodyGroups { by_level: &by_level, span_us }, 0, 30);
+    assert_eq!(k_over(2_000_000), 0);
+    assert!(t.k > 0);
+    assert_eq!(t.k, k_over(100_000));
+    let below: Vec<u64> = (6_000..6_060).filter(|&g| level(t.tk, g) < t.k).collect();
+    assert_eq!(t.xg, below);
+}
+
+#[test]
+fn a_target_excludes_whole_groups_and_states_them() {
     let (mut c, id) = collector();
     // 100 one-object groups a second for 15 s.
-    for g in 0..1500u64 {
-        let h =
-            Handoff { starts_group: true, opens_subgroup: true, ends_group: true, ..sent(g, 0) };
-        send(&mut c, id, "a", h, g as i64 * 10_000);
-    }
+    one_object_groups(&mut c, id, 0, 1500, 100, 0);
     c.cut(20_000_000, false);
-    let mut packer = Packer::new(head());
+    let mut packer = Packer::new(head(), Some(10));
     let (mut kept, mut excluded) = (0, 0);
     while let Some(iv) = c.cuts.pop_front() {
         let s = packer.pack(iv, &HashSet::new(), None).sealed;
@@ -379,7 +586,7 @@ fn sampling_excludes_whole_groups_and_states_them() {
 #[test]
 fn rseq_and_seq_run_on_across_bodies() {
     let (mut c, id) = collector();
-    let mut packer = Packer::new(head());
+    let mut packer = Packer::new(head(), None);
     let mut next = 0;
     for b in 0..3u64 {
         send(&mut c, id, "v", sent(b, 0), b as i64 * 100);
@@ -408,7 +615,7 @@ fn a_denied_connection_sends_nothing_and_is_counted() {
     let (mut c, id) = collector();
     send(&mut c, id, "v", sent(1, 0), 1);
     send(&mut c, id, "v", sent(1, 1), 2);
-    let mut packer = Packer::new(head());
+    let mut packer = Packer::new(head(), None);
     let p = packer.pack(cut(&mut c, 10), &HashSet::from([id]), None);
     assert!(p.sealed.batch.conns.is_empty());
     assert_eq!(p.over_relay_cap, 2, "the conn_open event and the run");

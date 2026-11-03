@@ -3,14 +3,19 @@
 //! counters. Everything here runs on the sealer, one interval at a time, in
 //! seal order.
 
+#![allow(
+    clippy::mutable_key_type,
+    reason = "a track hashes and compares by its name bytes, not by its atomics"
+)]
+
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::collect::{Clear, Flow, Interval, Pace, TrackRef, MAX_FLOWS};
 use crate::sampling::{body_k, level, BodyGroups, LEVELS};
 use crate::wire::{
-    preamble_json, record_frames, Batch, ConnRec, Hist, MarkIn, PaceIn, PevIn, Record, RunIn, Seal,
-    Tail, TrackRec, MAX_RECORD_ENTRIES,
+    preamble_json, record_frames, AppOffset, Batch, ConnRec, Hist, MarkIn, PaceIn, PevIn, Record,
+    RunIn, Seal, Tail, TrackRec, MAX_RECORD_ENTRIES,
 };
 
 /// A body sealed but not yet sent: its batch record gets its clock when it
@@ -20,8 +25,10 @@ pub(crate) struct Sealed {
     pub seq: u64,
     pub epoch: u64,
     pub base_us: i64,
-    pub app: Option<(i64, u64)>,
+    pub app: Option<AppOffset>,
     pub batch: Batch,
+    /// `batch.tracks`' tracks, in order.
+    pub tracks: Vec<TrackRef>,
     /// The fact records' frames.
     pub records: Vec<u8>,
     pub preamble: String,
@@ -29,6 +36,23 @@ pub(crate) struct Sealed {
     pub origins: Vec<String>,
     /// Its size before compression.
     pub raw_len: usize,
+}
+
+impl Sealed {
+    /// Fix which tracks carry their names, at the body's first send: those
+    /// no accepted body has carried yet.
+    pub(crate) fn name_tracks(&mut self) {
+        for (rec, t) in self.batch.tracks.iter_mut().zip(&self.tracks) {
+            rec.named = t.names_needed();
+        }
+    }
+
+    /// The body left the buffer, accepted by ingest or given up.
+    pub(crate) fn answered(&self, accepted: bool) {
+        for (rec, t) in self.batch.tracks.iter().zip(&self.tracks) {
+            t.answered(rec.named, accepted);
+        }
+    }
 }
 
 /// What every body of the instance shares.
@@ -88,7 +112,11 @@ pub(crate) struct Packer {
     head: Head,
     next_seq: u64,
     next_rseq: u64,
+    /// The integrator's sampling target, groups/s; `None`: every group.
+    target: Option<u32>,
     prev_k: HashMap<TrackRef, u8>,
+    /// The tracks the previous body listed.
+    prev_listed: HashSet<TrackRef>,
     emitted: Emitted,
     totals: BTreeMap<u64, (u64, u64)>,
     pre_drop_records: u64,
@@ -103,12 +131,14 @@ pub(crate) struct Packed {
 }
 
 impl Packer {
-    pub(crate) fn new(head: Head) -> Self {
+    pub(crate) fn new(head: Head, target: Option<u32>) -> Self {
         Packer {
             head,
             next_seq: 0,
             next_rseq: 0,
+            target,
             prev_k: HashMap::new(),
+            prev_listed: HashSet::new(),
             emitted: Emitted::default(),
             totals: BTreeMap::new(),
             pre_drop_records: 0,
@@ -126,7 +156,7 @@ impl Packer {
         &mut self,
         iv: Interval,
         denied: &HashSet<u64>,
-        app: Option<(i64, u64)>,
+        app: Option<AppOffset>,
     ) -> Packed {
         let Interval {
             from_us,
@@ -150,39 +180,46 @@ impl Packer {
         let ti: HashMap<&TrackRef, usize> =
             tracks.iter().enumerate().map(|(i, t)| (t, i)).collect();
 
-        // One sample level per track for the body.
+        // One sample level per track for the body, when a target is set.
         let mut track_recs = Vec::with_capacity(tracks.len());
         let mut excluded: HashMap<&TrackRef, HashSet<u64>> = HashMap::new();
         for t in &tracks {
-            let (k, span, xg) = match groups.get(t) {
-                None => (0, None, Vec::new()),
-                Some(tg) => {
+            let tg = groups.get(t);
+            let (k, xg) = match (self.target, tg) {
+                (Some(target), Some(tg)) => {
                     let mut by_level = [0u32; LEVELS];
-                    for &g in tg.first.keys() {
+                    for &g in &tg.groups {
                         by_level[usize::from(level(t.tk, g))] += 1;
                     }
-                    let lo = tg.first.values().min().copied().unwrap_or(0);
-                    let hi = tg.first.values().max().copied().unwrap_or(0);
+                    let from = if self.prev_listed.contains(t) {
+                        from_us
+                    } else {
+                        tg.span.map_or(through_us, |(lo, _)| lo)
+                    };
                     let prev = self.prev_k.get(t).copied().unwrap_or(0);
-                    let k = body_k(&BodyGroups { by_level: &by_level, span_us: hi - lo }, prev);
+                    let span_us = through_us - from;
+                    let k = body_k(&BodyGroups { by_level: &by_level, span_us }, prev, target);
                     self.prev_k.insert(Arc::clone(t), k);
                     let mut xg: Vec<u64> =
-                        tg.first.keys().copied().filter(|&g| level(t.tk, g) < k).collect();
+                        tg.groups.iter().copied().filter(|&g| level(t.tk, g) < k).collect();
                     xg.sort_unstable();
                     excluded.insert(t, xg.iter().copied().collect());
-                    (k, tg.span, xg)
+                    (k, xg)
                 }
+                _ => (0, Vec::new()),
             };
             track_recs.push(TrackRec {
                 ns: t.ns.clone(),
                 name: t.name.clone(),
                 tk: t.tk,
+                named: true,
                 k,
-                span,
+                span: tg.and_then(|g| g.span),
                 xg,
             });
         }
         self.prev_k.retain(|t, _| ti.contains_key(t));
+        self.prev_listed = tracks.iter().cloned().collect();
 
         let mut records = Vec::new();
         for e in events {
@@ -330,6 +367,7 @@ impl Packer {
             tracks: track_recs,
             gdec,
             start: (seq == 0).then_some(self.head.start),
+            smp: self.target,
         };
         let seal = Seal { seq, from_us, through_us, ms: seal_ms };
         let preamble = preamble_json(&self.head.instance_id, &em, &seal);
@@ -343,6 +381,7 @@ impl Packer {
                 base_us: from_us,
                 app,
                 batch,
+                tracks,
                 records,
                 preamble,
                 origins,

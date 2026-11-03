@@ -215,6 +215,9 @@ impl Harness {
         if let Some(n) = opt_uint(cmd, "buffer_bytes")? {
             b = b.buffer_bytes(usize::try_from(n).map_err(|_| bad())?);
         }
+        if let Some(t) = opt_uint(cmd, "sample_target")? {
+            b = b.sample_target(u32::try_from(t).unwrap_or(u32::MAX));
+        }
         match opt_text(cmd, "proxy")? {
             None | Some("env") => {}
             Some("direct") => b = b.proxy(Proxy::Direct),
@@ -311,6 +314,7 @@ fn error_code(e: Error) -> Fail {
         Error::InvalidEndpoint => "invalid_endpoint",
         Error::InvalidProxy => "invalid_proxy",
         Error::InvalidSealInterval => "invalid_seal_interval",
+        Error::InvalidSampleTarget => "invalid_sample_target",
         Error::InvalidRelayUrl => "invalid_relay_url",
         Error::TooManyConnections => "too_many_connections",
         Error::Stopped => "stopped",

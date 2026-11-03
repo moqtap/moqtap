@@ -19,7 +19,7 @@ use crate::egress::HttpClient;
 use crate::pack::{Head, Packer, Sealed};
 use crate::relay_cap::RelayLedger;
 use crate::time::Clock;
-use crate::wire::{body, frames, Clk, ClockSample};
+use crate::wire::{body, frames, AppOffset, Clk, ClockSample};
 use crate::State;
 
 /// The seal interval unless the builder names another.
@@ -65,6 +65,8 @@ pub(crate) struct Config {
     pub buffer_bytes: usize,
     pub retry_unit: Duration,
     pub app_clock: Option<AppClock>,
+    /// The integrator's sampling target, groups/s.
+    pub sample_target: Option<u32>,
     pub res_us: u64,
     pub start_wall_ms: i64,
 }
@@ -133,6 +135,7 @@ impl Outbox {
     }
 
     fn give_up(&mut self, gone: Entry) {
+        gone.sealed.answered(false);
         self.bytes = self.bytes.saturating_sub(gone.size());
         self.relays.given_up(&gone.sealed.origins);
         self.lost += 1;
@@ -207,13 +210,16 @@ impl Shared {
 }
 
 pub(crate) async fn sealer(shared: Arc<Shared>) {
-    let mut packer = Packer::new(Head {
-        source: shared.cfg.source.clone(),
-        instance_id: shared.cfg.instance_id.clone(),
-        start: (0, shared.cfg.start_wall_ms),
-        monitor_name: MONITOR_NAME,
-        monitor_version: MONITOR_VERSION,
-    });
+    let mut packer = Packer::new(
+        Head {
+            source: shared.cfg.source.clone(),
+            instance_id: shared.cfg.instance_id.clone(),
+            start: (0, shared.cfg.start_wall_ms),
+            monitor_name: MONITOR_NAME,
+            monitor_version: MONITOR_VERSION,
+        },
+        shared.cfg.sample_target,
+    );
     let mut timer_from = shared.clock.now();
     let mut seen = shared.clock.seal_requests();
     loop {
@@ -281,7 +287,8 @@ fn drain(shared: &Shared, packer: &mut Packer) {
         };
         let app = shared.cfg.app_clock.as_ref().and_then(|f| {
             let (utc_us, e_us) = f()?;
-            Some((utc_us.checked_sub(shared.mono_us())?, e_us))
+            let at_us = shared.mono_us();
+            Some(AppOffset { o_us: utc_us.checked_sub(at_us)?, e_us, at_us })
         });
         let packed = packer.pack(iv, &denied, app);
         let mut o = shared.outbox();
@@ -343,6 +350,7 @@ pub(crate) async fn sender(shared: Arc<Shared>, client: HttpClient) {
                 Outcome::Accepted(recv_ms) => {
                     attempt = 0;
                     if let Some(e) = o.take(seq) {
+                        e.sealed.answered(true);
                         o.sent += 1;
                         o.state = State::Running;
                         let o = &mut *o;
@@ -399,9 +407,10 @@ pub(crate) async fn sender(shared: Arc<Shared>, client: HttpClient) {
 }
 
 /// The head body's bytes: built at its first send, with the latest clock
-/// sample of its epoch, and the same on every send after.
+/// sample of its epoch and names only for tracks no accepted body carried,
+/// and the same on every send after.
 fn freeze(shared: &Shared, seq: u64) -> Option<Arc<Vec<u8>>> {
-    let (sealed, sample) = {
+    let (mut sealed, sample) = {
         let o = shared.outbox();
         let e = o.queue.front().filter(|e| e.sealed.seq == seq)?;
         if let Some(b) = &e.frozen {
@@ -410,6 +419,7 @@ fn freeze(shared: &Shared, seq: u64) -> Option<Arc<Vec<u8>>> {
         let sample = o.samples.get(&e.sealed.epoch).cloned();
         (e.sealed.clone(), sample)
     };
+    sealed.name_tracks();
     let clk = Clk {
         base_us: sealed.base_us,
         epoch: sealed.epoch,
@@ -425,6 +435,7 @@ fn freeze(shared: &Shared, seq: u64) -> Option<Arc<Vec<u8>>> {
     if e.frozen.is_none() {
         o.bytes = o.bytes.saturating_sub(e.sealed.raw_len) + bytes.len();
         e.frozen = Some(Arc::clone(&bytes));
+        e.sealed.batch.tracks = sealed.batch.tracks;
     }
     e.frozen.clone()
 }

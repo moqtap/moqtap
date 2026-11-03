@@ -64,7 +64,7 @@ use tokio::task::JoinHandle;
 pub use clock::DRIFT;
 pub use egress::Proxy;
 pub use relay_cap::MAX_RELAYS_PER_MONTH;
-pub use sampling::TARGET_GROUPS_PER_SEC;
+pub use sampling::MAX_SAMPLE_TARGET;
 #[doc(hidden)]
 pub use time::TestClock;
 
@@ -171,6 +171,9 @@ pub enum Error {
     /// The seal interval is outside [`MIN_SEAL_INTERVAL`] to [`MAX_SEAL_INTERVAL`].
     #[error("the seal interval must be 5 to 60 seconds")]
     InvalidSealInterval,
+    /// The sampling target is outside 1 to [`MAX_SAMPLE_TARGET`] groups a second.
+    #[error("the sampling target must be 1 to 1000000 groups a second")]
+    InvalidSampleTarget,
     /// The relay URL is not an `https`, `http` or `moqt` URL.
     #[error("not a relay URL")]
     InvalidRelayUrl,
@@ -256,6 +259,7 @@ pub struct MonitorBuilder {
     buffer_bytes: usize,
     retry_unit: Duration,
     app_clock: Option<AppClock>,
+    sample_target: Option<u32>,
     clock: Option<TestClock>,
     roots: Option<Vec<Vec<u8>>>,
 }
@@ -269,6 +273,7 @@ impl std::fmt::Debug for MonitorBuilder {
             .field("proxy", &self.proxy)
             .field("seal_interval", &self.interval)
             .field("buffer_bytes", &self.buffer_bytes)
+            .field("sample_target", &self.sample_target)
             .finish_non_exhaustive()
     }
 }
@@ -319,6 +324,16 @@ impl MonitorBuilder {
         self
     }
 
+    /// Report a sample of whole groups on fast tracks, aiming at more than
+    /// `groups_per_sec` groups a second per track: 1 to
+    /// [`MAX_SAMPLE_TARGET`]. Each upload states the groups it leaves out,
+    /// and viewers' objects of those groups read as sampled. Without it,
+    /// every group is reported.
+    pub fn sample_target(mut self, groups_per_sec: u32) -> Self {
+        self.sample_target = Some(groups_per_sec);
+        self
+    }
+
     #[doc(hidden)]
     pub fn test_timing(mut self, seal: Duration, retry_unit: Duration) -> Self {
         self.interval = seal.max(Duration::from_millis(10));
@@ -362,6 +377,9 @@ impl MonitorBuilder {
         {
             return Err(Error::InvalidSealInterval);
         }
+        if self.sample_target.is_some_and(|t| !(1..=MAX_SAMPLE_TARGET).contains(&t)) {
+            return Err(Error::InvalidSampleTarget);
+        }
         let mut key = HeaderValue::from_str(&format!("Bearer {}", self.key))
             .map_err(|_| Error::InvalidKey)?;
         key.set_sensitive(true);
@@ -390,6 +408,7 @@ impl MonitorBuilder {
                 buffer_bytes: self.buffer_bytes,
                 retry_unit: self.retry_unit,
                 app_clock: self.app_clock,
+                sample_target: self.sample_target,
                 res_us,
                 start_wall_ms: wall.unwrap_or(0).div_euclid(1000),
             },
@@ -448,6 +467,7 @@ impl Monitor {
             buffer_bytes: DEFAULT_BUFFER_BYTES,
             retry_unit: Duration::from_secs(1),
             app_clock: None,
+            sample_target: None,
             clock: None,
             roots: None,
         }
@@ -802,6 +822,10 @@ mod tests {
         for bad in [Duration::from_secs(4), Duration::from_secs(61)] {
             let e = Monitor::builder("enc", "mqt_sk_x").seal_interval(bad).start();
             assert!(matches!(e, Err(Error::InvalidSealInterval)), "{bad:?}");
+        }
+        for bad in [0, MAX_SAMPLE_TARGET + 1] {
+            let e = Monitor::builder("enc", "mqt_sk_x").sample_target(bad).start();
+            assert!(matches!(e, Err(Error::InvalidSampleTarget)), "{bad}");
         }
     }
 

@@ -5,11 +5,11 @@
 
 use std::path::PathBuf;
 
-use crate::sampling::level;
+use crate::sampling::{body_k, level, BodyGroups, LEVELS};
 use crate::wire::{
-    body, canonical_track_bytes, frames, hex, preamble_json, record_frames, track_key, Batch, Clk,
-    ClockSample, ConnRec, EventKind, MarkIn, MarkKind, PaceIn, PevIn, Record, RunIn, Seal, Tail,
-    TrackRec,
+    body, canonical_track_bytes, frames, hex, preamble_json, record_frames, track_key, AppOffset,
+    Batch, Clk, ClockSample, ConnRec, EventKind, MarkIn, MarkKind, PaceIn, PevIn, Record, RunIn,
+    Seal, Tail, TrackRec,
 };
 
 const SOURCE: &str = "enc-fra-1";
@@ -44,7 +44,15 @@ fn clk() -> Clk {
 
 fn track(ns: &[&[u8]], name: &[u8], k: u8) -> TrackRec {
     let ns: Vec<Vec<u8>> = ns.iter().map(|f| f.to_vec()).collect();
-    TrackRec { tk: track_key(&ns, name), ns, name: name.to_vec(), k, span: None, xg: Vec::new() }
+    TrackRec {
+        tk: track_key(&ns, name),
+        ns,
+        name: name.to_vec(),
+        named: true,
+        k,
+        span: None,
+        xg: Vec::new(),
+    }
 }
 
 fn video() -> TrackRec {
@@ -70,6 +78,8 @@ struct Spec {
     is_final: bool,
     gdec: Vec<(u64, usize, u64)>,
     start: Option<(i64, i64)>,
+    smp: Option<u32>,
+    seal: Option<Seal>,
 }
 
 impl Spec {
@@ -85,6 +95,8 @@ impl Spec {
             is_final: false,
             gdec: Vec::new(),
             start: None,
+            smp: None,
+            seal: None,
         }
     }
 
@@ -105,13 +117,14 @@ impl Spec {
             tracks: self.tracks,
             gdec: self.gdec,
             start: self.start,
+            smp: self.smp,
         };
-        let seal = Seal {
+        let seal = self.seal.unwrap_or(Seal {
             seq: self.seq,
             from_us: BASE + self.seq as i64 * SEAL_MS as i64 * 1000,
             through_us: BASE + (self.seq as i64 + 1) * SEAL_MS as i64 * 1000,
             ms: SEAL_MS,
-        };
+        });
         let em = if n > 0 { vec![(self.first, n)] } else { Vec::new() };
         let records = record_frames(&self.records, BASE, self.first);
         body(&preamble_json(INSTANCE, &em, &seal), &frames(&batch, &self.clk, &records), false)
@@ -265,7 +278,11 @@ fn negative_dt() {
             run(0, 0, 2, Some(0), ids(0, 2), vec![t(10_000.99), t(9_999.0)], 20),
         ])],
     );
-    s.clk.app = Some((1_761_696_000_000_000 - BASE, 2_500));
+    s.clk.app = Some(AppOffset {
+        o_us: 1_761_696_000_000_000 - BASE,
+        e_us: 2_500,
+        at_us: BASE - 1_000_000,
+    });
     check("negative-dt", s.build());
 }
 
@@ -317,7 +334,82 @@ fn sampled_cont() {
     s.seq = 4;
     s.first = 51;
     s.gdec = vec![(0, 0, 1)];
+    s.smp = Some(4);
     check("sampled-cont", s.build());
+}
+
+const HIGH_RATE_GROUPS: u64 = 240;
+const HIGH_RATE_STEP_US: i64 = 8_333;
+const HIGH_RATE_THROUGH: i64 = BASE + 2_000_000;
+
+/// 240 one-object groups at 120 a second, in a body sealed after 2 s, under
+/// `target`: k from this crate's rule over the first handoff to the seal.
+fn high_rate(target: Option<u32>) -> (Vec<u8>, u8, usize) {
+    let mut v = track(&[b"example.com", b"live"], b"video-120", 0);
+    let t = |i: u64| BASE + 1_000 + i as i64 * HIGH_RATE_STEP_US;
+    let groups: Vec<u64> = (0..HIGH_RATE_GROUPS).map(|i| 5_000 + i).collect();
+    let mut by_level = [0u32; LEVELS];
+    for &g in &groups {
+        by_level[usize::from(level(v.tk, g))] += 1;
+    }
+    let span_us = HIGH_RATE_THROUGH - t(0);
+    v.k = target.map_or(0, |tg| body_k(&BodyGroups { by_level: &by_level, span_us }, 0, tg));
+    v.span = Some((t(0), t(HIGH_RATE_GROUPS - 1)));
+    v.xg = groups.iter().copied().filter(|&g| level(v.tk, g) < v.k).collect();
+    let (k, excluded) = (v.k, v.xg.len());
+    let runs = groups
+        .iter()
+        .enumerate()
+        .filter(|(_, &g)| level(v.tk, g) >= k)
+        .map(|(i, &g)| RunIn {
+            gs: true,
+            fo: true,
+            eog: true,
+            ..run(0, 0, g, Some(0), vec![0], vec![t(i as u64)], 1_200)
+        })
+        .collect();
+    let mut s = Spec::new(vec![conn(0, 14, RELAY)], vec![v], vec![Record::Runs(runs)]);
+    s.smp = target;
+    s.seal = Some(Seal { seq: 0, from_us: BASE, through_us: HIGH_RATE_THROUGH, ms: 5_000 });
+    (s.build(), k, excluded)
+}
+
+#[test]
+fn unsampled_high_rate() {
+    let (built, k, excluded) = high_rate(None);
+    assert_eq!((k, excluded), (0, 0));
+    check("unsampled-high-rate", built);
+}
+
+#[test]
+fn sampled_target() {
+    let (built, k, excluded) = high_rate(Some(30));
+    assert_eq!((k, excluded), (1, 121));
+    check("sampled-target", built);
+}
+
+#[test]
+fn names_elided() {
+    let mut v = video();
+    v.named = false;
+    v.span = Some((BASE + 45_001_000, BASE + 45_001_000));
+    let mut a = audio();
+    a.span = Some((BASE + 45_002_000, BASE + 45_002_000));
+    let mut s = Spec::new(
+        vec![conn(0, 14, RELAY)],
+        vec![v, a],
+        vec![Record::Runs(vec![
+            RunIn {
+                gs: true,
+                fo: true,
+                ..run(0, 0, 400, Some(0), vec![0], vec![BASE + 45_001_000], 5_000)
+            },
+            RunIn { gs: true, ..run(0, 1, 400, None, vec![0], vec![BASE + 45_002_000], 160) },
+        ])],
+    );
+    s.seq = 3;
+    s.first = 40;
+    check("names-elided", s.build());
 }
 
 #[test]
@@ -326,7 +418,17 @@ fn final_unmapped() {
     s.seq = 9;
     s.first = 120;
     s.is_final = true;
-    s.clk = Clk { base_us: BASE, epoch: 1, res_us: 1, sample: None, app: None };
+    s.clk = Clk {
+        base_us: BASE,
+        epoch: 1,
+        res_us: 1,
+        sample: None,
+        app: Some(AppOffset {
+            o_us: 1_761_696_000_000_000 - BASE,
+            e_us: 4_000,
+            at_us: BASE + 9_000_000,
+        }),
+    };
     s.tail = Some(Tail {
         last_rseq: Some(120),
         pre_drop_records: 2,
@@ -384,6 +486,9 @@ fn every_accepted_golden_is_rebuilt() {
             "negative-dt",
             "u64-ids",
             "sampled-cont",
+            "unsampled-high-rate",
+            "sampled-target",
+            "names-elided",
             "final-unmapped"
         ]
     );

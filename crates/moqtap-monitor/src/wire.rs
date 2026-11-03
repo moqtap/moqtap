@@ -9,7 +9,9 @@
 //! number an integer.
 
 use std::fmt::Write as _;
+use std::hash::{Hash, Hasher};
 use std::io::Write as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use flate2::write::GzEncoder;
@@ -53,17 +55,46 @@ const FL_END_NA: u8 = 3 << 5;
 const FL_GS: u8 = 0x80;
 
 /// A full track name, by its bytes, with its `track_key`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 pub(crate) struct Track {
     pub ns: Vec<Vec<u8>>,
     pub name: Vec<u8>,
     pub tk: u64,
+    /// Ingest accepted a body carrying the names.
+    accepted: AtomicBool,
+}
+
+impl PartialEq for Track {
+    fn eq(&self, other: &Self) -> bool {
+        self.ns == other.ns && self.name == other.name
+    }
+}
+
+impl Eq for Track {}
+
+impl Hash for Track {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.ns.hash(h);
+        self.name.hash(h);
+    }
 }
 
 impl Track {
     pub(crate) fn new(ns: Vec<Vec<u8>>, name: Vec<u8>) -> Self {
         let tk = track_key(&ns, &name);
-        Track { ns, name, tk }
+        Track { ns, name, tk, accepted: AtomicBool::new(false) }
+    }
+
+    /// Whether a body first sent now carries the names.
+    pub(crate) fn names_needed(&self) -> bool {
+        !self.accepted.load(Ordering::Relaxed)
+    }
+
+    /// A body listing the track left the buffer: accepted, or given up.
+    pub(crate) fn answered(&self, carried_names: bool, accepted: bool) {
+        if accepted && carried_names {
+            self.accepted.store(true, Ordering::Relaxed);
+        }
     }
 }
 
@@ -281,8 +312,16 @@ pub(crate) struct Clk {
     pub epoch: u64,
     pub res_us: u64,
     pub sample: Option<ClockSample>,
-    /// An integrator's UTC offset and its bound, µs.
-    pub app: Option<(i64, u64)>,
+    pub app: Option<AppOffset>,
+}
+
+/// An integrator's UTC clock read: `utc - mono` offset and its bound, and
+/// the mono time it was read, µs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AppOffset {
+    pub o_us: i64,
+    pub e_us: u64,
+    pub at_us: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -306,6 +345,8 @@ pub(crate) struct TrackRec {
     pub ns: Vec<Vec<u8>>,
     pub name: Vec<u8>,
     pub tk: u64,
+    /// `ns` and `name` are written; otherwise `tk` alone.
+    pub named: bool,
     pub k: u8,
     pub span: Option<(i64, i64)>,
     pub xg: Vec<u64>,
@@ -329,6 +370,8 @@ pub(crate) struct Batch {
     pub gdec: Vec<(u64, usize, u64)>,
     /// The instance's start: mono µs and wall ms.
     pub start: Option<(i64, i64)>,
+    /// The integrator's sampling target, groups/s.
+    pub smp: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -488,6 +531,9 @@ fn batch_json(b: &Batch, clk: &Clk) -> String {
         s.int("wall_ms", wall_ms.into());
         j.raw("start", &s.finish());
     }
+    if let Some(t) = b.smp {
+        j.raw("smp", &format!("{{\"t\":{t}}}"));
+    }
     j.finish()
 }
 
@@ -504,10 +550,11 @@ fn clk_json(c: &Clk) -> String {
             j.str("pop", pop);
         }
     }
-    if let Some((o_us, e_us)) = c.app {
+    if let Some(app) = c.app {
         let mut a = Obj::new();
-        a.int("o_us", o_us.into());
-        a.int("e_us", e_us.into());
+        a.int("o_us", app.o_us.into());
+        a.int("e_us", app.e_us.into());
+        a.int("at_us", app.at_us.into());
         j.raw("app", &a.finish());
     }
     j.finish()
@@ -538,7 +585,7 @@ fn conn_json(c: &ConnRec) -> String {
 }
 
 /// The gzipped size of a `trk` list of `tracks`, without spans or excluded
-/// groups.
+/// groups, with names until a body carrying them is accepted.
 pub(crate) fn track_list_gz_len(tracks: &[Arc<Track>]) -> usize {
     if tracks.is_empty() {
         return 0;
@@ -551,6 +598,7 @@ pub(crate) fn track_list_gz_len(tracks: &[Arc<Track>]) -> usize {
                 ns: t.ns.clone(),
                 name: t.name.clone(),
                 tk: t.tk,
+                named: t.names_needed(),
                 k: 0,
                 span: None,
                 xg: Vec::new(),
@@ -564,9 +612,11 @@ pub(crate) fn track_list_gz_len(tracks: &[Arc<Track>]) -> usize {
 fn track_json(id: usize, t: &TrackRec) -> String {
     let mut j = Obj::new();
     j.int("id", id as i128);
-    let ns: Vec<String> = t.ns.iter().map(|f| json_string(&base64(f))).collect();
-    j.raw("ns", &format!("[{}]", ns.join(",")));
-    j.str("name", &base64(&t.name));
+    if t.named {
+        let ns: Vec<String> = t.ns.iter().map(|f| json_string(&base64(f))).collect();
+        j.raw("ns", &format!("[{}]", ns.join(",")));
+        j.str("name", &base64(&t.name));
+    }
     j.str("tk", &format!("{:016x}", t.tk));
     j.int("k", t.k.into());
     if let Some((lo, hi)) = t.span {

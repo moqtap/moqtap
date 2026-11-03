@@ -28,6 +28,9 @@ pub struct Conn {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Trk {
     pub id: u64,
+    /// `ns` and `name` were sent; otherwise both are empty and `tk` alone
+    /// names the track.
+    pub named: bool,
     pub ns: Vec<Vec<u8>>,
     pub name: Vec<u8>,
     pub tk: u64,
@@ -245,21 +248,26 @@ impl Leb<'_> {
     }
 }
 
-/// The drafts each source mark kind exists in, by wire index.
+/// The drafts each mark kind exists in, by wire index.
 fn mark_drafts(kind: u64) -> Option<(u64, u64)> {
     Some(match kind {
-        0 => (7, 22),
-        1 => (8, 22),
+        0 => (7, 23),
+        1 => (8, 23),
         2 => (7, 10),
         3 => (7, 7),
         4 => (7, 15),
-        5 | 6 => (16, 22),
-        7 => (20, 22),
-        8 => (11, 22),
-        9 => (14, 22),
-        10 => (7, 22),
+        5 | 6 => (16, 23),
+        7 => (20, 23),
+        8 => (11, 23),
+        9 => (14, 23),
+        10 => (7, 23),
+        11 => (23, 23),
         _ => return None,
     })
+}
+
+fn is_range(kind: u64) -> bool {
+    matches!(kind, 5..=7 | 11)
 }
 
 fn frames(b: &[u8]) -> R<Vec<(bool, Vec<u8>)>> {
@@ -378,6 +386,14 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
         count(&clk["r_us"], "r_us")?;
         int(&clk["at_us"], "at_us")?;
     }
+    if let Some(app) = clk.get("app") {
+        int(&app["o_us"], "app.o_us")?;
+        count(&app["e_us"], "app.e_us")?;
+        int(&app["at_us"], "app.at_us")?;
+        if obj(app)?.len() != 3 {
+            fail!("clk.app");
+        }
+    }
     if let Some(pop) = clk.get("pop") {
         let p = pop.as_str().ok_or("pop")?;
         if has != 3
@@ -418,6 +434,13 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
         }
         conns.push(Conn { c, draft, relay });
     }
+    let target = match batch.get("smp") {
+        None => None,
+        Some(smp) => match count(&smp["t"], "smp.t")? {
+            t @ 1..=1_000_000 if obj(smp)?.len() == 1 => Some(t),
+            _ => fail!("smp"),
+        },
+    };
     let mut tracks = Vec::new();
     let list = batch["trk"].as_array().ok_or("trk")?;
     if list.len() > 256 {
@@ -428,8 +451,19 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
         if id > 65_535 || tracks.iter().any(|t: &Trk| t.id == id) {
             fail!("trk.id");
         }
-        let ns = e["ns"].as_array().ok_or("ns")?.iter().map(base64).collect::<R<Vec<_>>>()?;
-        let name = base64(&e["name"])?;
+        let named = match (e.get("ns"), e.get("name")) {
+            (Some(_), Some(_)) => true,
+            (None, None) => false,
+            _ => fail!("half a track name"),
+        };
+        let (ns, name) = if named {
+            (
+                e["ns"].as_array().ok_or("ns")?.iter().map(base64).collect::<R<Vec<_>>>()?,
+                base64(&e["name"])?,
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
         if ns.len() > 32 || name.len() + ns.iter().map(Vec::len).sum::<usize>() > 4096 {
             fail!("track name");
         }
@@ -440,11 +474,11 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
             fail!("tk");
         }
         let tk = u64::from_str_radix(tk_s, 16).unwrap();
-        if tk != track_key(&ns, &name) {
+        if named && tk != track_key(&ns, &name) {
             fail!("tk does not match the name");
         }
         let k = count(&e["k"], "k")?;
-        if k > 20 {
+        if k > 20 || (k > 0 && target.is_none()) {
             fail!("k");
         }
         let span = match e.get("span") {
@@ -474,7 +508,7 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
                 xg.push(g);
             }
         }
-        tracks.push(Trk { id, ns, name, tk, k, span, xg });
+        tracks.push(Trk { id, named, ns, name, tk, k, span, xg });
     }
     let has_conn = |c: u64| conns.iter().any(|x| x.c == c);
     let has_track = |t: u64| tracks.iter().any(|x| x.id == t);
@@ -562,6 +596,7 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
                 }
                 out.end = Some(r["reason"].as_str().unwrap_or("").to_string());
             }
+            "ident" | "stream-end" => fail!("a viewer record: {t}"),
             _ => {}
         }
     }
@@ -574,7 +609,7 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
         if !has_conn(m.c) || !has_track(m.ti) {
             fail!("mark names an undeclared connection or track");
         }
-        if let Some(d) = draft_of(m.c).filter(|d| (7..=22).contains(d)) {
+        if let Some(d) = draft_of(m.c).filter(|d| (7..=23).contains(d)) {
             let (lo, hi) = mark_drafts(m.kind).ok_or("mark kind")?;
             if d < lo || d > hi {
                 fail!("mark {} on draft {d}", m.kind);
@@ -672,11 +707,11 @@ fn read_mark(rd: &mut Leb<'_>, base_us: i64, prev: Option<&Mark>) -> R<Mark> {
     let ti = rd.u()?;
     let g = rd.u64()?;
     let o = rd.u64()?;
-    if (5..=7).contains(&kind) {
+    if is_range(kind) {
         rd.u64()?;
         rd.u64()?;
     }
-    let n = if (8..=10).contains(&kind) { Some(rd.u64()?) } else { None };
+    let n = if is_range(kind) || (8..=10).contains(&kind) { Some(rd.u64()?) } else { None };
     let t = prev.map_or(base_us, |m| m.t) + rd.t()?;
     Ok(Mark { kind, c, ti, g, o, n, t })
 }
@@ -871,12 +906,23 @@ async fn handle(
     Ok(resp.body(Full::new(Bytes::from(reply.body))).expect("response"))
 }
 
+/// Track names by `tk`, from the bodies that carried them.
+pub fn names(bodies: &[Body]) -> HashMap<u64, (Vec<Vec<u8>>, Vec<u8>)> {
+    let mut out = HashMap::new();
+    for t in bodies.iter().flat_map(|b| &b.tracks).filter(|t| t.named) {
+        out.insert(t.tk, (t.ns.clone(), t.name.clone()));
+    }
+    out
+}
+
 /// Every connection's runs across bodies, as `(relay, track name, group, ids)`.
 pub fn published(bodies: &[Body]) -> Vec<(String, Vec<u8>, u64, Vec<u64>)> {
+    let names = names(bodies);
     let mut out = Vec::new();
     for b in bodies {
         for r in &b.runs {
-            out.push((b.relay(r.c).to_string(), b.track(r.ti).name.clone(), r.g, r.ids.clone()));
+            let name = names.get(&b.track(r.ti).tk).expect("a body carried the names").1.clone();
+            out.push((b.relay(r.c).to_string(), name, r.g, r.ids.clone()));
         }
     }
     out

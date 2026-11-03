@@ -88,10 +88,12 @@ Reports are sealed every 15 seconds (`MonitorBuilder::seal_interval`, 5 to
 sooner when an upload reaches its size limit. While someone watches a session
 this source feeds, ingest can ask for shorter intervals for a while.
 
-On a fast track the monitor reports a sample of whole groups, chosen so that
-it still reports more than `moqtap_monitor::TARGET_GROUPS_PER_SEC` groups a
-second, and states which groups it left out. The viewer side reports every
-group, and those left out are shown as sampled.
+Every group of every track is reported. To report less on fast tracks, set
+a target with `MonitorBuilder::sample_target(groups_per_sec)` (1 to
+1,000,000): the monitor then reports a sample of whole groups per track,
+still more than the target each second, and states which groups it left
+out. The viewer side reports every group, and those left out are shown as
+sampled.
 
 A source reports at most 64 relay origins in a calendar month (UTC;
 `moqtap_monitor::MAX_RELAYS_PER_MONTH`). Reports for a further origin are not

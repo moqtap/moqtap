@@ -468,6 +468,113 @@ async fn the_same_ids_twice_are_two_publications() {
     assert_eq!(b.batch["gdec"], serde_json::json!([[0, 0, 1]]));
 }
 
+/// 240 one-object groups at 120 a second on `video`, then shutdown.
+async fn high_rate(m: Monitor) {
+    let relay = m.connection("https://relay-a.example.net").unwrap();
+    let t0 = Instant::now();
+    for g in 0..240u64 {
+        let s = Sent { ends_group: true, ..obj(g, 0, 1_000) };
+        relay.object_sent(&NS, "video", s, Some(t0 + Duration::from_micros(g * 8_333))).unwrap();
+    }
+    m.shutdown(Duration::from_secs(5)).await;
+}
+
+#[tokio::test]
+async fn every_group_is_reported_unless_a_sampling_target_is_set() {
+    let mock = Mock::start().await;
+    high_rate(long(&mock)).await;
+    let bodies = accepted(&mock);
+    assert!(bodies.iter().all(|b| b.batch.get("smp").is_none()));
+    assert!(bodies.iter().flat_map(|b| &b.tracks).all(|t| t.k == 0 && t.xg.is_empty()));
+    let groups: Vec<u64> = published(&bodies).into_iter().map(|(_, _, g, _)| g).collect();
+    assert_eq!(groups, (0..240).collect::<Vec<_>>());
+
+    let mock = Mock::start().await;
+    let m = Monitor::builder(SOURCE, KEY)
+        .endpoint(mock.endpoint())
+        .test_timing(Duration::from_secs(3600), UNIT)
+        .sample_target(30)
+        .start()
+        .expect("start");
+    high_rate(m).await;
+    let bodies = accepted(&mock);
+    assert!(bodies.iter().all(|b| b.batch["smp"]["t"] == 30));
+    let t = bodies.iter().flat_map(|b| &b.tracks).find(|t| t.span.is_some()).unwrap();
+    assert!(t.k >= 1, "k {}", t.k);
+    let mut groups: Vec<u64> = published(&bodies).into_iter().map(|(_, _, g, _)| g).collect();
+    assert!(groups.iter().all(|g| !t.xg.contains(g)));
+    groups.extend(&t.xg);
+    groups.sort_unstable();
+    assert_eq!(groups, (0..240).collect::<Vec<_>>(), "every group is kept or stated");
+}
+
+/// Whether each body uploaded, in seq order, carried the names of `video`.
+fn named_video(mock: &Mock) -> Vec<bool> {
+    accepted(mock)
+        .iter()
+        .filter_map(|b| b.tracks.iter().find(|t| !t.named || t.name == b"video"))
+        .map(|t| t.named)
+        .collect()
+}
+
+/// Objects on `video` until `n` bodies were accepted, one each.
+async fn bodies_of_video(mock: &Mock, m: Monitor, n: usize) {
+    let relay = m.connection("https://relay-a.example.net").unwrap();
+    for g in 0..n as u64 {
+        relay.object_sent(&NS, "video", obj(g, 0, 10), None).unwrap();
+        until("a body accepted", || accepted(mock).len() > g as usize).await;
+    }
+    m.shutdown(Duration::from_secs(5)).await;
+}
+
+#[tokio::test]
+async fn names_ride_until_a_body_carrying_them_is_accepted() {
+    let mock = Mock::start().await;
+    mock.script([Reply::status(503)]);
+    bodies_of_video(&mock, monitor(&mock), 3).await;
+    let named = named_video(&mock);
+    assert!(named.len() >= 3);
+    assert!(named[0] && named[1..].iter().all(|n| !n), "{named:?}");
+    let bodies = accepted(&mock);
+    assert!(published(&bodies).iter().all(|(_, name, ..)| name == b"video"));
+
+    // The body carrying them is given up: the next one carries them again.
+    let mock = Mock::start().await;
+    mock.script([Reply::status(413)]);
+    let m = monitor(&mock);
+    let relay = m.connection("https://relay-a.example.net").unwrap();
+    relay.object_sent(&NS, "video", obj(0, 0, 10), None).unwrap();
+    until("the first body given up", || m.stats().bodies_lost == 1).await;
+    drop(relay);
+    bodies_of_video(&mock, m, 3).await;
+    let named = named_video(&mock);
+    assert!(named.len() >= 3);
+    assert!(named[0] && named[1] && named[2..].iter().all(|n| !n), "{named:?}");
+}
+
+#[tokio::test]
+async fn the_app_clock_is_stated_with_the_time_it_was_read() {
+    let mock = Mock::start().await;
+    let utc = |d: std::time::SystemTime| {
+        d.duration_since(std::time::UNIX_EPOCH).unwrap().as_micros() as i64
+    };
+    let m = builder(&mock)
+        .app_clock(move || Some((utc(std::time::SystemTime::now()) + 7_000_000, 250)))
+        .start()
+        .unwrap();
+    let relay = m.connection("https://relay-a.example.net").unwrap();
+    relay.object_sent(&NS, "video", obj(0, 0, 1), None).unwrap();
+    m.shutdown(Duration::from_secs(5)).await;
+    let first = &bodies(&mock)[0];
+    let app = &first.batch["clk"]["app"];
+    assert_eq!(app["e_us"], 250);
+    let at_us = app["at_us"].as_i64().unwrap();
+    let start_us = first.batch["start"]["wall_ms"].as_i64().unwrap() * 1000;
+    // utc - mono at the read: the wall clock at start, 7 s ahead.
+    let o = app["o_us"].as_i64().unwrap();
+    assert!(at_us >= 0 && (o - (start_us + 7_000_000)).abs() < 50_000, "{app}");
+}
+
 async fn until_sent(m: &Monitor, n: u64) {
     until("bodies sent", || m.stats().bodies_sent >= n).await;
 }
@@ -573,6 +680,6 @@ fn the_test_reader_agrees_with_the_goldens() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 25);
+    assert_eq!(checked, 31);
     let _ = unique(&[1]);
 }

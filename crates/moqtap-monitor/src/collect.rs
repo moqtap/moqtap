@@ -7,6 +7,11 @@
 //! connection or track cap. Nothing is dropped for being late or old; the
 //! few bounds that refuse input are named below.
 
+#![allow(
+    clippy::mutable_key_type,
+    reason = "a track hashes and compares by its name bytes, not by its atomics"
+)]
+
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -90,10 +95,10 @@ pub(crate) struct ConnInfo {
     pub draft: Option<u64>,
 }
 
-/// A track's groups in one interval: each group's first handoff time.
+/// A track's distinct groups in one interval.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TrackGroups {
-    pub first: HashMap<u64, i64>,
+    pub groups: HashSet<u64>,
     /// First and last handoff.
     pub span: Option<(i64, i64)>,
 }
@@ -148,10 +153,15 @@ struct Open {
     /// The body's gzipped size, estimated: the tracks listed at the start
     /// as measured, everything added since at its uncompressed size.
     bytes: usize,
+    /// The track list's part of `bytes`.
+    list_bytes: usize,
+    /// The tracks `list_bytes` counts with their names.
+    named: Vec<TrackRef>,
 }
 
 impl Open {
     fn new(from_us: i64, epoch: u64, active: Vec<TrackRef>, list_gz: usize) -> Self {
+        let named = active.iter().filter(|t| t.names_needed()).cloned().collect();
         let mut o = Open {
             from_us,
             epoch,
@@ -169,6 +179,8 @@ impl Open {
             listed: HashSet::new(),
             dropped_records: 0,
             bytes: 600 + list_gz,
+            list_bytes: list_gz,
+            named,
         };
         for t in active {
             if o.listed.insert(Arc::clone(&t)) {
@@ -180,10 +192,28 @@ impl Open {
 
     fn list(&mut self, t: &TrackRef) {
         if self.listed.insert(Arc::clone(t)) {
-            let names: usize = t.ns.iter().map(|f| f.len() * 4 / 3 + 6).sum();
-            self.bytes += 56 + names + t.name.len() * 4 / 3;
+            let mut cost = 40;
+            if t.names_needed() {
+                let names: usize = t.ns.iter().map(|f| f.len() * 4 / 3 + 6).sum();
+                cost += 16 + names + t.name.len() * 4 / 3;
+                self.named.push(Arc::clone(t));
+            }
+            self.bytes += cost;
+            self.list_bytes += cost;
             self.tracks.push(Arc::clone(t));
         }
+    }
+
+    /// Measure the track list again once a body carrying names the estimate
+    /// counts has been accepted: the body will list those tracks by key.
+    fn remeasure_names(&mut self) {
+        if self.named.iter().all(|t| t.names_needed()) {
+            return;
+        }
+        let gz = track_list_gz_len(&self.tracks);
+        self.bytes = self.bytes - self.list_bytes + gz;
+        self.list_bytes = gz;
+        self.named.retain(|t| t.names_needed());
     }
 
     fn has_facts(&self) -> bool {
@@ -290,8 +320,9 @@ pub(crate) struct Collector {
     breaks: crate::clock::BreakCheck,
     /// Mono µs of the latest call.
     last_mono: i64,
-    /// The last measured track list and its gzipped size.
-    list_gz: (Vec<TrackRef>, usize),
+    /// The last measured track list, whether each entry was measured with
+    /// its names, and its gzipped size.
+    list_gz: (Vec<TrackRef>, Vec<bool>, usize),
 }
 
 impl Collector {
@@ -302,7 +333,7 @@ impl Collector {
             names: HashMap::new(),
             active: HashMap::new(),
             cur: Open::new(0, 0, Vec::new(), 0),
-            list_gz: (Vec::new(), 0),
+            list_gz: (Vec::new(), Vec::new(), 0),
             cuts: VecDeque::new(),
             epoch: 0,
             seal_ms,
@@ -341,12 +372,14 @@ impl Collector {
             return false;
         }
         let active: Vec<TrackRef> = self.active_tracks();
-        let same = active.len() == self.list_gz.0.len()
+        let named: Vec<bool> = active.iter().map(|t| t.names_needed()).collect();
+        let same = named == self.list_gz.1
             && active.iter().zip(&self.list_gz.0).all(|(a, b)| Arc::ptr_eq(a, b));
         if !same {
-            self.list_gz = (active.clone(), track_list_gz_len(&active));
+            let gz = track_list_gz_len(&active);
+            self.list_gz = (active.clone(), named, gz);
         }
-        let next = Open::new(through_us.max(self.cur.from_us), self.epoch, active, self.list_gz.1);
+        let next = Open::new(through_us.max(self.cur.from_us), self.epoch, active, self.list_gz.2);
         let done = std::mem::replace(&mut self.cur, next);
         self.cuts.push_back(done.seal(through_us, self.seal_ms, is_final));
         self.prune();
@@ -465,6 +498,9 @@ impl Collector {
     fn room(&mut self, c: u64, track: Option<&TrackRef>, bytes: usize) -> Wake {
         let new_conn = !self.cur.conns.contains_key(&c);
         let new_track = track.is_some_and(|t| !self.cur.listed.contains(t));
+        if self.cur.has_facts() && self.cur.bytes + bytes + SEAL_SLACK > SEAL_BYTES {
+            self.cur.remeasure_names();
+        }
         let full = (new_conn && self.cur.conns.len() >= MAX_BODY_CONNS)
             || (new_track && self.cur.tracks.len() >= MAX_BODY_TRACKS)
             || (self.cur.has_facts() && self.cur.bytes + bytes + SEAL_SLACK > SEAL_BYTES);
@@ -554,10 +590,8 @@ impl Collector {
             cur.bytes += SPAN_BYTES;
         }
         let groups = cur.groups.entry(Arc::clone(&track)).or_default();
-        if groups.first.insert(h.g, at_us).is_none() {
+        if groups.groups.insert(h.g) {
             cur.bytes += 2;
-        } else if let Some(t) = groups.first.get_mut(&h.g) {
-            *t = (*t).min(at_us);
         }
         groups.span = Some(match groups.span {
             None => (at_us, at_us),

@@ -1,11 +1,11 @@
-//! Group sampling by hash level: a (track, group) has level
-//! `min(20, clz64(splitmix64(track_key ^ group)))` and is in the sample at
-//! exponent `k` when its level is at least `k`, so the samples nest and any
-//! id pattern is sampled evenly. Each body takes one `k` per track, from the
-//! track's group rate within the body.
+//! Group sampling by hash level, only when the integrator sets a target: a
+//! (track, group) has level `min(20, clz64(splitmix64(track_key ^ group)))`
+//! and is in the sample at exponent `k` when its level is at least `k`, so
+//! the samples nest and any id pattern is sampled evenly. Each body takes
+//! one `k` per track, from the track's group rate within the body.
 
-/// The group rate per track that sampling aims at.
-pub const TARGET_GROUPS_PER_SEC: u32 = 10;
+/// The highest sampling target, groups/s.
+pub const MAX_SAMPLE_TARGET: u32 = 1_000_000;
 
 /// The largest exponent a body may declare.
 pub(crate) const MAX_K: u8 = 20;
@@ -30,8 +30,9 @@ pub(crate) fn level(tk: u64, group: u64) -> u8 {
     (splitmix64(tk ^ group).leading_zeros() as u8).min(MAX_K)
 }
 
-/// A track's distinct groups in one body, by level, over `span_us`: the time
-/// from its first group's first handoff to its last group's.
+/// A track's distinct groups in one body, by level, over `span_us`: from
+/// the track's first handoff in the body, or the body's start when the
+/// previous body listed it, to the body's end.
 pub(crate) struct BodyGroups<'a> {
     pub by_level: &'a [u32; LEVELS],
     pub span_us: i64,
@@ -54,12 +55,12 @@ impl BodyGroups<'_> {
     }
 }
 
-/// The track's exponent for this body, from the previous body's `prev`:
-/// the largest exponent that keeps more than the target, lowered at once
-/// and raised only past [`RAISE_MARGIN`]. A body with a single group time
-/// has no rate and keeps every group.
-pub(crate) fn body_k(groups: &BodyGroups<'_>, prev: u8) -> u8 {
-    let target = f64::from(TARGET_GROUPS_PER_SEC);
+/// The track's exponent for this body under `target` groups/s, from the
+/// previous body's `prev`: the largest exponent that keeps more than the
+/// target, lowered at once and raised only past [`RAISE_MARGIN`]. A body
+/// with no span to measure keeps every group.
+pub(crate) fn body_k(groups: &BodyGroups<'_>, prev: u8, target: u32) -> u8 {
+    let target = f64::from(target);
     if groups.span_us <= 0 {
         return 0;
     }
@@ -74,14 +75,14 @@ mod tests {
     use super::*;
 
     /// One body of `secs` seconds at `rate` groups a second, ids from
-    /// `first` stepping by `step`.
+    /// `first` stepping by `step`, measured over the whole body.
     fn body(tk: u64, rate: u64, step: u64, secs: u64) -> ([u32; LEVELS], i64) {
         let mut by_level = [0u32; LEVELS];
         let n = rate * secs;
         for i in 0..n {
             by_level[usize::from(level(tk, 1000 + i * step))] += 1;
         }
-        (by_level, ((n - 1) * 1_000_000 / rate) as i64)
+        (by_level, (secs * 1_000_000) as i64)
     }
 
     #[test]
@@ -101,11 +102,15 @@ mod tests {
 
     #[test]
     fn k_follows_the_body_s_group_rate() {
-        for (rate, want) in [(4, 0), (10, 0), (15, 0), (30, 1), (100, 3), (1000, 6)] {
+        for (target, rate, want) in
+            [(10, 4, 0), (10, 10, 0), (10, 15, 0), (10, 30, 1), (10, 100, 3), (10, 1000, 6)]
+        {
             let (by_level, span_us) = body(99, rate, 1, 15);
-            let k = body_k(&BodyGroups { by_level: &by_level, span_us }, 0);
+            let k = body_k(&BodyGroups { by_level: &by_level, span_us }, 0, target);
             assert_eq!(k, want, "{rate}/s");
         }
+        let (by_level, span_us) = body(99, 1000, 1, 15);
+        assert_eq!(body_k(&BodyGroups { by_level: &by_level, span_us }, 0, 1000), 0);
     }
 
     #[test]
@@ -114,11 +119,11 @@ mod tests {
         // 11 groups a second kept at k = 1: past the target, not the margin.
         by_level[1] = 11;
         let g = BodyGroups { by_level: &by_level, span_us: 1_000_000 };
-        assert_eq!((body_k(&g, 0), body_k(&g, 1)), (0, 1));
+        assert_eq!((body_k(&g, 0, 10), body_k(&g, 1, 10)), (0, 1));
         by_level[1] = 12;
-        assert_eq!(body_k(&BodyGroups { by_level: &by_level, span_us: 1_000_000 }, 0), 1);
+        assert_eq!(body_k(&BodyGroups { by_level: &by_level, span_us: 1_000_000 }, 0, 10), 1);
         by_level[1] = 9;
-        assert_eq!(body_k(&BodyGroups { by_level: &by_level, span_us: 1_000_000 }, 1), 0);
-        assert_eq!(body_k(&BodyGroups { by_level: &by_level, span_us: 0 }, 3), 0);
+        assert_eq!(body_k(&BodyGroups { by_level: &by_level, span_us: 1_000_000 }, 1, 10), 0);
+        assert_eq!(body_k(&BodyGroups { by_level: &by_level, span_us: 0 }, 3, 10), 0);
     }
 }
