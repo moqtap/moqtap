@@ -34,7 +34,7 @@ pub use crate::types::{BypassReason, ObjectMeta};
 ///
 /// # Why a fetch stream needs something from outside itself
 ///
-/// Drafts 18-22 write a fetch Object's Group ID as a difference from the
+/// Drafts 18-23 write a fetch Object's Group ID as a difference from the
 /// Object before it, and the fetch's Group Order decides whether the
 /// difference counts up or down — draft-19 Section 11.4.4.1. Nothing on the
 /// data stream states the order, so a framer handed only the stream cannot
@@ -358,7 +358,7 @@ impl ObjectFramer {
 
     /// Read this stream's fetch Objects against the order its FETCH asked for.
     ///
-    /// Only drafts 18-22 need it — see [`FetchGroupOrders`] — and only a
+    /// Only drafts 18-23 need it — see [`FetchGroupOrders`] — and only a
     /// fetch stream consults it; a subgroup framer given one ignores it. A
     /// framer built without it on a draft that needs one reports
     /// [`BypassReason::FetchGroupOrderUnknown`] and forwards the stream
@@ -404,8 +404,8 @@ impl ObjectFramer {
     /// this only suppresses the cursor advance — those Object IDs are
     /// absolute, so the bytes of every later object already say the truth.
     /// Elsewhere it also arms a fix-up: the leading Object ID varint on a
-    /// drafts 14-22 subgroup stream, and the whole framing of the next frame
-    /// on a drafts 15-22 fetch stream, where it additionally puts the fetch
+    /// drafts 14-23 subgroup stream, and the whole framing of the next frame
+    /// on a drafts 15-23 fetch stream, where it additionally puts the fetch
     /// writer back to where the last forwarded frame left it.
     pub fn note_elided(&mut self, meta: &ObjectMeta) {
         let pending = self.pending_disposition.take();
@@ -488,7 +488,7 @@ impl ObjectFramer {
     /// That exception is the *only* one, and it is opt-in per stream: a
     /// framer used as a pure observer never calls `note_elided`, so its
     /// output stays byte-identical to its input. When `note_elided` has
-    /// been called on a drafts 14-22 subgroup stream, the next object the
+    /// been called on a drafts 14-23 subgroup stream, the next object the
     /// framer emits has its leading Object ID varint re-encoded against
     /// the last object actually forwarded — one field, in one object, and
     /// every byte after it copied verbatim. Everything else, on every
@@ -586,7 +586,7 @@ impl ObjectFramer {
                     // session's own record of what each FETCH asked for,
                     // rather than inferred from the reader refusing. A codec
                     // able to decode a layout is not on its own enough: on
-                    // drafts 18-22 it decodes under a Group Order nothing
+                    // drafts 18-23 it decodes under a Group Order nothing
                     // on this stream states, and the wrong one decodes as
                     // willingly as the right one.
                     DataStreamHeaderKind::Fetch(h) => match self.fetch_stage(h) {
@@ -849,7 +849,7 @@ impl ObjectFramer {
     /// `true` when this stream's Object IDs are written as `id - prev - 1`
     /// rather than absolutely, so eliding one renumbers every later object.
     ///
-    /// Subgroup streams on drafts 14-22, and no fetch stream on any draft:
+    /// Subgroup streams on drafts 14-23, and no fetch stream on any draft:
     /// this is the predicate for the *varint rewrite*, and a fetch frame is
     /// paid for by [`Self::reemit_fetch_frame`] instead. Drafts 07-13 write
     /// subgroup Object IDs absolutely and need neither.
@@ -878,7 +878,8 @@ impl ObjectFramer {
                 | DraftVersion::Draft19
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
-                | DraftVersion::Draft22 => true,
+                | DraftVersion::Draft22
+                | DraftVersion::Draft23 => true,
             }
     }
 
@@ -892,7 +893,7 @@ impl ObjectFramer {
     /// Locations nobody sent. `fixup_owed` on a `Bypassed` is what a session
     /// resets its destination over, and it reads this.
     ///
-    /// Fetch streams on drafts 15-22, where a Serialization Flags field lets
+    /// Fetch streams on drafts 15-23, where a Serialization Flags field lets
     /// a frame take any of its Group ID, Subgroup ID, Object ID and Priority
     /// from the frame before it — draft-17 Section 10.4.4.1, Table 7: "Object
     /// ID is the prior Object's ID plus one". Not drafts 07-14, whose fetch
@@ -922,7 +923,8 @@ impl ObjectFramer {
                 | DraftVersion::Draft19
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
-                | DraftVersion::Draft22 => true,
+                | DraftVersion::Draft22
+                | DraftVersion::Draft23 => true,
             },
         }
     }
@@ -1036,7 +1038,7 @@ impl ObjectFramer {
     /// hostile length field can provoke. That makes the choice per layout
     /// rather than global:
     ///
-    /// * Subgroup objects on drafts 14-22, and fetch objects on draft-14,
+    /// * Subgroup objects on drafts 14-23, and fetch objects on draft-14,
     ///   are measured without a single copy — their `read_object_meta`
     ///   advances past the extension block and the payload rather than
     ///   reading them. Nothing can be talked into allocating, so the pad is
@@ -1053,9 +1055,9 @@ impl ObjectFramer {
     /// crate's to change.
     ///
     /// **"Every other" includes the newest fetch layouts, and that is not an
-    /// omission.** Drafts 15 through 22 all read a fetch frame through
+    /// omission.** Drafts 15 through 23 all read a fetch frame through
     /// `FetchObjectReader::read_object_header`, which materialises the frame's
-    /// properties — `data_dispatch.rs` `fo15`..`fo22` each carry the block out
+    /// properties — `data_dispatch.rs` `fo15`..`fo23` each carry the block out
     /// of the buffer before `read_object_frame` skips the payload — so a
     /// declared extension length is still an allocation those drafts can be
     /// talked into. Only draft-14's `FetchObject::decode_meta` advances past
@@ -1081,7 +1083,8 @@ impl ObjectFramer {
                 | DraftVersion::Draft19
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
-                | DraftVersion::Draft22 => true,
+                | DraftVersion::Draft22
+                | DraftVersion::Draft23 => true,
             },
             Stage::Fetch { .. } => match self.draft {
                 DraftVersion::Draft14 => true,
@@ -1099,7 +1102,8 @@ impl ObjectFramer {
                 | DraftVersion::Draft19
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
-                | DraftVersion::Draft22 => false,
+                | DraftVersion::Draft22
+                | DraftVersion::Draft23 => false,
             },
             Stage::AwaitingHeader => false,
         };
@@ -1271,7 +1275,8 @@ impl Buf for PaddedBuf<'_> {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 mod tests {
     //! The elide cursor, on the wire.
@@ -1327,6 +1332,8 @@ mod tests {
         DraftVersion::Draft21,
         #[cfg(feature = "draft22")]
         DraftVersion::Draft22,
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23,
     ];
 
     /// The drafts that write an Object ID as `id - prev - 1`, and so are
@@ -1351,6 +1358,8 @@ mod tests {
         DraftVersion::Draft21,
         #[cfg(feature = "draft22")]
         DraftVersion::Draft22,
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23,
     ];
 
     /// The stream-type field opening a subgroup stream that carries an
@@ -1505,7 +1514,7 @@ mod tests {
     /// Eliding an object leaves a stream that still decodes to exactly the
     /// objects that survived, on every draft.
     ///
-    /// On drafts 14-22 that is only true because the framer rewrites the
+    /// On drafts 14-23 that is only true because the framer rewrites the
     /// next object's leading Object ID varint; on 07-13 the IDs are
     /// absolute and the surviving bytes already say the truth.
     ///

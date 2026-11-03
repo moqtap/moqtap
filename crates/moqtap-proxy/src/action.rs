@@ -305,9 +305,10 @@ pub enum Action {
     /// Reset the destination stream with this application error code.
     ///
     /// Refused on control streams on every draft: resetting a control
-    /// stream at the transport layer is a session-level `PROTOCOL_VIOLATION`
-    /// in all of drafts 07-19. The documented escalation is
-    /// [`Self::CloseSession`].
+    /// stream at the transport layer ends the session. Drafts 07-22 close it
+    /// as a `PROTOCOL_VIOLATION`; draft-23 Section 6.3: "If the control stream
+    /// is closed, the peer MUST close the session with CLOSED_CONTROL_STREAM."
+    /// The documented escalation is [`Self::CloseSession`].
     ///
     /// Codes above the QUIC varint ceiling (2^62 - 1) are refused with
     /// [`Refusal::ErrorCodeOutOfRange`](crate::capability::Refusal::ErrorCodeOutOfRange)
@@ -391,7 +392,7 @@ pub enum DropMode {
     /// Drafts 07-13, and fetch streams on drafts 07-14, encode absolute
     /// IDs, so this is pure byte deletion: every survivor is forwarded
     /// verbatim, including any non-minimally-encoded varint it arrived
-    /// with. Drafts 14-22 delta-encode, so the *one* object following an
+    /// with. Drafts 14-23 delta-encode, so the *one* object following an
     /// elided run has its leading ID varint rewritten and nothing else;
     /// every later object is again forwarded verbatim, because the wire
     /// cursor re-converges after that one fix-up.

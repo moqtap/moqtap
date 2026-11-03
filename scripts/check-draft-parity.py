@@ -168,6 +168,11 @@ one entry each with the reason it is there and who owns the fix. They are
 printed on every run rather than skipped silently, because a baseline nobody
 reads is a disabled gate with extra steps. It may be shortened and not
 lengthened: a new site is a new finding.
+
+`BOUNDARIES` beside it holds the other kind of list that stops at N-1: one the
+newest draft ended, by removing what it gates. Each entry names that draft and
+quotes the sentence, and it expires as soon as that draft is no longer the
+newest.
 """
 
 from __future__ import annotations
@@ -742,6 +747,9 @@ def rule_2(everything, known, used):
             if key in known:
                 used.add(key)
                 continue
+            if BOUNDARIES.get(key, (None,))[0] == newest:
+                used.add(key)
+                continue
             bad.append((where, lineno(text, off), kind, sorted(got), fn))
     print("rule 2  %d list(s) reaching draft-%02d, %d of them stop there"
           % (checked, previous, len(bad)))
@@ -858,24 +866,6 @@ KNOWN = {
     # added to the enum without an arm is a compile error rather than a plausible
     # value.
 
-    ("crates/moqtap-proxy/src/session.rs", "datagram_is_status", "quiet catch-all"):
-        "REAL DEFECT, owned by moqtap-proxy, and the sharpest of the set "
-        "because the seam analysis holds this exact site up as the *correct* "
-        "pattern at 2.3 - `#[allow(unreachable_patterns)] _ => false` is total "
-        "under every feature set, which is what that section is about. It "
-        "is still a quiet answer for a draft the match has not met. Both "
-        "readings are true; the fix is an arm that is total AND loud.",
-
-    ("crates/moqtap-codec/tests/dispatch_tests.rs", "put_varint_for", "quiet catch-all"):
-        "Test helper. An arm per draft from 17 on and `_ => put_varint(v, out)`, "
-        "so a new draft silently gets the pre-delta encoding. Owned by the "
-        "codec test suite; harmless today and wrong the day it is not.",
-
-    ("crates/moqtap-proxy/tests/action_matrix.rs", "fetch_frame", "quiet catch-all"):
-        "Test helper. An arm per draft from 18 on and `_ => return None`, so a "
-        "new draft is silently skipped by the rows that use it rather than "
-        "covered by them. Owned by the proxy test suite.",
-
     # Rule 2. Four sweeps in one file, all of them sampling the drafts rather
     # than listing them, and all of them stopping where draft-19 was the newest
     # there was. The first is the sharpest: it is named for every draft.
@@ -903,6 +893,24 @@ KNOWN = {
      "a `DraftVersion` list literal"):
         "REAL FINDING, owned by the proxy test suite. As above - drafts 14 and "
         "19 as representatives of the two eras, with the newer one stale.",
+}
+
+
+# Rule 2's ladder cannot tell a list somebody forgot from one the newest draft
+# ended: a construct draft N removed is gated on drafts up to N-1, which is the
+# exact shape rule 2 reports. `KNOWN` is the wrong home for those, because its
+# entries are defects. Each entry here names the draft that removed the
+# construct and the sentence that says so, and answers only while that draft is
+# the newest: one draft later the list sits two rungs down, rule 2 stops asking,
+# and the entry is reported stale.
+BOUNDARIES = {
+    ("crates/moqtap-client/src/dispatch.rs", "read_object",
+     "a `cfg(any(...))` draft list"):
+        (23, "`forward_parameter` writes FORWARD (0x10), which drafts 15-22 "
+             "carry. Draft-23 replaced it with PAUSED: draft-23 Section 9.19.18, "
+             "\"The PAUSED parameter (Parameter Type 0x11) is a uint8.\" The "
+             "draft-23 facade writes it through `draft23::publish::"
+             "paused_parameter`."),
 }
 
 
@@ -966,7 +974,16 @@ def main(argv=None):
         print("  %s %s  %s  [%s]" % (mark, key[0], key[2], key[1]))
         for line in re.findall(r".{1,72}(?:\s|$)", known[key]):
             print("      %s" % line.strip())
+    print()
+    print("specification boundaries (%d), lists the newest draft ended:" % len(BOUNDARIES))
+    for key in sorted(BOUNDARIES):
+        mark = " " if key in used else "*"
+        draft, why = BOUNDARIES[key]
+        print("  %s %s  %s  [%s]  draft-%02d" % (mark, key[0], key[2], key[1], draft))
+        for line in re.findall(r".{1,72}(?:\s|$)", why):
+            print("      %s" % line.strip())
     stale = [k for k in known if k not in used] if ran_the_rest else []
+    stale += [k for k in BOUNDARIES if k not in used] if ran_the_rest else []
     if stale:
         print()
         print("  * no longer reported. Delete the entry - a baseline that does "

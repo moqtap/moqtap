@@ -70,6 +70,7 @@
     feature = "draft20",
     feature = "draft21",
     feature = "draft22",
+    feature = "draft23",
 ))]
 
 mod common;
@@ -283,6 +284,30 @@ fn a_zero_start_with_no_end_is_the_beginning_of_the_track_on_draft22() {
     assert_ne!(filter, LocationFilter::next_object());
     assert_eq!(LocationFilter::next_object().encode_value(), vec![0x05]);
 }
+/// Draft-23 reads an open `{0, 0}` as the beginning of the track, so the
+/// facade sends it rather than refusing it.
+///
+/// Section 9.19.9 gives the live edge a type of its own — "If Location Filter
+/// Type is 0x05, no fields follow and it specifies the Next Object" — so type
+/// 0x02 with two zero fields can only be an absolute start, and the collision
+/// drafts 20 and 21 refuse over is not there to refuse.
+#[cfg(feature = "draft23")]
+#[test]
+fn a_zero_start_with_no_end_is_the_beginning_of_the_track_on_draft23() {
+    use moqtap_client::draft23::fill::LocationFilter;
+    use moqtap_codec::draft23::message::location_filter_types;
+
+    let filter = SubscribeRange::starting_at(0, 0)
+        .location_filter_draft23()
+        .expect("{0, 0} is an absolute start on draft-23");
+    assert_eq!(filter.filter_type(), location_filter_types::ABSOLUTE_START);
+    assert_eq!(filter.fields(), &[0, 0]);
+    assert_eq!(filter.encode_value(), vec![0x02, 0x00, 0x00]);
+
+    // The live edge is a different value, not the same one read another way.
+    assert_ne!(filter, LocationFilter::next_object());
+    assert_eq!(LocationFilter::next_object().encode_value(), vec![0x05]);
+}
 
 /// Ten drafts deleted the End Object and refuse a range that ends inside a
 /// group, rather than widening it to the whole group behind the caller's back.
@@ -307,6 +332,11 @@ fn a_range_ending_inside_a_group_is_two_drafts_and_not_fourteen() {
     #[cfg(feature = "draft22")]
     assert_eq!(
         ends_inside_a_group().location_filter_draft22().expect("draft-22 carries one too").fields(),
+        &[4, 0, 2, 9]
+    );
+    #[cfg(feature = "draft23")]
+    assert_eq!(
+        ends_inside_a_group().location_filter_draft23().expect("draft-23 carries one too").fields(),
         &[4, 0, 2, 9]
     );
 }
@@ -659,14 +689,15 @@ const DELTA_END: [&[u8]; 2] = [&[0x03, 4, 0], &[0x04, 4, 0, 2]];
 #[cfg(any(feature = "draft20", feature = "draft21"))]
 const FIELD_COUNT: [&[u8]; 3] = [&[4, 0], &[4, 0, 2], &[4, 0, 2, 9]];
 
-/// Draft-22: the same fields, each behind the `Location Filter Type` that
-/// names them — 0x02 for the open range, 0x03 for one through the end of a
-/// Group, 0x04 for one ending at Object 9 (Section 9.20.9).
+/// Draft-22 and draft-23: the same fields, each behind the `Location Filter
+/// Type` that names them — 0x02 for the open range, 0x03 for one through the
+/// end of a Group, 0x04 for one ending at Object 9 (draft-22 Section 9.20.9,
+/// draft-23 Section 9.19.9).
 ///
 /// The open range is where these differ from [`FIELD_COUNT`] on the wire: a
 /// draft-21 reader would take the `0x02` for a length and read `{2, 4}` as the
 /// start, two fields and a byte early.
-#[cfg(feature = "draft22")]
+#[cfg(any(feature = "draft22", feature = "draft23"))]
 const FILTER_TYPE: [&[u8]; 3] = [&[2, 4, 0], &[3, 4, 0, 2], &[4, 4, 0, 2, 9]];
 
 request_stream_gate!(
@@ -718,5 +749,14 @@ request_stream_gate!(
     true,
     FILTER_TYPE,
     "draft-22 Section 9.20.9 names the shape with a Location Filter Type and its ranges are \
+     inclusive: an end Object of 9 rather than 10"
+);
+request_stream_gate!(
+    draft23,
+    "draft23",
+    Draft23,
+    true,
+    FILTER_TYPE,
+    "draft-23 Section 9.19.9 names the shape with a Location Filter Type and its ranges are \
      inclusive: an end Object of 9 rather than 10"
 );

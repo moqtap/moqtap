@@ -428,6 +428,27 @@ repeated_goaway_gates!(
 /// control stream", which draft-19 removed again.
 macro_rules! uni_repeated_goaway_gates {
     ($draft:ident, $feat:literal, $version:ident, $section:literal, $goaway:tt, $role:path) => {
+        uni_repeated_goaway_gates!(
+            $draft,
+            $feat,
+            $version,
+            $section,
+            $goaway,
+            $role,
+            0x3,
+            "PROTOCOL_VIOLATION"
+        );
+    };
+    (
+        $draft:ident,
+        $feat:literal,
+        $version:ident,
+        $section:literal,
+        $goaway:tt,
+        $role:path,
+        $code:literal,
+        $code_name:literal
+    ) => {
         #[cfg(feature = $feat)]
         mod $draft {
             use std::time::Duration;
@@ -441,9 +462,8 @@ macro_rules! uni_repeated_goaway_gates {
             use moqtap_codec::$draft::message::{ControlMessage, GoAway, Setup};
             use $role as Role;
 
-            /// Session termination code PROTOCOL_VIOLATION, 0x3 in every
-            /// draft's registry of them.
-            const PROTOCOL_VIOLATION: u64 = 0x3;
+            /// The session termination code the draft names for the rule.
+            const REPEATED_GOAWAY_CODE: u64 = $code;
 
             const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -522,12 +542,13 @@ macro_rules! uni_repeated_goaway_gates {
                         quinn::ConnectionError::ApplicationClosed(frame) => {
                             assert_eq!(
                                 u64::from(frame.error_code),
-                                PROTOCOL_VIOLATION,
+                                REPEATED_GOAWAY_CODE,
                                 concat!(
                                     "Section ",
                                     $section,
-                                    " answers a repeated GOAWAY with PROTOCOL_VIOLATION; the \
-                                     close carried {} instead"
+                                    " answers a repeated GOAWAY with ",
+                                    $code_name,
+                                    "; the close carried {} instead"
                                 ),
                                 u64::from(frame.error_code)
                             );
@@ -675,6 +696,16 @@ uni_repeated_goaway_gates!(
     plain,
     moqtap_client::draft22::session::request_id::Role
 );
+uni_repeated_goaway_gates!(
+    draft23,
+    "draft23",
+    Draft23,
+    "9.2",
+    plain,
+    moqtap_client::draft23::session::request_id::Role,
+    0x303,
+    "UNEXPECTED_MESSAGE"
+);
 
 /// The per-stream half of the rule, on the two drafts that state it.
 ///
@@ -820,3 +851,69 @@ request_stream_goaway_gates!(draft19, "draft19", draft19_request_streams);
 request_stream_goaway_gates!(draft20, "draft20", draft20_request_streams);
 request_stream_goaway_gates!(draft21, "draft21", draft21_request_streams);
 request_stream_goaway_gates!(draft22, "draft22", draft22_request_streams);
+
+/// Draft-23 counts GOAWAYs per request stream, and gives GOAWAY on a request
+/// stream a direction. Draft-23 Section 9.2: "Only the receiver of a request can
+/// send GOAWAY on its request stream. If the receiver of a request receives a
+/// GOAWAY on that request stream, it MUST close the session with a
+/// PROTOCOL_VIOLATION."
+#[cfg(feature = "draft23")]
+mod draft23_request_streams {
+    use moqtap_client::draft23::endpoint::{Endpoint, EndpointError};
+    use moqtap_client::draft23::session::request_id::Role;
+    use moqtap_client::draft23::session::state::SessionState;
+    use moqtap_codec::draft23::error_codes::SessionErrorCode;
+    use moqtap_codec::draft23::message::{ControlMessage, Setup};
+    use moqtap_codec::types::TrackNamespace;
+
+    use super::draft23::{active_client, goaway};
+
+    fn namespace() -> TrackNamespace {
+        TrackNamespace(vec![b"conformance".to_vec()])
+    }
+
+    #[test]
+    fn the_count_is_per_stream() {
+        let mut endpoint = active_client();
+        let (first, _) = endpoint
+            .subscribe(namespace(), b"one".to_vec(), Vec::new())
+            .expect("a subscription to migrate");
+        let (second, _) = endpoint
+            .subscribe(namespace(), b"two".to_vec(), Vec::new())
+            .expect("a second subscription to migrate");
+        endpoint
+            .receive_response_on_stream(first, ControlMessage::GoAway(goaway()))
+            .expect("the receiver of the SUBSCRIBE may migrate it");
+        endpoint
+            .receive_response_on_stream(second, ControlMessage::GoAway(goaway()))
+            .expect("a GOAWAY migrating a different request is not a repeat");
+        assert_eq!(endpoint.session_state(), SessionState::Active);
+        let err = endpoint
+            .receive_response_on_stream(first, ControlMessage::GoAway(goaway()))
+            .expect_err("a second GOAWAY on one request's stream must be refused");
+        assert_eq!(err.session_error_code(), Some(SessionErrorCode::UnexpectedMessage));
+        assert_eq!(endpoint.session_state(), SessionState::Closed);
+    }
+
+    #[test]
+    fn a_goaway_from_the_sender_of_the_request_closes_the_session() {
+        let mut peer = Endpoint::new(Role::Server);
+        peer.connect().expect("connect");
+        let _ = peer.send_setup(Vec::new()).expect("SETUP");
+        peer.receive_setup(&Setup { options: Vec::new() }).expect("peer SETUP");
+        let (_, subscribe) = peer
+            .subscribe(namespace(), b"peer".to_vec(), Vec::new())
+            .expect("the peer's own endpoint builds the peer's SUBSCRIBE");
+
+        let mut endpoint = active_client();
+        let id = endpoint
+            .receive_request_on_stream(&subscribe)
+            .expect("the peer's SUBSCRIBE opens a request stream");
+        let err = endpoint
+            .receive_on_peer_request_stream(id, ControlMessage::GoAway(goaway()))
+            .expect_err("this endpoint is the receiver of the request");
+        assert!(matches!(err, EndpointError::GoAwayFromRequestSender(_)), "{err}");
+        assert_eq!(err.session_error_code(), Some(SessionErrorCode::ProtocolViolation));
+        assert_eq!(endpoint.session_state(), SessionState::Closed);
+    }
+}

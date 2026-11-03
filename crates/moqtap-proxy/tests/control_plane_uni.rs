@@ -1,4 +1,4 @@
-//! Drafts 17 through 22: the control plane is a **pair of unidirectional
+//! Drafts 17 through 23: the control plane is a **pair of unidirectional
 //! streams**, and a bidirectional stream is a request stream.
 //!
 //! # What the drafts say
@@ -49,7 +49,7 @@
 //!   `ProxyControl::inject_control` places a message in the peer's
 //!   control-message sequence, and nothing appears in the request stream's.
 //!
-//! Each runs once per compiled draft in 17-22, so a build with only one of
+//! Each runs once per compiled draft in 17-23, so a build with only one of
 //! them still gates that one.
 
 #![cfg(any(
@@ -58,7 +58,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 mod common;
@@ -138,6 +139,11 @@ fn setup(draft: DraftVersion) -> AnyControlMessage {
             use moqtap_codec::draft22::message::{ControlMessage, Setup};
             AnyControlMessage::Draft22(ControlMessage::Setup(Setup { options: Vec::new() }))
         }
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23 => {
+            use moqtap_codec::draft23::message::{ControlMessage, Setup};
+            AnyControlMessage::Draft23(ControlMessage::Setup(Setup { options: Vec::new() }))
+        }
         other => panic!("{other} does not carry its control plane on unidirectional streams"),
     }
 }
@@ -189,6 +195,14 @@ fn namespace(draft: DraftVersion, suffix: &[u8]) -> AnyControlMessage {
                 namespace_suffix: suffix,
             }))
         }
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23 => {
+            use moqtap_codec::draft23::message::{ControlMessage, Namespace};
+            AnyControlMessage::Draft23(ControlMessage::Namespace(Namespace {
+                namespace_suffix: suffix,
+                parameters: Vec::new(),
+            }))
+        }
         other => panic!("{other} does not carry its control plane on unidirectional streams"),
     }
 }
@@ -237,6 +251,13 @@ fn namespace_done(draft: DraftVersion, suffix: &[u8]) -> AnyControlMessage {
         DraftVersion::Draft22 => {
             use moqtap_codec::draft22::message::{ControlMessage, NamespaceDone};
             AnyControlMessage::Draft22(ControlMessage::NamespaceDone(NamespaceDone {
+                namespace_suffix: suffix,
+            }))
+        }
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23 => {
+            use moqtap_codec::draft23::message::{ControlMessage, NamespaceDone};
+            AnyControlMessage::Draft23(ControlMessage::NamespaceDone(NamespaceDone {
                 namespace_suffix: suffix,
             }))
         }
@@ -312,6 +333,16 @@ fn subscribe(draft: DraftVersion, request_id: u64, track: &[u8]) -> AnyControlMe
                 parameters: Vec::new(),
             }))
         }
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23 => {
+            use moqtap_codec::draft23::message::{ControlMessage, Subscribe};
+            AnyControlMessage::Draft23(ControlMessage::Subscribe(Subscribe {
+                request_id: id,
+                track_namespace: ns,
+                track_name: track.to_vec(),
+                parameters: Vec::new(),
+            }))
+        }
         other => panic!("{other} does not carry its control plane on unidirectional streams"),
     }
 }
@@ -372,6 +403,14 @@ fn goaway(draft: DraftVersion, uri: &[u8]) -> AnyControlMessage {
                 timeout,
             }))
         }
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23 => {
+            use moqtap_codec::draft23::message::{ControlMessage, GoAway};
+            AnyControlMessage::Draft23(ControlMessage::GoAway(GoAway {
+                new_session_uri: uri.to_vec(),
+                timeout,
+            }))
+        }
         other => panic!("{other} does not carry its control plane on unidirectional streams"),
     }
 }
@@ -427,12 +466,20 @@ struct LogState {
 ///
 /// The type field's width comes from the draft, because from draft-17 MoQT
 /// counts leading ones where RFC 9000 read a two-bit prefix: SETUP's 0x2F00
-/// is the two bytes `AF 00` here and would be four under the old rule.
+/// is the two bytes `AF 00` here and would be four under the old rule. The
+/// length is 16 bits on drafts 17-22 and a varint on draft-23 (draft-23
+/// Section 9, Figure 6: "Message Length (vi64)").
 fn framed_len(draft: DraftVersion, pending: &[u8]) -> Option<usize> {
     let type_len = draft.varint_len(*pending.first()?);
-    let hi = *pending.get(type_len)? as usize;
-    let lo = *pending.get(type_len + 1)? as usize;
-    Some(type_len + 2 + ((hi << 8) | lo))
+    if draft.uses_fixed_length_framing() {
+        let hi = *pending.get(type_len)? as usize;
+        let lo = *pending.get(type_len + 1)? as usize;
+        return Some(type_len + 2 + ((hi << 8) | lo));
+    }
+    let len_len = draft.varint_len(*pending.get(type_len)?);
+    let mut field = pending.get(type_len..type_len + len_len)?;
+    let body = draft.decode_varint(&mut field).ok()?.into_inner() as usize;
+    Some(type_len + len_len + body)
 }
 
 /// A live decoder over one stream of framed MoQT messages.
@@ -449,11 +496,6 @@ struct ControlLog {
 impl ControlLog {
     /// Start decoding `recv` in the background as `draft`.
     fn spawn(draft: DraftVersion, mut recv: quinn::RecvStream) -> Self {
-        assert!(
-            draft.uses_fixed_length_framing(),
-            "the length field this reader walks is the 16-bit big-endian one drafts 11 and \
-             later use; a draft that framed it as a varint would need a different walk",
-        );
         let state = Arc::new(Mutex::new(LogState::default()));
         let sink = Arc::clone(&state);
         let task = tokio::spawn(async move {
@@ -762,6 +804,11 @@ async fn the_control_plane_is_the_uni_pair_and_a_bidi_is_a_request_stream_draft2
 async fn the_control_plane_is_the_uni_pair_and_a_bidi_is_a_request_stream_draft22() {
     topology_gate(DraftVersion::Draft22).await;
 }
+#[cfg(feature = "draft23")]
+#[tokio::test]
+async fn the_control_plane_is_the_uni_pair_and_a_bidi_is_a_request_stream_draft23() {
+    topology_gate(DraftVersion::Draft23).await;
+}
 
 /// The body of the rows above.
 async fn topology_gate(draft: DraftVersion) {
@@ -985,6 +1032,11 @@ async fn an_injection_lands_on_the_uni_control_stream_and_not_on_a_request_strea
 #[tokio::test]
 async fn an_injection_lands_on_the_uni_control_stream_and_not_on_a_request_stream_draft22() {
     injection_gate(DraftVersion::Draft22).await;
+}
+#[cfg(feature = "draft23")]
+#[tokio::test]
+async fn an_injection_lands_on_the_uni_control_stream_and_not_on_a_request_stream_draft23() {
+    injection_gate(DraftVersion::Draft23).await;
 }
 
 /// Where the injected message must appear in the relay's control sequence.

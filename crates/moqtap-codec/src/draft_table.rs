@@ -67,11 +67,11 @@
 /// by_draft! { draft, <absent>,
 ///     ("draft07", Draft07) => <the answer draft-07 gives>,
 ///     ...
-///     ("draft22", Draft22) => <the answer draft-22 gives>,
+///     ("draft23", Draft23) => <the answer draft-23 gives>,
 /// }
 /// ```
 ///
-/// `draft` is the draft number as the IETF writes it — 7 through 22, matching
+/// `draft` is the draft number as the IETF writes it — 7 through 23, matching
 /// [`crate::version::DraftVersion::number`]. `<absent>` is the answer for a
 /// draft this crate does not implement **and** for one whose feature flag is off
 /// in this build, which are two different facts with one honest answer: this

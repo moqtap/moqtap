@@ -98,7 +98,17 @@
 //! measuring objects here knows which track they belong to. What is written
 //! down is the END_OF_TRACK half, and a track whose end was only ever announced
 //! by a fetch response has no final object recorded to be past.
+//!
+//! # Objects that do not exist
+//!
+//! Draft-23 Section 12.1 adds: "An Object is received after it has been
+//! recorded as not existing, or is signalled as not existing after it was
+//! received (see Section 2.1.2)." [`TrackLocations::note_exists`](crate::track_locations::TrackLocations::note_exists)
+//! and [`TrackLocations::note_absent`](crate::track_locations::TrackLocations::note_absent) keep the two records that rule needs: the
+//! Objects received, as runs of Object IDs per Group, and the ranges signalled
+//! as not existing.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use moqtap_codec::types::TrackNamespace;
@@ -198,6 +208,56 @@ struct TrackRecord {
     /// nothing, so nothing after it is measured against where it claimed the
     /// track stopped.
     final_object: Option<ObjectLocation>,
+    /// The Objects received, per Group, as inclusive runs of Object IDs. Kept
+    /// only by [`TrackLocations::note_exists`].
+    received: BTreeMap<u64, Vec<(u64, u64)>>,
+    /// The inclusive Location ranges signalled as not existing. Kept only by
+    /// [`TrackLocations::note_absent`].
+    absent: Vec<(ObjectLocation, ObjectLocation)>,
+}
+
+impl TrackRecord {
+    fn new(namespace: &TrackNamespace, name: &[u8]) -> Self {
+        Self {
+            namespace: namespace.clone(),
+            name: name.to_vec(),
+            reached: None,
+            final_object: None,
+            received: BTreeMap::new(),
+            absent: Vec::new(),
+        }
+    }
+}
+
+/// Whether `at` lies in the inclusive range `from..=to`, in Location order.
+fn within(at: ObjectLocation, from: ObjectLocation, to: ObjectLocation) -> bool {
+    (from.group, from.object) <= (at.group, at.object)
+        && (at.group, at.object) <= (to.group, to.object)
+}
+
+/// Add `object` to a Group's sorted runs, merging runs it joins.
+fn insert_run(runs: &mut Vec<(u64, u64)>, object: u64) {
+    let i = runs.partition_point(|&(_, hi)| hi.saturating_add(1) < object);
+    if let Some(run) = runs.get_mut(i) {
+        if run.0 <= object && object <= run.1 {
+            return;
+        }
+        if run.0 == object.saturating_add(1) {
+            run.0 = object;
+        } else if run.1.saturating_add(1) == object {
+            run.1 = object;
+            if let Some(&(next_lo, next_hi)) = runs.get(i + 1) {
+                if next_lo == object.saturating_add(1) {
+                    runs[i].1 = next_hi;
+                    runs.remove(i + 1);
+                }
+            }
+        } else {
+            runs.insert(i, (object, object));
+        }
+        return;
+    }
+    runs.push((object, object));
 }
 
 /// How far each track's objects have reached, so far.
@@ -223,12 +283,8 @@ impl TrackLocations {
     /// End of Track object that follows it.
     pub fn observe(&mut self, namespace: &TrackNamespace, name: &[u8], at: ObjectLocation) {
         let Some(record) = self.record_mut(namespace, name) else {
-            self.tracks.push(TrackRecord {
-                namespace: namespace.clone(),
-                name: name.to_vec(),
-                reached: Some(at),
-                final_object: None,
-            });
+            self.tracks
+                .push(TrackRecord { reached: Some(at), ..TrackRecord::new(namespace, name) });
             return;
         };
         record.reached = Some(match record.reached {
@@ -293,12 +349,8 @@ impl TrackLocations {
         at: ObjectLocation,
     ) {
         let Some(record) = self.record_mut(namespace, name) else {
-            self.tracks.push(TrackRecord {
-                namespace: namespace.clone(),
-                name: name.to_vec(),
-                reached: None,
-                final_object: Some(at),
-            });
+            self.tracks
+                .push(TrackRecord { final_object: Some(at), ..TrackRecord::new(namespace, name) });
             return;
         };
         if record.final_object.is_none() {
@@ -328,6 +380,63 @@ impl TrackLocations {
             return Err(final_object);
         }
         Ok(())
+    }
+
+    /// Record that the Object at `at` was received, unless the track has
+    /// recorded it as not existing.
+    ///
+    /// Draft-23 Section 12.1 counts "An Object is received after it has been
+    /// recorded as not existing" as a Malformed Track. The `Err` is `at`.
+    pub fn note_exists(
+        &mut self,
+        namespace: &TrackNamespace,
+        name: &[u8],
+        at: ObjectLocation,
+    ) -> Result<(), ObjectLocation> {
+        let record = self.record_or_insert(namespace, name);
+        if record.absent.iter().any(|&(from, to)| within(at, from, to)) {
+            return Err(at);
+        }
+        insert_run(record.received.entry(at.group).or_default(), at.object);
+        Ok(())
+    }
+
+    /// Record that every Object from `from` through `to`, inclusive, does not
+    /// exist, unless one of them was received.
+    ///
+    /// The other half of the same condition: an Object "is signalled as not
+    /// existing after it was received". The `Err` is the first received
+    /// Object the range covers.
+    pub fn note_absent(
+        &mut self,
+        namespace: &TrackNamespace,
+        name: &[u8],
+        from: ObjectLocation,
+        to: ObjectLocation,
+    ) -> Result<(), ObjectLocation> {
+        let record = self.record_or_insert(namespace, name);
+        for (&group, runs) in record.received.range(from.group..=to.group) {
+            for &(lo, hi) in runs {
+                let start = if group == from.group { lo.max(from.object) } else { lo };
+                let end = if group == to.group { hi.min(to.object) } else { hi };
+                if start <= end {
+                    return Err(ObjectLocation { group, object: start });
+                }
+            }
+        }
+        record.absent.push((from, to));
+        Ok(())
+    }
+
+    fn record_or_insert(&mut self, namespace: &TrackNamespace, name: &[u8]) -> &mut TrackRecord {
+        let i = match self.tracks.iter().position(|t| t.namespace == *namespace && t.name == name) {
+            Some(i) => i,
+            None => {
+                self.tracks.push(TrackRecord::new(namespace, name));
+                self.tracks.len() - 1
+            }
+        };
+        &mut self.tracks[i]
     }
 
     fn record(&self, namespace: &TrackNamespace, name: &[u8]) -> Option<&TrackRecord> {
@@ -493,6 +602,21 @@ impl TrackObjects {
     /// [`TrackLocations::check_not_past_final`].
     pub fn check_not_past_final(&self, at: ObjectLocation) -> Result<(), ObjectLocation> {
         self.locked().check_not_past_final(&self.namespace, &self.name, at)
+    }
+
+    /// Record that an Object was received. See [`TrackLocations::note_exists`].
+    pub fn note_exists(&self, at: ObjectLocation) -> Result<(), ObjectLocation> {
+        self.locked().note_exists(&self.namespace, &self.name, at)
+    }
+
+    /// Record a range of Objects signalled as not existing. See
+    /// [`TrackLocations::note_absent`].
+    pub fn note_absent(
+        &self,
+        from: ObjectLocation,
+        to: ObjectLocation,
+    ) -> Result<(), ObjectLocation> {
+        self.locked().note_absent(&self.namespace, &self.name, from, to)
     }
 
     /// Record an object this track produced. See [`TrackLocations::observe`].

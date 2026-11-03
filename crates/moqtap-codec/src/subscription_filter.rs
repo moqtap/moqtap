@@ -18,8 +18,9 @@
 //! module's: its `Location Filter Type` numbers the forms afresh (0x01 is a
 //! relative start where draft-19's 0x1 was Next Group Start, and 0x05 is the
 //! Next Object), and the value has no length. Draft-22 reads it through
-//! `draft22::message::decode_location_filter`, and a draft-22 filter read
-//! through this module would be misnamed rather than refused.
+//! `draft22::message::decode_location_filter`, and draft-23 through its own,
+//! and a filter of either read through this module would be misnamed rather
+//! than refused.
 //!
 //! The move is why this module exists. A parameter value is a run of bytes, and
 //! a codec that carries it as bytes carries the Filter Type with it — including

@@ -168,7 +168,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 mod common;
@@ -240,13 +241,15 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
 /// The draft every fixture in this file is built for: the **newest** one
 /// this build compiled.
 ///
 /// Newest rather than oldest because the newest draft exercises the hardest
-/// half of the framer: drafts 14-22 delta-encode object IDs. Nothing here
+/// half of the framer: drafts 14-23 delta-encode object IDs. Nothing here
 /// elides, so no ID is rewritten and byte equality is the ordering assertion
 /// on every draft.
 const DRAFT: DraftVersion = COMPILED_DRAFTS[COMPILED_DRAFTS.len() - 1];
@@ -287,7 +290,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 /// A subgroup stream header for `draft`: track alias 1, group 0, subgroup
 /// 0, publisher priority `0x80`.
 ///
-/// Five bytes on every draft 07-22 — the type field, three one-byte
+/// Five bytes on every draft 07-23 — the type field, three one-byte
 /// varints and the priority octet — which is why [`Rig`]'s promise that
 /// every test here starts with the same five header bytes holds whatever
 /// this build compiled.
@@ -2287,7 +2290,7 @@ async fn a_stop_during_a_delay_is_mirrored_on_the_data_path() {
 // message on each cohort: type `0x40` with a varint length on drafts 07-10,
 // `0x20` with a `u16` length on 11-14, versions replaced by parameters on
 // 15-16, and a unified `SETUP` at `0x2F00` with delta-encoded KVP options
-// on 17-22. A "portable" encoder here would be four encoders and three
+// on 17-23. A "portable" encoder here would be four encoders and three
 // guesses.
 //
 // Draft-14 also keeps `moq-00` — this file's ALPN — meaningful: it leaves

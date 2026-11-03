@@ -52,6 +52,7 @@ draft19 = ["moqtap-codec/draft19"]
 draft20 = ["moqtap-codec/draft20"]
 draft21 = ["moqtap-codec/draft21"]
 draft22 = ["moqtap-codec/draft22"]
+draft23 = ["moqtap-codec/draft23"]
 all-drafts = [
     "draft07",
     "draft08",
@@ -69,6 +70,7 @@ all-drafts = [
     "draft20",
     "draft21",
     "draft22",
+    "draft23",
     "moqtap-codec/all-drafts",
 ]
 

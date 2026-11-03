@@ -52,6 +52,7 @@ fn every_alpn() -> Vec<Vec<u8>> {
         DraftVersion::Draft20,
         DraftVersion::Draft21,
         DraftVersion::Draft22,
+        DraftVersion::Draft23,
         DraftVersion::Draft19,
         DraftVersion::Draft18,
         DraftVersion::Draft17,

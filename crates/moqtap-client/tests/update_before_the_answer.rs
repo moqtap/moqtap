@@ -102,3 +102,4 @@ update_before_the_answer_gates!(draft19, "draft19", draft19, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft20, "draft20", draft20, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft21, "draft21", draft21, "REQUEST_UPDATE");
 update_before_the_answer_gates!(draft22, "draft22", draft22, "REQUEST_UPDATE");
+update_before_the_answer_gates!(draft23, "draft23", draft23, "REQUEST_UPDATE");

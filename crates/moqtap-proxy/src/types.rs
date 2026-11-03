@@ -89,7 +89,7 @@ pub struct ObjectMeta {
     /// Subgroup ID. `None` when the frame has none to report, which
     /// happens two ways.
     /// On a subgroup stream, when the stream type encodes an implicit subgroup
-    /// ID that this draft never resolves — drafts 11 through 22 define a
+    /// ID that this draft never resolves — drafts 11 through 23 define a
     /// *subgroup ID is the first object's ID* mode that the codec stores as
     /// zero, and reporting that zero would mis-key any matcher.
     ///
@@ -101,7 +101,7 @@ pub struct ObjectMeta {
     /// a subgroup ID field that holds a placeholder — the same zero, and
     /// the same mis-keying if it were forwarded.
     pub subgroup_id: Option<u64>,
-    /// Absolute Object ID, resolved from delta encoding on drafts 14-22.
+    /// Absolute Object ID, resolved from delta encoding on drafts 14-23.
     pub object_id: u64,
     /// Publisher priority. `None` when the header set a default-priority
     /// flag and omitted the field (drafts 15+).
@@ -112,10 +112,12 @@ pub struct ObjectMeta {
     pub payload_len: u64,
     /// Object Status wire code; `None` when a non-empty payload followed.
     pub status: Option<u64>,
-    /// Which End of Range indicator this frame is, or `None` for an object.
+    /// Which indicator this frame is, or `None` for an object.
     ///
-    /// Drafts 16-19 let a fetch stream state that a run of Objects was not
-    /// serialized instead of sending them, and those frames arrive through
+    /// Drafts 16-23 let a fetch stream state that a run of Objects was not
+    /// serialized instead of sending them, and draft-23 adds End of Group and
+    /// End of Track, which say the Object before them ends its Group or the
+    /// Track and carry that Object's Location. These frames arrive through
     /// the same reader call as objects do. They are **not** objects: they
     /// carry no payload and no content, and one of them standing in a
     /// count of objects is a count that is wrong. An observer that means
@@ -143,7 +145,7 @@ pub enum BypassReason {
     /// dispatch and the object-reader dispatch ever disagree about which
     /// drafts this binary speaks.
     NoFetchObjectCodec,
-    /// A fetch stream on drafts 18-22 naming a request this
+    /// A fetch stream on drafts 18-23 naming a request this
     /// session never saw asked for.
     ///
     /// Those drafts write an Object's Group ID as a difference from the

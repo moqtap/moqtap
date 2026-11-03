@@ -57,6 +57,8 @@ pub enum DraftVersion {
     Draft21,
     /// draft-ietf-moq-transport-22.
     Draft22,
+    /// draft-ietf-moq-transport-23.
+    Draft23,
 }
 
 impl DraftVersion {
@@ -85,7 +87,7 @@ impl DraftVersion {
     /// wrong. `scripts/check-draft-parity.py` holds those against the enum, the
     /// per-draft source directories, the cargo features and the CI rows on
     /// every run, and the tests below hold them against `from_number`.
-    pub const ALL: [DraftVersion; 16] = [
+    pub const ALL: [DraftVersion; 17] = [
         DraftVersion::Draft07,
         DraftVersion::Draft08,
         DraftVersion::Draft09,
@@ -102,6 +104,7 @@ impl DraftVersion {
         DraftVersion::Draft20,
         DraftVersion::Draft21,
         DraftVersion::Draft22,
+        DraftVersion::Draft23,
     ];
 
     /// The newest draft of the series.
@@ -124,7 +127,7 @@ impl DraftVersion {
     /// **From draft-15 on there is no such value on the wire at all.** Draft-15
     /// deleted the version field from CLIENT_SETUP and moved version selection
     /// into the ALPN (`moqt-<N>`, see [`Self::quic_alpn`]), so the number this
-    /// returns for drafts 15 through 22 — `0xff00000f` through `0xff000016` —
+    /// returns for drafts 15 through 23 — `0xff00000f` through `0xff000017` —
     /// is a continuation of the mapping and not something a peer can observe or
     /// send. Nothing in this crate encodes it for those drafts. It is kept so
     /// that a caller with a draft in hand can name the version the series would
@@ -151,6 +154,7 @@ impl DraftVersion {
             DraftVersion::Draft20 => 20,
             DraftVersion::Draft21 => 21,
             DraftVersion::Draft22 => 22,
+            DraftVersion::Draft23 => 23,
         };
         VarInt::from_usize(0xff000000 + n as usize)
     }
@@ -179,13 +183,14 @@ impl DraftVersion {
             DraftVersion::Draft20 => b"moqt-20",
             DraftVersion::Draft21 => b"moqt-21",
             DraftVersion::Draft22 => b"moqt-22",
+            DraftVersion::Draft23 => b"moqt-23",
         }
     }
 
     /// Resolve an ALPN identifier to a specific draft version.
     ///
     /// Returns `Some` for ALPNs that unambiguously identify a draft
-    /// (`moqt-15` through `moqt-22`). Returns `None`
+    /// (`moqt-15` through `moqt-23`). Returns `None`
     /// for `moq-00` — which covers drafts 07–14 and requires inspecting
     /// CLIENT_SETUP's supported-versions list — and for any unrecognized
     /// ALPN.
@@ -199,11 +204,12 @@ impl DraftVersion {
             b"moqt-20" => Some(DraftVersion::Draft20),
             b"moqt-21" => Some(DraftVersion::Draft21),
             b"moqt-22" => Some(DraftVersion::Draft22),
+            b"moqt-23" => Some(DraftVersion::Draft23),
             _ => None,
         }
     }
 
-    /// Resolve a draft number (e.g. 7..=22) to a `DraftVersion`.
+    /// Resolve a draft number (e.g. 7..=23) to a `DraftVersion`.
     ///
     /// Returns `None` for numbers outside the supported range.
     pub fn from_number(n: u8) -> Option<DraftVersion> {
@@ -224,16 +230,36 @@ impl DraftVersion {
             20 => Some(DraftVersion::Draft20),
             21 => Some(DraftVersion::Draft21),
             22 => Some(DraftVersion::Draft22),
+            23 => Some(DraftVersion::Draft23),
             _ => None,
         }
     }
 
     /// Whether this draft uses a 16-bit big-endian message length in control
-    /// message framing (`true`) or a QUIC varint (`false`).
+    /// message framing (`true`) or a variable-length integer (`false`).
     ///
-    /// Draft-11 changed the framing from `Length(i)` to `Length(16)`.
+    /// Drafts 07-10 write `Length (i)`, drafts 11-22 `Length (16)`, and
+    /// draft-23 Section 9, Figure 6 writes "Message Length (vi64)".
     pub fn uses_fixed_length_framing(&self) -> bool {
-        self.number() >= 11
+        match self {
+            DraftVersion::Draft07
+            | DraftVersion::Draft08
+            | DraftVersion::Draft09
+            | DraftVersion::Draft10
+            | DraftVersion::Draft23 => false,
+            DraftVersion::Draft11
+            | DraftVersion::Draft12
+            | DraftVersion::Draft13
+            | DraftVersion::Draft14
+            | DraftVersion::Draft15
+            | DraftVersion::Draft16
+            | DraftVersion::Draft17
+            | DraftVersion::Draft18
+            | DraftVersion::Draft19
+            | DraftVersion::Draft20
+            | DraftVersion::Draft21
+            | DraftVersion::Draft22 => true,
+        }
     }
 
     /// Which variable-length integer encoding this draft's wire format uses.
@@ -259,13 +285,14 @@ impl DraftVersion {
             // Draft-20 Section 1.4.1 is draft-18's encoding verbatim: the same
             // leading-ones-count prefix over all nine lengths. The revision
             // changed the hyphen in "Variable-length" in the heading and
-            // nothing else about it. Drafts 21 and 22 state it in Section 8.1
-            // and leave the integer alone.
+            // nothing else about it. Drafts 21 through 23 state it in Section
+            // 8.1 and leave the integer alone.
             DraftVersion::Draft18
             | DraftVersion::Draft19
             | DraftVersion::Draft20
             | DraftVersion::Draft21
-            | DraftVersion::Draft22 => VarIntEncoding::Moqt18,
+            | DraftVersion::Draft22
+            | DraftVersion::Draft23 => VarIntEncoding::Moqt18,
         }
     }
 
@@ -314,7 +341,7 @@ impl DraftVersion {
         }
     }
 
-    /// The draft number (e.g. 7, 14, 22).
+    /// The draft number (e.g. 7, 14, 23).
     pub fn number(&self) -> u8 {
         match self {
             DraftVersion::Draft07 => 7,
@@ -333,6 +360,7 @@ impl DraftVersion {
             DraftVersion::Draft20 => 20,
             DraftVersion::Draft21 => 21,
             DraftVersion::Draft22 => 22,
+            DraftVersion::Draft23 => 23,
         }
     }
 }
@@ -416,6 +444,7 @@ mod tests {
             (DraftVersion::Draft20, Moqt18),
             (DraftVersion::Draft21, Moqt18),
             (DraftVersion::Draft22, Moqt18),
+            (DraftVersion::Draft23, Moqt18),
         ];
         for (draft, encoding) in expected {
             assert_eq!(draft.varint_encoding(), encoding, "{draft}");
@@ -453,6 +482,7 @@ mod tests {
         assert_eq!(DraftVersion::from_alpn(b"moqt-20"), Some(DraftVersion::Draft20));
         assert_eq!(DraftVersion::from_alpn(b"moqt-21"), Some(DraftVersion::Draft21));
         assert_eq!(DraftVersion::from_alpn(b"moqt-22"), Some(DraftVersion::Draft22));
+        assert_eq!(DraftVersion::from_alpn(b"moqt-23"), Some(DraftVersion::Draft23));
     }
 
     #[test]

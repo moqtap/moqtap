@@ -22,7 +22,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 use moqtap_codec::error::{

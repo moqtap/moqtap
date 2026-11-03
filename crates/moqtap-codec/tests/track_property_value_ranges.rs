@@ -58,7 +58,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 /// DEFAULT_PUBLISHER_GROUP_ORDER.
@@ -96,6 +97,8 @@ const IN_RANGE: &[(u64, u64)] = &[
 /// decode side with no fixture if the two shared one. Everything except the run
 /// of extensions is a fixed prelude: the message type, the sixteen-bit payload
 /// length, an empty Parameters list, and on draft-16 a Request ID.
+// Draft-23 has its own module below, so a draft-23-only build uses none of it.
+#[allow(unused_macros)]
 macro_rules! track_property_range_gate {
     (
         $module:ident,
@@ -538,3 +541,127 @@ track_property_range_gate!(
     },
     also_refused = &[]
 );
+/// Draft-23 answers all three ranges with MALFORMED_KEY_VALUE, the priority
+/// included. Section 10.4: "If an endpoint receives a value above 255, it MUST
+/// close the session with MALFORMED_KEY_VALUE." Its Message Length is a `vi64`
+/// (Section 9, Figure 6).
+#[cfg(feature = "draft23")]
+mod draft23 {
+    use super::{DEFAULT_PUBLISHER_PRIORITY, IMMUTABLE, IN_RANGE, OUT_OF_RANGE};
+    use moqtap_codec::draft23::message::*;
+    use moqtap_codec::error::CodecError;
+    use moqtap_codec::kvp::{KeyValuePair, KvpValue};
+    use moqtap_codec::varint::{Moqt18, VarInt};
+
+    fn put_varint(v: u64, out: &mut Vec<u8>) {
+        VarInt::from_u64_moqt(v).encode_moqt::<Moqt18>(out);
+    }
+
+    fn kvp_varint(key: u64, value: u64, out: &mut Vec<u8>) {
+        put_varint(key, out);
+        put_varint(value, out);
+    }
+
+    fn kvp_bytes(key: u64, value: &[u8], out: &mut Vec<u8>) {
+        put_varint(key, out);
+        put_varint(value.len() as u64, out);
+        out.extend_from_slice(value);
+    }
+
+    fn beside(key: u64, value: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        kvp_varint(key, value, &mut out);
+        out
+    }
+
+    fn inside(key: u64, value: u64) -> Vec<u8> {
+        let mut nested = Vec::new();
+        kvp_varint(key, value, &mut nested);
+        let mut out = Vec::new();
+        kvp_bytes(IMMUTABLE, &nested, &mut out);
+        out
+    }
+
+    /// A SUBSCRIBE_OK, track alias 7 and no parameters, whose tail is `run`.
+    fn subscribe_ok(run: &[u8]) -> Vec<u8> {
+        let mut payload = vec![0x07, 0x00];
+        payload.extend_from_slice(run);
+        let mut wire = vec![0x04];
+        put_varint(payload.len() as u64, &mut wire);
+        wire.extend_from_slice(&payload);
+        wire
+    }
+
+    fn tail_of(wire: &[u8]) -> Result<Vec<KeyValuePair>, CodecError> {
+        match ControlMessage::decode(&mut &wire[..])? {
+            ControlMessage::SubscribeOk(m) => Ok(m.track_properties),
+            other => panic!("the fixture is a SUBSCRIBE_OK: {other:?}"),
+        }
+    }
+
+    const ALSO_REFUSED: &[(u64, u64)] =
+        &[(DEFAULT_PUBLISHER_PRIORITY, 256), (DEFAULT_PUBLISHER_PRIORITY, 300)];
+
+    #[test]
+    fn a_value_outside_the_range_its_type_allows_is_refused() {
+        for &(key, value) in OUT_OF_RANGE.iter().chain(ALSO_REFUSED) {
+            for (where_, run) in [("beside", beside(key, value)), ("inside", inside(key, value))] {
+                assert_eq!(
+                    tail_of(&subscribe_ok(&run)),
+                    Err(CodecError::TrackPropertyValueOutOfRange { key, value }),
+                    "type {key:#x} value {value} {where_} the immutable block must be refused",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_value_the_ranges_admit_is_carried() {
+        for &(key, value) in IN_RANGE.iter().chain(&[(DEFAULT_PUBLISHER_PRIORITY, 255)]) {
+            let beside = tail_of(&subscribe_ok(&beside(key, value)))
+                .unwrap_or_else(|e| panic!("type {key:#x} value {value} is legal: {e:?}"));
+            assert_eq!(beside.len(), 1);
+            let inside = tail_of(&subscribe_ok(&inside(key, value)))
+                .unwrap_or_else(|e| panic!("type {key:#x} value {value} nested: {e:?}"));
+            assert_eq!(inside[0].key.into_inner(), IMMUTABLE);
+        }
+    }
+
+    #[test]
+    fn a_value_the_decoder_refuses_is_never_written() {
+        for &(key, value) in OUT_OF_RANGE.iter().chain(ALSO_REFUSED) {
+            let message = ControlMessage::SubscribeOk(SubscribeOk {
+                track_alias: VarInt::from_u64_moqt(7),
+                parameters: Vec::new(),
+                track_properties: vec![KeyValuePair {
+                    key: VarInt::from_u64_moqt(key),
+                    value: KvpValue::Varint(VarInt::from_u64_moqt(value)),
+                }],
+            });
+            let mut wire = Vec::new();
+            assert_eq!(
+                message.encode(&mut wire),
+                Err(CodecError::TrackPropertyValueOutOfRange { key, value }),
+                "type {key:#x} value {value} must not be written",
+            );
+            assert!(wire.is_empty());
+        }
+    }
+
+    /// Bytes under 0xB that are not a Key-Value-Pair run are carried, and do
+    /// not shield the entries after them.
+    #[test]
+    fn an_unreadable_immutable_block_is_carried_and_shields_nothing() {
+        let mut run = Vec::new();
+        kvp_bytes(IMMUTABLE, &[0xFF], &mut run);
+        let tail = tail_of(&subscribe_ok(&run)).expect("unreadable is not the same as illegal");
+        assert_eq!(tail[0].value, KvpValue::Bytes(vec![0xFF]));
+
+        put_varint(0x22 - IMMUTABLE, &mut run);
+        put_varint(0, &mut run);
+        assert_eq!(
+            tail_of(&subscribe_ok(&run)),
+            Err(CodecError::TrackPropertyValueOutOfRange { key: 0x22, value: 0 })
+        );
+    }
+}

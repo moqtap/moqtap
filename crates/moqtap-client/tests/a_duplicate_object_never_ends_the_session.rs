@@ -10,7 +10,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 //! A duplicate Object that contradicts the one before it never ends the
@@ -1232,3 +1233,4 @@ unidirectional_duplicate_gates!(draft19, "draft19", Draft19, "9.1");
 unidirectional_duplicate_gates!(draft20, "draft20", Draft20, "9.1");
 unidirectional_duplicate_gates!(draft21, "draft21", Draft21, "7.1");
 unidirectional_duplicate_gates!(draft22, "draft22", Draft22, "7.1");
+unidirectional_duplicate_gates!(draft23, "draft23", Draft23, "7.1");

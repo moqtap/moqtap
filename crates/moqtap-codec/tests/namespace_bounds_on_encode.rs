@@ -1064,3 +1064,54 @@ mod draft22 {
         assert!(decoded.is_ok(), "what this codec wrote it must read: {decoded:?}");
     }
 }
+#[cfg(feature = "draft23")]
+mod draft23 {
+    use super::fields;
+    use moqtap_codec::draft23::message::{ControlMessage, PublishNamespace};
+    #[allow(unused_imports)]
+    use moqtap_codec::varint::VarInt;
+
+    fn message(namespace: moqtap_codec::types::TrackNamespace) -> ControlMessage {
+        ControlMessage::PublishNamespace(PublishNamespace {
+            request_id: VarInt::from_u64(0).unwrap(),
+            track_namespace: namespace,
+            parameters: vec![],
+        })
+    }
+
+    fn encode(n: usize) -> Result<Vec<u8>, moqtap_codec::error::CodecError> {
+        let mut buf = Vec::new();
+        message(fields(n)).encode(&mut buf)?;
+        Ok(buf)
+    }
+
+    /// More fields than draft-23 Section 2.4.1 permits, refused before the
+    /// bytes exist.
+    #[test]
+    fn a_namespace_of_33_fields_never_reaches_the_wire() {
+        let result = encode(33);
+        assert!(result.is_err(), "33 fields is more than this draft permits: {result:?}");
+    }
+
+    /// The boundary on the other side of the same rule. Without this the gate
+    /// above would pass on an encoder that refused every namespace.
+    #[test]
+    fn a_namespace_of_32_fields_round_trips() {
+        let buf = encode(32).expect("32 fields is the most this draft permits");
+        let decoded = ControlMessage::decode(&mut &buf[..]);
+        assert!(decoded.is_ok(), "what this codec wrote it must read: {decoded:?}");
+    }
+
+    /// A namespace of no fields, which this draft does define.
+    ///
+    /// Draft-23 Section 2.4.1 makes a Track Namespace "an ordered set of
+    /// between 0 and 32 Track Namespace Fields", and states only the upper
+    /// bound as a violation, so the empty namespace goes out and comes back.
+    #[test]
+    fn an_empty_namespace_is_carried() {
+        let result = encode(0);
+        let buf = result.expect("this draft defines the empty namespace");
+        let decoded = ControlMessage::decode(&mut &buf[..]);
+        assert!(decoded.is_ok(), "what this codec wrote it must read: {decoded:?}");
+    }
+}

@@ -15,6 +15,7 @@
     feature = "draft20",
     feature = "draft21",
     feature = "draft22",
+    feature = "draft23",
 ))]
 
 //! `AnyConnection::fetch_joining` names a subscription and a starting point,
@@ -846,6 +847,15 @@ no_joining_gate!(
     Vec::new(),
     "Section 9.11",
     "draft-22 has no joining mechanism"
+);
+no_joining_gate!(
+    draft23,
+    "draft23",
+    Draft23,
+    uni,
+    Vec::new(),
+    "Section 9.11",
+    "draft-23 has no joining mechanism"
 );
 
 // ── Drafts 08 through 10: one joining Fetch Type, and a flat FETCH ──────────

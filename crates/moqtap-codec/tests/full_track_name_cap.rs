@@ -43,7 +43,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::error::CodecError;
 #[cfg(any(
@@ -58,7 +59,8 @@ use moqtap_codec::error::CodecError;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::types::TrackNamespace;
 #[cfg(any(
@@ -67,7 +69,8 @@ use moqtap_codec::types::TrackNamespace;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::varint::MoqtProfile;
 #[cfg(any(
@@ -82,7 +85,8 @@ use moqtap_codec::varint::MoqtProfile;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -105,6 +109,16 @@ use moqtap_codec::varint::VarInt;
 fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     let mut wire = vec![type_id];
     wire.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    wire.extend_from_slice(payload);
+    wire
+}
+
+/// [`framed`] with draft-23's `vi64` Message Length (Section 9, Figure 6).
+#[cfg(feature = "draft23")]
+fn framed_vi64(type_id: u8, payload: &[u8]) -> Vec<u8> {
+    use moqtap_codec::varint::{Moqt18, VarInt};
+    let mut wire = vec![type_id];
+    VarInt::from_usize(payload.len()).encode_moqt::<Moqt18>(&mut wire);
     wire.extend_from_slice(payload);
     wire
 }
@@ -150,7 +164,8 @@ fn subscribe_prefix(leading_varints: usize, namespace_bytes: usize, name_bytes: 
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn subscribe_prefix_moqt<P: MoqtProfile>(
     leading_varints: usize,
@@ -259,6 +274,27 @@ macro_rules! full_track_name_cap_gate_moqt {
             );
         }
     };
+    ($fname:ident, $feat:literal, $draft:ident, $profile:ty, $leading:expr, vi64) => {
+        #[cfg(feature = $feat)]
+        #[test]
+        fn $fname() {
+            use moqtap_codec::$draft::message::ControlMessage;
+
+            let over = framed_vi64(0x03, &subscribe_prefix_moqt::<$profile>($leading, 4000, 97));
+            let decoded = ControlMessage::decode(&mut &over[..]);
+            assert!(
+                matches!(decoded, Err(CodecError::TrackNameTooLong)),
+                "a 4,097-byte Full Track Name must be refused, got {decoded:?}"
+            );
+
+            let at_cap = framed_vi64(0x03, &subscribe_prefix_moqt::<$profile>($leading, 4000, 96));
+            let decoded = ControlMessage::decode(&mut &at_cap[..]);
+            assert!(
+                !matches!(decoded, Err(CodecError::TrackNameTooLong)),
+                "a 4,096-byte Full Track Name is within the cap, got {decoded:?}"
+            );
+        }
+    };
 }
 
 // Draft-17 carries a Required Request ID Delta between the Request ID and the
@@ -306,4 +342,14 @@ full_track_name_cap_gate_moqt!(
     draft22,
     moqtap_codec::varint::Moqt18,
     1
+);
+// Draft-23 frames the message with a `vi64` Length; the SUBSCRIBE fields and
+// Section 8.7's cap are draft-22's.
+full_track_name_cap_gate_moqt!(
+    draft23_caps_the_full_track_name,
+    "draft23",
+    draft23,
+    moqtap_codec::varint::Moqt18,
+    1,
+    vi64
 );

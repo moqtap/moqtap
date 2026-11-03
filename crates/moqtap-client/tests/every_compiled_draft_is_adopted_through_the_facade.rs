@@ -174,6 +174,7 @@ drafts! {
     "draft20" => Draft20, draft20, unified;
     "draft21" => Draft21, draft21, unified;
     "draft22" => Draft22, draft22, unified;
+    "draft23" => Draft23, draft23, unified;
 }
 
 /// A peer's view of one stream: bytes in, one decoded control message out.

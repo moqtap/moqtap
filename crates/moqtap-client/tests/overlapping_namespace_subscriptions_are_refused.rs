@@ -1,3 +1,22 @@
+#![cfg(any(
+    feature = "draft07",
+    feature = "draft08",
+    feature = "draft09",
+    feature = "draft10",
+    feature = "draft11",
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22"
+))]
+
 //! Two namespace subscriptions on one session may not overlap, and the
 //! publisher is the end that says so.
 //!

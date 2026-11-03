@@ -25,7 +25,7 @@ moqtap-codec = "0.9"
 moqtap-client = "0.9"
 ```
 
-Each draft is a separate feature flag on both crates (`draft07`..`draft22`), and both default to `all-drafts`. Turn default features off and name only the drafts you need to build a smaller subset; a draft that is not enabled cannot be negotiated at runtime.
+Each draft is a separate feature flag on both crates (`draft07`..`draft23`), and both default to `all-drafts`. Turn default features off and name only the drafts you need to build a smaller subset; a draft that is not enabled cannot be negotiated at runtime.
 
 ### Connect and subscribe (draft-14)
 
@@ -133,7 +133,7 @@ moqtap-monitor        Producer monitor: an API the publisher calls, and the
 ### Draft support
 
 `moqtap-codec` and `moqtap-client` have one module per draft, `draft07` through
-`draft22`, each behind a cargo feature of the same name. Use a `draftNN` module
+`draft23`, each behind a cargo feature of the same name. Use a `draftNN` module
 when you target one draft and want its exact types.
 
 Each of those crates also has a `dispatch` module whose `Any*` enums
@@ -149,9 +149,9 @@ runtime, keyed on `DraftVersion`.
 
 ## Spec Compliance
 
-This implementation covers MoQT drafts 07 through 22.
+This implementation covers MoQT drafts 07 through 23.
 
-Draft-22 is the newest and is not a default anywhere: no crate uses it as a
+Draft-23 is the newest and is not a default anywhere: no crate uses it as a
 connection default, an advertised-preferred version or an auto-selected draft.
 Interop testing ran against draft-18.
 

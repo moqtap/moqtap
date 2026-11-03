@@ -81,7 +81,7 @@ use crate::kvp::KeyValuePair;
 //
 // An `allow` rather than a `cfg`, and the choice is forced rather than
 // preferred. Spelling the condition would mean writing
-// `any(feature = "draft07", ..., feature = "draft21", feature = "draft22")` — every draft — beside a
+// `any(feature = "draft07", ..., feature = "draft22", feature = "draft23")` — every draft — beside a
 // list of the same drafts, with nothing holding the two level. That is the
 // drift `scripts/check-draft-parity.py` exists to catch and would not catch
 // here: a new draft added to the table and forgotten in the `cfg` compiles
@@ -120,6 +120,7 @@ pub fn setup_option_name(draft: u8, param: &KeyValuePair) -> Option<String> {
         ("draft20", Draft20) => crate::draft20::fields::options_to_json(one),
         ("draft21", Draft21) => crate::draft21::fields::options_to_json(one),
         ("draft22", Draft22) => crate::draft22::fields::options_to_json(one),
+        ("draft23", Draft23) => crate::draft23::fields::options_to_json(one),
     };
     name_in(&rendered)
 }
@@ -160,7 +161,7 @@ fn name_in(rendered: &crate::fields::FieldValue) -> Option<String> {
 /// rather than being switched off whole because one is missing.
 ///
 /// The two negative claims — a codepoint nobody assigned, and a draft number
-/// outside 7..=22 — are left ungated because they are true under every feature
+/// outside the implemented range — are left ungated because they are true under every feature
 /// set and no build can make them false. They are *vacuous* for a draft that
 /// was left out, since it answers `None` for every parameter; that is a
 /// weakening the all-drafts `cargo test --workspace` run in `just test` covers,
@@ -201,7 +202,9 @@ mod tests {
         assert_eq!(setup_option_name(11, &max).as_deref(), Some("max_request_id"));
         #[cfg(feature = "draft16")]
         assert_eq!(setup_option_name(16, &max).as_deref(), Some("max_request_id"));
-        for draft in 17..=22 {
+        for draft in
+            crate::version::DraftVersion::ALL.map(|d| d.number()).into_iter().filter(|n| *n >= 17)
+        {
             assert_eq!(setup_option_name(draft, &max), None, "draft-{draft} still names 0x02");
         }
     }
@@ -210,7 +213,7 @@ mod tests {
     #[test]
     fn an_unassigned_codepoint_is_named_by_nobody() {
         let odd = bytes(0x21, b"\x01\xff");
-        for draft in 7..=22 {
+        for draft in crate::version::DraftVersion::ALL.map(|d| d.number()) {
             assert_eq!(setup_option_name(draft, &odd), None, "draft-{draft} names 0x21");
         }
     }

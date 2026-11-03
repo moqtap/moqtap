@@ -125,7 +125,8 @@ impl TestVector {
 ///   variant maps here: absence is not something this decoder detects, because
 ///   nothing in it knows which parameters a message requires. A vector claiming
 ///   it will therefore fail rather than pass quietly, which is the honest
-///   outcome for a category the crate does not implement.
+///   outcome for a category the crate does not implement. Draft-23's missing
+///   REDIRECT Error Detail is the corpus's `invalid_value`.
 #[allow(dead_code)]
 pub fn error_category(err: &CodecError) -> &'static str {
     match err {
@@ -139,6 +140,12 @@ pub fn error_category(err: &CodecError) -> &'static str {
         // and disagreed with their own header, which is not. The variant keeps
         // the direction in prose because the useful number differs between
         // them, so this reads the prose.
+        //
+        // Draft-23's decoder words the same direction "its fields need more
+        // bytes than its Length gives", and the draft-23 corpus calls such a
+        // frame `invalid_value`: its truncated vectors are all short buffers,
+        // and a complete frame whose fields overrun its Length is a malformed
+        // message (Section 9).
         //
         // Reword either string in the codec and every truncated-frame vector
         // across the drafts stops being `incomplete` and starts being
@@ -176,6 +183,7 @@ pub fn error_category(err: &CodecError) -> &'static str {
         | CodecError::ParametersOutOfOrder(_, _)
         | CodecError::KeyDeltaOverflow(_, _)
         | CodecError::KeyValueFormatting { .. }
+        | CodecError::MalformedAuthToken { .. }
         // A filter parameter whose value is not the structure its type names,
         // and one whose End Group Delta carries the range out of the number
         // space, are both a parameter wrong in itself — its length in the first
@@ -348,9 +356,9 @@ pub fn unassigned_statuses(vector: &TestVector, assigned: &[u64]) -> Vec<u64> {
 ///
 /// # Which JSON keys count
 ///
-/// `object_status`, which drafts 07-14 use everywhere and drafts 15-22 keep on
-/// the datagram header, and `status`, which is what drafts 15-22 call the same
-/// field inside a subgroup object. Drafts 15-22's `subgroup.json` and
+/// `object_status`, which drafts 07-14 use everywhere and drafts 15-23 keep on
+/// the datagram header, and `status`, which is what drafts 15-23 call the same
+/// field inside a subgroup object. Drafts 15-23's `subgroup.json` and
 /// `fetch-header.json` carry no `object_status` key at all, so a walk that knew
 /// only the first name read none of those six drafts' subgroup objects — and
 /// reported a clean sweep over a corpus it had not opened.

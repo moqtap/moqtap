@@ -372,7 +372,7 @@ macro_rules! unsubscribe_gates {
             /// UnknownRequest(0)
             /// ```
             ///
-            /// It reddens eighteen, on drafts 14 through 16: six of the gates here.
+            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             #[test]
             fn an_unsubscribe_ends_a_subscription_this_endpoint_offered() {
                 let mut ep = publishing();
@@ -402,7 +402,7 @@ macro_rules! unsubscribe_gates {
             /// the first UNSUBSCRIBE: UnknownRequest(0)
             /// ```
             ///
-            /// It reddens eighteen, on drafts 14 through 16: six of the gates here.
+            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             ///
             /// Ending the subscription by assignment rather than by transition, so
             /// a state with no ending to give gives one anyway:
@@ -453,7 +453,7 @@ macro_rules! unsubscribe_gates {
             /// the subscriber ends it: UnknownRequest(0)
             /// ```
             ///
-            /// It reddens eighteen, on drafts 14 through 16: six of the gates here.
+            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             #[test]
             fn an_ended_subscription_is_not_ended_again_by_its_publisher() {
                 let mut ep = publishing();
@@ -486,7 +486,7 @@ macro_rules! unsubscribe_gates {
             /// the subscriber ends it: UnknownRequest(0)
             /// ```
             ///
-            /// It reddens eighteen, on drafts 14 through 16: six of the gates here.
+            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             #[test]
             fn the_alias_of_an_unsubscribed_offer_is_free() {
                 let mut ep = publishing();
@@ -529,7 +529,7 @@ macro_rules! unsubscribe_gates {
             /// one yet; instead: Err(UnknownRequest(0))
             /// ```
             ///
-            /// It reddens eighteen, on drafts 14 through 16: six of the gates here.
+            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             ///
             /// Ending the subscription by assignment rather than by transition, so
             /// a state with no ending to give gives one anyway:
@@ -656,7 +656,7 @@ macro_rules! unsubscribe_gates {
             /// the peer's UNSUBSCRIBE: UnknownRequest(0)
             /// ```
             ///
-            /// It reddens eighteen, on drafts 14 through 16: six of the gates here.
+            /// It reddens 18 gates, six per draft on drafts 14 through 16.
             #[test]
             fn an_unsubscribe_off_the_control_stream_reaches_the_flow() {
                 let mut ep = publishing();

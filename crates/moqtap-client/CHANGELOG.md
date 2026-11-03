@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking.** `DraftVersion` gains `Draft23` (see `moqtap-codec`), and the `Any*` enums in `dispatch` gain a `Draft23` variant behind the new `draft23` feature, which is in `all-drafts`. A downstream `match` over any of them stops compiling.
+- **Breaking.** `AboveCodecRule` gains `GoAwayFromRequestSender`, `StateNotifyFromTheSubscriber`, `ObjectExistenceContradicted` and `TruncatedObject`, and `MalformedTrackCondition` gains `ExistenceContradicted`; an exhaustive match over either no longer compiles without them.
+
+### Added
+
+- Draft-23, behind the `draft23` feature (in `all-drafts`), as `draft23` and through `AnyConnection`. A FETCH is answered with REQUEST_OK (`respond_ok`); the first REQUEST_OK on a FETCH's stream is its FETCH_OK. REQUEST_OKs this endpoint receives are held to their request's parameter list and Track Properties rule.
+- Draft-23: the facade writes `forward` as PAUSED (0x11); `draft23::publish::paused_parameter` builds it.
+- Draft-23: sessions close with draft-23's session error codes (0x200-0x203, 0x300-0x306, 0x400-0x401, MALFORMED_KEY_VALUE and MALFORMED_AUTH_TOKEN where the draft names them), including CLOSED_CONTROL_STREAM when the peer closes its control stream, INVALID_OBJECT_STATUS for an unassigned Object Status, TRUNCATED_OBJECT (`ConnectionError::TruncatedObject`) for a data stream that ends with a FIN inside an Object, and UNKNOWN_AUTH_TOKEN_ALIAS for a server SETUP whose AUTHORIZATION TOKEN has Alias Type DELETE or USE_ALIAS. A server SETUP the codec refuses closes the session.
+- Draft-23: a control message longer than the MAX_CONTROL_MESSAGE_SIZE this endpoint advertised is refused before it is buffered, and closes the session with FIELD_LENGTH_EXCEEDED. Control messages after SETUP are written under the server's MAX_CONTROL_MESSAGE_SIZE (`FramedSendStream::write_control_with_limit`).
+- Draft-23: `AnyFetchObject::end_of_range` reports End of Group (0x80), End of Track (0x81) and End of Gone Range (0x40C).
+- Draft-23: overlapping SUBSCRIBE_NAMESPACE and SUBSCRIBE_TRACKS requests are accepted; a GOAWAY on a request stream from the sender of that request closes the session with PROTOCOL_VIOLATION; a peer's FETCH with a relative Location filter must be refused with INVALID_RANGE; REQUEST_UPDATEs are answered in order, and a REQUEST_ERROR does not coalesce one carrying FILL_PARAMETERS or TRACK_NAMESPACE_PREFIX.
+- Draft-23: a fill fetch stream naming a peer's PUBLISH is attributed to it; one naming a SUBSCRIBE_TRACKS is `UnrequestedFillStream`. Only REQUEST_ERROR Error Code REDIRECT has its REDIRECT Error Detail checked.
+- Draft-23: an Object received after it was signalled as not existing, or signalled as not existing after it was received, is a Malformed Track (`EndpointError::ObjectExistenceContradicted`, `MalformedTrackCondition::ExistenceContradicted`), and `Connection::requests_to_cancel` names the track's requests. The signals are a Prior Group ID Gap or Prior Object ID Gap, and on the stream answering a FETCH this endpoint sent, an End of Non-Existent Range or a gap between two entries of a FETCH with no Range Filter. Fill fetch streams, and the gaps before a FETCH stream's first entry and after its last, are not recorded. `TrackLocations::note_exists` and `note_absent` keep the record, and `Endpoint::requests_for_malformed_track_named` names the requests for a track.
+
+### Fixed
+
+- The draft-22 error for a control message that does not narrow to draft-22 no longer has a run of spaces in the middle of its text.
+
 ## [0.9.1] - 2026-10-30
 
 ### Fixed

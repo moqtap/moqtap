@@ -5,6 +5,7 @@
     feature = "draft20",
     feature = "draft21",
     feature = "draft22",
+    feature = "draft23",
 ))]
 
 //! `AnyConnection::recv_inbound` refuses a peer request it has no entry point
@@ -279,6 +280,17 @@ refusal_gate!(
     "draft22",
     Draft22,
     moqtap_codec::draft22::message::TrackStatus {
+        request_id: v(PEER_REQUEST_ID),
+        track_namespace: namespace(),
+        track_name: TRACK.to_vec(),
+        parameters: Vec::new(),
+    }
+);
+refusal_gate!(
+    draft23,
+    "draft23",
+    Draft23,
+    moqtap_codec::draft23::message::TrackStatus {
         request_id: v(PEER_REQUEST_ID),
         track_namespace: namespace(),
         track_name: TRACK.to_vec(),

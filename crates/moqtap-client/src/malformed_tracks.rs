@@ -90,6 +90,13 @@ pub enum MalformedTrackCondition {
     /// this condition is stated unchanged from draft-12 on and
     /// depends on nothing that moved.
     ObjectPastFinalObject,
+    /// "An Object is received after it has been recorded as not existing, or
+    /// is signalled as not existing after it was received" (draft-23 Section
+    /// 12.1).
+    ///
+    /// Detected by [`crate::track_locations`], which records the Objects a
+    /// track has carried and the ranges signalled as not existing.
+    ExistenceContradicted,
 }
 
 impl std::fmt::Display for MalformedTrackCondition {
@@ -100,6 +107,9 @@ impl std::fmt::Display for MalformedTrackCondition {
             }
             MalformedTrackCondition::ObjectPastFinalObject => {
                 f.write_str("an Object was received past the track's final Object")
+            }
+            MalformedTrackCondition::ExistenceContradicted => {
+                f.write_str("an Object was both received and signalled as not existing")
             }
         }
     }

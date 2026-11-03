@@ -60,7 +60,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::error::CodecError;
 #[cfg(any(
@@ -75,7 +76,8 @@ use moqtap_codec::error::CodecError;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::types::TrackNamespace;
 #[cfg(any(
@@ -84,7 +86,8 @@ use moqtap_codec::types::TrackNamespace;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::varint::MoqtProfile;
 #[cfg(any(
@@ -99,7 +102,8 @@ use moqtap_codec::varint::MoqtProfile;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -122,6 +126,16 @@ use moqtap_codec::varint::VarInt;
 fn framed(type_id: u8, payload: &[u8]) -> Vec<u8> {
     let mut wire = vec![type_id];
     wire.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    wire.extend_from_slice(payload);
+    wire
+}
+
+/// [`framed`] with draft-23's `vi64` Message Length (Section 9, Figure 6).
+#[cfg(feature = "draft23")]
+fn framed_vi64(type_id: u8, payload: &[u8]) -> Vec<u8> {
+    use moqtap_codec::varint::{Moqt18, VarInt};
+    let mut wire = vec![type_id];
+    VarInt::from_usize(payload.len()).encode_moqt::<Moqt18>(&mut wire);
     wire.extend_from_slice(payload);
     wire
 }
@@ -149,7 +163,8 @@ fn vi(v: u64) -> Vec<u8> {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn vi_moqt<P: MoqtProfile>(v: u64) -> Vec<u8> {
     let mut out = Vec::new();
@@ -184,7 +199,8 @@ fn ns_name(namespace_bytes: usize, name_bytes: usize) -> Vec<u8> {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn ns_name_moqt<P: MoqtProfile>(namespace_bytes: usize, name_bytes: usize) -> Vec<u8> {
     let mut out = Vec::new();
@@ -235,6 +251,29 @@ macro_rules! cap_gate {
             );
 
             let at_cap = framed($type_id, &build(4000, 96));
+            let decoded = ControlMessage::decode(&mut &at_cap[..]);
+            assert!(
+                !matches!(decoded, Err(CodecError::TrackNameTooLong)),
+                "a 4,096-byte Full Track Name is within the cap, got {decoded:?}"
+            );
+        }
+    };
+    ($fname:ident, $feat:literal, $draft:ident, $type_id:expr, $payload:expr, vi64) => {
+        #[cfg(feature = $feat)]
+        #[test]
+        fn $fname() {
+            use moqtap_codec::$draft::message::ControlMessage;
+
+            let build: fn(usize, usize) -> Vec<u8> = $payload;
+
+            let over = framed_vi64($type_id, &build(4000, 97));
+            let decoded = ControlMessage::decode(&mut &over[..]);
+            assert!(
+                matches!(decoded, Err(CodecError::TrackNameTooLong)),
+                "a 4,097-byte Full Track Name must be refused, got {decoded:?}"
+            );
+
+            let at_cap = framed_vi64($type_id, &build(4000, 96));
             let decoded = ControlMessage::decode(&mut &at_cap[..]);
             assert!(
                 !matches!(decoded, Err(CodecError::TrackNameTooLong)),
@@ -323,7 +362,8 @@ type M17 = moqtap_codec::varint::Moqt17;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 type M18 = moqtap_codec::varint::Moqt18;
 
@@ -498,3 +538,59 @@ cap_gate!(draft22_caps_a_redirect, "draft22", draft22, 0x05, |ns, name| {
     ]
     .concat()
 });
+
+// Draft-23: the same carriers under a `vi64` Length (Section 9, Figure 6).
+cap_gate!(
+    draft23_caps_a_track_status,
+    "draft23",
+    draft23,
+    0x0D,
+    |ns, name| { [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(0)].concat() },
+    vi64
+);
+cap_gate!(
+    draft23_caps_a_publish,
+    "draft23",
+    draft23,
+    0x1D,
+    |ns, name| { [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(4)].concat() },
+    vi64
+);
+cap_gate!(
+    draft23_caps_a_fetch,
+    "draft23",
+    draft23,
+    0x16,
+    |ns, name| { [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name), vi_moqt::<M18>(0)].concat() },
+    vi64
+);
+cap_gate!(
+    draft23_caps_a_publish_skipped,
+    "draft23",
+    draft23,
+    0x0F,
+    |ns, name| { ns_name_moqt::<M18>(ns, name) },
+    vi64
+);
+// Draft-23 Section 9.4.2.1 carries the Redirect in a REDIRECT Error Detail:
+// Delta Type 0x01 and a Length ahead of the same Connect URI, namespace and
+// name.
+cap_gate!(
+    draft23_caps_a_redirect,
+    "draft23",
+    draft23,
+    0x05,
+    |ns, name| {
+        let redirect = [vi_moqt::<M18>(0), ns_name_moqt::<M18>(ns, name)].concat();
+        [
+            vi_moqt::<M18>(0x34),
+            vi_moqt::<M18>(0),
+            vi_moqt::<M18>(0),
+            vi_moqt::<M18>(0x01),
+            vi_moqt::<M18>(redirect.len() as u64),
+            redirect,
+        ]
+        .concat()
+    },
+    vi64
+);

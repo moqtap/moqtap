@@ -11,7 +11,7 @@
 //!
 //! # Feature flags
 //!
-//! Enable a draft with `--features draft14` (or any of `draft07`..`draft22`).
+//! Enable a draft with `--features draft14` (or any of `draft07`..`draft23`).
 //! The default is `all-drafts`, which enables every one; select individual
 //! drafts with `default-features = false`. `webtransport` adds the
 //! WebTransport transport.
@@ -28,7 +28,7 @@
 //!   drafts that make an end-of-track object's placement a protocol error
 //! - `malformed_tracks` — Which tracks this endpoint has withdrawn from, on
 //!   the drafts that answer a malformed one with control messages
-//! - `draft07`..`draft22` — One module per supported MoQT draft, each
+//! - `draft07`..`draft23` — One module per supported MoQT draft, each
 //!   enabled via the matching `draftNN` feature flag.
 
 #[cfg(feature = "draft07")]
@@ -79,6 +79,9 @@ pub mod draft21;
 #[cfg(feature = "draft22")]
 pub mod draft22;
 
+#[cfg(feature = "draft23")]
+pub mod draft23;
+
 pub mod transport;
 
 /// What a track's objects have been framed as, for the nine drafts that make
@@ -103,15 +106,17 @@ pub mod forwarding_preference;
 /// **Two rules, and the drafts that state them are not the same set.** Drafts
 /// 08 through 13 make an end-of-track object's Group and Object ID a protocol
 /// error when they name a place the track has already passed, which takes a
-/// record of where the track has reached; drafts 07 and 14 through 22 have no
+/// record of where the track has reached; drafts 07 and 14 through 23 have no
 /// such sentence, draft-07 having no ordering condition on the status at all
 /// and draft-14 having replaced it with a prohibition on the publisher. Drafts
-/// 12 through 22 make an object *past* where an end-of-track object put the end
+/// 12 through 23 make an object *past* where an end-of-track object put the end
 /// a Malformed Track, which takes a record of that place instead.
 ///
 /// So the module is compiled wherever either rule is, and which of its two
 /// entry points a draft calls is what says which rule it states. The overlap is
-/// drafts 12 and 13, where both hold.
+/// drafts 12 and 13, where both hold. Draft-23 adds a third, which only it
+/// calls: an Object both received and signalled as not existing makes the
+/// track malformed (draft-23 Section 12.1).
 #[cfg(any(
     feature = "draft08",
     feature = "draft09",
@@ -127,7 +132,8 @@ pub mod forwarding_preference;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 pub mod track_locations;
 
@@ -140,7 +146,7 @@ pub mod track_locations;
 /// error to the application." Drafts 14, 15 and 16 widen the same sentence to
 /// fetches — "it MUST UNSUBSCRIBE any subscription and FETCH_CANCEL any fetch
 /// for that Track from that publisher" — which is a second message and the
-/// same record. Drafts 17 through 22 replace both with a cancellation of the
+/// same record. Drafts 17 through 23 replace both with a cancellation of the
 /// request's own stream — a reset rather than a message — and the record is
 /// compiled there too, because what it holds is *which track was given up and
 /// what for*, which is the same question whichever shape the answer takes. It
@@ -157,7 +163,8 @@ pub mod track_locations;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 pub mod malformed_tracks;
 

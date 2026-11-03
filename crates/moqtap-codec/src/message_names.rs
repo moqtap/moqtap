@@ -29,7 +29,7 @@
 //! | | Request | Response |
 //! |---|---|---|
 //! | **Drafts 07-12** | `track_status_request` (0x0D) | `track_status` (0x0E) |
-//! | **Drafts 13-22** | `track_status` (0x0D) | `track_status_ok` (0x0E) |
+//! | **Drafts 13-23** | `track_status` (0x0D) | `track_status_ok` (0x0E) |
 //!
 //! Every answer is right about its own draft, so comparing two of them by name
 //! yields a wrong conclusion out of two correct lookups.
@@ -51,7 +51,7 @@
 /// The name draft `draft` gives control message type `id`, or `None` if that
 /// draft assigns the id nothing.
 ///
-/// `draft` is the draft number as the IETF writes it — 7 through 20 — which is
+/// `draft` is the draft number as the IETF writes it — 7 through 23 — which is
 /// what a trace header's `moq-transport-NN` carries and what
 /// [`crate::version::DraftVersion::number`] returns. A number outside the range
 /// this crate
@@ -116,6 +116,7 @@ pub fn message_type_name(draft: u8, id: u64) -> Option<&'static str> {
         ("draft20", Draft20) => crate::draft20::message::MessageType::from_id(id).map(|t| t.name()),
         ("draft21", Draft21) => crate::draft21::message::MessageType::from_id(id).map(|t| t.name()),
         ("draft22", Draft22) => crate::draft22::message::MessageType::from_id(id).map(|t| t.name()),
+        ("draft23", Draft23) => crate::draft23::message::MessageType::from_id(id).map(|t| t.name()),
     }
 }
 
@@ -186,7 +187,7 @@ mod tests {
     /// for every id, which is what this asserts anyway.
     #[test]
     fn none_for_an_unassigned_id() {
-        for draft in 7..=22u8 {
+        for draft in crate::version::DraftVersion::ALL.map(|d| d.number()) {
             assert_eq!(message_type_name(draft, 0x3F), None, "draft-{draft}");
         }
     }

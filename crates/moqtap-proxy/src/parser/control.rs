@@ -142,10 +142,10 @@ impl ControlStreamParser {
                 Err(_) => break,
             };
 
-            // Read payload length. Draft-11+ uses 16-bit BE; earlier drafts
-            // use a QUIC varint.
+            // Read payload length: 16-bit BE on drafts 11-22, a varint in
+            // the draft's own encoding on drafts 07-10 and 23.
             let (payload_len, total) = if self.draft.uses_fixed_length_framing() {
-                // Draft-11+: type_id(vi) + length(u16 BE) + payload
+                // Drafts 11-22: type_id(vi) + length(u16 BE) + payload
                 if self.buf.len() < type_len + 2 {
                     break;
                 }
@@ -154,7 +154,7 @@ impl ControlStreamParser {
                 let payload_len = (hi << 8) | lo;
                 (payload_len, type_len + 2 + payload_len)
             } else {
-                // Draft-07..10: type_id(vi) + length(vi) + payload
+                // Drafts 07-10 and 23: type_id(vi) + length(vi) + payload
                 if self.buf.len() <= type_len {
                     break;
                 }
@@ -288,8 +288,8 @@ mod tests {
     ///
     /// `0x3A` is unassigned on all the drafts and is below `0x40`, so
     /// it is a single byte under RFC 9000's encoding and under MoQT's
-    /// alike; the two-byte big-endian length is draft-11-and-later framing,
-    /// which is what draft-19 uses. Nothing about it is malformed — the
+    /// alike; the two-byte big-endian length is the framing of drafts 11-22,
+    /// which draft-19 is one of. Nothing about it is malformed — the
     /// parser can say exactly where it ends — and the decoder still has
     /// nowhere to send it.
     #[cfg(feature = "draft19")]

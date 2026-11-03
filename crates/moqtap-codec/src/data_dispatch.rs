@@ -12,13 +12,13 @@
 //!
 //! Objects on drafts 07-13 are standalone: absolute Object IDs, and (on
 //! drafts 11-13) an extension block whose presence is fixed by the stream
-//! type. Drafts 14-22 delta-encode Object IDs against the previous object on
+//! type. Drafts 14-23 delta-encode Object IDs against the previous object on
 //! the stream. Both are constructed from the stream's header and read one
 //! object at a time, so the difference stays inside this module.
 //!
 //! Fetch streams split the same way, at a different draft. Through draft-14 a
 //! fetch object spells out its Group ID, Subgroup ID, Object ID and Publisher
-//! Priority on every object, so each one stands alone. Drafts 15-22 put a
+//! Priority on every object, so each one stands alone. Drafts 15-23 put a
 //! Serialization Flags field first and let it leave any of those four off the
 //! wire, meaning "the prior object's" — and from draft-18 the two ID fields
 //! that remain are differences rather than values. So a fetch object on those
@@ -44,14 +44,14 @@ use crate::version::DraftVersion;
 
 /// One object read from a subgroup data stream, normalised across drafts.
 ///
-/// Field semantics are identical on every draft 07-22; the per-draft wire
+/// Field semantics are identical on every draft 07-23; the per-draft wire
 /// differences (absolute vs delta object IDs, count- vs length-prefixed
 /// extension blocks, typed vs raw status codes) are resolved by
 /// [`AnySubgroupObjectReader`] before this value is produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnySubgroupObject {
     /// Absolute Object ID. Already resolved from delta encoding on drafts
-    /// 14-22; copied verbatim on drafts 07-13.
+    /// 14-23; copied verbatim on drafts 07-13.
     pub object_id: u64,
     /// The extension-header (draft-17+: "property") block's contents,
     /// excluding any length or count prefix. Empty when the draft has no
@@ -109,9 +109,10 @@ pub struct AnySubgroupObjectMeta {
     pub wire_len: u64,
 }
 
-/// What an End of Range indicator asserts about the Locations it covers.
+/// What a fetch stream indicator asserts: an End of Range about the Locations
+/// it covers, or (draft-23 on) the end of a Group or of the Track.
 ///
-/// Drafts 16-22 let a fetch stream state that a run of Objects was not
+/// Drafts 16-23 let a fetch stream state that a run of Objects was not
 /// serialized instead of sending them: one frame names the Location that ends
 /// the run, and every Location from the previously serialized Object up to and
 /// including that one is covered. The indicators are the same frame shape with
@@ -135,6 +136,22 @@ pub enum AnyFetchEndOfRange {
     /// stream's draft as much as about the frame, and is why a receiver cannot
     /// treat the two as interchangeable.
     TimedOut,
+    /// The covered Objects are Gone: the original publisher cannot deliver
+    /// them and does not know whether they exist.
+    ///
+    /// **Draft-23 and later only** (draft-23 Section 11.4.1, Table 8, 0x40C).
+    Gone,
+    /// End of Group (draft-23 Table 8, 0x80). Not a range: it carries no
+    /// Location and says the Object before it is the last in its Group. The
+    /// frame's Location is that Object's.
+    ///
+    /// **Draft-23 and later only.**
+    EndOfGroup,
+    /// End of Track (draft-23 Table 8, 0x81), which also ends the Group. Not a
+    /// range, as for [`Self::EndOfGroup`].
+    ///
+    /// **Draft-23 and later only.**
+    EndOfTrack,
 }
 
 /// The order a fetch response's groups arrive in.
@@ -157,13 +174,13 @@ pub enum AnyFetchGroupOrder {
 
 /// One frame read from a fetch data stream, normalised across drafts.
 ///
-/// Usually an object. On drafts 16-22 it may instead be an End of Range
+/// Usually an object. On drafts 16-23 it may instead be an End of Range
 /// indicator, which carries a Location and no content — [`Self::end_of_range`]
 /// is what tells the two apart, and it is `None` for every object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnyFetchObject {
     /// Absolute Group ID. Already resolved against the objects before it on
-    /// drafts 15-22, whose fetch objects may omit the field or (on drafts
+    /// drafts 15-23, whose fetch objects may omit the field or (on drafts
     /// 18-19) encode it as a difference; copied verbatim on drafts 07-14.
     pub group_id: u64,
     /// Absolute Subgroup ID, resolved as [`Self::group_id`] is. Zero and
@@ -172,7 +189,7 @@ pub struct AnyFetchObject {
     /// Whether this frame has a Subgroup ID at all.
     ///
     /// `true` on every draft 07-15, and for every End of Range indicator's
-    /// predecessor. `false` in two cases drafts 16-22 add: an object whose
+    /// predecessor. `false` in two cases drafts 16-23 add: an object whose
     /// Forwarding Preference is Datagram, which has no Subgroup ID anywhere in
     /// its framing, and an End of Range indicator, whose Location is a Group
     /// and Object ID only.
@@ -186,10 +203,10 @@ pub struct AnyFetchObject {
     pub object_id: u64,
     /// Publisher Priority in force for this frame.
     ///
-    /// Drafts 15-22 let an object omit the field and take the previous
+    /// Drafts 15-23 let an object omit the field and take the previous
     /// object's, and an End of Range indicator never carries one. Where
     /// nothing on the stream has stated a priority, this is 128 — the value
-    /// every draft 15-22 gives a subscription whose Default Publisher Priority
+    /// every draft 15-23 gives a subscription whose Default Publisher Priority
     /// property is omitted (draft-19 Section 12.4).
     pub publisher_priority: u8,
     /// Extension/property block contents, excluding its prefix. Same
@@ -200,7 +217,7 @@ pub struct AnyFetchObject {
     pub extension_count: Option<u64>,
     /// Object Status wire code, present only when the payload is empty.
     ///
-    /// Always `None` on drafts 16-22: those drafts removed the field from
+    /// Always `None` on drafts 16-23: those drafts removed the field from
     /// fetch objects entirely, stating that Object Status "is only present in
     /// objects that are delivered via a SUBSCRIPTION, and is absent in Objects
     /// delivered via a FETCH" (draft-19 Section 11.2.1.1). A zero-length fetch
@@ -236,7 +253,7 @@ pub struct AnyFetchObjectMeta {
     pub publisher_priority: u8,
     /// Declared payload length in bytes.
     pub payload_length: u64,
-    /// Object Status wire code; always `None` on drafts 16-22.
+    /// Object Status wire code; always `None` on drafts 16-23.
     pub status: Option<u64>,
     /// Which End of Range indicator this frame is, or `None` for an object.
     pub end_of_range: Option<AnyFetchEndOfRange>,
@@ -248,7 +265,7 @@ pub struct AnyFetchObjectMeta {
 
 /// The Publisher Priority a fetch frame that states none is read under.
 ///
-/// Drafts 16-22 let an object leave the field off the wire and take the
+/// Drafts 16-23 let an object leave the field off the wire and take the
 /// previous object's, and an End of Range indicator carries none at all, so a
 /// stream can reach a frame with no priority ever having been stated. Every one
 /// of those drafts fixes the same fallback for a subscription that never stated
@@ -276,7 +293,8 @@ pub struct AnyFetchObjectMeta {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 const DEFAULT_PUBLISHER_PRIORITY: u8 = 128;
 
@@ -659,7 +677,7 @@ legacy_subgroup_glue!(gated_extensions sg13, "draft13", draft13, Draft13);
 ///
 /// Every draft from 14 on carries a typed `ObjectStatus`, so the leading
 /// keyword selects how the payload length reaches the wire instead: draft-14
-/// derives it from the payload, while drafts 15-22 carry an explicit
+/// derives it from the payload, while drafts 15-23 carry an explicit
 /// payload-length field, which this glue always sets from the payload.
 ///
 /// Both arms funnel the draft-neutral `AnySubgroupObject`, whose status is a
@@ -803,6 +821,7 @@ modern_subgroup_glue!(explicit_length sg19, "draft19", draft19);
 modern_subgroup_glue!(explicit_length sg20, "draft20", draft20);
 modern_subgroup_glue!(explicit_length sg21, "draft21", draft21);
 modern_subgroup_glue!(explicit_length sg22, "draft22", draft22);
+modern_subgroup_glue!(explicit_length sg23, "draft23", draft23);
 
 /// Generates the conversion glue for one draft's fetch objects.
 ///
@@ -1131,7 +1150,7 @@ mod fo16 {
             // are not present". Its per-draft resolver still reads the two low
             // flag bits of a marker as Subgroup ID mode zero and answers zero,
             // which is a real Subgroup ID; the draft-neutral value says the
-            // marker has none, as drafts 17-22 do.
+            // marker has none, as drafts 17-23 do.
             subgroup_id: location.subgroup_id.filter(|_| end_of_range.is_none()),
             object_id: location.object_id,
             publisher_priority: location.publisher_priority.unwrap_or(DEFAULT_PUBLISHER_PRIORITY),
@@ -1552,6 +1571,75 @@ mod fo22 {
         read_object_frame(reader, buf).map(|frame| frame.meta)
     }
 }
+#[cfg(feature = "draft23")]
+mod fo23 {
+    use super::{conv, AnyFetchEndOfRange, AnyFetchObject, AnyFetchObjectMeta};
+    use crate::draft23::data_stream::{
+        FetchEndMarker, FetchEndOfRange, FetchObject, FetchObjectReader,
+    };
+    use crate::error::CodecError;
+    use bytes::Buf;
+
+    fn resolved(object: &FetchObject) -> super::Resolved {
+        let range = object.header.end_of_range().map(|r| match r {
+            FetchEndOfRange::NonExistent => AnyFetchEndOfRange::NonExistent,
+            FetchEndOfRange::Unknown => AnyFetchEndOfRange::Unknown,
+            FetchEndOfRange::TimedOut => AnyFetchEndOfRange::TimedOut,
+            FetchEndOfRange::Gone => AnyFetchEndOfRange::Gone,
+        });
+        let marker = object.header.end_marker().map(|m| match m {
+            FetchEndMarker::EndOfGroup => AnyFetchEndOfRange::EndOfGroup,
+            FetchEndMarker::EndOfTrack => AnyFetchEndOfRange::EndOfTrack,
+        });
+        super::Resolved {
+            group_id: object.group_id,
+            subgroup_id: object.subgroup_id,
+            object_id: object.object_id,
+            publisher_priority: object
+                .publisher_priority
+                .unwrap_or(super::DEFAULT_PUBLISHER_PRIORITY),
+            end_of_range: range.or(marker),
+        }
+    }
+
+    pub fn read_object(
+        reader: &mut FetchObjectReader,
+        buf: &mut impl Buf,
+    ) -> Result<AnyFetchObject, CodecError> {
+        let object = reader.read_object_header(buf)?;
+        let resolved = resolved(&object);
+        let payload = conv::take(buf, object.header.payload_length.into_inner())?;
+        Ok(resolved.into_object(object.header.properties.unwrap_or_default(), payload))
+    }
+
+    pub fn read_object_frame(
+        reader: &mut FetchObjectReader,
+        buf: &mut impl Buf,
+    ) -> Result<super::AnyFetchFrame, CodecError> {
+        let start = buf.remaining();
+        let object = reader.read_object_header(buf)?;
+        let resolved = resolved(&object);
+        let payload_length = object.header.payload_length.into_inner();
+        conv::skip(buf, payload_length)?;
+        let meta = resolved.into_meta(
+            object.header.properties.as_ref().map_or(0, |p| p.len() as u64),
+            payload_length,
+            (start - buf.remaining()) as u64,
+        );
+        Ok(super::AnyFetchFrame {
+            meta,
+            draft: crate::version::DraftVersion::Draft23,
+            shape: super::FetchFrameShape::Draft23(object),
+        })
+    }
+
+    pub fn read_object_meta(
+        reader: &mut FetchObjectReader,
+        buf: &mut impl Buf,
+    ) -> Result<AnyFetchObjectMeta, CodecError> {
+        read_object_frame(reader, buf).map(|frame| frame.meta)
+    }
+}
 
 /// A drafts-16-to-19 fetch frame's identity once the fields its Serialization
 /// Flags left off the wire have been filled in.
@@ -1568,7 +1656,8 @@ mod fo22 {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 struct Resolved {
     group_id: u64,
@@ -1585,7 +1674,8 @@ struct Resolved {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 impl Resolved {
     fn into_object(self, extension_headers: Vec<u8>, payload: Vec<u8>) -> AnyFetchObject {
@@ -1597,7 +1687,7 @@ impl Resolved {
             publisher_priority: self.publisher_priority,
             extension_headers,
             extension_count: None,
-            // Drafts 16-22 removed the Object Status field from fetch objects;
+            // Drafts 16-23 removed the Object Status field from fetch objects;
             // a zero-length payload here carries no code to report.
             status: None,
             end_of_range: self.end_of_range,
@@ -1629,7 +1719,7 @@ impl Resolved {
 // ── Subgroup object reader ──────────────────────────────────
 
 /// Per-draft reader state. Drafts 07-10 need none, drafts 11-13 need the
-/// stream type's extensions-present flag, drafts 14-22 own a stateful
+/// stream type's extensions-present flag, drafts 14-23 own a stateful
 /// per-draft reader that tracks the Object ID delta.
 #[derive(Debug, Clone)]
 enum SubgroupReaderState {
@@ -1665,12 +1755,14 @@ enum SubgroupReaderState {
     Draft21(crate::draft21::data_stream::SubgroupObjectReader),
     #[cfg(feature = "draft22")]
     Draft22(crate::draft22::data_stream::SubgroupObjectReader),
+    #[cfg(feature = "draft23")]
+    Draft23(crate::draft23::data_stream::SubgroupObjectReader),
 }
 
 /// Stateful reader for the objects on a subgroup data stream, for any
 /// enabled draft.
 ///
-/// Drafts 07-13 encode absolute object IDs and need no state, drafts 14-22
+/// Drafts 07-13 encode absolute object IDs and need no state, drafts 14-23
 /// delta-encode them against the previous object. This reader presents both
 /// as the same API: construct it from the stream's header, then call
 /// [`read_object`](Self::read_object) once per object.
@@ -1747,6 +1839,10 @@ impl AnySubgroupObjectReader {
             AnySubgroupHeader::Draft22(h) => SubgroupReaderState::Draft22(
                 crate::draft22::data_stream::SubgroupObjectReader::new(h),
             ),
+            #[cfg(feature = "draft23")]
+            AnySubgroupHeader::Draft23(h) => SubgroupReaderState::Draft23(
+                crate::draft23::data_stream::SubgroupObjectReader::new(h),
+            ),
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(CodecError::UnsupportedDraft(format!(
@@ -1794,6 +1890,8 @@ impl AnySubgroupObjectReader {
             SubgroupReaderState::Draft21(_) => DraftVersion::Draft21,
             #[cfg(feature = "draft22")]
             SubgroupReaderState::Draft22(_) => DraftVersion::Draft22,
+            #[cfg(feature = "draft23")]
+            SubgroupReaderState::Draft23(_) => DraftVersion::Draft23,
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnySubgroupObjectReader has no enabled variants"),
         }
@@ -1843,6 +1941,8 @@ impl AnySubgroupObjectReader {
             SubgroupReaderState::Draft21(inner) => sg21::read_object(inner, buf),
             #[cfg(feature = "draft22")]
             SubgroupReaderState::Draft22(inner) => sg22::read_object(inner, buf),
+            #[cfg(feature = "draft23")]
+            SubgroupReaderState::Draft23(inner) => sg23::read_object(inner, buf),
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnySubgroupObjectReader has no enabled variants"),
         }
@@ -1892,6 +1992,8 @@ impl AnySubgroupObjectReader {
             SubgroupReaderState::Draft21(inner) => sg21::read_object_meta(inner, buf),
             #[cfg(feature = "draft22")]
             SubgroupReaderState::Draft22(inner) => sg22::read_object_meta(inner, buf),
+            #[cfg(feature = "draft23")]
+            SubgroupReaderState::Draft23(inner) => sg23::read_object_meta(inner, buf),
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnySubgroupObjectReader has no enabled variants"),
         }
@@ -1900,7 +2002,7 @@ impl AnySubgroupObjectReader {
 
 // ── Subgroup object writer ──────────────────────────────────
 
-/// Per-draft writer state. Mirrors [`SubgroupReaderState`]; drafts 14-22
+/// Per-draft writer state. Mirrors [`SubgroupReaderState`]; drafts 14-23
 /// reuse each draft's `SubgroupObjectReader`, which owns both directions of
 /// the delta state. Drafts 07-13 encode absolute IDs, so nothing on the wire
 /// forces them to increase and they carry a `prev_object_id` of their own —
@@ -1939,12 +2041,14 @@ enum SubgroupWriterState {
     Draft21 { inner: crate::draft21::data_stream::SubgroupObjectReader, extensions: bool },
     #[cfg(feature = "draft22")]
     Draft22 { inner: crate::draft22::data_stream::SubgroupObjectReader, extensions: bool },
+    #[cfg(feature = "draft23")]
+    Draft23 { inner: crate::draft23::data_stream::SubgroupObjectReader, extensions: bool },
 }
 
 /// Serializer for the objects on a subgroup data stream, for any enabled
 /// draft.
 ///
-/// Mirrors [`AnySubgroupObjectReader`]. On drafts 14-22 it tracks the
+/// Mirrors [`AnySubgroupObjectReader`]. On drafts 14-23 it tracks the
 /// previous Object ID so successive writes produce correct deltas; on drafts
 /// 07-13 object IDs are absolute and the same state only enforces that they
 /// increase.
@@ -2038,6 +2142,11 @@ impl AnySubgroupObjectWriter {
                 inner: crate::draft22::data_stream::SubgroupObjectReader::new(h),
                 extensions: h.has_properties(),
             },
+            #[cfg(feature = "draft23")]
+            AnySubgroupHeader::Draft23(h) => SubgroupWriterState::Draft23 {
+                inner: crate::draft23::data_stream::SubgroupObjectReader::new(h),
+                extensions: h.has_properties(),
+            },
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(CodecError::UnsupportedDraft(format!(
@@ -2085,6 +2194,8 @@ impl AnySubgroupObjectWriter {
             SubgroupWriterState::Draft21 { .. } => DraftVersion::Draft21,
             #[cfg(feature = "draft22")]
             SubgroupWriterState::Draft22 { .. } => DraftVersion::Draft22,
+            #[cfg(feature = "draft23")]
+            SubgroupWriterState::Draft23 { .. } => DraftVersion::Draft23,
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnySubgroupObjectWriter has no enabled variants"),
         }
@@ -2097,7 +2208,7 @@ impl AnySubgroupObjectWriter {
     /// Let a stream's objects decode to absolute IDs `a_0, a_1, .., a_n`.
     /// Feeding any strictly-increasing subsequence of those objects through
     /// one writer, in order, produces a byte stream that decodes back to
-    /// exactly that subsequence of absolute IDs, on every draft 07-22.
+    /// exactly that subsequence of absolute IDs, on every draft 07-23.
     ///
     /// Concretely: dropping `a_2` from `0,1,2,3,4` yields a stream decoding
     /// to `0,1,3,4` — not `0,1,2,3`.
@@ -2207,6 +2318,11 @@ impl AnySubgroupObjectWriter {
                 reject_unrepresentable_extensions(*extensions, object)?;
                 sg22::write_object(inner, object, buf)
             }
+            #[cfg(feature = "draft23")]
+            SubgroupWriterState::Draft23 { inner, extensions } => {
+                reject_unrepresentable_extensions(*extensions, object)?;
+                sg23::write_object(inner, object, buf)
+            }
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnySubgroupObjectWriter has no enabled variants"),
         }
@@ -2235,7 +2351,7 @@ pub enum Reemit {
 /// This is the whole of what removing an object from a subgroup stream
 /// costs. Drafts 07-13 encode absolute Object IDs, so every survivor's
 /// bytes are already correct and this copies `raw` unchanged after checking
-/// that IDs still increase. Drafts 14-22 encode `id - prev - 1`, so the
+/// that IDs still increase. Drafts 14-23 encode `id - prev - 1`, so the
 /// leading varint is recomputed against `prev_forwarded`; when its minimal
 /// encoding is byte-identical to the one in `raw` the bytes are still
 /// copied unchanged. Everything after the ID field — extension block,
@@ -2301,7 +2417,7 @@ pub fn reemit_subgroup_object(
         return Err(CodecError::InvalidField);
     }
 
-    // Measure the ID field. Every draft 07-22 puts it first and nothing past
+    // Measure the ID field. Every draft 07-23 puts it first and nothing past
     // it is decoded, so `raw` may stop anywhere after it. Which varint measures
     // it depends on the draft: 17 replaced the RFC 9000 encoding with MoQT's.
     let mut cursor: &[u8] = raw;
@@ -2354,24 +2470,31 @@ pub fn reemit_subgroup_object(
 /// Needs no `#[cfg]`: [`DraftVersion`] is not feature-gated, so this answers
 /// for a draft whose codec is not compiled in.
 fn delta_encodes_object_ids(draft: DraftVersion) -> bool {
-    matches!(
-        draft,
+    match draft {
+        DraftVersion::Draft07
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10
+        | DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13 => false,
         DraftVersion::Draft14
-            | DraftVersion::Draft15
-            | DraftVersion::Draft16
-            | DraftVersion::Draft17
-            | DraftVersion::Draft18
-            | DraftVersion::Draft19
-            | DraftVersion::Draft20
-            | DraftVersion::Draft21
-            | DraftVersion::Draft22
-    )
+        | DraftVersion::Draft15
+        | DraftVersion::Draft16
+        | DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
+    }
 }
 
 /// Enforce the strictly-increasing Object ID rule on the drafts that encode
 /// IDs absolutely.
 ///
-/// Drafts 14-22 get this for free: their delta is `id - prev - 1`, so a
+/// Drafts 14-23 get this for free: their delta is `id - prev - 1`, so a
 /// repeated or decreasing ID underflows and the per-draft writer rejects it.
 /// Drafts 07-13 write the ID verbatim and would happily emit a stream no
 /// publisher can produce, so the check lives here. As on the delta drafts, the
@@ -2410,7 +2533,8 @@ fn advance_absolute_id(
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn reject_unrepresentable_extensions(
     extensions: bool,
@@ -2425,7 +2549,7 @@ fn reject_unrepresentable_extensions(
 // ── Fetch object reader ─────────────────────────────────────
 
 /// Per-draft fetch reader state. Fetch objects are self-describing on drafts
-/// 07-14, so those variants carry none; drafts 15-22 let an object take fields
+/// 07-14, so those variants carry none; drafts 15-23 let an object take fields
 /// from the one before it, so each owns the running state that resolves them.
 #[derive(Debug, Clone)]
 enum FetchReaderState {
@@ -2461,6 +2585,8 @@ enum FetchReaderState {
     Draft21(crate::draft21::data_stream::FetchObjectReader),
     #[cfg(feature = "draft22")]
     Draft22(crate::draft22::data_stream::FetchObjectReader),
+    #[cfg(feature = "draft23")]
+    Draft23(crate::draft23::data_stream::FetchObjectReader),
 }
 
 /// Stateful reader for the frames on a fetch data stream, for any enabled
@@ -2484,7 +2610,7 @@ enum FetchReaderState {
 ///
 /// # Frames that are not objects
 ///
-/// Drafts 16-22 add End of Range indicators, which state that a run of Objects
+/// Drafts 16-23 add End of Range indicators, which state that a run of Objects
 /// was not serialized. They arrive through the same calls as objects and are
 /// told apart by [`AnyFetchObject::end_of_range`].
 #[derive(Debug, Clone)]
@@ -2532,7 +2658,7 @@ impl AnyFetchObjectReader {
             AnyFetchHeader::Draft13(_) => FetchReaderState::Draft13,
             #[cfg(feature = "draft14")]
             AnyFetchHeader::Draft14(_) => FetchReaderState::Draft14,
-            // The header carries only a request id on drafts 15-22, so nothing
+            // The header carries only a request id on drafts 15-23, so nothing
             // about it seeds the reader; the first object does.
             #[cfg(feature = "draft15")]
             AnyFetchHeader::Draft15(_) => {
@@ -2601,6 +2727,17 @@ impl AnyFetchObjectReader {
                     }
                 }),
             ),
+            #[cfg(feature = "draft23")]
+            AnyFetchHeader::Draft23(_) => FetchReaderState::Draft23(
+                crate::draft23::data_stream::FetchObjectReader::new(match group_order {
+                    AnyFetchGroupOrder::Ascending => {
+                        crate::draft23::data_stream::GroupOrder::Ascending
+                    }
+                    AnyFetchGroupOrder::Descending => {
+                        crate::draft23::data_stream::GroupOrder::Descending
+                    }
+                }),
+            ),
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(CodecError::UnsupportedDraft(format!(
@@ -2648,6 +2785,8 @@ impl AnyFetchObjectReader {
             FetchReaderState::Draft21(_) => DraftVersion::Draft21,
             #[cfg(feature = "draft22")]
             FetchReaderState::Draft22(_) => DraftVersion::Draft22,
+            #[cfg(feature = "draft23")]
+            FetchReaderState::Draft23(_) => DraftVersion::Draft23,
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnyFetchObjectReader has no enabled variants"),
         }
@@ -2659,7 +2798,7 @@ impl AnyFetchObjectReader {
     /// frame; the reader's state is unspecified after such an error, so callers
     /// that may be fed partial buffers must probe against a clone.
     ///
-    /// Returns [`CodecError::InvalidField`] on drafts 15-22 when a frame takes
+    /// Returns [`CodecError::InvalidField`] on drafts 15-23 when a frame takes
     /// a field from an object before it that does not exist — the first frame
     /// of a stream doing so is a protocol violation on every one of those
     /// drafts — and when a resolved Group ID, Subgroup ID or Object ID would
@@ -2703,6 +2842,8 @@ impl AnyFetchObjectReader {
             FetchReaderState::Draft21(inner) => fo21::read_object(inner, buf),
             #[cfg(feature = "draft22")]
             FetchReaderState::Draft22(inner) => fo22::read_object(inner, buf),
+            #[cfg(feature = "draft23")]
+            FetchReaderState::Draft23(inner) => fo23::read_object(inner, buf),
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnyFetchObjectReader has no enabled variants"),
         };
@@ -2766,6 +2907,8 @@ impl AnyFetchObjectReader {
             FetchReaderState::Draft21(inner) => fo21::read_object_frame(inner, buf),
             #[cfg(feature = "draft22")]
             FetchReaderState::Draft22(inner) => fo22::read_object_frame(inner, buf),
+            #[cfg(feature = "draft23")]
+            FetchReaderState::Draft23(inner) => fo23::read_object_frame(inner, buf),
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnyFetchObjectReader has no enabled variants"),
         }
@@ -2814,6 +2957,8 @@ impl AnyFetchObjectReader {
             FetchReaderState::Draft21(inner) => fo21::read_object_meta(inner, buf),
             #[cfg(feature = "draft22")]
             FetchReaderState::Draft22(inner) => fo22::read_object_meta(inner, buf),
+            #[cfg(feature = "draft23")]
+            FetchReaderState::Draft23(inner) => fo23::read_object_meta(inner, buf),
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnyFetchObjectReader has no enabled variants"),
         }
@@ -2826,7 +2971,7 @@ impl AnyFetchObjectReader {
 ///
 /// Drafts 07-14 keep nothing: every field of a fetch object is on their wire
 /// outright, so the bytes say the same thing whatever precedes them. Drafts
-/// 15-22 keep the frame's own header, and draft-16 the resolved Location
+/// 15-23 keep the frame's own header, and draft-16 the resolved Location
 /// beside it, because those two are exactly what each draft's
 /// `FetchObjectWriter` is handed.
 #[derive(Debug, Clone)]
@@ -2862,6 +3007,8 @@ enum FetchFrameShape {
     Draft21(crate::draft21::data_stream::FetchObject),
     #[cfg(feature = "draft22")]
     Draft22(crate::draft22::data_stream::FetchObject),
+    #[cfg(feature = "draft23")]
+    Draft23(crate::draft23::data_stream::FetchObject),
 }
 
 /// One fetch frame, in the form re-encoding it takes.
@@ -2970,6 +3117,8 @@ enum FetchWriterState {
     Draft21(crate::draft21::data_stream::FetchObjectWriter),
     #[cfg(feature = "draft22")]
     Draft22(crate::draft22::data_stream::FetchObjectWriter),
+    #[cfg(feature = "draft23")]
+    Draft23(crate::draft23::data_stream::FetchObjectWriter),
 }
 
 /// Re-emitter for the frames of a fetch data stream, for any enabled draft.
@@ -2977,7 +3126,7 @@ enum FetchWriterState {
 /// The inverse of [`AnyFetchObjectReader`], and it exists for one caller: a
 /// relay reading one fetch stream and writing another from the same frames,
 /// having removed some of them. Removing a frame changes what the frames
-/// behind it are encoded *against*, and on drafts 15-22 nearly every field of
+/// behind it are encoded *against*, and on drafts 15-23 nearly every field of
 /// a fetch object is defined against the frame before it — draft-17
 /// Section 10.4.4.1, Table 7: "Object ID is the prior Object's ID plus one" —
 /// so a survivor following a removed run cannot keep its original bytes.
@@ -2993,7 +3142,7 @@ enum FetchWriterState {
 ///
 /// # What it costs
 ///
-/// Nothing on drafts 07-14, and on drafts 15-22 one header re-derivation per
+/// Nothing on drafts 07-14, and on drafts 15-23 one header re-derivation per
 /// frame, which allocates only when the answer differs from the bytes that
 /// arrived. A stream with nothing removed from it therefore forwards every
 /// frame's own bytes and copies no payload.
@@ -3107,6 +3256,17 @@ impl AnyFetchObjectWriter {
                     }
                 }),
             ),
+            #[cfg(feature = "draft23")]
+            AnyFetchHeader::Draft23(_) => FetchWriterState::Draft23(
+                crate::draft23::data_stream::FetchObjectWriter::new(match group_order {
+                    AnyFetchGroupOrder::Ascending => {
+                        crate::draft23::data_stream::GroupOrder::Ascending
+                    }
+                    AnyFetchGroupOrder::Descending => {
+                        crate::draft23::data_stream::GroupOrder::Descending
+                    }
+                }),
+            ),
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(CodecError::UnsupportedDraft(format!(
@@ -3150,6 +3310,8 @@ impl AnyFetchObjectWriter {
             FetchWriterState::Draft21(_) => DraftVersion::Draft21,
             #[cfg(feature = "draft22")]
             FetchWriterState::Draft22(_) => DraftVersion::Draft22,
+            #[cfg(feature = "draft23")]
+            FetchWriterState::Draft23(_) => DraftVersion::Draft23,
             #[allow(unreachable_patterns)]
             _ => unreachable!("AnyFetchObjectWriter has no enabled variants"),
         }
@@ -3320,6 +3482,18 @@ impl AnyFetchObjectWriter {
                 writer.advance(original);
                 Ok(put_reframed(&encoded, framing.len(), rest, out))
             }
+            #[cfg(feature = "draft23")]
+            (FetchWriterState::Draft23(writer), FetchFrameShape::Draft23(original)) => {
+                let reframed = writer.header_for(original)?;
+                if reframed == original.header {
+                    writer.advance(original);
+                    return Ok(FetchReemit::Unchanged);
+                }
+                let mut encoded = Vec::with_capacity(framing.len() + 16);
+                reframed.encode(&mut encoded)?;
+                writer.advance(original);
+                Ok(put_reframed(&encoded, framing.len(), rest, out))
+            }
             // Unreachable: the drafts were compared before this match, and one
             // draft has one state and one shape.
             #[allow(unreachable_patterns)]
@@ -3341,7 +3515,8 @@ impl AnyFetchObjectWriter {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn put_reframed(
     encoded: &[u8],

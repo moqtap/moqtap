@@ -51,16 +51,17 @@ impl PropertyRules {
                 rules(false, Some(MAX_VALUE_LEN), Some(IMMUTABLE))
             }
             // Delta Types: draft-16 Section 1.4.2, drafts 17-20 Section 1.4.3,
-            // drafts 21-22 Section 8.3. Immutable Extensions: draft-16 Section
+            // drafts 21-23 Section 8.3. Immutable Extensions: draft-16 Section
             // 11.2; Immutable Properties: draft-17 Section 11.6, drafts 18-20
-            // Section 12.7, drafts 21-22 Section 10.7.
+            // Section 12.7, drafts 21-23 Section 10.7.
             DraftVersion::Draft16
             | DraftVersion::Draft17
             | DraftVersion::Draft18
             | DraftVersion::Draft19
             | DraftVersion::Draft20
             | DraftVersion::Draft21
-            | DraftVersion::Draft22 => rules(true, Some(MAX_VALUE_LEN), Some(IMMUTABLE)),
+            | DraftVersion::Draft22
+            | DraftVersion::Draft23 => rules(true, Some(MAX_VALUE_LEN), Some(IMMUTABLE)),
         }
     }
 }

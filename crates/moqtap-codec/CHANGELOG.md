@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking.** `DraftVersion` gains `Draft23` (feature `draft23`, in `all-drafts`; ALPN `moqt-23`), and `DraftVersion::ALL` is a `[DraftVersion; 17]`.
+- **Breaking.** `AnyFetchEndOfRange` gains `Gone`, `EndOfGroup` and `EndOfTrack`, which only draft-23 produces.
+- **Breaking.** `CodecError` gains `ControlMessageExceedsLimit`, `MissingErrorDetail`, `MalformedErrorDetail`, `TokenAliasInSetup`, `EmptyTrackName`, `MalformedAuthToken`, `TrackPropertiesNotPermitted`, `DeltaDecodingOverflow`, `MalformedObject`, `MalformedTrack` and `UnknownObjectStatus`. Only draft-23 produces them.
+
+### Added
+
+- **`draft23`**, a module and a feature. Its control messages have a vi64 Length, which `decode_with_limit` and `encode_with_limit` check against MAX_CONTROL_MESSAGE_SIZE (setup option 0x09, default 65535). FETCH is answered by REQUEST_OK, and message type 0x18 is reserved. REQUEST_ERROR carries Error Details (REDIRECT, UNSUPPORTED_PROPERTY). NAMESPACE carries parameters. FILL_PARAMETERS is a count. PAUSED (0x11) and SUBSCRIBE_TRACKS_ID (0x36) are new. The session, request, PUBLISH_DONE and stream reset codes follow draft-23.
+- Draft-23 fetch streams: the Object ID delta is +2 within a Group, End of Range Object IDs are delta-encoded, and there are three new indicators: End of Group (0x80), End of Track (0x81) and End of Gone Range (0x40C).
+- Draft-23 subgroup and datagram readers refuse an unassigned Object Status as `UnknownObjectStatus`. The readers that return a whole object refuse properties on a non-Normal status. They also refuse the Prior Group ID Gap and Prior Object ID Gap conditions that one Object, or one subgroup stream, shows.
+- Draft-23 SUBSCRIBE, PUBLISH, TRACK_STATUS and FETCH check for an empty Track Name after the rest of the message, so a DELTA_ENCODING_OVERFLOW or FIELD_LENGTH_EXCEEDED later in it is the error returned.
+
 ## [0.9.0] - 2026-10-29
 
 ### Added

@@ -686,14 +686,14 @@ impl ProxySession {
         let object_hook = interest.contains(Interest::OBJECTS);
         let control_mutation = interest.contains(Interest::CONTROL);
         // A fourth reason to decode control frames, and the only one that is
-        // not about telling somebody. Drafts 18-22 write a fetch
+        // not about telling somebody. Drafts 18-23 write a fetch
         // Object's Group ID as a difference whose sign the fetch's Group Order
         // decides, and the order is on the FETCH — so on those drafts a session
         // that frames data has to read its own control plane or it cannot read
         // its own fetch streams. See `capability::fetch_group_order_is_needed`.
         //
         // The initial draft is exact here for the same reason it is in
-        // `bidi_streams_carry_requests`: drafts 18-22 have an ALPN each,
+        // `bidi_streams_carry_requests`: drafts 18-23 have an ALPN each,
         // and the one cohort that is a guess, `moq-00`, spans drafts 07 to 14
         // and answers `false` for every member.
         let fetch_orders_wanted = objects_enabled && fetch_group_order_is_needed(initial_draft);
@@ -1730,7 +1730,7 @@ struct ForwardCtx {
     /// [`ForwardCtx::control_frames_are_decoded`] rather than either alone.
     control_parse: bool,
     /// Whether this session has to decode control frames to read its own
-    /// fetch streams — drafts 18-22, framing data.
+    /// fetch streams — drafts 18-23, framing data.
     ///
     /// Unlike `control_parse` this arms no report and calls no hook. It is
     /// the one case where the proxy parses the control plane for itself, and
@@ -2029,14 +2029,15 @@ const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
         | DraftVersion::Draft19
         | DraftVersion::Draft20
         | DraftVersion::Draft21
-        | DraftVersion::Draft22 => true,
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
     }
 }
 
 /// The application error code to reset a forwarded data stream with when
 /// the source read failed for a reason that is not a peer `RESET_STREAM`.
 ///
-/// `0x3` (SESSION_CLOSED on drafts 11-19) for a connection-level failure —
+/// `0x3` (SESSION_CLOSED on drafts 11-23) for a connection-level failure —
 /// literally true when the relay dies mid-subgroup, and the code a real
 /// publisher would send. `0x0` (INTERNAL_ERROR) for everything else, which
 /// is verbatim what a proxy-internal failure is. Deliberately **not**
@@ -2811,7 +2812,7 @@ async fn forward_undefined_bidi_streams(
 /// unidirectional streams**, making a bidirectional stream a *request*
 /// stream rather than the control stream.
 ///
-/// True on drafts 17 through 22; false on 07 through 16.
+/// True on drafts 17 through 23; false on 07 through 16.
 ///
 /// # What the drafts say
 ///
@@ -2874,7 +2875,8 @@ const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
         | DraftVersion::Draft19
         | DraftVersion::Draft20
         | DraftVersion::Draft21
-        | DraftVersion::Draft22 => true,
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
     }
 }
 
@@ -2882,7 +2884,7 @@ const fn control_plane_is_unidirectional(draft: DraftVersion) -> bool {
 /// own, so that a bidirectional stream beyond the control stream is a stream
 /// this proxy has to forward.
 ///
-/// True on drafts 16 through 22; false on 07 through 15.
+/// True on drafts 16 through 23; false on 07 through 15.
 ///
 /// # Why this is not [`control_plane_is_unidirectional`]
 ///
@@ -2956,7 +2958,8 @@ const fn bidi_streams_carry_requests(draft: DraftVersion) -> bool {
         | DraftVersion::Draft19
         | DraftVersion::Draft20
         | DraftVersion::Draft21
-        | DraftVersion::Draft22 => true,
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
     }
 }
 
@@ -3294,12 +3297,18 @@ const MAX_CONTROL_HEADER: usize = 16;
 ///
 /// Not a protocol limit and not enforced on anything — the bytes are
 /// forwarded either way. It is a sanity bound on the walker's *own*
-/// arithmetic: drafts 11 and later cap a control payload at 65535 by
-/// framing it in sixteen bits, and drafts 07-10 frame it as a varint that
-/// can say 2^62 but never does. A length that large is not a large message,
-/// it is a length field read at the wrong offset — most likely because the
-/// session's draft guess is wrong for the moq-00 cohort, where the framing
-/// style changed at draft 11.
+/// arithmetic, and it applies only to drafts 07-10: drafts 11-22 cap a
+/// control payload at 65535 by framing it in sixteen bits, and drafts 07-10
+/// frame it as a varint that can say 2^62 but never does. A length that
+/// large there is not a large message, it is a length field read at the
+/// wrong offset — most likely because the session's draft guess is wrong for
+/// the moq-00 cohort, where the framing style changed at draft 11.
+///
+/// Draft-23 frames the length as a varint too, but its ALPN names it, so the
+/// offset is not a guess, and the receiver's MAX_CONTROL_MESSAGE_SIZE has no
+/// upper bound (draft-23 Section 9.1.8: "The value is encoded as a
+/// variable-length integer and MUST be at least 65535"). A long length there
+/// is a long message, and the walker counts it down.
 ///
 /// Without the bound the walker would count down through that number for
 /// the rest of the session, hold every injection, and claim at teardown
@@ -3307,6 +3316,35 @@ const MAX_CONTROL_HEADER: usize = 16;
 /// know where the boundaries are, which is the truth and which suppresses
 /// both.
 const MAX_CONTROL_PAYLOAD: usize = 1024 * 1024;
+
+/// Whether [`MAX_CONTROL_PAYLOAD`] bounds a control message length this
+/// draft frames as a varint. See that constant for why 07-10 are bounded and
+/// 23 is not.
+///
+/// Drafts 11-22 frame the length in sixteen bits and never reach the varint
+/// read; they answer `true`, the bound being the one their framing already
+/// keeps.
+const fn control_length_is_bounded(draft: DraftVersion) -> bool {
+    match draft {
+        DraftVersion::Draft07
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10
+        | DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13
+        | DraftVersion::Draft14
+        | DraftVersion::Draft15
+        | DraftVersion::Draft16
+        | DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22 => true,
+        DraftVersion::Draft23 => false,
+    }
+}
 
 /// Where the message boundaries are on a control stream being forwarded
 /// verbatim.
@@ -3473,7 +3511,10 @@ impl ControlFrameWalker {
         }
         let mut cursor = &self.header[type_len..type_len + len_len];
         match self.draft.decode_varint(&mut cursor) {
-            Ok(v) if v.into_inner() as usize <= MAX_CONTROL_PAYLOAD => {
+            Ok(v)
+                if v.into_inner() as usize <= MAX_CONTROL_PAYLOAD
+                    || !control_length_is_bounded(self.draft) =>
+            {
                 HeaderStep::Payload(v.into_inner() as usize)
             }
             // A length no control message has, so the field was read at the
@@ -4694,7 +4735,8 @@ fn report_refused_frames(
         feature = "draft19",
         feature = "draft20",
         feature = "draft21",
-        feature = "draft22"
+        feature = "draft22",
+        feature = "draft23"
     )),
     allow(unreachable_code)
 )]
@@ -6267,8 +6309,12 @@ fn datagram_is_status(header: &AnyDatagramHeader) -> bool {
         AnyDatagramHeader::Draft21(h) => h.object_status.is_some(),
         #[cfg(feature = "draft22")]
         AnyDatagramHeader::Draft22(h) => h.object_status.is_some(),
+        #[cfg(feature = "draft23")]
+        AnyDatagramHeader::Draft23(h) => h.object_status.is_some(),
+        // Every compiled draft has an arm above, so this is reached only in a
+        // build with no draft, where no header can be decoded.
         #[allow(unreachable_patterns)]
-        _ => false,
+        _ => unreachable!("a datagram header decoded under a draft this match has no arm for"),
     }
 }
 
@@ -6377,12 +6423,14 @@ async fn forward_datagrams(
                         if ctx.observer_enabled {
                             let payload_start =
                                 datagram_payload_start(&decoded, data.len(), data.len() - cursor.len());
+                            // `header` last: with no draft compiled the header type
+                            // is empty and its clone diverges.
                             ctx.observer.on_event(&ProxyEvent::Datagram {
                                 session_id: ctx.session_id,
                                 side,
-                                header: decoded.clone(),
                                 header_raw: data.slice(..payload_start),
                                 payload_len: data.len() - payload_start,
+                                header: decoded.clone(),
                             });
                         }
                         header = Some(decoded);
@@ -6636,8 +6684,8 @@ fn peek_draft(buf: &[u8], side: ProxySide) -> DraftPeek {
     // Distinguish framing by the type id:
     //   0x40 = CLIENT_SETUP (drafts 07–10, varint length)
     //   0x41 = SERVER_SETUP (drafts 07–10, varint length)
-    //   0x20 = CLIENT_SETUP (drafts 11+, u16-BE length)
-    //   0x21 = SERVER_SETUP (drafts 11+, u16-BE length)
+    //   0x20 = CLIENT_SETUP (drafts 11-16, u16-BE length)
+    //   0x21 = SERVER_SETUP (drafts 11-16, u16-BE length)
     //
     // Anything else is `NotSetup` rather than `NeedMore`, and that is the
     // whole reason for the distinction: the type varint is decided by bytes
@@ -6832,7 +6880,7 @@ mod tests {
         out
     }
 
-    /// `[type varint][payload length u16-BE][payload]` — drafts 11+.
+    /// `[type varint][payload length u16-BE][payload]` — drafts 11-22.
     fn frame_u16_length(type_id: u64, payload: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         varint(type_id, &mut out);
@@ -6852,7 +6900,7 @@ mod tests {
 
     /// Two messages, fed as one read, and the walker names the seam.
     ///
-    /// The fixed-length framing (drafts 11 and later): type varint, then a
+    /// The fixed-length framing (drafts 11-22): type varint, then a
     /// sixteen-bit big-endian length.
     ///
     /// *Ablation, recorded:* have `advance` return the **last** boundary in
@@ -6956,6 +7004,36 @@ mod tests {
         // changes nothing, because the stream position is already lost.
         assert_eq!(walker.advance(&frame_varint_length(0x41, &[1])), None);
         assert!(!walker.at_boundary());
+    }
+
+    /// Draft-23 writes the length as a varint and names its draft by ALPN, so
+    /// a length past [`MAX_CONTROL_PAYLOAD`] is a long message and is counted
+    /// down to its seam.
+    ///
+    /// Draft-23 Section 9, Figure 6: "Message Length (vi64)". Section 9.1.8:
+    /// "The value is encoded as a variable-length integer and MUST be at least
+    /// 65535."
+    #[test]
+    fn a_draft_23_length_past_the_bound_is_a_long_message() {
+        let draft = DraftVersion::Draft23;
+        let put = |v: u64, out: &mut Vec<u8>| {
+            draft.encode_varint(moqtap_codec::varint::VarInt::from_u64(v).unwrap(), out)
+        };
+        let long = MAX_CONTROL_PAYLOAD + 1;
+        let mut first = Vec::new();
+        put(0x07, &mut first);
+        put(long as u64, &mut first);
+        first.resize(first.len() + long, 0);
+        let mut second = Vec::new();
+        put(0x07, &mut second);
+        put(1, &mut second);
+        second.push(0);
+        let mut stream = first.clone();
+        stream.extend_from_slice(&second);
+
+        let mut walker = ControlFrameWalker::new(draft);
+        assert_eq!(walker.advance(&stream), Some(first.len()));
+        assert!(walker.at_boundary());
     }
 
     /// CLIENT_SETUP's payload: version count, versions, then no parameters.

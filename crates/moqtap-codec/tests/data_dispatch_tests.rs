@@ -26,7 +26,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 use bytes::Buf;
@@ -192,7 +193,7 @@ fn check_all(header: &AnySubgroupHeader, objects: &[AnySubgroupObject]) {
     meta_matches_read_object(header, objects);
     truncation_reports_incomplete(header, objects);
     // First, middle and last object: the first is the case where the
-    // successor's field switches from relative to absolute on drafts 14-22.
+    // successor's field switches from relative to absolute on drafts 14-23.
     for dropped in [0, 2, 4] {
         check_elide(header, objects, dropped);
     }
@@ -220,7 +221,7 @@ fn extensions_without_a_block_are_rejected(header: &AnySubgroupHeader) {
 
 /// Object IDs on a subgroup stream are strictly increasing: two objects can
 /// never share one, and a stream that walks backwards is one no publisher can
-/// produce. Drafts 14-22 get this from the delta arithmetic; drafts 07-13
+/// produce. Drafts 14-23 get this from the delta arithmetic; drafts 07-13
 /// write absolute IDs, so the dispatch writer enforces it for them. Either
 /// way a rejected object must leave neither bytes nor state behind.
 fn non_increasing_object_ids_are_rejected(header: &AnySubgroupHeader) {
@@ -311,6 +312,7 @@ fn leading_varint_len(draft: DraftVersion, raw: &[u8]) -> usize {
             | DraftVersion::Draft20
             | DraftVersion::Draft21
             | DraftVersion::Draft22
+            | DraftVersion::Draft23
     ) {
         if raw[0] == 0xFF {
             9
@@ -327,7 +329,7 @@ fn leading_varint_len(draft: DraftVersion, raw: &[u8]) -> usize {
 /// ID field and the delta drafts recompute the same delta.
 ///
 /// *Ablation:* delete the `encoded == &raw[..id_bytes_before]` short-circuit
-/// in `reemit_subgroup_object` so the rewrite path always runs; drafts 14-22
+/// in `reemit_subgroup_object` so the rewrite path always runs; drafts 14-23
 /// must fail on the returned `Reemit`.
 fn reemit_is_verbatim_without_an_elide(header: &AnySubgroupHeader) {
     let draft = header.draft();
@@ -349,7 +351,7 @@ fn reemit_is_verbatim_without_an_elide(header: &AnySubgroupHeader) {
 /// changes — and every object after it stays correct, because the writer's
 /// cursor has re-converged with the reader's.
 ///
-/// Drafts 14-22 only: on 07-13 the ID field is absolute and an elide costs
+/// Drafts 14-23 only: on 07-13 the ID field is absolute and an elide costs
 /// nothing at all, which is what `reemit_is_verbatim_without_an_elide`
 /// already pins there.
 ///
@@ -471,7 +473,7 @@ fn reemit_accepts_a_prefix(header: &AnySubgroupHeader) {
 ///
 /// *Ablation:* delete the `object_id <= prev` guard at the top of
 /// `reemit_subgroup_object`. Ran it; drafts 07-13 failed. It is a **no-op on
-/// drafts 14-22**, and deliberately so: there the delta is `id - prev - 1`,
+/// drafts 14-23**, and deliberately so: there the delta is `id - prev - 1`,
 /// so a repeated or decreasing ID underflows `checked_sub` and the same
 /// `InvalidField` comes back from the arithmetic. The guard is load-bearing
 /// only on the seven absolute drafts, which is exactly where the ablation
@@ -529,7 +531,7 @@ fn payload_is_the_trailing_bytes(header: &AnySubgroupHeader, objects: &[AnySubgr
     }
 }
 
-/// The four elide-primitive checks every draft 07-22 runs. A macro so that
+/// The four elide-primitive checks every draft 07-23 runs. A macro so that
 /// each draft module can carry the same four test names while supplying its
 /// own header and object set.
 macro_rules! elide_primitive_tests {
@@ -805,7 +807,7 @@ gated_draft_tests!(draft11, "draft11", draft11, Draft11);
 gated_draft_tests!(draft12, "draft12", draft12, Draft12);
 gated_draft_tests!(draft13, "draft13", draft13, Draft13);
 
-// ── Drafts 14-22: delta-encoded object IDs ──────────────────
+// ── Drafts 14-23: delta-encoded object IDs ──────────────────
 
 #[cfg(feature = "draft14")]
 mod draft14 {
@@ -908,6 +910,7 @@ modern_draft_tests!(draft19, "draft19", draft19, Draft19);
 modern_draft_tests!(draft20, "draft20", draft20, Draft20);
 modern_draft_tests!(draft21, "draft21", draft21, Draft21);
 modern_draft_tests!(draft22, "draft22", draft22, Draft22);
+modern_draft_tests!(draft23, "draft23", draft23, Draft23);
 
 // ── Fetch streams ───────────────────────────────────────────
 
@@ -1052,7 +1055,7 @@ fn fetch_objects_draft14() {
     assert_eq!(meta.payload_length, 2);
 }
 
-// ── Fetch objects on drafts 15-22 ───────────────────────────
+// ── Fetch objects on drafts 15-23 ───────────────────────────
 //
 // These drafts replaced the fixed field list of a fetch object with a leading
 // Serialization Flags value naming the fields that follow, so an object is only
@@ -1074,7 +1077,8 @@ fn fetch_objects_draft14() {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::dispatch::{
     AnyFetchGroupOrder, AnyFetchHeader, AnyFetchObject, AnyFetchObjectReader,
@@ -1082,7 +1086,7 @@ use moqtap_codec::dispatch::{
 
 /// What the three objects must resolve to. `second` and `third` are the Object
 /// Status each of the two zero-length objects carries: a code on draft-15,
-/// which keeps the field, and `None` on drafts 16-22, which removed it from
+/// which keeps the field, and `None` on drafts 16-23, which removed it from
 /// fetch objects.
 #[cfg(any(
     feature = "draft15",
@@ -1092,7 +1096,8 @@ use moqtap_codec::dispatch::{
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn expected_fetch_objects(second: Option<u64>, third: Option<u64>) -> Vec<AnyFetchObject> {
     let object = |group_id, object_id, status, payload: &[u8]| AnyFetchObject {
@@ -1120,7 +1125,8 @@ fn expected_fetch_objects(second: Option<u64>, third: Option<u64>) -> Vec<AnyFet
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn read_fetch_stream(header: &AnyFetchHeader, wire: &[u8]) -> Vec<AnyFetchObject> {
     let mut reader = AnyFetchObjectReader::new(header, AnyFetchGroupOrder::Ascending)
@@ -1739,6 +1745,68 @@ fn fetch_objects_draft22_resolve_deltas_against_the_prior_object() {
         "draft-22 fetch objects must resolve their deltas to absolute identities"
     );
 }
+#[cfg(feature = "draft23")]
+#[test]
+fn fetch_objects_draft23_resolve_deltas_against_the_prior_object() {
+    use moqtap_codec::draft23::data_stream::{FetchHeader, FetchObjectHeader};
+
+    // Draft-19 keeps draft-18's deltas and distinguishes a properties block
+    // that is absent from one that is present and empty, so `None` is what
+    // leaves the 0x20 bit clear.
+    let objects = [
+        FetchObjectHeader {
+            serialization_flags: VarInt::from_usize(0x1f),
+            group_id_delta: Some(VarInt::from_usize(1)),
+            subgroup_id: Some(VarInt::from_usize(2)),
+            object_id_delta: Some(VarInt::from_usize(3)),
+            publisher_priority: Some(128),
+            properties: None,
+            payload_length: VarInt::from_usize(2),
+        },
+        FetchObjectHeader {
+            serialization_flags: VarInt::from_usize(0x01),
+            group_id_delta: None,
+            subgroup_id: None,
+            object_id_delta: None,
+            publisher_priority: None,
+            properties: None,
+            payload_length: VarInt::from_usize(0),
+        },
+        FetchObjectHeader {
+            serialization_flags: VarInt::from_usize(0x0d),
+            group_id_delta: Some(VarInt::from_usize(0)),
+            subgroup_id: None,
+            object_id_delta: Some(VarInt::from_usize(0)),
+            publisher_priority: None,
+            properties: None,
+            payload_length: VarInt::from_usize(0),
+        },
+    ];
+
+    let mut wire = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        object.encode(&mut wire).unwrap_or_else(|e| panic!("object {index} encode failed: {e}"));
+        if object.payload_length.into_inner() == 2 {
+            wire.extend_from_slice(&[0xca, 0xfe]);
+        }
+    }
+    assert_eq!(
+        wire,
+        vec![
+            0x1f, 0x01, 0x02, 0x03, 0x80, 0x02, 0xca, 0xfe, // group 1, subgroup 2, object 3
+            0x01, 0x00, // everything inherited
+            0x0d, 0x00, 0x00, 0x00, // group delta 0 means group 2, object 0
+        ],
+        "the draft-23 fetch stream under test"
+    );
+
+    let header = AnyFetchHeader::Draft23(FetchHeader { request_id: VarInt::from_usize(9) });
+    assert_eq!(
+        read_fetch_stream(&header, &wire),
+        expected_fetch_objects(None, None),
+        "draft-23 fetch objects must resolve their deltas to absolute identities"
+    );
+}
 
 /// An End of Range marker reports the same Publisher Priority on every draft
 /// that has one.
@@ -1763,7 +1831,8 @@ fn fetch_objects_draft22_resolve_deltas_against_the_prior_object() {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 #[test]
 fn an_end_of_range_marker_reports_the_priority_in_force_on_every_draft() {
@@ -1965,6 +2034,33 @@ fn an_end_of_range_marker_reports_the_priority_in_force_on_every_draft() {
         let header = AnyFetchHeader::Draft22(FetchHeader { request_id: VarInt::from_usize(9) });
         cases.push(("draft-22", header, wire));
     }
+    #[cfg(feature = "draft23")]
+    {
+        use moqtap_codec::draft23::data_stream::{FetchHeader, FetchObjectHeader};
+        let object = FetchObjectHeader {
+            serialization_flags: VarInt::from_usize(0x1f),
+            group_id_delta: Some(VarInt::from_usize(1)),
+            subgroup_id: Some(VarInt::from_usize(2)),
+            object_id_delta: Some(VarInt::from_usize(3)),
+            publisher_priority: Some(0x40),
+            properties: None,
+            payload_length: VarInt::from_usize(0),
+        };
+        let marker = FetchObjectHeader {
+            serialization_flags: VarInt::from_usize(0x8c),
+            group_id_delta: Some(VarInt::from_usize(9)),
+            subgroup_id: None,
+            object_id_delta: Some(VarInt::from_usize(4)),
+            publisher_priority: None,
+            properties: None,
+            payload_length: VarInt::from_usize(0),
+        };
+        let mut wire = Vec::new();
+        object.encode(&mut wire).expect("the draft-23 object encodes");
+        marker.encode(&mut wire).expect("the draft-23 marker encodes");
+        let header = AnyFetchHeader::Draft23(FetchHeader { request_id: VarInt::from_usize(9) });
+        cases.push(("draft-23", header, wire));
+    }
 
     for (draft, header, wire) in &cases {
         let objects = read_fetch_stream(header, wire);
@@ -1992,8 +2088,17 @@ fn an_end_of_range_marker_reports_the_priority_in_force_on_every_draft() {
         // Both readings are defensible from the text; what would not be
         // defensible is a draft-neutral test asserting one of them for every
         // draft, which is why the expectation is per draft.
-        let expected_location =
-            if matches!(*draft, "draft-20" | "draft-21" | "draft-22") { (11, 4) } else { (9, 4) };
+        //
+        // Draft-23 Section 11.4.2.1 settles it a third way: "the Group ID is
+        // the prior Group ID plus Group ID Delta for Ascending Group Order",
+        // with no + 1, so 1 + 9 = 10, and "When Group ID Delta is nonzero, the
+        // Object ID Delta field contains the absolute Object ID in the new
+        // Group".
+        let expected_location = match *draft {
+            "draft-20" | "draft-21" | "draft-22" => (11, 4),
+            "draft-23" => (10, 4),
+            _ => (9, 4),
+        };
         assert_eq!(
             (objects[1].group_id, objects[1].object_id),
             expected_location,
@@ -2018,7 +2123,8 @@ fn an_end_of_range_marker_reports_the_priority_in_force_on_every_draft() {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 #[test]
 fn the_group_order_decides_a_fetch_group_id() {
@@ -2061,6 +2167,13 @@ fn the_group_order_decides_a_fetch_group_id() {
     cases.push((
         "draft-22",
         AnyFetchHeader::Draft22(moqtap_codec::draft22::data_stream::FetchHeader {
+            request_id: VarInt::from_usize(9),
+        }),
+    ));
+    #[cfg(feature = "draft23")]
+    cases.push((
+        "draft-23",
+        AnyFetchHeader::Draft23(moqtap_codec::draft23::data_stream::FetchHeader {
             request_id: VarInt::from_usize(9),
         }),
     ));

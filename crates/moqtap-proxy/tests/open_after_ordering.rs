@@ -62,7 +62,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 mod common;
@@ -120,6 +121,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
 /// The draft every fixture here is built for: the **newest** one this build
@@ -174,7 +177,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 }
 
 /// A subgroup stream header for `draft` carrying `track_alias`: group 0,
-/// subgroup 0, publisher priority `0x80`. Five bytes on every draft 07-22.
+/// subgroup 0, publisher priority `0x80`. Five bytes on every draft 07-23.
 fn subgroup_header_bytes(draft: DraftVersion, track_alias: u64) -> Vec<u8> {
     assert!(track_alias < 64, "single-byte varint only");
     vec![subgroup_stream_type(draft), track_alias as u8, 0x00, 0x00, 0x80]

@@ -2,9 +2,9 @@
 
 //! MoQT wire codec for
 //! [draft-07](https://www.ietf.org/archive/id/draft-ietf-moq-transport-07.html) through
-//! [draft-22](https://www.ietf.org/archive/id/draft-ietf-moq-transport-22.html).
+//! [draft-23](https://www.ietf.org/archive/id/draft-ietf-moq-transport-23.html).
 //!
-//! Each draft sits behind its own feature flag — `draft07` through `draft22`.
+//! Each draft sits behind its own feature flag — `draft07` through `draft23`.
 //! The default is `all-drafts`, which enables every one of them.
 //!
 //! # Shared modules
@@ -72,10 +72,12 @@ pub mod draft20;
 pub mod draft21;
 #[cfg(feature = "draft22")]
 pub mod draft22;
+#[cfg(feature = "draft23")]
+pub mod draft23;
 
 /// The Token structure carried by the AUTHORIZATION TOKEN parameter.
 ///
-/// Drafts 11 through 22 define one structure and require a receiver to close
+/// Drafts 11 through 23 define one structure and require a receiver to close
 /// the session when a value it understands does not match it.
 pub mod auth_token;
 

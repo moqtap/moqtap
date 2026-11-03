@@ -86,7 +86,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 mod common;
@@ -143,6 +144,8 @@ const DELIMITED: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
 /// Every draft this build compiled, delimited or not.
@@ -187,9 +190,11 @@ const COMPILED: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
-/// Drafts 15-22, whose datagram type carries a status flag at bit 5 and,
+/// Drafts 15-23, whose datagram type carries a status flag at bit 5 and,
 /// when it is set, ends the header with a status field and no payload.
 ///
 /// Draft-14 is left out although it has the same flag: its header decode
@@ -213,6 +218,8 @@ const STATUS_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
 /// The draft the single-session tests below run on: whichever this build
@@ -309,14 +316,14 @@ fn datagram_header(draft: DraftVersion, payload_len: usize) -> Vec<u8> {
             varint(OBJECT_ID, &mut h);
             h.push(PRIORITY);
         }
-        // 14-20: a leading datagram-type field. `0x00` means object ID
+        // 14-23: a leading datagram-type field. `0x00` means object ID
         // present, priority present, no extensions or properties, no
-        // status, so the layout is the same five fields on all seven. It
+        // status, so the layout is the same five fields on each of them. It
         // is written as one octet, which serves every reader here: drafts
-        // 14, 15 and 20 decode this field as a varint and 16-19 as a raw
+        // 14, 15 and 20-23 decode this field as a varint and 16-19 as a raw
         // `u8`, and a lone `0x00` is both a valid one-byte varint and that
         // `u8`. How the field is defined differs too: 14 and 15 enumerate
-        // whole type values in a table, while 16-22 name the bits and
+        // whole type values in a table, while 16-23 name the bits and
         // `0x00` clears all of them. Draft-20 spells the field
         // `Type Flags` where 14-19 spell it `Type`; draft-20's bits are
         // draft-19's.
@@ -328,7 +335,8 @@ fn datagram_header(draft: DraftVersion, payload_len: usize) -> Vec<u8> {
         | DraftVersion::Draft19
         | DraftVersion::Draft20
         | DraftVersion::Draft21
-        | DraftVersion::Draft22 => {
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => {
             h.push(0x00);
             varint(TRACK_ALIAS, &mut h);
             varint(GROUP_ID, &mut h);
@@ -350,8 +358,8 @@ fn datagram(draft: DraftVersion, payload: &[u8]) -> Vec<u8> {
 /// status flag, so the header ends with a status field and there is no
 /// payload slot at all.
 ///
-/// One byte-for-byte layout serves all six. The type is a single octet,
-/// which drafts 15 and 20 read as a one-byte varint and 16-19 as a raw
+/// One byte-for-byte layout serves every one of them. The type is a single
+/// octet, which drafts 15 and 20-23 read as a one-byte varint and 16-19 as a raw
 /// `u8`; the status is `0x3`, which is one byte under both the RFC 9000
 /// varint and MoQT's.
 ///
@@ -463,7 +471,8 @@ fn the_hand_built_fixtures_decode_on_every_draft() {
                 feature = "draft18",
                 feature = "draft20",
                 feature = "draft21",
-                feature = "draft22"
+                feature = "draft22",
+                feature = "draft23"
             ))]
             other => panic!("expected a draft-19 header, got {other:?}"),
         }

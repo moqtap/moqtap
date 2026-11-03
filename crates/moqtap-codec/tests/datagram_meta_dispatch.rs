@@ -45,7 +45,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 mod test_vectors;
@@ -89,6 +90,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
 /// The drafts whose datagram may leave the Publisher Priority off the wire.
@@ -188,6 +191,7 @@ fn corpus_dir(draft: DraftVersion) -> &'static str {
         DraftVersion::Draft20 => "draft20",
         DraftVersion::Draft21 => "draft21",
         DraftVersion::Draft22 => "draft22",
+        DraftVersion::Draft23 => "draft23",
     }
 }
 

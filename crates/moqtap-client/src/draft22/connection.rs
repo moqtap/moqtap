@@ -158,7 +158,7 @@ pub enum ConnectionError {
     /// [`LocalRefusal`]: crate::above_codec_rules::DraftSpecificCause::LocalRefusal
     /// [`ErrorCause::Facade`]: crate::dispatch::ErrorCause::Facade
     #[error(
-        "a control message decoded for draft-22 did not narrow to draft-22: a defect in this          build, and evidence about nothing the peer did"
+        "a control message decoded for draft-22 did not narrow to draft-22: a defect in this build, and evidence about nothing the peer did"
     )]
     ControlMessageNarrowing,
     /// A message that begins a request stream was handed to
@@ -3616,6 +3616,18 @@ impl Connection {
             // A property block that does not parse makes the Track malformed,
             // Section 10.7.
             | CodecError::MalformedObjectProperties { .. }
+            // Raised only by the draft-23 codec.
+            | CodecError::ControlMessageExceedsLimit { .. }
+            | CodecError::MissingErrorDetail { .. }
+            | CodecError::MalformedErrorDetail { .. }
+            | CodecError::TokenAliasInSetup { .. }
+            | CodecError::EmptyTrackName
+            | CodecError::MalformedAuthToken { .. }
+            | CodecError::TrackPropertiesNotPermitted
+            | CodecError::DeltaDecodingOverflow { .. }
+            | CodecError::MalformedObject { .. }
+            | CodecError::MalformedTrack { .. }
+            | CodecError::UnknownObjectStatus(_)
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(
                 KvpError::MissingLength | KvpError::UnexpectedEnd | KvpError::VarInt(_),

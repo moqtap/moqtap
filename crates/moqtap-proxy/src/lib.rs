@@ -210,7 +210,7 @@
 //! Ordering is not a policy option. Each unit is classified and charged
 //! individually, but a destination stream keeps one FIFO whose head gates
 //! everything behind it, because object IDs are delta-encoded on drafts
-//! 14-22 and the framer's re-encoding primitive handles removal, not
+//! 14-23 and the framer's re-encoding primitive handles removal, not
 //! reordering. A stream carrying two classes says so, once, as
 //! `ImpairmentKind::ClassChangedMidStream`.
 //!
@@ -231,7 +231,7 @@
 //!   `Refusal::WrongSite` rather than approximated. Reordering and delay
 //!   under a whole connection are `quinn-netem`'s, one layer down.
 //! * **A `Fetch`-aimed class can miss one stream at a time on drafts
-//!   18-22**, whose fetch objects carry a Group ID *difference* the fetch's
+//!   18-23**, whose fetch objects carry a Group ID *difference* the fetch's
 //!   Group Order gives a direction to. That order is settled on the control
 //!   plane and never reaches the data stream, so the session reads it off the
 //!   FETCH and hands it to the framer; a fetch stream naming a request the
@@ -247,7 +247,7 @@
 //!   does.
 //! * **There is no `Expiry::Drop`.** A unit dropped at release time cannot
 //!   arm the framer's positional elide fix-up — its successors are already
-//!   framed — so on drafts 14-22 it would shift every later object's
+//!   framed — so on drafts 14-23 it would shift every later object's
 //!   absolute ID and report corruption as loss. Under the default
 //!   [`shape::Expiry::Deliver`] a starved class is **late, never lossy**;
 //!   [`shape::Expiry::ResetStream`] abandons the stream instead. Discarding

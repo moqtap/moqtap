@@ -67,7 +67,8 @@ mod frames;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 #[cfg(any(
@@ -83,7 +84,8 @@ use moqtap_codec::kvp::{KeyValuePair, KvpValue};
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use moqtap_codec::varint::VarInt;
 
@@ -100,7 +102,8 @@ use moqtap_codec::varint::VarInt;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn varint(v: u64) -> VarInt {
     VarInt::from_u64(v).expect("fixture value fits a varint")
@@ -119,7 +122,8 @@ fn varint(v: u64) -> VarInt {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn pair(key: u64, value: Vec<u8>) -> KeyValuePair {
     KeyValuePair { key: varint(key), value: KvpValue::Bytes(value) }
@@ -141,7 +145,8 @@ fn pair(key: u64, value: Vec<u8>) -> KeyValuePair {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 const WELL_FORMED: &[u8] = &[0x02, 0x07];
 
@@ -163,7 +168,8 @@ const WELL_FORMED: &[u8] = &[0x02, 0x07];
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 const MALFORMED: &[&[u8]] = &[
     // No Alias Type at all.
@@ -194,7 +200,8 @@ const MALFORMED: &[&[u8]] = &[
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn alias_only(alias_type: u8, alias: u8) -> Vec<u8> {
     vec![alias_type, alias]
@@ -216,7 +223,8 @@ fn alias_only(alias_type: u8, alias: u8) -> Vec<u8> {
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -> Vec<u8> {
     let mut out = vec![alias_type];
@@ -257,10 +265,26 @@ fn with_value(alias_type: u8, alias: Option<u8>, token_type: u8, value: &[u8]) -
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 macro_rules! token_structure_gates {
     ($draft:ident, $key:expr) => {
+        token_structure_gates!($draft, $key, KeyValueFormatting, with_length_prefixed_value);
+    };
+    ($draft:ident, $key:expr, setup) => {
+        token_structure_gates!(
+            $draft,
+            $key,
+            setup,
+            KeyValueFormatting,
+            with_length_prefixed_value
+        );
+    };
+    // `$variant` is the error a Token that cannot be decoded is refused with,
+    // and `$rewrite` the `frames` function that swaps the value inside a frame
+    // of this draft's framing.
+    ($draft:ident, $key:expr, $variant:ident, $rewrite:ident) => {
         use super::{alias_only, pair, with_value, MALFORMED, WELL_FORMED};
         use moqtap_codec::error::CodecError;
 
@@ -271,7 +295,7 @@ macro_rules! token_structure_gates {
         /// token the decoder refuses, so the frame is built around one it will
         /// write and the token alone is rewritten.
         fn carrying(bad: &[u8]) -> Vec<u8> {
-            super::frames::with_length_prefixed_value(
+            super::frames::$rewrite(
                 &encode(&subscribe(vec![pair($key, WELL_FORMED.to_vec())])),
                 WELL_FORMED,
                 bad,
@@ -299,7 +323,7 @@ macro_rules! token_structure_gates {
         fn a_token_with_no_alias_type_is_refused() {
             let got = decode(&carrying(&[]));
             assert!(
-                matches!(got, Err(CodecError::KeyValueFormatting { key, .. }) if key == $key),
+                matches!(got, Err(CodecError::$variant { key, .. }) if key == $key),
                 "a token with no Alias Type was carried: {got:?}",
             );
         }
@@ -322,7 +346,7 @@ macro_rules! token_structure_gates {
         fn an_unassigned_alias_type_is_refused() {
             let got = decode(&carrying(&[0x04, 0x01]));
             assert!(
-                matches!(got, Err(CodecError::KeyValueFormatting { key, .. }) if key == $key),
+                matches!(got, Err(CodecError::$variant { key, .. }) if key == $key),
                 "an unassigned Alias Type was carried: {got:?}",
             );
         }
@@ -341,7 +365,7 @@ macro_rules! token_structure_gates {
         fn a_promised_alias_that_never_arrives_is_refused() {
             let got = decode(&carrying(&[0x01]));
             assert!(
-                matches!(got, Err(CodecError::KeyValueFormatting { key, .. }) if key == $key),
+                matches!(got, Err(CodecError::$variant { key, .. }) if key == $key),
                 "a token promising an Alias it does not carry was carried: {got:?}",
             );
         }
@@ -362,7 +386,7 @@ macro_rules! token_structure_gates {
         fn a_promised_token_type_that_never_arrives_is_refused() {
             let got = decode(&carrying(&[0x01, 0x07]));
             assert!(
-                matches!(got, Err(CodecError::KeyValueFormatting { key, .. }) if key == $key),
+                matches!(got, Err(CodecError::$variant { key, .. }) if key == $key),
                 "a token promising a Token Type it does not carry was carried: {got:?}",
             );
         }
@@ -387,7 +411,7 @@ macro_rules! token_structure_gates {
         fn bytes_after_a_token_that_carries_no_value_are_refused() {
             let got = decode(&carrying(&[0x00, 0x07, 0x63]));
             assert!(
-                matches!(got, Err(CodecError::KeyValueFormatting { key, .. }) if key == $key),
+                matches!(got, Err(CodecError::$variant { key, .. }) if key == $key),
                 "bytes after a token that ends at its Alias were carried: {got:?}",
             );
         }
@@ -422,7 +446,7 @@ macro_rules! token_structure_gates {
                 let mut buf = Vec::new();
                 let result = subscribe(vec![pair($key, bad.to_vec())]).encode(&mut buf);
                 assert!(
-                    matches!(result, Err(CodecError::KeyValueFormatting { key, .. })
+                    matches!(result, Err(CodecError::$variant { key, .. })
                              if key == $key),
                     "the writer produced a token the reader refuses: {bad:?} gave {result:?}",
                 );
@@ -462,8 +486,8 @@ macro_rules! token_structure_gates {
             }
         }
     };
-    ($draft:ident, $key:expr, setup) => {
-        token_structure_gates!($draft, $key);
+    ($draft:ident, $key:expr, setup, $variant:ident, $rewrite:ident) => {
+        token_structure_gates!($draft, $key, $variant, $rewrite);
 
         /// The setup namespace carries the token too, and its writer is held to
         /// the same structure.
@@ -489,7 +513,7 @@ macro_rules! token_structure_gates {
                 let mut buf = Vec::new();
                 let result = setup(vec![pair($key, bad.to_vec())]).encode(&mut buf);
                 assert!(
-                    matches!(result, Err(CodecError::KeyValueFormatting { key, .. })
+                    matches!(result, Err(CodecError::$variant { key, .. })
                              if key == $key),
                     "the writer produced a setup token the reader refuses: {bad:?} \
                      gave {result:?}",
@@ -1010,6 +1034,48 @@ mod draft22 {
     }
 
     token_structure_gates!(draft22, AUTHORIZATION_TOKEN, setup);
+}
+#[cfg(feature = "draft23")]
+mod draft23 {
+    use moqtap_codec::draft23::message::*;
+    use moqtap_codec::kvp::KeyValuePair;
+    use moqtap_codec::types::*;
+
+    const AUTHORIZATION_TOKEN: u64 = 0x03;
+
+    fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: super::varint(1),
+            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+            track_name: b"t".to_vec(),
+            parameters,
+        })
+    }
+
+    fn setup(options: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Setup(Setup { options })
+    }
+
+    fn encode(message: &ControlMessage) -> Vec<u8> {
+        let mut buf = Vec::new();
+        message.encode(&mut buf).expect("the encoder writes the value it is given");
+        buf
+    }
+
+    fn decode(bytes: &[u8]) -> Result<ControlMessage, moqtap_codec::error::CodecError> {
+        ControlMessage::decode(&mut &bytes[..])
+    }
+
+    // Section 8.9: "If the Token structure cannot be decoded, including an
+    // unknown Alias Type, the receiver MUST close the Session with
+    // MALFORMED_AUTH_TOKEN."
+    token_structure_gates!(
+        draft23,
+        AUTHORIZATION_TOKEN,
+        setup,
+        MalformedAuthToken,
+        with_length_prefixed_value_vi64_length
+    );
 }
 
 /// Drafts 07 through 10 have no Token, and the same bytes travel unread.

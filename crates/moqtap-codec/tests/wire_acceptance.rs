@@ -38,7 +38,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 use bytes::Buf;
@@ -50,10 +51,12 @@ use moqtap_codec::dispatch::{
 use moqtap_codec::error::CodecError;
 use moqtap_codec::version::DraftVersion;
 
-/// One even-typed Key-Value-Pair: type `0x3c`, varint value `0x02`. Two
+/// One even-typed Key-Value-Pair: type `0x3c`, varint value `0x00`. Two
 /// bytes on every draft that carries an extension/property block, so the
-/// same blob serves as a byte-length of 2 and as a count of 1.
-const EXT: &[u8] = &[0x3c, 0x02];
+/// same blob serves as a byte-length of 2 and as a count of 1. Draft-23 reads
+/// 0x3C as Prior Group ID Gap (Section 10.8), and a gap of 0 is valid in any
+/// Group.
+const EXT: &[u8] = &[0x3c, 0x00];
 
 /// A zero-length object's status code. `EndOfGroup` is `0x03` on all
 /// drafts, and every draft refuses a code their Object Status
@@ -85,6 +88,7 @@ fn enabled_drafts() -> Vec<DraftVersion> {
         (cfg!(feature = "draft20"), DraftVersion::Draft20),
         (cfg!(feature = "draft21"), DraftVersion::Draft21),
         (cfg!(feature = "draft22"), DraftVersion::Draft22),
+        (cfg!(feature = "draft23"), DraftVersion::Draft23),
     ]
     .into_iter()
     .filter_map(|(enabled, draft)| enabled.then_some(draft))
@@ -123,6 +127,7 @@ fn drafts_with_fetch_serialization_flags() -> Vec<DraftVersion> {
                     | DraftVersion::Draft20
                     | DraftVersion::Draft21
                     | DraftVersion::Draft22
+                    | DraftVersion::Draft23
             )
         })
         .collect()
@@ -187,6 +192,7 @@ impl Wire {
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
                 | DraftVersion::Draft22
+                | DraftVersion::Draft23
         )
     }
 
@@ -353,7 +359,7 @@ impl Wire {
     }
 
     /// Whether this draft frames a fetch object with a leading Serialization
-    /// Flags field. Drafts 15-22; see
+    /// Flags field. Drafts 15-23; see
     /// [`drafts_with_fetch_serialization_flags`].
     fn fetch_flagged(&self) -> bool {
         matches!(
@@ -366,6 +372,7 @@ impl Wire {
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
                 | DraftVersion::Draft22
+                | DraftVersion::Draft23
         )
     }
 
@@ -385,13 +392,14 @@ impl Wire {
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
                 | DraftVersion::Draft22
+                | DraftVersion::Draft23
         )
     }
 
     /// Whether a fetch object carries an Object Status behind a zero payload
     /// length.
     ///
-    /// Drafts 07-15 do. Drafts 16-22 removed the field from fetch objects —
+    /// Drafts 07-15 do. Drafts 16-23 removed the field from fetch objects —
     /// Object Status "is only present in objects that are delivered via a
     /// SUBSCRIPTION, and is absent in Objects delivered via a FETCH" — so a
     /// zero-length fetch object there is an object with no bytes and nothing
@@ -406,6 +414,7 @@ impl Wire {
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
                 | DraftVersion::Draft22
+                | DraftVersion::Draft23
         )
     }
 
@@ -430,7 +439,7 @@ impl Wire {
         out
     }
 
-    /// One fetch object on drafts 15-22, framed by Serialization Flags.
+    /// One fetch object on drafts 15-23, framed by Serialization Flags.
     ///
     /// The flag byte is picked from what changed since `prev`, so the stream
     /// exercises the readings the layout exists for rather than spelling every
@@ -438,7 +447,7 @@ impl Wire {
     ///
     /// - the first object states its Group ID, Object ID and Priority (`0x1c`)
     ///   with the Subgroup ID mode left at `0b00`, which fixes the Subgroup ID
-    ///   at zero without consulting anything. Drafts 18-22 require a first
+    ///   at zero without consulting anything. Drafts 18-23 require a first
     ///   object to carry both ID fields, and every draft allows it;
     /// - an object in the same group states nothing at all (`0x00`): the Group
     ///   ID and Priority are the previous object's, the Object ID is one past
@@ -474,7 +483,7 @@ impl Wire {
                 } else {
                     object.group_id
                 };
-                // With a Group ID field present, drafts 18-22 read the Object
+                // With a Group ID field present, drafts 18-23 read the Object
                 // ID field as the absolute ID in the new group, which is what
                 // drafts 15-17 write there anyway.
                 (Some(group), Some(object.object_id), false)
@@ -782,7 +791,7 @@ fn readers_consume_object_payloads() {
 /// and would satisfy an ID-level check.
 /// Only the wire bytes distinguish them.
 ///
-/// Concretely on drafts 14-22, with IDs 0,1,2,3,4 every delta field is
+/// Concretely on drafts 14-23, with IDs 0,1,2,3,4 every delta field is
 /// `0x00`. Eliding the middle object must turn object 3's field into
 /// `0x01`; eliding the first must turn object 1's field from a relative
 /// `0x00` into an absolute `0x01`.
@@ -1019,7 +1028,7 @@ fn fetch_object_meta_agrees_with_the_full_read() {
     }
 }
 
-/// A fetch stream on drafts 15-22 must yield its objects — identities *and*
+/// A fetch stream on drafts 15-23 must yield its objects — identities *and*
 /// payload bytes — not merely a header that decodes.
 ///
 /// The stream is deliberately written in the implicit forms the Serialization
@@ -1067,7 +1076,7 @@ fn fetch_streams_yield_their_objects_end_to_end_on_drafts_15_to_19() {
         // codec's misunderstanding would round-trip perfectly and prove
         // nothing. These are the shapes the shipped corpus uses:
         // `fetch-stream-two-objects` is `1c 00 00 80 04 deadbeef 00 02 cafe`
-        // on every draft 15-22, the same first-then-implicit pair as the first
+        // on every draft 15-23, the same first-then-implicit pair as the first
         // two objects here; and `fetch-stream-cross-group-delta` on drafts
         // 18-20 opens its second group with `0c 00 00`, a Group ID Delta of
         // zero meaning "the next group", where drafts 15-17 name the group
@@ -1126,7 +1135,7 @@ fn fetch_streams_yield_their_objects_end_to_end_on_drafts_15_to_19() {
 ///
 /// [`fetch_object_meta_agrees_with_the_full_read`] already sweeps every draft,
 /// but only for values the full read also produced. This pins the one thing
-/// that is specific to drafts 15-22: the meta path advances the *same*
+/// that is specific to drafts 15-23: the meta path advances the *same*
 /// prior-object state, so the identities it reports for the second and third
 /// objects are resolved and not merely copied off the wire.
 ///
@@ -1177,9 +1186,11 @@ fn fetch_object_meta_resolves_prior_object_fields_on_drafts_15_to_19() {
 /// A fetch stream's first object may not take a field from an object before
 /// it, because there is none.
 ///
-/// Every draft 15-22 answers that with a session close: "If the first Object in
+/// Every draft 15-23 answers that with a session close: "If the first Object in
 /// the FETCH response uses a flag that references fields in the prior Object,
-/// the Subscriber MUST close the session with a PROTOCOL_VIOLATION". The
+/// the Subscriber MUST close the session with a PROTOCOL_VIOLATION" on drafts
+/// 15-22, and draft-23 Section 11.4.1.1 ends the same sentence "with
+/// MALFORMED_OBJECT". The
 /// dispatch layer's job is to report it rather than invent a zero — a reader
 /// that defaulted the missing Group ID to 0 would decode this stream happily
 /// and place every later object in the wrong group.
@@ -1215,9 +1226,18 @@ fn a_first_fetch_object_that_references_a_prior_object_is_refused_on_drafts_15_t
         let mut reader = AnyFetchObjectReader::new(&header, AnyFetchGroupOrder::Ascending)
             .unwrap_or_else(|e| panic!("[{draft}] fetch reader construction failed: {e}"));
 
+        // Draft-23 Section 11.4.1.1 names the code: "If the first Object in
+        // the FETCH response uses a flag that references fields in the prior
+        // Object, the Subscriber MUST close the session with MALFORMED_OBJECT."
+        let expected = match draft {
+            DraftVersion::Draft23 => CodecError::MalformedObject {
+                detail: "the first Object leaves an ID to a prior Object",
+            },
+            _ => CodecError::InvalidField,
+        };
         assert_eq!(
             reader.read_object(&mut cursor),
-            Err(CodecError::InvalidField),
+            Err(expected),
             "[{draft}] a first fetch object inheriting from nothing must be refused"
         );
     }

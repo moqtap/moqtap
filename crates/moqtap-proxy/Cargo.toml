@@ -39,6 +39,7 @@ all-drafts = [
     "draft20",
     "draft21",
     "draft22",
+    "draft23",
 ]
 
 # Each proxy draft feature forwards to BOTH dependencies. Forwarding only to
@@ -60,6 +61,7 @@ draft19 = ["moqtap-client/draft19", "moqtap-codec/draft19"]
 draft20 = ["moqtap-client/draft20", "moqtap-codec/draft20"]
 draft21 = ["moqtap-client/draft21", "moqtap-codec/draft21"]
 draft22 = ["moqtap-client/draft22", "moqtap-codec/draft22"]
+draft23 = ["moqtap-client/draft23", "moqtap-codec/draft23"]
 
 cert-gen = ["rcgen"]
 webtransport = ["wtransport", "moqtap-client/webtransport"]

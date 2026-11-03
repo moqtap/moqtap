@@ -5,19 +5,21 @@
     feature = "draft20",
     feature = "draft21",
     feature = "draft22",
+    feature = "draft23",
 ))]
 
 //! `AnyConnection::subscribe_tracks` asks for every track under a prefix on
 //! each draft that has SUBSCRIBE_TRACKS, and the handle it returns ends the
 //! subscription by resetting its stream.
 //!
-//! SUBSCRIBE_TRACKS is message type `0x51` on drafts 18 through 22, always on a
+//! SUBSCRIBE_TRACKS is message type `0x51` on drafts 18 through 23, always on a
 //! bidirectional stream of its own, and answered with REQUEST_OK. The peer
-//! below decodes it, renders the prefix and the FORWARD parameter through
-//! [`common::render`], accepts it, and then reads how the client's direction
-//! ends once the handle is dropped. A FIN would not do: on drafts 19 through
-//! 22 it says only that the requester has nothing more to send (draft-22
-//! Section 6.4.2.2), so a reset is how the handle cancels on every draft.
+//! below decodes it, renders the prefix and the FORWARD parameter (PAUSED on
+//! draft-23) through [`common::render`], accepts it, and then reads how the
+//! client's direction ends once the handle is dropped. A FIN would not do: on
+//! drafts 19 through 23 it says only that the requester has nothing more to
+//! send (draft-23 Section 6.4.2.2), so a reset is how the handle cancels on
+//! every draft.
 //!
 //! Draft-17 is here for the refusal. It asks the same question through
 //! SUBSCRIBE_NAMESPACE's Subscribe Options, so the facade has nothing to send
@@ -65,7 +67,9 @@ fn field_text(value: &FieldValue) -> String {
     }
 }
 
-/// The value of the parameter of type 0x10, FORWARD, or `absent`.
+/// The value of the parameter of type 0x10, FORWARD, or the inverse of
+/// draft-23's PAUSED (0x11), whose Section 9.19.18 reads "0 (unpaused) or 1
+/// (paused)", or `absent`.
 ///
 /// Unread in a build that enables only drafts whose gates do not use it.
 #[allow(dead_code)]
@@ -75,6 +79,13 @@ fn forward_text(message: &AnyControlMessage) -> String {
             if let FieldValue::Map(entry) = param {
                 if entry.get("type") == Some(&FieldValue::Text("0x10".to_string())) {
                     return entry.get("value").map(field_text).unwrap_or_default();
+                }
+                if entry.get("type") == Some(&FieldValue::Text("0x11".to_string())) {
+                    return match entry.get("value") {
+                        Some(FieldValue::Uint(0)) => "1".to_string(),
+                        Some(FieldValue::Uint(1)) => "0".to_string(),
+                        other => format!("paused={other:?}"),
+                    };
                 }
             }
         }
@@ -160,7 +171,7 @@ async fn connect(draft: DraftVersion, addr: std::net::SocketAddr) -> AnyConnecti
         .expect("connect")
 }
 
-/// One draft with SUBSCRIBE_TRACKS: drafts 18 through 22.
+/// One draft with SUBSCRIBE_TRACKS: drafts 18 through 23.
 macro_rules! subscribe_tracks_gate {
     ($mod_name:ident, $feat:literal, $version:ident) => {
         #[cfg(feature = $feat)]
@@ -250,6 +261,7 @@ subscribe_tracks_gate!(draft19, "draft19", Draft19);
 subscribe_tracks_gate!(draft20, "draft20", Draft20);
 subscribe_tracks_gate!(draft21, "draft21", Draft21);
 subscribe_tracks_gate!(draft22, "draft22", Draft22);
+subscribe_tracks_gate!(draft23, "draft23", Draft23);
 
 /// Draft-17 has no SUBSCRIBE_TRACKS: the facade refuses before anything
 /// reaches the wire, and points at the question's draft-17 spelling.

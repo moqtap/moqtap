@@ -1,0 +1,5272 @@
+#![allow(missing_docs)]
+//! Draft-23 MoQT endpoint: the session and per-request state machines, and the
+//! rules a peer's messages are held to above the codec.
+//!
+//! A SUBSCRIBE, REQUEST_UPDATE or PUBLISH carrying `FILL_PARAMETERS` (0x23)
+//! asks for a fill fetch stream (Sections 3.4 and 3.4.1). [`Endpoint::fill_requested`] records it so an arriving
+//! FETCH_HEADER can be told from a fetch's.
+
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
+
+use crate::draft23::fetch::{FetchError, FetchState, FetchStateMachine};
+use crate::draft23::fill::{self, FillError, LocationFilter};
+use crate::draft23::namespace::{
+    NamespaceError, PublishNamespaceState, PublishNamespaceStateMachine, SubscribeNamespaceState,
+    SubscribeNamespaceStateMachine,
+};
+use crate::draft23::publish::{
+    PublishError as PublishFlowError, PublishState, PublishStateMachine,
+};
+use crate::draft23::session::request_id::{RequestIdAllocator, RequestIdError, Role};
+use crate::draft23::session::setup::{self, SetupError};
+
+use moqtap_codec::draft23::data_stream::{FetchEndOfRange, FetchObject, GroupOrder, PriorGaps};
+use moqtap_codec::kvp::KvpValue;
+use moqtap_codec::object_properties::parse_object_properties;
+use moqtap_codec::range_filter::{self, RangeFilterError};
+use moqtap_codec::varint::Moqt18;
+use moqtap_codec::version::DraftVersion;
+
+/// The MAX_REQUEST_UPDATES Setup Option, Section 9.1.7.
+const MAX_REQUEST_UPDATES: u64 = 0x08;
+
+/// The MAX_FILTER_RANGES Setup Option, Section 9.1.6.
+const MAX_FILTER_RANGES: u64 = 0x06;
+
+/// The Message Parameters a request carries, or nothing for a message that is
+/// not a request.
+///
+/// Every one of the seven request kinds carries a parameter list, so the empty
+/// arm is only reached by a caller that is not looking at a request. Section
+/// 3.3.2 names the messages a Range Filter may appear in (SUBSCRIBE, FETCH,
+/// SUBSCRIBE_TRACKS and REQUEST_UPDATE), and this does not narrow to them: a
+/// filter parameter arriving where the section does not list it is a scope
+/// question, and scope is answered by the parameter registry rather than here.
+/// What matters for the ceiling is that a filter this endpoint has no budget
+/// for is not accepted, wherever it turned up.
+fn request_parameters(msg: &ControlMessage) -> &[KeyValuePair] {
+    match msg {
+        ControlMessage::Subscribe(m) => &m.parameters,
+        ControlMessage::Publish(m) => &m.parameters,
+        ControlMessage::Fetch(m) => &m.parameters,
+        ControlMessage::PublishNamespace(m) => &m.parameters,
+        ControlMessage::SubscribeNamespace(m) => &m.parameters,
+        ControlMessage::SubscribeTracks(m) => &m.parameters,
+        ControlMessage::TrackStatus(m) => &m.parameters,
+        _ => &[],
+    }
+}
+
+/// The Range Filter parameters in `parameters`, dropping the removals.
+///
+/// A Range Filter whose value is empty is Section 3.3.2's removal form — "In
+/// REQUEST_UPDATE, Length of 0 removes the filter" — so it names a filter rather
+/// than being one, and carrying it forward would leave a filter of no ranges in
+/// force for the life of the request.
+fn range_filter_parameters(parameters: &[KeyValuePair]) -> Vec<KeyValuePair> {
+    parameters
+        .iter()
+        .filter(|p| range_filter::is_range_filter(p.key.into_inner()))
+        .filter(|p| !matches!(&p.value, KvpValue::Bytes(bytes) if bytes.is_empty()))
+        .cloned()
+        .collect()
+}
+
+/// Apply a REQUEST_UPDATE's filter parameters to the set already in force.
+///
+/// Replacement is by Parameter Type and takes the whole type with it: "non-zero
+/// replaces it entirely". A type the update does not mention is left alone,
+/// which is the sentence after it — "If a filter parameter is omitted from
+/// REQUEST_UPDATE, it is unchanged" — and is why this merges rather than
+/// measuring the update on its own.
+fn apply_filter_update(in_force: &mut Vec<KeyValuePair>, update: &[KeyValuePair]) {
+    let mentioned: Vec<u64> = update
+        .iter()
+        .map(|p| p.key.into_inner())
+        .filter(|key| range_filter::is_range_filter(*key))
+        .collect();
+    in_force.retain(|p| !mentioned.contains(&p.key.into_inner()));
+    in_force.extend(range_filter_parameters(update));
+}
+
+/// Read a Setup Option's value as a variable-length integer, or 0 if it is
+/// absent.
+///
+/// Zero is also the default every numeric option in Section 9.1 takes when
+/// it is not sent, so an absent option and an explicit zero mean the same thing
+/// and do not need to be told apart.
+fn setup_varint(options: &[KeyValuePair], key: u64) -> u64 {
+    let key = VarInt::from_u64(key).expect("option key fits a varint");
+    options
+        .iter()
+        .find(|o| o.key == key)
+        .and_then(|o| match &o.value {
+            KvpValue::Varint(v) => Some(v.into_inner()),
+            KvpValue::Bytes(bytes) => {
+                let mut cursor = &bytes[..];
+                let parsed = VarInt::decode_moqt::<Moqt18>(&mut cursor).ok()?;
+                cursor.is_empty().then(|| parsed.into_inner())
+            }
+        })
+        .unwrap_or(0)
+}
+use crate::draft23::session::state::{SessionError, SessionState, SessionStateMachine};
+use crate::draft23::subscription::{
+    SubscriptionError, SubscriptionState, SubscriptionStateMachine,
+};
+use crate::draft23::track_status::{TrackStatusError, TrackStatusState, TrackStatusStateMachine};
+use crate::malformed_tracks::{MalformedTrackCondition, MalformedTracks};
+use crate::track_locations::{ObjectLocation, ObjectRole, TrackLocations, TrackObjects};
+use moqtap_codec::draft23::error_codes::{
+    PublishDoneStatusCode, RequestErrorCode, SessionErrorCode,
+};
+use moqtap_codec::draft23::message::{
+    self, ControlMessage, Fetch, GoAway, MessageType, Publish, PublishDone, PublishNamespace,
+    PublishSkipped, PublishStateNotify, RequestError, RequestOk, RequestOkKind, RequestUpdate,
+    Setup, Subscribe, SubscribeNamespace, SubscribeOk, SubscribeTracks, FILL_PARAMETERS,
+};
+use moqtap_codec::kvp::KeyValuePair;
+use moqtap_codec::types::*;
+use moqtap_codec::varint::VarInt;
+
+/// Why a peer's request must be answered with REQUEST_ERROR.
+///
+/// Draft-23 gives the Range Filters four rules and answers every one of them
+/// the same way (Section 3.3.2: "MUST reject this with REQUEST_ERROR with error
+/// code INVALID_FILTER"), and gives a FETCH's relative Location filter
+/// INVALID_RANGE (Section 3.2). [`FilterRejection::request_error_code`] is the
+/// code.
+///
+/// None of these is a session close, which is the whole reason the type exists.
+/// A rejection is a reply, and a reply names the Request ID of the request it
+/// answers, so the endpoint has to have taken the request in order to refuse it.
+/// The rejection is recorded against that id and spent by the REQUEST_ERROR that
+/// answers it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum FilterRejection {
+    /// The peer sent a Range Filter and this endpoint advertised no budget.
+    ///
+    /// Section 9.1.6: "The default value is 0, so if not specified, the peer
+    /// MUST NOT send any such filter parameters." Zero is the default and it
+    /// means none allowed — the opposite of what zero means in the option
+    /// beside it, MAX_REQUEST_UPDATES, where it means no limit. The two sit in
+    /// consecutive subsections and read opposite ways.
+    #[error("this endpoint advertised no MAX_FILTER_RANGES, so no range filter is allowed")]
+    NoBudgetAdvertised,
+    /// More Ranges than MAX_FILTER_RANGES allows, counted across every filter.
+    #[error("{ranges} ranges across the request's filters, where {limit} were advertised")]
+    TooManyRanges {
+        /// The total the request carried.
+        ranges: usize,
+        /// The total this endpoint advertised.
+        limit: u64,
+    },
+    /// Two filters with the same Parameter Type, SetID and Property Type.
+    ///
+    /// Repeats of a type are otherwise expected, so the key is the whole triple:
+    /// "The Track Property filter parameter MAY appear multiple times in a
+    /// SUBSCRIBE_TRACKS message"
+    #[error("two filters share parameter type {0:#x}, set {1} and property type {2:?}")]
+    RepeatedFilter(u64, u8, Option<u64>),
+    /// A filter this codec could not read, or one that broke a rule of its own.
+    #[error("a range filter is not usable: {0}")]
+    Unreadable(#[from] RangeFilterError),
+    /// A FETCH whose Location filter is relative.
+    ///
+    /// Draft-23 Section 3.2: "If the Location filter is relative (see Section
+    /// 9.19.9), the publisher MUST return REQUEST_ERROR with error code
+    /// INVALID_RANGE." Table 6 calls one type relative, 0x01 (Relative Start).
+    #[error("a FETCH's Location filter is relative")]
+    RelativeFetchLocation,
+}
+
+impl FilterRejection {
+    /// The REQUEST_ERROR code this rejection is answered with.
+    pub fn request_error_code(&self) -> RequestErrorCode {
+        match self {
+            FilterRejection::RelativeFetchLocation => RequestErrorCode::InvalidRange,
+            FilterRejection::NoBudgetAdvertised
+            | FilterRejection::TooManyRanges { .. }
+            | FilterRejection::RepeatedFilter(..)
+            | FilterRejection::Unreadable(_) => RequestErrorCode::InvalidFilter,
+        }
+    }
+}
+
+/// One track's record of which Objects exist and which do not.
+///
+/// Keyed on the track rather than on an alias, because a FETCH stream names
+/// none and its objects are judged against the same record a subscription's
+/// are.
+#[derive(Clone)]
+pub(crate) struct TrackExistence {
+    locations: Arc<Mutex<TrackLocations>>,
+    namespace: TrackNamespace,
+    name: Vec<u8>,
+}
+
+impl TrackExistence {
+    fn locked(&self) -> std::sync::MutexGuard<'_, TrackLocations> {
+        self.locations.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn contradicted(&self, found: ObjectLocation) -> EndpointError {
+        EndpointError::ObjectExistenceContradicted {
+            namespace: self.namespace.clone(),
+            name: self.name.clone(),
+            group: found.group,
+            object: found.object,
+        }
+    }
+
+    fn note_exists(&self, at: ObjectLocation) -> Result<(), EndpointError> {
+        self.locked()
+            .note_exists(&self.namespace, &self.name, at)
+            .map_err(|found| self.contradicted(found))
+    }
+
+    fn note_absent(&self, from: ObjectLocation, to: ObjectLocation) -> Result<(), EndpointError> {
+        self.locked()
+            .note_absent(&self.namespace, &self.name, from, to)
+            .map_err(|found| self.contradicted(found))
+    }
+}
+
+/// Record what one received Object says about which Objects exist.
+///
+/// A Normal Object exists. Its Prior Group ID Gap (Section 10.8) and Prior
+/// Object ID Gap (Section 10.9) say that "the number of Groups prior to the
+/// current Group" and "the number of Objects prior to the current Object" "do
+/// not, and will never, exist". Either record contradicting the other is the
+/// [`EndpointError::ObjectExistenceContradicted`] Malformed Track.
+///
+/// A properties block that does not parse records nothing: the reader that
+/// decoded the Object has already refused it.
+pub(crate) fn note_existence(
+    objects: &TrackExistence,
+    at: ObjectLocation,
+    role: ObjectRole,
+    properties: &[u8],
+) -> Result<(), EndpointError> {
+    if role != ObjectRole::Produced {
+        return Ok(());
+    }
+    objects.note_exists(at)?;
+    let gaps = parse_object_properties(DraftVersion::Draft23, properties)
+        .and_then(|parsed| PriorGaps::from_properties(&parsed, at.group, at.object));
+    let Ok(gaps) = gaps else { return Ok(()) };
+    if let Some(gap) = gaps.group.filter(|&g| g > 0 && g <= at.group) {
+        objects.note_absent(
+            ObjectLocation { group: at.group - gap, object: 0 },
+            ObjectLocation { group: at.group - 1, object: u64::MAX },
+        )?;
+    }
+    if let Some(gap) = gaps.object.filter(|&g| g > 0 && g <= at.object) {
+        objects.note_absent(
+            ObjectLocation { group: at.group, object: at.object - gap },
+            ObjectLocation { group: at.group, object: at.object - 1 },
+        )?;
+    }
+    Ok(())
+}
+
+/// The Locations strictly between two consecutive entries of a FETCH stream,
+/// as inclusive ranges.
+///
+/// draft-23 Section 3.2.2: "When two consecutive objects A and B are in
+/// different groups, a gap represents multiple logical gaps: the tail of
+/// A.Group; all skipped groups; and {B.Group, 0} through B, exclusive." Groups
+/// arrive in the request's Group Order and, Section 3.2.1, "Within each group,
+/// objects are sent in Object ID order". An entry that does not move forward in
+/// that order leaves no gap.
+fn fetch_gap(
+    prior: ObjectLocation,
+    next: ObjectLocation,
+    order: GroupOrder,
+) -> Vec<(ObjectLocation, ObjectLocation)> {
+    let at = |group, object| ObjectLocation { group, object };
+    let mut ranges = Vec::new();
+    if next.group == prior.group {
+        if next.object > prior.object && next.object - prior.object > 1 {
+            ranges.push((at(prior.group, prior.object + 1), at(prior.group, next.object - 1)));
+        }
+        return ranges;
+    }
+    let skipped = match order {
+        GroupOrder::Ascending if next.group > prior.group => {
+            (next.group - prior.group > 1).then(|| (prior.group + 1, next.group - 1))
+        }
+        GroupOrder::Descending if next.group < prior.group => {
+            (prior.group - next.group > 1).then(|| (next.group + 1, prior.group - 1))
+        }
+        GroupOrder::Ascending | GroupOrder::Descending => return ranges,
+    };
+    if prior.object < u64::MAX {
+        ranges.push((at(prior.group, prior.object + 1), at(prior.group, u64::MAX)));
+    }
+    if let Some((lo, hi)) = skipped {
+        ranges.push((at(lo, 0), at(hi, u64::MAX)));
+    }
+    if next.object > 0 {
+        ranges.push((at(next.group, 0), at(next.group, next.object - 1)));
+    }
+    ranges
+}
+
+/// What one FETCH stream's entries say about which of its track's Objects
+/// exist.
+///
+/// draft-23 Section 3.2.2: "Unless the request included Range Filters (see
+/// Section 3.3.2), any gaps in the Group and Object IDs in the response stream
+/// that are not otherwise marked indicate objects that do not exist (see
+/// Section 2.1.2). When one or more Range Filters are present, unmarked gaps
+/// indicate objects in the Unknown state." Section 11.4.2: the Objects between
+/// the last serialized Object and an End of Range indicator, inclusive, "either
+/// do not exist (when Serialization Flags is 0x8C), are Unknown (0x10C), are
+/// timed out (0x20C), or are Gone (0x40C)". Only Does Not Exist is recorded.
+/// Section 2.1.2: "receiving an Object that was recorded as Gone or Unknown is
+/// not an error."
+///
+/// Only the gaps between two entries of the stream are judged. The gaps before
+/// the first entry and after the last are measured against the Start and End
+/// Location, and Section 3.2.2's End Location is "the LARGEST_OBJECT in
+/// FETCH_OK if present", which can arrive after the stream has ended. An End of
+/// Non-Existent Range that is the first entry is not recorded, for the same
+/// reason. An indicator's span starts after the entry before it, which is the
+/// last serialized Object or an earlier indicator.
+pub(crate) struct FetchExistence {
+    track: TrackExistence,
+    /// Whether the FETCH carried a Range Filter, which makes an unmarked gap
+    /// Unknown rather than Does Not Exist.
+    range_filtered: bool,
+    order: GroupOrder,
+    /// The Location the next entry's gap is measured from. After End of Group
+    /// or End of Track it is the end of that Group, as Section 11.4.2.2 has
+    /// it: "The prior Object ID becomes 2^64-1."
+    prior: Option<ObjectLocation>,
+}
+
+impl FetchExistence {
+    /// Judge the entries that follow as arriving in `order`.
+    pub(crate) fn begin(&mut self, order: GroupOrder) {
+        self.order = order;
+        self.prior = None;
+    }
+
+    /// Record one entry, as the codec's reader resolved it.
+    pub(crate) fn note_entry(&mut self, entry: &FetchObject) -> Result<(), EndpointError> {
+        let at = ObjectLocation { group: entry.group_id, object: entry.object_id };
+        let header = &entry.header;
+        if header.end_marker().is_some() {
+            self.prior = Some(ObjectLocation { group: at.group, object: u64::MAX });
+            return Ok(());
+        }
+        let prior = self.prior.replace(at);
+        if let Some(range) = header.end_of_range() {
+            if let (FetchEndOfRange::NonExistent, Some(prior)) = (range, prior) {
+                for (from, to) in fetch_gap(prior, at, self.order) {
+                    self.track.note_absent(from, to)?;
+                }
+                self.track.note_absent(at, at)?;
+            }
+            return Ok(());
+        }
+        if !self.range_filtered {
+            if let Some(prior) = prior {
+                for (from, to) in fetch_gap(prior, at, self.order) {
+                    self.track.note_absent(from, to)?;
+                }
+            }
+        }
+        note_existence(
+            &self.track,
+            at,
+            ObjectRole::Produced,
+            header.properties.as_deref().unwrap_or(&[]),
+        )
+    }
+}
+
+/// Whether a FETCH's parameters carry a relative Location filter, Location
+/// Filter Type 0x01 (draft-23 Section 9.19.9, Table 6).
+fn fetch_location_is_relative(parameters: &[KeyValuePair]) -> bool {
+    parameters.iter().any(|p| {
+        p.key.into_inner() == message::LOCATION_FILTER
+            && matches!(&p.value, KvpValue::Bytes(value)
+                if message::decode_location_filter(value)
+                    .is_ok_and(|(ty, _)| ty == message::location_filter_types::RELATIVE_START))
+    })
+}
+
+/// Errors that can occur during endpoint operations.
+#[derive(Debug, thiserror::Error)]
+pub enum EndpointError {
+    #[error("session error: {0}")]
+    Session(#[from] SessionError),
+    #[error("request ID error: {0}")]
+    RequestId(#[from] RequestIdError),
+    #[error("subscription error: {0}")]
+    Subscription(#[from] SubscriptionError),
+    #[error("fetch error: {0}")]
+    Fetch(#[from] FetchError),
+    /// A `LOCATION_FILTER` or `FILL_PARAMETERS` value this endpoint was asked
+    /// to build is one draft-23 does not define. Nothing was written.
+    #[error("fill parameter error: {0}")]
+    Fill(#[from] FillError),
+    #[error("namespace error: {0}")]
+    Namespace(#[from] NamespaceError),
+    #[error("track status error: {0}")]
+    TrackStatus(#[from] TrackStatusError),
+    #[error("publish flow error: {0}")]
+    PublishFlow(#[from] PublishFlowError),
+    #[error("setup error: {0}")]
+    Setup(#[from] SetupError),
+    #[error("unknown request ID: {0}")]
+    UnknownRequest(u64),
+    #[error(
+        "response message received on control stream; draft-23 responses belong on bidi request streams"
+    )]
+    ResponseOnControlStream,
+    /// A REQUEST_UPDATE arrived on the control stream.
+    ///
+    /// Draft-23 Table 5 gives REQUEST_UPDATE the Stream value "Request", and
+    /// Section 9.5 requires it on the same bidi stream as the request it
+    /// modifies. One on the control stream modifies nothing, which makes it a
+    /// case Section 9.5 says MUST close the session.
+    #[error(
+        "REQUEST_UPDATE received on the control stream; it belongs on its request's own stream"
+    )]
+    RequestUpdateOnControlStream,
+    /// A NAMESPACE, NAMESPACE_DONE or PUBLISH_SKIPPED arrived on the control
+    /// stream.
+    ///
+    /// Draft-23 Table 5 gives all three the Stream value "Request": NAMESPACE
+    /// (0x8, Section 9.15) and NAMESPACE_DONE (0xE, Section 9.16) belong on
+    /// the SUBSCRIBE_NAMESPACE request stream whose namespace they report, and
+    /// PUBLISH_SKIPPED (0xF, Section 9.18) on the SUBSCRIBE_TRACKS stream
+    /// whose namespace it names a skipped track in — "All PUBLISH_SKIPPED
+    /// messages are in response to a SUBSCRIBE_TRACKS". Only SETUP is
+    /// "Control" alone; GOAWAY is the one message the
+    /// table lists as "Control, Request". One of these three on the control
+    /// stream names no request, so nothing can be done with it.
+    #[error("{0} received on the control stream; draft-23 Table 5 places it on a request stream")]
+    RequestMessageOnControlStream(&'static str),
+    /// A REQUEST_UPDATE named a request that cannot be updated, or none.
+    ///
+    /// Draft-23 Section 9.5: "An endpoint that receives a REQUEST_UPDATE
+    /// other than in the two cases above MUST close the session with UNEXPECTED_MESSAGE."
+    /// TRACK_STATUS is called out in Section 9.12 as one
+    /// such case: "the subscriber cannot send REQUEST_UPDATE."
+    #[error("REQUEST_UPDATE for request {0}, which is not an updatable outstanding request")]
+    UnexpectedRequestUpdate(u64),
+    /// Track Properties on a REQUEST_OK answering something other than a
+    /// TRACK_STATUS.
+    ///
+    /// Draft-23 Section 9.3: they "are empty in PUBLISH_OK,
+    /// REQUEST_UPDATE_OK, SUBSCRIBE_NAMESPACE_OK and PUBLISH_NAMESPACE_OK. If
+    /// an endpoint receives Track Properties in one of these messages it MUST close the session
+    /// with INVALID_FIELD."
+    #[error(
+        "track properties on the REQUEST_OK answering request {0}, which is not a TRACK_STATUS"
+    )]
+    TrackPropertiesOnNonTrackStatus(u64),
+    /// A server received a Redirect naming a Connect URI.
+    ///
+    /// Draft-23 Section 9.4.2.1: "If a server receives a Redirect with a non-zero Connect URI
+    /// Length it MUST close the session with ROLE_VIOLATION." As with GOAWAY, only a client is
+    /// redirected.
+    #[error("Redirect carrying a Connect URI received at a server")]
+    RedirectUriAtServer,
+    /// A Redirect answering a namespace-scoped request carried a Track Name.
+    ///
+    /// Draft-23 Section 9.4.2.1: "Track Name is not meaningful for
+    /// namespace-scoped requests (SUBSCRIBE_NAMESPACE, PUBLISH_NAMESPACE,
+    /// SUBSCRIBE_TRACKS) and MUST be empty; an endpoint that receives a
+    /// non-empty Track Name in a Redirect for a namespace-scoped request MUST close the session
+    /// with INVALID_FIELD."
+    #[error("Redirect for namespace-scoped request {0} carries a track name")]
+    RedirectTrackNameOnNamespaceRequest(u64),
+    /// A server received a GOAWAY carrying a New Session URI.
+    ///
+    /// Draft-23 Section 9.2: "If a server receives a GOAWAY with a non-zero New Session URI Length
+    /// it MUST close the session with ROLE_VIOLATION." Only a client can be redirected.
+    #[error("GOAWAY carrying a New Session URI received at a server")]
+    GoAwayUriAtServer,
+    /// The peer reused a Request ID it had already spent.
+    ///
+    /// Draft-23 Section 6.4.2.1: "If an endpoint receives a Request ID where the least significant
+    /// bit is incorrect for the sender, it MUST close the session with INVALID_REQUEST_ID. If an
+    /// endpoint detects a duplicate Request ID, it MUST close the session with INVALID_REQUEST_ID."
+    #[error("request {0} was already used by the peer")]
+    DuplicateRequestId(u64),
+    /// A bidirectional stream the peer opened began with a message that does
+    /// not open a request stream.
+    ///
+    /// Draft-23 Section 6.3: "Bidirectional streams MUST NOT begin with any
+    /// other message type unless negotiated. If they do, the peer MUST close the Session with
+    /// UNEXPECTED_MESSAGE."
+    #[error("{0:?} does not begin a request stream")]
+    NotARequest(MessageType),
+    /// A message that this endpoint may not write on a request stream the peer
+    /// opened was handed to the responder path. Nothing was written and no
+    /// state moved.
+    #[error("{0:?} is not a message a responder writes on a peer's request stream")]
+    NotAResponse(MessageType),
+    /// A message arrived on a request stream the peer opened that may not
+    /// follow a request there.
+    ///
+    /// This endpoint is the responder on such a stream, so a response arriving
+    /// on it is the peer answering its own request.
+    #[error("{0:?} may not follow a request on a stream the peer opened")]
+    UnexpectedOnPeerRequestStream(MessageType),
+    /// A namespace-scoped request's response half opened with something other
+    /// than REQUEST_OK or REQUEST_ERROR.
+    ///
+    /// Draft-23 Section 4.2, of SUBSCRIBE_NAMESPACE: "The publisher MUST send
+    /// a single SUBSCRIBE_NAMESPACE_OK or SUBSCRIBE_NAMESPACE_ERROR as the first
+    /// message on the response half of the stream; if the subscriber receives any other message
+    /// first, it MUST close the session with UNEXPECTED_MESSAGE." Section 3.6 says the same of
+    /// SUBSCRIBE_TRACKS.
+    /// Both names are Section 1.5's shorthand for a REQUEST_OK and a
+    /// REQUEST_ERROR.
+    #[error("request {0} answered with {1:?} before its REQUEST_OK or REQUEST_ERROR")]
+    ResponseBeforeTheFirstResponse(u64, MessageType),
+    /// Track Properties were put on a REQUEST_OK answering something other
+    /// than a TRACK_STATUS, on the way out. Nothing was written.
+    ///
+    /// The send-side mirror of
+    /// [`TrackPropertiesOnNonTrackStatus`](Self::TrackPropertiesOnNonTrackStatus):
+    /// Section 9.3 answers receiving them with a session close, so writing
+    /// them would hand a conforming peer a reason to close this session. This
+    /// one is not fatal — nothing reached the wire, so there is nothing for the
+    /// peer to object to.
+    #[error("request {0} is not a TRACK_STATUS; only its response carries track properties")]
+    TrackPropertiesOnOutgoingRequestOk(u64),
+    /// A REQUEST_UPDATE arrived on a stream that had already used up the
+    /// concurrency this endpoint advertised.
+    ///
+    /// Draft-23 Section 9.1.7: "If an endpoint receives a REQUEST_UPDATE on
+    /// a stream that already has MAX_REQUEST_UPDATES outstanding
+    /// REQUEST_UPDATEs, it MUST close the session with
+    /// TOO_MANY_REQUEST_UPDATES."
+    #[error("request {0} already has the {1} outstanding REQUEST_UPDATEs it was allowed")]
+    TooManyRequestUpdates(u64, u64),
+    /// A REQUEST_OK was offered for a request whose Range Filters this endpoint
+    /// is required to reject.
+    ///
+    /// Not fatal, and deliberately not raised where the filter arrives. Every
+    /// Range Filter rule in Section 3.3.2 is answered with a REQUEST_ERROR, and
+    /// a REQUEST_ERROR names the Request ID of the request it answers — so the
+    /// request has to be taken before it can be refused. What this stops is the
+    /// other answer: accepting the request the draft says to reject leaves the
+    /// subscriber with a subscription whose filters this endpoint never agreed
+    /// to apply, and a publisher that then forwards by its own reading of them.
+    #[error("request {0} must be answered with REQUEST_ERROR: {1}")]
+    FilterMustBeRejected(u64, FilterRejection),
+    /// A REQUEST_OK or REQUEST_ERROR was offered as the answer to a
+    /// REQUEST_UPDATE on a stream with no update waiting for one.
+    ///
+    /// Section 9.5 requires "exactly one REQUEST_UPDATE_OK or
+    /// REQUEST_UPDATE_ERROR message indicating if the update was successful" —
+    /// a REQUEST_OK or a REQUEST_ERROR, under Section 1.5's names — so an answer with nothing to
+    /// answer is one the peer will read as belonging to an update it never
+    /// sent. Not fatal: nothing was written.
+    ///
+    /// A SUBSCRIBE is answered with SUBSCRIBE_OK, so on its stream a REQUEST_OK can be nothing but
+    /// an update's answer
+    /// and this is what a mistimed one produces. On the five kinds REQUEST_OK
+    /// answers itself, the first one is the request's and only the ones after
+    /// it can reach here.
+    #[error("request {0} has no REQUEST_UPDATE waiting for an answer")]
+    NoUpdateToAnswer(u64),
+    /// An update was refused and the subscription it belongs to was then ended
+    /// under some status other than the one that names why.
+    ///
+    /// Section 9.5.1: "When a REQUEST_UPDATE is unsuccessful, the publisher MUST
+    /// also terminate the subscription by sending a PUBLISH_DONE with error
+    /// code UPDATE_FAILED." The REQUEST_ERROR is half of what that sentence
+    /// asks for and the termination is the other half, so this endpoint holds
+    /// the request to it: whatever else the caller writes first, the
+    /// termination it does write says so.
+    #[error("request {request}'s update was refused, so its PUBLISH_DONE must carry {required}")]
+    WrongUpdateFailureStatus {
+        /// The request whose update was refused.
+        request: u64,
+        /// The status code the termination must carry.
+        required: u64,
+    },
+    #[error("session not active")]
+    NotActive,
+    #[error("session is draining, no new requests allowed")]
+    Draining,
+    /// A second GOAWAY arrived on the control stream.
+    ///
+    /// The GOAWAY that says the peer is going away is one message, and the
+    /// draft answers a repeat of it with a session close rather than with an
+    /// error about the second message: there is no state a second one could
+    /// move that the first has not already moved.
+    #[error("a second GOAWAY arrived on the control stream")]
+    RepeatedGoAway,
+    /// A GOAWAY on a request stream the peer opened.
+    ///
+    /// Section 9.2: "Only the receiver of a request can send GOAWAY on its
+    /// request stream. If the receiver of a request receives a GOAWAY on that
+    /// request stream, it MUST close the session with a PROTOCOL_VIOLATION."
+    #[error("GOAWAY on request {0}'s stream, sent by the request's own sender")]
+    GoAwayFromRequestSender(u64),
+    /// A second GOAWAY arrived on one request's stream.
+    ///
+    /// The count is per stream rather than per session: this draft lets a
+    /// GOAWAY migrate a single request, so one on each of two request streams
+    /// is two first GOAWAYs and not a repeat.
+    #[error("a second GOAWAY arrived on request {0}'s stream")]
+    RepeatedGoAwayOnRequestStream(
+        /// The Request ID of the stream that carried both.
+        u64,
+    ),
+    /// The peer named a Track Alias it is already using for another track.
+    ///
+    /// Draft-23 Section 3.1.3: "The same Track Alias MUST NOT be used by a
+    /// publisher to refer to two different Tracks simultaneously in the same
+    /// session. If a subscriber receives a PUBLISH or SUBSCRIBE_OK that uses
+    /// the same Track Alias as a different Track with an Established
+    /// subscription, it MUST close the session with error
+    /// DUPLICATE_TRACK_ALIAS."
+    ///
+    /// The session is over: this endpoint's own state has moved to Closed and
+    /// the code the transport should close with is in
+    /// [`EndpointError::session_error_code`].
+    #[error("track alias {alias} already names request {established}'s track; request {offered} names a different one")]
+    DuplicateTrackAlias {
+        /// The alias both tracks are named by.
+        alias: u64,
+        /// The request whose Established subscription holds the alias.
+        established: u64,
+        /// The request whose message arrived naming it for another track.
+        offered: u64,
+    },
+    /// This endpoint was asked to give a Track Alias to a second track.
+    ///
+    /// The same rule as [`EndpointError::DuplicateTrackAlias`] read at the end
+    /// that chooses the alias. Section 3.1.3 states it as a prohibition on the
+    /// publisher before it states what the subscriber does about one: "The
+    /// same Track Alias MUST NOT be used by a publisher to refer to two different Tracks
+    /// simultaneously in the same session."
+    ///
+    /// The message is refused instead of built, and nothing else moves: no
+    /// Request ID is spent, no publish flow is created, and the session stays
+    /// as it was. The alias never reaches the peer, so there is nothing for
+    /// the peer to close over.
+    #[error("track alias {alias} already names request {held}'s track")]
+    TrackAliasInUse {
+        /// The alias that is already spoken for.
+        alias: u64,
+        /// The request whose live flow holds it.
+        held: u64,
+    },
+    /// An object arriving after the track's final object.
+    ///
+    /// Section 12.1 lists the condition: "An Object is received whose
+    /// Group and Object ID are larger
+    /// than the final Object in the Track.
+    /// The final Object in a Track is the Object with Status END_OF_TRACK."
+    ///
+    /// **Larger is Section 8.2's comparison and not a reading of the
+    /// words.** That section puts one Location below another when "A.Group <
+    /// B.Group || (A.Group == B.Group && A.Object < B.Object)", so an Object in
+    /// a later group is past the end whatever its own Object ID is.
+    ///
+    /// **A Malformed Track and not a session error**, and on this draft not a
+    /// message either. Section 12.1 answers its whole list at once with "it
+    /// MUST cancel any corresponding subscription or fetches for that Track
+    /// from that publisher", where cancelling a request is the transport
+    /// operation Section 6.4.2.3 describes. This is the error half; the
+    /// requests to cancel are named by
+    /// [`Endpoint::requests_for_malformed_track`].
+    #[error(
+        "the object at group {group}, object {object} on track alias {alias} arrived \
+         after the track's final object at group {final_group}, object {final_object}"
+    )]
+    ObjectPastFinalObject {
+        /// The Track Alias the offending object named.
+        alias: u64,
+        /// The Group ID it named.
+        group: u64,
+        /// The Object ID it named.
+        object: u64,
+        /// The Group ID of the object the track ended at.
+        final_group: u64,
+        /// The Object ID of the object the track ended at.
+        final_object: u64,
+    },
+    /// An Object both received and signalled as not existing.
+    ///
+    /// Section 12.1: "An Object is received after it has been recorded as not
+    /// existing, or is signalled as not existing after it was received (see
+    /// Section 2.1.2)." Section 10.8 states the Prior Group ID Gap cases: "An
+    /// endpoint receives an Object with a Prior Group ID Gap covering an Object
+    /// it previously received" and "An endpoint receives an Object with a Group
+    /// ID within a previously communicated gap." A Malformed Track, answered by
+    /// cancelling the track's requests, not by a session close.
+    #[error(
+        "the object at group {group}, object {object} was both received and signalled as \
+         not existing"
+    )]
+    ObjectExistenceContradicted {
+        /// The Track Namespace of the track both signals are about.
+        namespace: TrackNamespace,
+        /// The Track Name of the track both signals are about.
+        name: Vec<u8>,
+        /// The Group ID both signals name.
+        group: u64,
+        /// The Object ID both signals name.
+        object: u64,
+    },
+
+    /// A PUBLISH_STATE_NOTIFY arrived for a request that is not a
+    /// subscription.
+    ///
+    /// Section 9.10: "PUBLISH_STATE_NOTIFY applies only to subscriptions, and
+    /// is sent only by the publisher. An endpoint that receives a PUBLISH_STATE_NOTIFY for any
+    /// other request type MUST close the session with UNEXPECTED_MESSAGE. A publisher that receives
+    /// a PUBLISH_STATE_NOTIFY MUST close the session with ROLE_VIOLATION."
+    ///
+    /// This is the first half of that sentence. The session is over: this
+    /// endpoint's own state has moved to Closed and the code the transport
+    /// should close with is in [`EndpointError::session_error_code`].
+    #[error("PUBLISH_STATE_NOTIFY for request {0}, which is not a subscription")]
+    StateNotifyForNonSubscription(u64),
+
+    /// A PUBLISH_STATE_NOTIFY arrived from the subscriber.
+    ///
+    /// The second half of the same sentence. A subscription's publisher is the
+    /// end that did not send the SUBSCRIBE, so one arriving on a stream this
+    /// endpoint opened with a SUBSCRIBE is the publisher's and one arriving on
+    /// a stream the peer opened with a SUBSCRIBE is the subscriber's — which is
+    /// what this refuses, and what the section answers with a session close.
+    #[error(
+        "PUBLISH_STATE_NOTIFY on request {0} may only be sent by that subscription's publisher"
+    )]
+    StateNotifyFromSubscriber(u64),
+
+    /// A PUBLISH_STATE_NOTIFY was offered for a request this endpoint does not
+    /// publish a subscription for. Nothing was written and no state moved.
+    ///
+    /// The send-side mirror of the two above, and not fatal for the same reason
+    /// [`EndpointError::TrackPropertiesOnOutgoingRequestOk`] is not: nothing
+    /// reached the wire, so there is nothing for the peer to object to. What it
+    /// prevents is handing a conforming peer a message Section 9.10 tells it to
+    /// close the session over.
+    #[error("request {0} is not a subscription this endpoint publishes, so it sends no PUBLISH_STATE_NOTIFY")]
+    StateNotifyThisEndpointMayNotSend(u64),
+
+    /// A fill fetch stream opened against a request that asked for no fill.
+    ///
+    /// Section 9.19.15 makes `FILL_PARAMETERS` the whole of the request: "A fill fetch stream is
+    /// opened only when FILL_PARAMETERS is present." A FETCH_HEADER naming a subscription that
+    /// never asked is a stream this endpoint has nothing to attribute, and one
+    /// naming a request that is not a subscription at all is worse.
+    ///
+    /// Not a session close. Draft-23 states no rule for it — a fill fetch
+    /// stream has no FETCH_OK and no REQUEST_ERROR, so there is no answer to
+    /// send and no sentence naming a code — and the honest handling is
+    /// `STOP_SENDING` on that stream alone, which Section 3.4.1 gives the
+    /// subscriber outright and says "does not affect the subscription".
+    #[error("request {0} opened a fill fetch stream without asking for a fill")]
+    UnrequestedFillStream(u64),
+}
+
+/// Parameter Type of TRACK_NAMESPACE_PREFIX.
+const TRACK_NAMESPACE_PREFIX: u64 = 0x34;
+
+/// The Track Namespace Prefix a REQUEST_UPDATE asks a namespace subscription
+/// to move to, and `None` when it asks for no such move.
+///
+/// Section 9.19.20: "The TRACK_NAMESPACE_PREFIX parameter (Parameter Type
+/// 0x34) uses the Track Namespace encoding described in Section 8.7. It MAY
+/// appear in REQUEST_UPDATE for a SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS
+/// request. It updates the Track Namespace Prefix for that subscription."
+///
+/// A prefix of no fields is a value rather than a removal. Section 2.4.1 puts
+/// a Track Namespace at "between 0 and 32 Track Namespace Fields", an empty
+/// prefix selects every namespace, and Section 9.5 leaves no other reading
+/// open: "There is no generic mechanism to remove a parameter from a
+/// request."
+///
+/// The last one wins when a message carries the parameter twice. That is the
+/// rule Section 9.5 gives for two messages -- "Parameter values from later
+/// REQUEST_UPDATE messages override values from earlier ones" -- applied
+/// inside one, which is the only reading under which a repeat means anything.
+///
+/// A value that is not a whole Track Namespace answers `None`, so an update
+/// carrying one leaves the prefix where it was. The decoder that built the
+/// message has already refused a malformed one; this is the arm that keeps a
+/// hand-built message from moving a subscription to half a prefix.
+fn updated_prefix(parameters: &[KeyValuePair]) -> Option<TrackNamespace> {
+    parameters.iter().rfind(|p| p.key.into_inner() == TRACK_NAMESPACE_PREFIX).and_then(|p| match &p
+        .value
+    {
+        KvpValue::Bytes(bytes) => {
+            let mut cursor = &bytes[..];
+            let prefix = TrackNamespace::decode_allow_empty_moqt::<Moqt18>(&mut cursor).ok()?;
+            cursor.is_empty().then_some(prefix)
+        }
+        KvpValue::Varint(_) => None,
+    })
+}
+
+impl EndpointError {
+    /// Whose doing this is — the peer's, or this endpoint's, or a variant that
+    /// cannot say.
+    ///
+    /// The companion of [`EndpointError::session_error_code`], which answers
+    /// *what the draft requires be done about it*. Neither answers the other's
+    /// question and the pair is what a caller needs: a code without a side
+    /// names nobody, and a side without a code is not grounds to publish
+    /// anything.
+    ///
+    /// Exhaustive, with no wildcard arm, so a variant added to this draft's
+    /// `EndpointError` is a compile error here rather than a silent arrival on
+    /// the wrong side of the answer. See
+    /// [`EndpointFault`](crate::above_codec_rules::EndpointFault) for the three
+    /// answers and for the collision that made the third one necessary.
+    pub fn fault(&self) -> crate::above_codec_rules::EndpointFault {
+        use crate::above_codec_rules::{AboveCodecRule as Rule, EndpointFault as Fault};
+
+        match self {
+            // Raised on both a receive path and a send path, so the
+            // variant cannot say which end is at fault. The state machines
+            // render as `invalid transition from X on event Y` whichever end
+            // asked for the transition, and the unknown-request errors name
+            // an id that may be one the peer sent or one a caller here made
+            // up.
+            EndpointError::Session(..)
+            | EndpointError::Subscription(..)
+            | EndpointError::Fetch(..)
+            | EndpointError::Fill(..)
+            | EndpointError::Namespace(..)
+            | EndpointError::TrackStatus(..)
+            | EndpointError::PublishFlow(..)
+            | EndpointError::Setup(..)
+            | EndpointError::UnknownRequest(..) => Fault::EitherEnd,
+
+            // Raised on the way out. Nothing reached the wire, so none of
+            // these is evidence about a peer — including the ones a peer
+            // caused, where what failed is this side's attempt to accept
+            // something the draft says to refuse.
+            EndpointError::NotAResponse(..)
+            | EndpointError::TrackPropertiesOnOutgoingRequestOk(..)
+            | EndpointError::FilterMustBeRejected(..)
+            | EndpointError::NoUpdateToAnswer(..)
+            | EndpointError::WrongUpdateFailureStatus { .. }
+            | EndpointError::NotActive
+            | EndpointError::Draining
+            | EndpointError::TrackAliasInUse { .. }
+            | EndpointError::StateNotifyThisEndpointMayNotSend(..) => Fault::ThisEndpoint,
+
+            // Raised reading what the peer sent.
+            EndpointError::NotARequest(..) => Fault::Peer(Rule::BidiStreamOpener),
+            EndpointError::DuplicateTrackAlias { .. } => Fault::Peer(Rule::DuplicateTrackAlias),
+            EndpointError::GoAwayUriAtServer => Fault::Peer(Rule::GoAwayAtServer),
+            EndpointError::ResponseOnControlStream
+            | EndpointError::RequestMessageOnControlStream(..)
+            | EndpointError::UnexpectedOnPeerRequestStream(..) => {
+                Fault::Peer(Rule::MessageOnTheWrongStream)
+            }
+            EndpointError::ObjectPastFinalObject { .. } => Fault::Peer(Rule::ObjectPastFinalObject),
+            EndpointError::ObjectExistenceContradicted { .. } => {
+                Fault::Peer(Rule::ObjectExistenceContradicted)
+            }
+            EndpointError::RedirectTrackNameOnNamespaceRequest(..) => {
+                Fault::Peer(Rule::RedirectTrackNameOnNamespaceRequest)
+            }
+            EndpointError::RedirectUriAtServer => Fault::Peer(Rule::RedirectUriAtServer),
+            EndpointError::RepeatedGoAway | EndpointError::RepeatedGoAwayOnRequestStream(..) => {
+                Fault::Peer(Rule::RepeatedGoAway)
+            }
+            EndpointError::GoAwayFromRequestSender(..) => {
+                Fault::Peer(Rule::GoAwayFromRequestSender)
+            }
+            EndpointError::DuplicateRequestId(..) => Fault::Peer(Rule::RequestIdOutOfSequence),
+            // A REQUEST_UPDATE on the control stream is this rule and not
+            // `MessageOnTheWrongStream`. Section 9.5 states the rule as two
+            // permitted cases and closes over everything else — "The sender of
+            // a request (SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE,
+            // SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS) can later send a
+            // REQUEST_UPDATE on the same bidi stream as the request to modify
+            // it. A subscriber can also send REQUEST_UPDATE to modify
+            // parameters of a subscription established with PUBLISH." — and
+            // the first case is *on the same bidi stream as the request*. One
+            // that arrives on the control stream is in neither case, so it is
+            // squarely inside "other than in the two cases above", which is the
+            // sentence this rule cites, and carries its close.
+            EndpointError::RequestUpdateOnControlStream
+            | EndpointError::UnexpectedRequestUpdate(..) => {
+                Fault::Peer(Rule::RequestUpdateForTheWrongRequest)
+            }
+            EndpointError::ResponseBeforeTheFirstResponse(..) => {
+                Fault::Peer(Rule::ResponseBeforeItsFirstResponse)
+            }
+            EndpointError::StateNotifyForNonSubscription(..) => {
+                Fault::Peer(Rule::StateNotifyOnTheWrongRequest)
+            }
+            EndpointError::StateNotifyFromSubscriber(..) => {
+                Fault::Peer(Rule::StateNotifyFromTheSubscriber)
+            }
+            EndpointError::TooManyRequestUpdates(..) => Fault::Peer(Rule::TooManyRequestUpdates),
+            EndpointError::TrackPropertiesOnNonTrackStatus(..) => {
+                Fault::Peer(Rule::TrackPropertiesOnNonTrackStatus)
+            }
+            EndpointError::UnrequestedFillStream(..) => Fault::Peer(Rule::UnrequestedFillStream),
+
+            // The Request ID rules, which are the peer's: every one of them is
+            // read off an id the peer put on the wire. This draft carries no
+            // MAX_REQUEST_ID, so neither ceiling arm can fire — the allocator
+            // opens at `u64::MAX` and nothing ever lowers it - and they are
+            // answered rather than left out so that a draft restoring the
+            // message does not restore a hole with it.
+            EndpointError::RequestId(e) => match e {
+                RequestIdError::Decreased(..) => Fault::Peer(Rule::MaxRequestIdDecreased),
+                RequestIdError::ExceedsMax(..) => Fault::Peer(Rule::RequestIdCeiling),
+                RequestIdError::WrongParity(..) => Fault::Peer(Rule::RequestIdParity),
+                // This endpoint has spent the budget the peer granted it.
+                RequestIdError::Blocked => Fault::ThisEndpoint,
+            },
+        }
+    }
+
+    /// The code to close the session with, when draft-23 says this error is
+    /// fatal to the session rather than to one request.
+    ///
+    /// `None` means the error is recoverable: the caller may report it and
+    /// keep the session running. `Some` means the draft requires a close, and
+    /// the endpoint has already moved its own session state to
+    /// [`SessionState::Closed`] — the code is what the transport should carry.
+    ///
+    /// Each code is the one the sentence stating the rule names (draft-23
+    /// Section 12.2 defines them).
+    pub fn session_error_code(&self) -> Option<SessionErrorCode> {
+        match self {
+            // Section 9.5: "An endpoint that receives a REQUEST_UPDATE other
+            // than in the two cases above MUST close the session with
+            // UNEXPECTED_MESSAGE."
+            EndpointError::RequestUpdateOnControlStream
+            | EndpointError::UnexpectedRequestUpdate(_)
+            // Sections 3.6 and 4.2: a first message on the response half other
+            // than the answer "MUST close the session with UNEXPECTED_MESSAGE".
+            | EndpointError::ResponseBeforeTheFirstResponse(..)
+            // Section 6.3: "Bidirectional streams MUST NOT begin with any other
+            // message type unless negotiated. If they do, the peer MUST close
+            // the Session with UNEXPECTED_MESSAGE."
+            | EndpointError::NotARequest(_)
+            // Section 9.2: "The endpoint MUST close the session with
+            // UNEXPECTED_MESSAGE (Section 12.2) if it receives more than one
+            // GOAWAY on the control stream or on a single request stream."
+            | EndpointError::RepeatedGoAway
+            | EndpointError::RepeatedGoAwayOnRequestStream(_)
+            // Section 9.10: "An endpoint that receives a PUBLISH_STATE_NOTIFY
+            // for any other request type MUST close the session with
+            // UNEXPECTED_MESSAGE."
+            | EndpointError::StateNotifyForNonSubscription(_) => {
+                Some(SessionErrorCode::UnexpectedMessage)
+            }
+            // Section 9.10: "A publisher that receives a PUBLISH_STATE_NOTIFY
+            // MUST close the session with ROLE_VIOLATION." Section 9.2 and
+            // Section 9.4.2.1 give the same code to a server receiving a New
+            // Session URI or a Connect URI.
+            EndpointError::StateNotifyFromSubscriber(_)
+            | EndpointError::GoAwayUriAtServer
+            | EndpointError::RedirectUriAtServer => Some(SessionErrorCode::RoleViolation),
+            // Section 9.3 for Track Properties on a response that takes none,
+            // and Section 9.4.2.1 for a Track Name in a namespace-scoped
+            // REDIRECT: each "MUST close the session with INVALID_FIELD".
+            EndpointError::TrackPropertiesOnNonTrackStatus(_)
+            | EndpointError::RedirectTrackNameOnNamespaceRequest(_) => {
+                Some(SessionErrorCode::InvalidField)
+            }
+            EndpointError::GoAwayFromRequestSender(_) => Some(SessionErrorCode::ProtocolViolation),
+            EndpointError::DuplicateRequestId(_)
+            | EndpointError::RequestId(RequestIdError::WrongParity(..)) => {
+                Some(SessionErrorCode::InvalidRequestId)
+            }
+            EndpointError::TooManyRequestUpdates(..) => {
+                Some(SessionErrorCode::TooManyRequestUpdates)
+            }
+            // Section 3.1.3 names this code in the sentence that states the
+            // rule.
+            EndpointError::DuplicateTrackAlias { .. } => {
+                Some(SessionErrorCode::DuplicateTrackAlias)
+            }
+            // This draft carries no MAX_REQUEST_ID, so neither ceiling can be
+            // passed (see `fault`), and `Blocked` is this endpoint's own.
+            EndpointError::RequestId(
+                RequestIdError::Decreased(..)
+                | RequestIdError::ExceedsMax(..)
+                | RequestIdError::Blocked,
+            ) => None,
+            // Section 12.2 defines UNEXPECTED_MESSAGE as covering "a message
+            // was received on the wrong stream", but no sentence requires a
+            // close for one: Table 5's "Messages marked "First" MUST be the
+            // first message on a new request stream" binds the sender. The
+            // message carries its own length, so it is refused and the
+            // session left running.
+            EndpointError::ResponseOnControlStream
+            | EndpointError::RequestMessageOnControlStream(_)
+            | EndpointError::UnexpectedOnPeerRequestStream(_) => None,
+            // Section 12.1: a subscriber that detects a Malformed Track "MUST
+            // cancel any corresponding subscription or fetches for that Track
+            // from that publisher". The track, not the session.
+            EndpointError::ObjectPastFinalObject { .. }
+            | EndpointError::ObjectExistenceContradicted { .. } => None,
+            // Section 3.4.1: "Because there is no REQUEST_ERROR associated
+            // with a fill fetch stream", and no close is stated for a fill
+            // fetch stream the subscriber did not ask for. The stream alone
+            // is refused.
+            EndpointError::UnrequestedFillStream(_) => None,
+            // MAX_FILTER_RANGES is a ceiling the draft answers with a
+            // REQUEST_ERROR, not a session close.
+            EndpointError::FilterMustBeRejected(..) => None,
+            // State machine and lookup errors, raised on either path. A close
+            // a peer caused through one of them is carried by a variant above.
+            EndpointError::Session(..)
+            | EndpointError::Subscription(..)
+            | EndpointError::Fetch(..)
+            | EndpointError::Fill(..)
+            | EndpointError::Namespace(..)
+            | EndpointError::TrackStatus(..)
+            | EndpointError::PublishFlow(..)
+            | EndpointError::Setup(..)
+            | EndpointError::UnknownRequest(..) => None,
+            // Raised on the way out, so nothing reached the peer.
+            EndpointError::NotAResponse(..)
+            | EndpointError::TrackPropertiesOnOutgoingRequestOk(..)
+            | EndpointError::NoUpdateToAnswer(..)
+            | EndpointError::WrongUpdateFailureStatus { .. }
+            | EndpointError::NotActive
+            | EndpointError::Draining
+            | EndpointError::TrackAliasInUse { .. }
+            | EndpointError::StateNotifyThisEndpointMayNotSend(..) => None,
+        }
+    }
+}
+
+pub struct Endpoint {
+    role: Role,
+    session: SessionStateMachine,
+    request_ids: RequestIdAllocator,
+    subscriptions: HashMap<u64, SubscriptionStateMachine>,
+    fetches: HashMap<u64, FetchStateMachine>,
+    /// Which subscriptions have asked for a fill fetch stream, and how many of
+    /// their streams are open.
+    ///
+    /// Keyed by the subscription's Request ID, which is also the Request ID a
+    /// fill fetch stream's FETCH_HEADER carries — Section 3.4: "the subscription's Request ID for
+    /// an initial fill, or the REQUEST_UPDATE Request ID for a subsequent fill", and a
+    /// REQUEST_UPDATE travels on its request's own
+    /// stream under that request's Request ID (Section 9.5). So the two ids
+    /// the section distinguishes are the same number, and the same section
+    /// nonetheless says a subscription "can have multiple fill fetch streams
+    /// open at once, each identified by its Request ID". **The draft is
+    /// inconsistent here and the identifier cannot separate them**, so this
+    /// counts the open streams rather than pretending to tell them apart, which
+    /// is what a PUBLISH_DONE's Stream Count needs anyway.
+    ///
+    /// An entry appears when a SUBSCRIBE or a REQUEST_UPDATE carrying
+    /// `FILL_PARAMETERS` is sent or received, and is never removed: Section
+    /// 9.19.15 keeps `FILL_PARAMETERS` off the sticky-parameter rules, but a
+    /// subscription that asked once is a subscription whose later FETCH_HEADERs
+    /// are attributable, and a Request ID is spent once so an entry can never
+    /// come to describe a different request.
+    fills: HashMap<u64, FillStreams>,
+    subscribe_namespaces: HashMap<u64, SubscribeNamespaceStateMachine>,
+    subscribe_tracks: HashMap<u64, SubscribeNamespaceStateMachine>,
+    publish_namespaces: HashMap<u64, PublishNamespaceStateMachine>,
+    track_statuses: HashMap<u64, TrackStatusStateMachine>,
+    publishes: HashMap<u64, PublishStateMachine>,
+    goaway_uri: Option<Vec<u8>>,
+    /// The peer's requests whose stream has already carried a GOAWAY.
+    ///
+    /// Section 9.2 makes the second GOAWAY on one request stream a session
+    /// close while leaving a first one on every other stream legal, so the
+    /// count cannot live on the session. Held apart from the per-kind request
+    /// maps because a GOAWAY says nothing about which kind of request it
+    /// migrates.
+    goaway_request_streams: HashSet<u64>,
+    /// Every Request ID the peer has spent, whether or not the request it
+    /// opened is still live.
+    ///
+    /// Draft-23 Section 6.4.2.1 makes a duplicate Request ID a session close, and
+    /// "duplicate" is about the id ever having been used, not about the
+    /// request still being open. Deriving it from the per-kind maps instead
+    /// would answer wrongly the moment those maps are ever pruned, so the rule
+    /// is stated once, here, and this set is never pruned.
+    peer_request_ids: HashSet<u64>,
+    /// Every request the **peer** opened a stream with, as it arrived, keyed
+    /// by the Request ID it carries.
+    ///
+    ///
+    /// One map for all seven kinds, because one entry point takes all seven:
+    /// [`receive_request_on_stream`](Self::receive_request_on_stream) is the
+    /// only thing that writes here, so what is in here is a request, and it
+    /// is the peer's, by construction. How far each one has got stays in the
+    /// per-kind map beside this endpoint's own requests, which is where every
+    /// later message on the stream reads it and where the parity of a Request
+    /// ID keeps the two ends apart.
+    ///
+    /// What a map of state machines cannot hold is the request. Section 3.1 has
+    /// the subscriber "either accepts or rejects the subscription", and what is
+    /// being accepted or rejected -- the track, the namespace prefix, the
+    /// parameters -- is named in the request and nowhere else once the message
+    /// has been dropped.
+    inbound_requests: HashMap<u64, ControlMessage>,
+    /// The Track Namespace Prefix a REQUEST_UPDATE asks one of the peer's
+    /// namespace subscriptions to move to, held until that update is
+    /// answered.
+    ///
+    /// Section 9.5.2 ties the move to the acceptance: "If the update is
+    /// accepted, NAMESPACE and NAMESPACE_DONE messages following the
+    /// REQUEST_OK will contain Track Namespace suffixes relative to the
+    /// updated prefix." Until then the subscription still selects what the
+    /// peer opened it with, so a later request is weighed against the prefix
+    /// in `inbound_requests` and not against this one.
+    updated_namespace_prefixes: HashMap<u64, TrackNamespace>,
+    /// The MAX_REQUEST_UPDATES this endpoint put in its own SETUP.
+    ///
+    /// The peer's value is a different number and belongs to the sending side,
+    /// which this type has no path for: draft-23 gives the endpoint no
+    /// REQUEST_UPDATE builder, so there is nothing here to hold back.
+    ///
+    /// Zero means no limit rather than none allowed, which is the opposite of
+    /// how MAX_REQUEST_ID reads. Section 9.1.7 says so outright - "A value
+    /// of 0 means the endpoint does not limit REQUEST_UPDATE concurrency. If
+    /// not present, the default value is 0" - so an endpoint that never sends
+    /// the option is not limiting anything, and a check that read zero as a
+    /// ceiling would refuse the first update of every session.
+    advertised_max_request_updates: u64,
+    /// Per request stream, how many REQUEST_UPDATEs the peer has sent that this
+    /// endpoint has not yet answered.
+    ///
+    /// "Outstanding" is Section 9.1.7's word and it is per stream, not per
+    /// session: "Each REQUEST_OK or REQUEST_ERROR response restores one credit
+    /// on that stream."
+    outstanding_peer_updates: HashMap<u64, u64>,
+    /// Per request stream, how many REQUEST_UPDATEs are still waiting for the
+    /// answer Section 9.5 requires.
+    ///
+    /// A second count rather than a reading of the one above, because the two
+    /// sentences count different things and disagree on exactly one response.
+    /// Section 9.1.7 says "Each REQUEST_OK or REQUEST_ERROR response
+    /// restores one credit on that stream" — every response, including the
+    /// REQUEST_OK that answers a SUBSCRIBE_NAMESPACE rather than an update. That
+    /// is the sender's accounting rule as much as the receiver's, and an
+    /// endpoint that credited more carefully than the peer does would close a
+    /// conforming session, so the credit above stays literal.
+    ///
+    /// This one is about which response answers which message, and there the
+    /// request's own REQUEST_OK answers the request. Keeping them apart is what
+    /// lets a response be recognised as an update's answer without changing
+    /// what the peer is allowed to send.
+    ///
+    /// One entry per update, oldest first, saying whether it may be coalesced
+    /// into a REQUEST_ERROR answering more than one (Section 9.5).
+    unanswered_peer_updates: HashMap<u64, VecDeque<bool>>,
+    /// The requests whose refused update has not been followed by the
+    /// PUBLISH_DONE that ends them.
+    ///
+    /// Emptied as each is written. A request is in here for exactly as long as
+    /// this endpoint owes the peer the second half of a refusal.
+    owed_update_failures: HashSet<u64>,
+    /// The peer's requests whose own response has already been written.
+    ///
+    /// Section 9.5 gives an update the same two answers a request has, and on
+    /// the five kinds REQUEST_OK answers, the message that answers the request
+    /// and the message that answers an update are the same message. Nothing on
+    /// the wire tells them apart, so both endpoints resolve it by order: the
+    /// first response on a stream answers the request that opened it and the
+    /// ones after it answer updates. This set is that order, recorded.
+    answered_peer_requests: HashSet<u64>,
+    /// The MAX_FILTER_RANGES this endpoint put in its own SETUP.
+    ///
+    /// Section 9.1.6 makes it a ceiling on the peer's total number of Ranges
+    /// (Start/End pairs) allowed concurrently in all Range filter parameters for
+    /// a given subscription or fetch, and fixes what its absence means: "The
+    /// default value is 0, so if not specified, the peer MUST NOT send any such
+    /// filter parameters."
+    ///
+    /// So zero is none allowed, and it is the default. The option in the
+    /// subsection after this one, MAX_REQUEST_UPDATES, reads its zero the other
+    /// way — no limit — and the two are otherwise the same shape. Reading either
+    /// with the other's rule is a working implementation that is wrong in one
+    /// direction or the other for every session.
+    advertised_max_filter_ranges: u64,
+    /// Requests whose Range Filters this endpoint owes the peer a REQUEST_ERROR
+    /// about.
+    ///
+    /// Keyed by Request ID, because that is what the reply names. Entries are
+    /// spent by the REQUEST_ERROR that answers them, and a REQUEST_OK offered
+    /// for one is refused: taking the request in and then accepting it would
+    /// leave the peer with a subscription whose filters were never agreed.
+    peer_filter_rejections: HashMap<u64, FilterRejection>,
+    /// The Range Filter parameters currently in force on each of the peer's
+    /// requests.
+    ///
+    /// Section 3.3.2 makes the ceiling a property of the request rather than of
+    /// the message that carried it — "the total number of Ranges allowed in all
+    /// Range Filter parameters for a given subscription or fetch" — and lets a
+    /// REQUEST_UPDATE rewrite the set: "In REQUEST_UPDATE, Length of 0 removes
+    /// the filter; non-zero replaces it entirely. If a filter parameter is
+    /// omitted from REQUEST_UPDATE, it is unchanged."
+    ///
+    /// So the count that matters is of what is in force after the update, and
+    /// the parameters an update leaves alone are part of it. Held as the
+    /// parameters rather than as decoded filters because replacement is by
+    /// Parameter Type, which is the key of the pair.
+    peer_request_filters: HashMap<u64, Vec<KeyValuePair>>,
+    /// What Full Track Name the peer has attached each Track Alias to, per
+    /// Request ID.
+    ///
+    /// Section 3.1.3 forbids one alias naming two tracks at once, and the "at
+    /// once" is what makes this a table rather than a set: an alias the peer
+    /// used for a track whose subscription has ended is free again. The table
+    /// therefore records the binding and reads liveness back off the request's
+    /// own state machine, rather than keeping a second copy of it that every
+    /// path ending a subscription would have to remember to prune.
+    track_bindings: HashMap<u64, TrackBinding>,
+    /// The track each fetch this endpoint made is for.
+    ///
+    /// Not in `track_bindings`, because that table exists to answer questions
+    /// about Track Aliases and a fetch has none: its objects arrive on a stream
+    /// that opens by naming the Request ID.
+    ///
+    /// Every FETCH names its own track (draft-23 Section 9.11). A fill fetch
+    /// stream belongs to its subscription and is tracked in `fills`.
+    fetch_tracks: HashMap<u64, FetchTrack>,
+    /// Which tracks this endpoint has given up on, and what for.
+    ///
+    /// Behind a lock because the note is taken on the data plane, where this
+    /// endpoint is reached through `&self`.
+    malformed: Mutex<MalformedTracks>,
+    /// How far each track's objects have reached, and where a track ended.
+    ///
+    /// An `Arc` because a subgroup stream measures its objects against one
+    /// track for as long as it runs, and the handle it holds outlives any
+    /// single call into this endpoint.
+    locations: Arc<Mutex<TrackLocations>>,
+}
+
+/// What one subscription's fill fetch streams amount to, from the point of
+/// view of an endpoint that has to attribute an arriving FETCH_HEADER and
+/// count the streams a PUBLISH_DONE reports.
+///
+/// There is no state machine here on purpose. A fill fetch stream has no
+/// FETCH_OK and no REQUEST_ERROR (Section 3.4.1), so it has none of the
+/// states [`FetchStateMachine`] exists to keep apart: it is opened, it carries
+/// objects, and it ends with a FIN meaning the fill is complete or a reset
+/// meaning it failed. Neither ending touches the subscription — "Resetting or
+/// cancelling a fill fetch stream, by either endpoint, does not affect the
+/// subscription, which continues to deliver objects using subscribe subgroups
+/// and datagrams."
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FillStreams {
+    /// How many of this subscription's fill fetch streams are open.
+    open: usize,
+    /// How many have been opened over the life of the subscription, ended or
+    /// not.
+    ///
+    /// Section 9.9 makes the count a PUBLISH_DONE field: Stream Count is the
+    /// total the publisher opened, "including streams that contained no Objects
+    /// (e.g., an empty Subgroup) and including any fill fetch streams". So the
+    /// number that matters is cumulative and the open count cannot answer it.
+    opened: u64,
+    /// The Group Order the fill's Objects arrive in, resolved from the request
+    /// that asked for the fill by [`fill::group_order`].
+    ///
+    /// Held here because nothing on a fill fetch stream says which direction its
+    /// Group ID Deltas count in (Section 11.4.1.1) and the answer is in a
+    /// control message the stream never sees. Kept per subscription rather than
+    /// per stream for the reason the field above is: a fill fetch stream carries
+    /// its subscription's Request ID and nothing else, so two of them cannot be
+    /// told apart here. A REQUEST_UPDATE that asks for a second fill with a
+    /// different order **replaces** this, which is right for the stream it opens
+    /// and wrong for one still running under the older order; a caller in that
+    /// position restarts the reader itself with
+    /// [`begin_fetch_objects`](crate::draft23::connection::FramedRecvStream::begin_fetch_objects).
+    group_order: GroupOrder,
+}
+
+/// The track one fetch is for, which the fetch's own state machine does not
+/// hold.
+#[derive(Debug, Clone)]
+struct FetchTrack {
+    namespace: TrackNamespace,
+    name: Vec<u8>,
+    /// Whether the FETCH carried a Range Filter (Section 3.3.2).
+    range_filtered: bool,
+}
+
+/// A Track Alias the peer has attached to a Full Track Name, and the request
+/// whose lifetime the attachment follows.
+#[derive(Debug, Clone)]
+struct TrackBinding {
+    namespace: TrackNamespace,
+    name: Vec<u8>,
+    /// The alias, once the peer has named one.
+    ///
+    /// A SUBSCRIBE this endpoint sends names a track and waits for its alias,
+    /// so the binding exists with no alias in it from the moment the request
+    /// is made until its SUBSCRIBE_OK arrives. A PUBLISH carries both at once
+    /// and is never in that state.
+    alias: Option<u64>,
+    kind: BindingKind,
+}
+
+/// Which of the two sequences Section 3.1 names established the subscription
+/// that owns a binding, and so which state machine says whether it still has
+/// one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BindingKind {
+    /// This endpoint's SUBSCRIBE, established by the peer's SUBSCRIBE_OK.
+    Subscribe,
+    /// A PUBLISH, established by the PUBLISH_OK answering it - whichever end
+    /// sent which. Both are held in the same map, which Request ID parity
+    /// keeps from colliding.
+    Publish,
+}
+
+impl Endpoint {
+    pub fn new(role: Role) -> Self {
+        Self {
+            role,
+            session: SessionStateMachine::new(),
+            request_ids: RequestIdAllocator::new(role),
+            subscriptions: HashMap::new(),
+            fetches: HashMap::new(),
+            fills: HashMap::new(),
+            subscribe_namespaces: HashMap::new(),
+            subscribe_tracks: HashMap::new(),
+            publish_namespaces: HashMap::new(),
+            track_statuses: HashMap::new(),
+            publishes: HashMap::new(),
+            goaway_uri: None,
+            goaway_request_streams: HashSet::new(),
+            peer_request_ids: HashSet::new(),
+            inbound_requests: HashMap::new(),
+            updated_namespace_prefixes: HashMap::new(),
+            advertised_max_request_updates: 0,
+            outstanding_peer_updates: HashMap::new(),
+            unanswered_peer_updates: HashMap::new(),
+            owed_update_failures: HashSet::new(),
+            answered_peer_requests: HashSet::new(),
+            advertised_max_filter_ranges: 0,
+            peer_filter_rejections: HashMap::new(),
+            peer_request_filters: HashMap::new(),
+            track_bindings: HashMap::new(),
+            fetch_tracks: HashMap::new(),
+            malformed: Mutex::new(MalformedTracks::new()),
+            locations: Arc::new(Mutex::new(TrackLocations::new())),
+        }
+    }
+
+    /// The Track Alias the peer attached to `request_id`, once it has named
+    /// one.
+    ///
+    /// Answers for a subscription this endpoint asked for from the moment its
+    /// SUBSCRIBE_OK arrives, and for one the peer offered from the moment its
+    /// PUBLISH does. `None` before that, and for a Request ID this session has
+    /// no track for.
+    pub fn track_alias_for(&self, request_id: VarInt) -> Option<VarInt> {
+        let alias = self.track_bindings.get(&request_id.into_inner())?.alias?;
+        VarInt::from_u64(alias).ok()
+    }
+
+    /// The refusal Section 3.1.3 requires when `alias` already names a
+    /// different track that still has an Established subscription, or `None`
+    /// when it is free.
+    ///
+    /// # Why the set is read rather than kept
+    ///
+    /// "Established" is a subscription state Section 3.1 defines, and both
+    /// state machines here already hold it: a subscription reaches it on
+    /// SUBSCRIBE_OK and a publish on PUBLISH_OK, and each leaves it on the
+    /// message that ends the flow. Asking them is what makes an alias free
+    /// again the moment its track's subscription ends, with nothing to prune
+    /// on the way out - and a path that ended a subscription without telling
+    /// this table would otherwise leave the alias held forever and refuse the
+    /// peer's next, conforming, use of it.
+    ///
+    /// # Why the request's own binding is skipped
+    ///
+    /// A SUBSCRIBE_OK is judged before its own alias is written down, so the
+    /// skip is not what keeps it from finding itself. A PUBLISH is not: a
+    /// second PUBLISH under a Request ID already bound is refused by the
+    /// duplicate-Request-ID rule before it reaches here, and comparing a
+    /// request against its own binding would answer the wrong rule if that one
+    /// ever moved.
+    fn conflicting_track_alias(
+        &self,
+        request_id: u64,
+        alias: u64,
+        namespace: &TrackNamespace,
+        name: &[u8],
+    ) -> Option<EndpointError> {
+        for (&id, binding) in &self.track_bindings {
+            if id == request_id || binding.alias != Some(alias) {
+                continue;
+            }
+            if binding.namespace == *namespace && binding.name == name {
+                continue;
+            }
+            if self.binding_is_established(id, binding.kind) {
+                return Some(EndpointError::DuplicateTrackAlias {
+                    alias,
+                    established: id,
+                    offered: request_id,
+                });
+            }
+        }
+        None
+    }
+
+    /// The request already using `alias` for a track other than (`namespace`,
+    /// `name`), or `None` when this endpoint may give the alias to that track.
+    ///
+    /// Separate from [`Self::conflicting_track_alias`] because the two answer
+    /// different questions about the same table. That one judges a message
+    /// that has arrived and ends the session over it; this one judges one that
+    /// has not been built and declines to build it.
+    fn alias_held_elsewhere(
+        &self,
+        alias: u64,
+        namespace: &TrackNamespace,
+        name: &[u8],
+    ) -> Option<EndpointError> {
+        self.track_bindings.iter().find_map(|(&id, binding)| {
+            let other_track = binding.namespace != *namespace || binding.name != name;
+            (binding.alias == Some(alias)
+                && other_track
+                && self.binding_is_in_use(id, binding.kind))
+            .then_some(EndpointError::TrackAliasInUse { alias, held: id })
+        })
+    }
+
+    /// Whether a binding's request has put its alias in play at all. Broader
+    /// than [`Self::binding_is_established`], and the two sentences are why.
+    /// What a subscriber must close over is qualified - "the same Track Alias
+    /// as a different Track with an Established subscription" - and the
+    /// prohibition on the publisher is not: "The same Track Alias MUST NOT be
+    /// used by a publisher to refer to two different Tracks simultaneously in
+    /// the same session." Once a PUBLISH carrying an alias has been sent,
+    /// giving that alias to a second track is what that sentence forbids,
+    /// answered or not.
+    fn binding_is_in_use(&self, id: u64, kind: BindingKind) -> bool {
+        match kind {
+            BindingKind::Subscribe => {
+                self.subscriptions.get(&id).is_some_and(|sm| sm.state() != SubscriptionState::Done)
+            }
+            BindingKind::Publish => {
+                self.publishes.get(&id).is_some_and(|sm| sm.state() != PublishState::Done)
+            }
+        }
+    }
+
+    /// Whether the request that owns a binding still has an Established
+    /// subscription.
+    fn binding_is_established(&self, id: u64, kind: BindingKind) -> bool {
+        match kind {
+            BindingKind::Subscribe => self
+                .subscriptions
+                .get(&id)
+                .is_some_and(|sm| sm.state() == SubscriptionState::Active),
+            BindingKind::Publish => {
+                self.publishes.get(&id).is_some_and(|sm| sm.state() == PublishState::Active)
+            }
+        }
+    }
+
+    /// The track a live binding has given `alias` to.
+    ///
+    /// Read rather than kept: a binding whose request has ended holds nothing,
+    /// and an alias that is free again may name a different track next.
+    fn track_for_alias(&self, alias: u64) -> Option<(&TrackNamespace, &[u8])> {
+        self.track_bindings.iter().find_map(|(&id, binding)| {
+            (binding.alias == Some(alias) && self.binding_is_in_use(id, binding.kind))
+                .then_some((&binding.namespace, binding.name.as_slice()))
+        })
+    }
+
+    /// Whether this endpoint *receives* the track a request names.
+    ///
+    /// The sentence to be answered is a subscriber's - "cancel any
+    /// corresponding subscription or fetches for that Track from that
+    /// publisher" - so a request that makes this endpoint the publisher is not
+    /// one of them. A SUBSCRIBE in the table is always this endpoint's own,
+    /// because a SUBSCRIBE the peer sends makes this endpoint the publisher and
+    /// leaves no binding. A PUBLISH is in the table either way round, and
+    /// Request ID parity is what separates them: the offer the peer made is the
+    /// one this endpoint receives a track through.
+    fn receives_through(&self, id: u64, kind: BindingKind) -> bool {
+        match kind {
+            BindingKind::Subscribe => true,
+            BindingKind::Publish => self.request_ids.validate_peer_id(id).is_ok(),
+        }
+    }
+
+    /// The record a stream carrying `alias`'s objects measures them against.
+    ///
+    /// `None` for an alias no live binding names: an object for one breaks a
+    /// different rule, and measuring it against a track this endpoint never
+    /// asked for would answer that one with the wrong sentence.
+    pub fn track_objects(&self, alias: u64) -> Option<TrackObjects> {
+        let (namespace, name) = self.track_for_alias(alias)?;
+        Some(TrackObjects::new(
+            Arc::clone(&self.locations),
+            namespace.clone(),
+            name.to_vec(),
+            alias,
+        ))
+    }
+
+    /// The existence record a stream carrying `alias`'s objects is judged
+    /// against, on the same terms as [`Self::track_objects`].
+    pub(crate) fn track_existence(&self, alias: u64) -> Option<TrackExistence> {
+        let (namespace, name) = self.track_for_alias(alias)?;
+        Some(TrackExistence {
+            locations: Arc::clone(&self.locations),
+            namespace: namespace.clone(),
+            name: name.to_vec(),
+        })
+    }
+
+    /// The existence record the FETCH stream answering `request_id` is judged
+    /// against, or `None` for a Request ID this endpoint sent no FETCH under.
+    pub(crate) fn fetch_existence(&self, request_id: u64) -> Option<FetchExistence> {
+        let track = self.fetch_tracks.get(&request_id)?;
+        Some(FetchExistence {
+            track: TrackExistence {
+                locations: Arc::clone(&self.locations),
+                namespace: track.namespace.clone(),
+                name: track.name.clone(),
+            },
+            range_filtered: track.range_filtered,
+            order: GroupOrder::Ascending,
+            prior: None,
+        })
+    }
+
+    /// Record or judge one object that arrived outside a subgroup stream, and
+    /// report Section 12.1's Malformed Track when it arrived after the place
+    /// an end-of-track object put the end.
+    ///
+    /// One rule and not two. Draft-23 states no rule about where an
+    /// end-of-track object may be placed, so an object that ends a track here
+    /// is judged against nothing and only settles where the track stopped.
+    ///
+    /// `&self`, because the call site is the data plane's.
+    pub fn note_received_object(
+        &self,
+        alias: u64,
+        at: ObjectLocation,
+        role: ObjectRole,
+        properties: &[u8],
+    ) -> Result<(), EndpointError> {
+        let (Some(objects), Some(existence)) =
+            (self.track_objects(alias), self.track_existence(alias))
+        else {
+            return Ok(());
+        };
+        objects.note_past_final(at, role).map_err(|end| EndpointError::ObjectPastFinalObject {
+            alias,
+            group: at.group,
+            object: at.object,
+            final_group: end.group,
+            final_object: end.object,
+        })?;
+        note_existence(&existence, at, role, properties)
+    }
+
+    /// The condition a track was withdrawn for, or `None` for a track this
+    /// endpoint has found nothing wrong with.
+    ///
+    /// # Why this takes a track and not the alias the object carried
+    ///
+    /// An alias only means anything through a live binding, and the withdrawal
+    /// ends the binding it would have been resolved through. An accessor taking
+    /// an alias would therefore answer `None` from the instant it had something
+    /// to say. The record is keyed on the track, and so is this.
+    pub fn malformed_track(
+        &self,
+        namespace: &TrackNamespace,
+        name: &[u8],
+    ) -> Option<MalformedTrackCondition> {
+        self.malformed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .condition(namespace, name)
+    }
+
+    /// Note a track as malformed and name every request through which this
+    /// endpoint is receiving it, so the caller can cancel them.
+    ///
+    /// **This is the whole of what this crate can do here, and the reason is
+    /// structural rather than a shortfall.** Section 12.1 asks a subscriber
+    /// that detects a Malformed Track to "cancel any corresponding subscription
+    /// or fetches for that Track from that publisher", and on this draft
+    /// cancelling a request means resetting the request's own bidirectional
+    /// stream - Section 6.4.2.3. Every request lives at the front of a
+    /// stream of its own, and `Connection::recv_on_request_stream` hands that
+    /// stream to the caller as a `RequestStream`. So the stream this answer
+    /// operates on is not the endpoint's to touch, and no amount of state here
+    /// changes that. What the endpoint can do is say which requests they are.
+    ///
+    /// # Nothing here ends a request
+    ///
+    /// Deliberately, and it is what keeps the answer to one. The flows are read
+    /// and not moved, so a caller that passes each id to
+    /// `Connection::cancel_request_stream` ends the request there - and the
+    /// binding stops being in use, so a second object past the end finds no
+    /// track for the alias and names nothing. The request ending is still what
+    /// closes the loop, exactly as it is on the drafts that answer with a
+    /// message; what changed is which side ends it. A caller that ignores the
+    /// list gets named the same requests again, which is honest: the condition
+    /// really did fire again.
+    ///
+    /// # What is named, and what is not
+    ///
+    /// Requests through which this endpoint *receives* the track: a SUBSCRIBE
+    /// this endpoint sent, a PUBLISH the peer sent, and a fetch this endpoint
+    /// made. A request that makes this endpoint the publisher is not one of
+    /// them. Empty for an alias no live binding names,
+    /// and empty for a track whose only requests are ones this endpoint
+    /// publishes.
+    ///
+    /// Sorted, because a `HashMap` iterates in no order and two requests for
+    /// one track is a shape a peer can produce.
+    pub fn requests_for_malformed_track(
+        &self,
+        alias: u64,
+        condition: MalformedTrackCondition,
+    ) -> Vec<VarInt> {
+        let Some((namespace, name)) = self.track_for_alias(alias) else { return Vec::new() };
+        self.requests_for_malformed_track_named(namespace, name, condition)
+    }
+
+    /// [`Self::requests_for_malformed_track`] for a track named directly, as
+    /// one a FETCH stream found malformed is: the stream names no alias.
+    pub fn requests_for_malformed_track_named(
+        &self,
+        namespace: &TrackNamespace,
+        name: &[u8],
+        condition: MalformedTrackCondition,
+    ) -> Vec<VarInt> {
+        self.malformed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .note(namespace, name, condition);
+        let mut ids: Vec<u64> = self
+            .track_bindings
+            .iter()
+            .filter(|(&id, binding)| {
+                binding.namespace == *namespace
+                    && binding.name == name
+                    && self.binding_is_in_use(id, binding.kind)
+                    && self.receives_through(id, binding.kind)
+            })
+            .map(|(&id, _)| id)
+            .chain(self.fetch_tracks.iter().filter_map(|(&id, track)| {
+                (track.namespace == *namespace
+                    && track.name == name
+                    && self.fetches.get(&id).is_some_and(|sm| sm.state() != FetchState::Done))
+                .then_some(id)
+            }))
+            .collect();
+        ids.sort_unstable();
+        ids.into_iter().filter_map(|id| VarInt::from_u64(id).ok()).collect()
+    }
+
+    /// The conflict a SUBSCRIBE_OK's alias has with the tracks already bound.
+    ///
+    /// Separate from [`Self::conflicting_track_alias`] because the track a
+    /// SUBSCRIBE_OK is about is not in the SUBSCRIBE_OK: it is the one this
+    /// endpoint's own SUBSCRIBE asked for, which is why the request has to be
+    /// looked up before the alias can be judged.
+    fn conflicting_alias_for_subscribe_ok(&self, id: u64, alias: u64) -> Option<EndpointError> {
+        let binding = self.track_bindings.get(&id)?;
+        self.conflicting_track_alias(id, alias, &binding.namespace, &binding.name)
+    }
+
+    pub fn role(&self) -> Role {
+        self.role
+    }
+
+    /// Returns the role of the peer, which is the other one.
+    pub fn peer_role(&self) -> Role {
+        match self.role {
+            Role::Client => Role::Server,
+            Role::Server => Role::Client,
+        }
+    }
+
+    /// Hold a refused update's ending to the status the draft names, and
+    /// retire the obligation once that ending is written.
+    ///
+    /// Both routes to a PUBLISH_DONE come through here. A subscription this
+    /// endpoint accepted is ended by a response on the peer's stream; a PUBLISH
+    /// this endpoint sent is ended on its own, which does not go through the
+    /// response path at all. The rule is the same either way, so it is stated
+    /// once and called twice rather than written where each route happened to
+    /// need it.
+    fn require_update_failure_status(
+        &mut self,
+        id: u64,
+        status_code: VarInt,
+    ) -> Result<(), EndpointError> {
+        if !self.owed_update_failures.contains(&id) {
+            return Ok(());
+        }
+        let required = PublishDoneStatusCode::UpdateFailed as u64;
+        if status_code.into_inner() != required {
+            return Err(EndpointError::WrongUpdateFailureStatus { request: id, required });
+        }
+        self.owed_update_failures.remove(&id);
+        Ok(())
+    }
+
+    /// Whether the peer has sent a REQUEST_UPDATE on this request that has not
+    /// been answered yet.
+    ///
+    /// Draft-23 Section 9.5: "A subscriber can also send REQUEST_UPDATE to
+    /// modify parameters of a subscription established with PUBLISH", and the
+    /// receiver of one "MUST respond with exactly one REQUEST_UPDATE_OK or
+    /// REQUEST_UPDATE_ERROR message indicating if the update was successful",
+    /// which Section 1.5 names for a REQUEST_OK and a REQUEST_ERROR.
+    ///
+    /// Asked by the connection layer, which otherwise writes nothing on a
+    /// stream this endpoint opened. An update the peer sent on a PUBLISH is
+    /// the one thing on such a stream that this endpoint has to answer, and
+    /// this is what tells it apart from a response to its own request.
+    pub fn has_unanswered_update(&self, request_id: VarInt) -> bool {
+        self.unanswered_peer_updates.get(&request_id.into_inner()).is_some_and(|q| !q.is_empty())
+    }
+
+    /// Whether the request `id` names a subscription this endpoint publishes.
+    ///
+    /// Draft-23 Section 9.5.1 gives a refused REQUEST_UPDATE three different
+    /// consequences and picks between them by what was being updated: "When a
+    /// REQUEST_UPDATE is unsuccessful, the publisher MUST also terminate the
+    /// subscription by sending a PUBLISH_DONE with error code UPDATE_FAILED.
+    /// When a REQUEST_UPDATE fails for a FETCH, the publisher MUST reset the
+    /// FETCH data stream. When a REQUEST_UPDATE fails for a SUBSCRIBE_NAMESPACE,
+    /// SUBSCRIBE_TRACKS or PUBLISH_NAMESPACE, the responder MUST close the bidi
+    /// stream (see Section 6.4.2.2)."
+    ///
+    /// Only the first of the three is a message, and only the first is owed
+    /// here. Recording it for the other two is what would hold their streams
+    /// open past the close the third sentence requires.
+    ///
+    /// Two requests leave this endpoint publishing: a SUBSCRIBE the peer sent,
+    /// and a PUBLISH this endpoint sent. Either can carry an update from the
+    /// other side, and either is ended by a PUBLISH_DONE written from here. A
+    /// peer's PUBLISH is neither, because the peer is the publisher on it, and
+    /// it is told apart by having arrived rather than been sent.
+    fn publishes_a_subscription(&self, id: u64) -> bool {
+        matches!(self.inbound_requests.get(&id), Some(ControlMessage::Subscribe(_)))
+            || (self.publishes.contains_key(&id) && !self.inbound_requests.contains_key(&id))
+    }
+
+    /// Whether this request's refused update still owes the peer the
+    /// PUBLISH_DONE that ends it.
+    ///
+    /// Asked by the connection layer, which owns the stream that termination
+    /// has to be written on and therefore has to know not to close it. A
+    /// REQUEST_ERROR answering the request itself ends the exchange and takes
+    /// the stream with it; one answering an update does not, and nothing in
+    /// the message tells the two apart.
+    pub fn owes_update_failure(&self, request_id: VarInt) -> bool {
+        self.owed_update_failures.contains(&request_id.into_inner())
+    }
+
+    pub fn session_state(&self) -> SessionState {
+        self.session.state()
+    }
+
+    pub fn goaway_uri(&self) -> Option<&[u8]> {
+        self.goaway_uri.as_deref()
+    }
+
+    pub fn active_subscription_count(&self) -> usize {
+        self.subscriptions.len()
+    }
+
+    pub fn active_fetch_count(&self) -> usize {
+        self.fetches.len()
+    }
+
+    pub fn active_subscribe_namespace_count(&self) -> usize {
+        self.subscribe_namespaces.len()
+    }
+
+    pub fn active_subscribe_tracks_count(&self) -> usize {
+        self.subscribe_tracks.len()
+    }
+
+    pub fn active_publish_namespace_count(&self) -> usize {
+        self.publish_namespaces.len()
+    }
+
+    pub fn active_track_status_count(&self) -> usize {
+        self.track_statuses.len()
+    }
+
+    pub fn active_publish_count(&self) -> usize {
+        self.publishes.len()
+    }
+
+    /// How many Request IDs the peer has spent on this session.
+    ///
+    /// Nothing here removes an entry, so this only grows. A responder that
+    /// wants a ceiling on peer-created state has to impose one itself — see
+    /// the note on [`receive_request_on_stream`](Self::receive_request_on_stream).
+    pub fn peer_request_count(&self) -> usize {
+        self.peer_request_ids.len()
+    }
+
+    // -- Session lifecycle ------------------------------------------
+
+    pub fn connect(&mut self) -> Result<(), EndpointError> {
+        self.session.on_connect()?;
+        Ok(())
+    }
+
+    pub fn close(&mut self) -> Result<(), EndpointError> {
+        self.session.on_close()?;
+        Ok(())
+    }
+
+    // -- Unified SETUP ----------------------------------------------
+
+    /// Generate a SETUP message. Both client and server use the same message
+    /// type; only the role (and the order of send/receive) distinguishes them.
+    pub fn send_setup(
+        &mut self,
+        options: Vec<KeyValuePair>,
+    ) -> Result<ControlMessage, EndpointError> {
+        let msg = Setup { options };
+        setup::validate_setup(&msg, self.role)?;
+        self.advertised_max_request_updates = setup_varint(&msg.options, MAX_REQUEST_UPDATES);
+        self.advertised_max_filter_ranges = setup_varint(&msg.options, MAX_FILTER_RANGES);
+        Ok(ControlMessage::Setup(msg))
+    }
+
+    /// Process an incoming SETUP message. Transitions the session to Active.
+    pub fn receive_setup(&mut self, msg: &Setup) -> Result<(), EndpointError> {
+        setup::validate_setup(msg, self.peer_role())?;
+        self.session.on_setup_complete()?;
+        Ok(())
+    }
+
+    // -- GoAway -----------------------------------------------------
+
+    pub fn receive_goaway(&mut self, msg: &GoAway) -> Result<(), EndpointError> {
+        // Draft-23 Section 9.2: "If a server receives a GOAWAY with a non-zero New Session URI
+        // Length it MUST close the session with ROLE_VIOLATION." Migration is something a server
+        // offers a
+        // client, never the other way round, so the URI is refused here rather
+        // than stored and later followed.
+        if self.role == Role::Server && !msg.new_session_uri.is_empty() {
+            return Err(self.fail_session(EndpointError::GoAwayUriAtServer));
+        }
+        // Draft-23 Section 9.2: "The endpoint MUST close the session with UNEXPECTED_MESSAGE
+        // (Section 12.2) if it receives more than one GOAWAY on the
+        // control stream or on a single request stream." Draining is reached
+        // from nowhere else - `on_goaway` is its only entry and this method is
+        // that method's only caller - so the session state is the record of
+        // the first GOAWAY having arrived. This is the control-stream half;
+        // the per-stream half is in `receive_goaway_on_request_stream`.
+        if self.session.state() == SessionState::Draining {
+            return Err(self.fail_session(EndpointError::RepeatedGoAway));
+        }
+        self.session.on_goaway()?;
+        self.goaway_uri = Some(msg.new_session_uri.clone());
+        Ok(())
+    }
+
+    /// Record that the session is over because the peer broke a rule the draft
+    /// answers with a session close, and hand the error back unchanged.
+    ///
+    /// The state move is what makes the violation stick: every request entry
+    /// point goes through [`require_active_or_err`](Self::require_active_or_err),
+    /// so a caller that ignores the returned error still cannot start anything
+    /// new. The close on the wire is the connection layer's job — see
+    /// [`EndpointError::session_error_code`] for the code it should use.
+    fn fail_session(&mut self, err: EndpointError) -> EndpointError {
+        // `on_close` accepts SetupExchange, Active and Draining. A violation
+        // seen in Connecting or Closed leaves the state machine alone: there
+        // is no session to close, and the error itself is still the answer.
+        //
+        // SetupExchange is in that set because the Termination section says
+        // "The Transport Session can be terminated at any point", and the
+        // Setup exchange is a point. So a violation caught while the setup is
+        // still in flight does close the session, and the discarded result is
+        // safe because that is one of the states `on_close` accepts.
+        let _ = self.session.on_close();
+        err
+    }
+
+    fn require_active_or_err(&self) -> Result<(), EndpointError> {
+        match self.session.state() {
+            SessionState::Active => Ok(()),
+            SessionState::Draining => Err(EndpointError::Draining),
+            _ => Err(EndpointError::NotActive),
+        }
+    }
+
+    // -- Subscribe flow ---------------------------------------------
+
+    pub fn subscribe(
+        &mut self,
+        track_namespace: TrackNamespace,
+        track_name: Vec<u8>,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        self.require_active_or_err()?;
+        let req_id = self.request_ids.allocate()?;
+
+        let mut sm = SubscriptionStateMachine::new();
+        sm.on_subscribe_sent()?;
+        self.subscriptions.insert(req_id.into_inner(), sm);
+        // Section 9.19.15: "A fill fetch stream is opened only when
+        // FILL_PARAMETERS is present." Noted so that the FETCH_HEADER the publisher
+        // opens next — which carries this SUBSCRIBE's Request ID, not a
+        // fetch's — can be attributed to this subscription rather than
+        // answered with "unknown request".
+        self.note_fill_requested(req_id.into_inner(), &parameters);
+        // The track is recorded here because this is the only place it is
+        // known: a SUBSCRIBE_OK names an alias and not the track it is for.
+        self.track_bindings.insert(
+            req_id.into_inner(),
+            TrackBinding {
+                namespace: track_namespace.clone(),
+                name: track_name.clone(),
+                alias: None,
+                kind: BindingKind::Subscribe,
+            },
+        );
+
+        let msg = ControlMessage::Subscribe(Subscribe {
+            request_id: req_id,
+            track_namespace,
+            track_name,
+            parameters,
+        });
+        Ok((req_id, msg))
+    }
+
+    /// Process an incoming SUBSCRIBE_OK. Draft-23: no request_id on wire; the
+    /// caller supplies the `request_id` of the bidi stream on which the
+    /// response arrived.
+    pub fn receive_subscribe_ok(
+        &mut self,
+        request_id: VarInt,
+        msg: &SubscribeOk,
+    ) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        if !self.subscriptions.contains_key(&id) {
+            return Err(EndpointError::UnknownRequest(id));
+        }
+        let alias = msg.track_alias.into_inner();
+        // Judged before the transition, so that the subscription this message
+        // is about is not yet Established and cannot be found as its own
+        // conflict, and so that a refused SUBSCRIBE_OK leaves no alias behind.
+        if let Some(conflict) = self.conflicting_alias_for_subscribe_ok(id, alias) {
+            return Err(self.fail_session(conflict));
+        }
+        let sm = self.subscriptions.get_mut(&id).expect("checked above");
+        sm.on_subscribe_ok()?;
+        if let Some(binding) = self.track_bindings.get_mut(&id) {
+            binding.alias = Some(alias);
+        }
+        Ok(())
+    }
+
+    /// Take one of the REQUEST_UPDATE credits this endpoint advertised for
+    /// `id`'s stream.
+    ///
+    /// Section 9.1.7 puts the limit on the number *outstanding*, so the
+    /// count is a running balance rather than a total: it goes up on each
+    /// REQUEST_UPDATE received and down on each REQUEST_OK or REQUEST_ERROR
+    /// this endpoint writes back, and a peer that keeps pace never reaches the
+    /// ceiling however many updates it sends.
+    ///
+    /// # Errors
+    ///
+    /// [`EndpointError::TooManyRequestUpdates`], which answers
+    /// `Some(TooManyRequestUpdates)` - its own close code - and the session is failed before it
+    /// returns.
+    fn spend_update_credit(&mut self, id: u64) -> Result<(), EndpointError> {
+        let limit = self.advertised_max_request_updates;
+        if limit == 0 {
+            return Ok(());
+        }
+        let outstanding = self.outstanding_peer_updates.entry(id).or_insert(0);
+        if *outstanding >= limit {
+            return Err(self.fail_session(EndpointError::TooManyRequestUpdates(id, limit)));
+        }
+        *outstanding += 1;
+        Ok(())
+    }
+
+    /// Give back the credit a REQUEST_OK or REQUEST_ERROR restores.
+    ///
+    /// Called for every response this endpoint writes, whether or not the
+    /// stream ever carried an update: a stream with no outstanding updates has
+    /// nothing to restore and the saturating subtraction says so, which is
+    /// cheaper than deciding first whether the response is answering an update
+    /// or the original request.
+    fn restore_update_credit(&mut self, id: u64) {
+        if let Some(outstanding) = self.outstanding_peer_updates.get_mut(&id) {
+            *outstanding = outstanding.saturating_sub(1);
+        }
+    }
+
+    /// Process a REQUEST_UPDATE that arrived on the bidi request stream
+    /// identified by `request_id`.
+    ///
+    /// Draft-23 Section 9.5: "The sender of a request (SUBSCRIBE, PUBLISH,
+    /// FETCH, PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS) can
+    /// later send a REQUEST_UPDATE on the same bidi stream as the request to
+    /// modify it. A subscriber can also send REQUEST_UPDATE to modify
+    /// parameters of a subscription established with PUBLISH." Anything else
+    /// "MUST close the session with UNEXPECTED_MESSAGE", which is what
+    /// [`EndpointError::UnexpectedRequestUpdate`] carries — TRACK_STATUS most
+    /// of all, since Section 9.12 says outright that "the subscriber cannot
+    /// send REQUEST_UPDATE".
+    ///
+    /// The message carries a Request ID of its own and the stream carries one
+    /// too. They name the same request when the peer is conforming; a
+    /// disagreement means the update was sent on a stream that is not its
+    /// request's, which is the same violation, so it is refused rather than
+    /// silently resolved to one of the two.
+    ///
+    /// Only SUBSCRIBE-established subscriptions have a state-machine event for
+    /// this. That is not an omission: an update changes a request's parameters
+    /// and not its lifecycle, so for the other five kinds the update is a
+    /// self-transition with nothing to record.
+    pub fn receive_request_update(
+        &mut self,
+        request_id: VarInt,
+        msg: &RequestUpdate,
+    ) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        if msg.request_id.into_inner() != id {
+            return Err(self.fail_session(EndpointError::UnexpectedRequestUpdate(
+                msg.request_id.into_inner(),
+            )));
+        }
+        self.spend_update_credit(id)?;
+        // The two cases are about who is sending, and only one of them is
+        // about which request. Case one is the peer updating a request the
+        // peer made, whatever its kind; case two is a subscriber updating a
+        // subscription this endpoint established with PUBLISH. A SUBSCRIBE, a
+        // FETCH or a namespace request this endpoint made is in neither, and
+        // an update on one is a violation rather than a request to apply.
+        //
+        // They are not symmetrical about timing either. Case one allows an
+        // update "later" and says nothing about the answer, so a request of
+        // the peer's may be updated before this endpoint has answered it.
+        // Case two rests on the subscription existing, and Section 3.1 says
+        // when it does: "Once either of these sequences is successful, the
+        // subscription moves to the Established state and can be updated by
+        // the subscriber using REQUEST_UPDATE." A PUBLISH still waiting for
+        // its answer is Pending, and an update on one is outside both cases.
+        //
+        // Checked before the state machine below moves, so a session that is
+        // closing does not leave a subscription updated on the way out.
+        let one_of_the_two_cases = self.inbound_requests.contains_key(&id)
+            || self.binding_is_established(id, BindingKind::Publish);
+        if !one_of_the_two_cases {
+            return Err(self.fail_session(EndpointError::UnexpectedRequestUpdate(id)));
+        }
+        let updatable = if let Some(sm) = self.subscriptions.get_mut(&id) {
+            sm.on_subscribe_update()?;
+            true
+        } else {
+            self.publishes.contains_key(&id)
+                || self.fetches.contains_key(&id)
+                || self.subscribe_namespaces.contains_key(&id)
+                || self.subscribe_tracks.contains_key(&id)
+                || self.publish_namespaces.contains_key(&id)
+        };
+        if !updatable {
+            return Err(self.fail_session(EndpointError::UnexpectedRequestUpdate(id)));
+        }
+        // Section 9.5: "A receiver MUST NOT coalesce a REQUEST_UPDATE
+        // containing a parameter whose definition prohibits coalescing."
+        // Sections 9.19.15 and 9.19.20 prohibit it for FILL_PARAMETERS and
+        // TRACK_NAMESPACE_PREFIX.
+        let coalescable = !msg.parameters.iter().any(|p| {
+            let key = p.key.into_inner();
+            key == FILL_PARAMETERS || key == TRACK_NAMESPACE_PREFIX
+        });
+        self.unanswered_peer_updates.entry(id).or_default().push_back(coalescable);
+
+        // Section 3.4.1: "A publisher opens a fill fetch stream when it processes a SUBSCRIBE or
+        // REQUEST_UPDATE, or sends a PUBLISH, that carries FILL_PARAMETERS
+        // while the subscription is not paused", and "A REQUEST_UPDATE that
+        // does not carry FILL_PARAMETERS does not open a new fill fetch
+        // stream." So an update is the second place a fill can be asked for,
+        // and the only place a second one can. The pause half of that sentence
+        // is the publisher's decision about whether to open the stream, not
+        // this endpoint's about whether a stream is attributable, so it is not
+        // applied here: a fill fetch stream that arrives is one to account
+        // for, whatever this endpoint thought the subscription's state was.
+        self.note_fill_requested(id, &msg.parameters);
+
+        // The ceiling is on what the request carries after the update, so the
+        // update is merged into the set in force and the whole set measured.
+        // Recorded rather than refused for the reason the request itself is:
+        // the answer is a REQUEST_ERROR, which names a Request ID.
+        let mut in_force = self.peer_request_filters.remove(&id).unwrap_or_default();
+        apply_filter_update(&mut in_force, &msg.parameters);
+        if let Some(rejection) = self.filter_verdict(&in_force) {
+            self.peer_filter_rejections.insert(id, rejection);
+        }
+        self.peer_request_filters.insert(id, in_force);
+
+        // Section 9.5.2: "A subscriber can update the Track Namespace Prefix of
+        // an established SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS by including
+        // the TRACK_NAMESPACE_PREFIX parameter (Section 9.19.20) in a
+        // REQUEST_UPDATE." Held until the update is answered.
+        if let Some(prefix) = updated_prefix(&msg.parameters) {
+            if matches!(
+                self.inbound_requests.get(&id),
+                Some(ControlMessage::SubscribeNamespace(_) | ControlMessage::SubscribeTracks(_))
+            ) {
+                self.updated_namespace_prefixes.insert(id, prefix);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn receive_publish_done(
+        &mut self,
+        request_id: VarInt,
+        _msg: &PublishDone,
+    ) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        let sm = self.subscriptions.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+        sm.on_publish_done()?;
+        Ok(())
+    }
+
+    /// Process a PUBLISH_STATE_NOTIFY that arrived on the subscription's bidi
+    /// request stream (Section 9.10).
+    ///
+    /// # Nothing here moves, and that is the message
+    ///
+    /// "This message is informative and no action is required by the
+    /// recipient." It reports that the subscription's state changed for a
+    /// reason other than a REQUEST_UPDATE the subscriber sent, carries only the
+    /// parameters whose values changed, and gets **no reply**: unlike a
+    /// REQUEST_UPDATE it is "a unilateral notification: the receiver does not
+    /// respond with REQUEST_OK or REQUEST_ERROR, and the message is not subject
+    /// to the MAX_REQUEST_UPDATES limit". So this spends no update credit and
+    /// leaves nothing owed — a notify routed through
+    /// [`receive_request_update`](Self::receive_request_update) instead would
+    /// consume a credit the peer never spent and leave this endpoint owing an
+    /// answer that must not be sent.
+    ///
+    /// What the parameters mean is the caller's: the values changed at the
+    /// publisher, and the publisher "MUST include the LARGEST_OBJECT parameter"
+    /// — if known — "so the subscriber can determine the point in the Track at
+    /// which the change took effect". A message that omits it is still a
+    /// well-formed frame, so nothing here refuses one.
+    ///
+    /// # Errors
+    ///
+    /// [`EndpointError::StateNotifyForNonSubscription`] when `request_id` names
+    /// something other than a subscription, and
+    /// [`EndpointError::StateNotifyFromSubscriber`] when it names a
+    /// subscription on which this endpoint is the publisher rather than the
+    /// subscriber. Section 9.10 answers both with a session close, and both
+    /// are returned after this endpoint's own session state has moved to
+    /// Closed.
+    pub fn receive_publish_state_notify(
+        &mut self,
+        request_id: VarInt,
+        _msg: &PublishStateNotify,
+    ) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        // The two ways a subscription exists, from Section 3.1: this endpoint
+        // sent a SUBSCRIBE, or the peer sent a PUBLISH. Either way the peer is
+        // the publisher, which is the sender this section permits. A
+        // subscription the peer opened with a SUBSCRIBE makes this endpoint the
+        // publisher, and a notify on it came from the subscriber.
+        let ours = self.subscriptions.contains_key(&id) && !self.inbound_requests.contains_key(&id);
+        let peers_publish =
+            self.publishes.contains_key(&id) && self.inbound_requests.contains_key(&id);
+        if ours || peers_publish {
+            return Ok(());
+        }
+        let a_subscription =
+            self.subscriptions.contains_key(&id) || self.publishes.contains_key(&id);
+        let err = if a_subscription {
+            EndpointError::StateNotifyFromSubscriber(id)
+        } else {
+            EndpointError::StateNotifyForNonSubscription(id)
+        };
+        Err(self.fail_session(err))
+    }
+
+    // -- Fetch flow -------------------------------------------------
+
+    /// Send a FETCH.
+    ///
+    /// Draft-23 Section 9.11 has no `Fetch Type` field; the Track Namespace
+    /// and the Track Name are inline fields, and **the range travels in the
+    /// `LOCATION_FILTER` parameter** (Section 3.3.1) rather than in the
+    /// message. So this takes the same three arguments
+    /// [`subscribe`](Self::subscribe) does, and the range is something the
+    /// caller puts in `parameters` — see [`fetch_range`](Self::fetch_range),
+    /// which does it.
+    ///
+    /// A FETCH with no `LOCATION_FILTER` covers `{0,0}` through Largest Object,
+    /// inclusive.
+    ///
+    /// `parameters` are the request's own, as they are on every other request
+    /// this endpoint makes.
+    pub fn fetch(
+        &mut self,
+        track_namespace: TrackNamespace,
+        track_name: Vec<u8>,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        self.require_active_or_err()?;
+        let req_id = self.request_ids.allocate()?;
+
+        let mut sm = FetchStateMachine::new();
+        sm.on_fetch_sent()?;
+        self.fetches.insert(req_id.into_inner(), sm);
+        // Before the two of them are moved into the message below: a fetch
+        // that has left no track behind is one no withdrawal can name.
+        self.fetch_tracks.insert(
+            req_id.into_inner(),
+            FetchTrack {
+                namespace: track_namespace.clone(),
+                name: track_name.clone(),
+                range_filtered: !range_filter_parameters(&parameters).is_empty(),
+            },
+        );
+
+        let msg = ControlMessage::Fetch(Fetch {
+            request_id: req_id,
+            track_namespace,
+            track_name,
+            parameters,
+        });
+        Ok((req_id, msg))
+    }
+
+    /// Send a FETCH for one range, carried as a `LOCATION_FILTER` parameter.
+    ///
+    /// [`fetch`](Self::fetch) with the filter put into `parameters` at the
+    /// position ascending Parameter Type order requires. The convenience is
+    /// worth a method because Section 9.19 makes that order a wire rule and the
+    /// codec's encoder refuses a descending pair rather than emitting one.
+    ///
+    /// **The range is inclusive at both ends** (Sections 3.2 and 3.3.1), and
+    /// nothing here adds or subtracts one. [`LocationFilter`] carries the same
+    /// warning at each constructor.
+    pub fn fetch_range(
+        &mut self,
+        track_namespace: TrackNamespace,
+        track_name: Vec<u8>,
+        range: &LocationFilter,
+        mut parameters: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        let filter = range.parameter()?;
+        fill::insert_parameter(&mut parameters, filter);
+        self.fetch(track_namespace, track_name, parameters)
+    }
+
+    // -- Fill fetch streams -----------------------------------------
+    //
+    // Draft-23 Sections 3.4 and 3.4.1, which take the place of
+    // the joining fetch. There is no message here and no state machine: a fill
+    // is asked for by a parameter on a SUBSCRIBE or a REQUEST_UPDATE, answered
+    // by a unidirectional stream, and ended by that stream being finished or
+    // reset.
+
+    /// Note that the request under `request_id` asked for a fill fetch stream.
+    ///
+    /// Called for this endpoint's own requests and for the peer's alike, from
+    /// wherever a SUBSCRIBE or a REQUEST_UPDATE carrying `FILL_PARAMETERS`
+    /// passes through, so both ends of a session can attribute the stream that
+    /// follows.
+    ///
+    /// The Group Order the fill will be read in is resolved here rather than
+    /// when the stream arrives, because this is the last place the request's
+    /// parameters are in hand: a FETCH_HEADER carries a Request ID and nothing
+    /// else. See [`fill::group_order`] for the three-step resolution and for
+    /// why an unstated order is Ascending. A value the resolver refuses cannot
+    /// come off the wire — the codec holds a received `GROUP_ORDER` to
+    /// `{1, 2}` before this sees it — so the fallback here is the same
+    /// Ascending default rather than an error this entry point has no way to
+    /// report.
+    fn note_fill_requested(&mut self, request_id: u64, parameters: &[KeyValuePair]) {
+        if !parameters.iter().any(|p| p.key.into_inner() == FILL_PARAMETERS) {
+            return;
+        }
+        let group_order = fill::group_order(parameters).unwrap_or(GroupOrder::Ascending);
+        let entry =
+            self.fills.entry(request_id).or_insert(FillStreams { open: 0, opened: 0, group_order });
+        entry.group_order = group_order;
+    }
+
+    /// Whether the request under `request_id` has asked for a fill fetch
+    /// stream.
+    ///
+    /// This is what tells an arriving FETCH_HEADER apart from a fetch's.
+    /// Section 3.4 puts the *subscription's* Request ID on a fill fetch
+    /// stream's header, so a reader that knew only about fetches would answer a
+    /// perfectly ordinary fill with "unknown request".
+    pub fn fill_requested(&self, request_id: VarInt) -> bool {
+        self.fills.contains_key(&request_id.into_inner())
+    }
+
+    /// How many of this subscription's fill fetch streams are open.
+    pub fn open_fill_streams(&self, request_id: VarInt) -> usize {
+        self.fills.get(&request_id.into_inner()).map_or(0, |f| f.open)
+    }
+
+    /// How many fill fetch streams this subscription has opened in total,
+    /// ended or not.
+    ///
+    /// Section 9.9 makes PUBLISH_DONE's Stream Count the total the publisher
+    /// opened for the subscription, "including streams that contained no
+    /// Objects (e.g., an empty Subgroup) and including any fill fetch streams".
+    pub fn fill_streams_opened(&self, request_id: VarInt) -> u64 {
+        self.fills.get(&request_id.into_inner()).map_or(0, |f| f.opened)
+    }
+
+    /// The Group Order this subscription's fill fetch streams deliver in, or
+    /// `None` if it never asked for a fill.
+    ///
+    /// What [`accept_fill_stream`](crate::draft23::connection::Connection::accept_fill_stream)
+    /// starts the arriving stream's object reader with. Resolved once, from the
+    /// request's own parameters, by [`fill::group_order`] — see there for the
+    /// order of precedence and for why an unstated order is Ascending.
+    pub fn fill_group_order(&self, request_id: VarInt) -> Option<GroupOrder> {
+        self.fills.get(&request_id.into_inner()).map(|f| f.group_order)
+    }
+
+    /// Record a fill fetch stream opening for `request_id`.
+    ///
+    /// Section 3.4: "a subscription can have multiple fill fetch streams open
+    /// at once", and "opening a new fill fetch stream does not implicitly
+    /// cancel any previously opened fill fetch streams", so this counts rather
+    /// than replaces.
+    ///
+    /// # Errors
+    ///
+    /// [`EndpointError::UnrequestedFillStream`] when the request never carried
+    /// `FILL_PARAMETERS`. Not fatal to the session — see the variant.
+    pub fn on_fill_stream_opened(&mut self, request_id: VarInt) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        let Some(fill) = self.fills.get_mut(&id) else {
+            return Err(EndpointError::UnrequestedFillStream(id));
+        };
+        fill.open += 1;
+        fill.opened += 1;
+        Ok(())
+    }
+
+    /// Record a fill fetch stream ending, whether by FIN or by reset.
+    ///
+    /// One entry point for both endings on purpose. Section 3.4.1 gives them
+    /// different meanings to the application — a FIN says the fill range was
+    /// delivered, a reset says the fill failed — and the same meaning to the
+    /// subscription, which is none: "Resetting or cancelling a fill fetch
+    /// stream, by either endpoint, does not affect the subscription, which
+    /// continues to deliver objects using subscribe subgroups and datagrams."
+    /// Nothing here touches the subscription's state machine, and that is the
+    /// point.
+    ///
+    /// A stream this endpoint never saw open is ignored rather than refused: a
+    /// reset can arrive for a stream whose header was never read.
+    pub fn on_fill_stream_ended(&mut self, request_id: VarInt) {
+        if let Some(fill) = self.fills.get_mut(&request_id.into_inner()) {
+            fill.open = fill.open.saturating_sub(1);
+        }
+    }
+
+    pub fn on_fetch_stream_fin(&mut self, request_id: VarInt) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        let sm = self.fetches.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+        sm.on_stream_fin()?;
+        Ok(())
+    }
+
+    pub fn on_fetch_stream_reset(&mut self, request_id: VarInt) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        let sm = self.fetches.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+        sm.on_stream_reset()?;
+        Ok(())
+    }
+
+    // -- Subscribe Namespace flow -----------------------------------
+
+    pub fn subscribe_namespace(
+        &mut self,
+        namespace_prefix: TrackNamespace,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        self.require_active_or_err()?;
+        let req_id = self.request_ids.allocate()?;
+
+        let mut sm = SubscribeNamespaceStateMachine::new();
+        sm.on_subscribe_namespace_sent()?;
+        self.subscribe_namespaces.insert(req_id.into_inner(), sm);
+
+        let msg = ControlMessage::SubscribeNamespace(SubscribeNamespace {
+            request_id: req_id,
+            namespace_prefix,
+            parameters,
+        });
+        Ok((req_id, msg))
+    }
+
+    // // -- Subscribe Tracks flow ---------------------------------------
+
+    pub fn subscribe_tracks(
+        &mut self,
+        namespace_prefix: TrackNamespace,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        self.require_active_or_err()?;
+        let req_id = self.request_ids.allocate()?;
+
+        // Reuse the SubscribeNamespace state machine — the lifecycle is the
+        // same (request → ok/error → done) and adding a parallel state
+        // machine purely to disambiguate would be churn.
+        let mut sm = SubscribeNamespaceStateMachine::new();
+        sm.on_subscribe_namespace_sent()?;
+        self.subscribe_tracks.insert(req_id.into_inner(), sm);
+
+        let msg = ControlMessage::SubscribeTracks(SubscribeTracks {
+            request_id: req_id,
+            namespace_prefix,
+            parameters,
+        });
+        Ok((req_id, msg))
+    }
+
+    // -- Publish Namespace flow -------------------------------------
+
+    pub fn publish_namespace(
+        &mut self,
+        track_namespace: TrackNamespace,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        self.require_active_or_err()?;
+        let req_id = self.request_ids.allocate()?;
+
+        let mut sm = PublishNamespaceStateMachine::new();
+        sm.on_publish_namespace_sent()?;
+        self.publish_namespaces.insert(req_id.into_inner(), sm);
+
+        let msg = ControlMessage::PublishNamespace(PublishNamespace {
+            request_id: req_id,
+            track_namespace,
+            parameters,
+        });
+        Ok((req_id, msg))
+    }
+
+    // -- Track Status flow ------------------------------------------
+
+    pub fn track_status(
+        &mut self,
+        track_namespace: TrackNamespace,
+        track_name: Vec<u8>,
+        parameters: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        self.require_active_or_err()?;
+        let req_id = self.request_ids.allocate()?;
+        let mut sm = TrackStatusStateMachine::new();
+        sm.on_track_status_sent()?;
+        self.track_statuses.insert(req_id.into_inner(), sm);
+
+        let msg = ControlMessage::TrackStatus(message::TrackStatus {
+            request_id: req_id,
+            track_namespace,
+            track_name,
+            parameters,
+        });
+        Ok((req_id, msg))
+    }
+
+    // -- Publish flow (publisher side) ------------------------------
+
+    pub fn publish(
+        &mut self,
+        track_namespace: TrackNamespace,
+        track_name: Vec<u8>,
+        track_alias: VarInt,
+        parameters: Vec<KeyValuePair>,
+        track_properties: Vec<KeyValuePair>,
+    ) -> Result<(VarInt, ControlMessage), EndpointError> {
+        self.require_active_or_err()?;
+        // Section 3.1.3: "The same Track Alias MUST NOT be used by a publisher to refer to
+        // two different Tracks simultaneously in the same session." Refused before the
+        // Request ID is allocated, so a refusal spends nothing.
+        let alias = track_alias.into_inner();
+        if let Some(refusal) = self.alias_held_elsewhere(alias, &track_namespace, &track_name) {
+            return Err(refusal);
+        }
+        let req_id = self.request_ids.allocate()?;
+        let mut sm = PublishStateMachine::new();
+        sm.on_publish_sent()?;
+        self.publishes.insert(req_id.into_inner(), sm);
+        // The alias and the track travel together in a PUBLISH, so the binding
+        // is complete the moment the message is built.
+        self.track_bindings.insert(
+            req_id.into_inner(),
+            TrackBinding {
+                namespace: track_namespace.clone(),
+                name: track_name.clone(),
+                alias: Some(alias),
+                kind: BindingKind::Publish,
+            },
+        );
+
+        let msg = ControlMessage::Publish(Publish {
+            request_id: req_id,
+            track_namespace,
+            track_name,
+            track_alias,
+            parameters,
+            track_properties,
+        });
+        Ok((req_id, msg))
+    }
+
+    pub fn send_publish_done(
+        &mut self,
+        request_id: VarInt,
+        status_code: VarInt,
+        stream_count: VarInt,
+        reason_phrase: Vec<u8>,
+    ) -> Result<ControlMessage, EndpointError> {
+        let id = request_id.into_inner();
+        // Before the state machine moves, so an ending under the wrong status
+        // leaves the publication where it was. A PUBLISH this endpoint sent is
+        // ended here rather than through the response path, and a refused
+        // update on it owes the same ending as one on a peer's SUBSCRIBE.
+        self.require_update_failure_status(id, status_code)?;
+        let sm = self.publishes.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+        sm.on_publish_done_sent()?;
+        Ok(ControlMessage::PublishDone(PublishDone { status_code, stream_count, reason_phrase }))
+    }
+
+    // -- Consolidated responses (per-bidi-stream routing) -----------
+
+    /// Process an incoming REQUEST_OK on the bidi stream identified by
+    /// `request_id`. Draft-23: PUBLISH_OK is a REQUEST_OK alias, so this
+    /// handler also resolves outstanding PUBLISH requests.
+    ///
+    /// # Track Properties are refused except on TRACK_STATUS_OK
+    ///
+    /// Draft-23 Section 9.3: Track Properties "are populated in TRACK_STATUS_OK and FETCH_OK; they
+    /// are empty in PUBLISH_OK, REQUEST_UPDATE_OK,
+    /// SUBSCRIBE_NAMESPACE_OK and PUBLISH_NAMESPACE_OK. If an endpoint
+    /// receives Track Properties in one of these messages it MUST close the session with
+    /// INVALID_FIELD." The codec cannot make that check —
+    /// REQUEST_OK is one wire form and only the request stream says which of
+    /// the five shapes it is. This is the layer that knows, because finding
+    /// the request id in one of the maps below is what names the shape.
+    pub fn receive_request_ok(
+        &mut self,
+        request_id: VarInt,
+        msg: &RequestOk,
+    ) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        let kind = self.request_ok_kind(request_id);
+        if !msg.track_properties.is_empty() && !kind.is_some_and(|k| k.allows_track_properties()) {
+            return Err(self.fail_session(EndpointError::TrackPropertiesOnNonTrackStatus(id)));
+        }
+        // Draft-23 Section 1.5: FETCH_OK is "a REQUEST_OK sent in response to"
+        // a FETCH. Only the first REQUEST_OK on the stream answers the FETCH.
+        if let Some(sm) = self.fetches.get_mut(&id) {
+            sm.on_fetch_ok()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.publishes.get_mut(&id) {
+            sm.on_publish_ok()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.subscribe_namespaces.get_mut(&id) {
+            sm.on_subscribe_namespace_ok()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.subscribe_tracks.get_mut(&id) {
+            sm.on_subscribe_namespace_ok()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.publish_namespaces.get_mut(&id) {
+            sm.on_publish_namespace_ok()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.track_statuses.get_mut(&id) {
+            sm.on_track_status_ok()?;
+            return Ok(());
+        }
+        Err(EndpointError::UnknownRequest(id))
+    }
+
+    /// Which response a REQUEST_OK on the stream of request `request_id`, a
+    /// request this endpoint made, would be.
+    ///
+    /// Draft-23 Section 1.5: "This document uses the shorthand PUBLISH_OK,
+    /// FETCH_OK, REQUEST_UPDATE_OK, TRACK_STATUS_OK, SUBSCRIBE_NAMESPACE_OK,
+    /// SUBSCRIBE_TRACKS_OK and PUBLISH_NAMESPACE_OK to refer to a REQUEST_OK
+    /// sent in response to the corresponding request type." The frame does not
+    /// say which, so the request's state does: a request still waiting for its
+    /// answer is answered by this one, and a later REQUEST_OK can only answer a
+    /// REQUEST_UPDATE (Section 9.5). A SUBSCRIBE is answered by SUBSCRIBE_OK,
+    /// so a REQUEST_OK on its stream is always REQUEST_UPDATE_OK.
+    ///
+    /// `None` for a request this endpoint has no record of.
+    pub fn request_ok_kind(&self, request_id: VarInt) -> Option<RequestOkKind> {
+        let id = request_id.into_inner();
+        if let Some(sm) = self.fetches.get(&id) {
+            return Some(if sm.state() == FetchState::Pending {
+                RequestOkKind::Fetch
+            } else {
+                RequestOkKind::RequestUpdate
+            });
+        }
+        if let Some(sm) = self.publishes.get(&id) {
+            return Some(if sm.state() == PublishState::Publishing {
+                RequestOkKind::Publish
+            } else {
+                RequestOkKind::RequestUpdate
+            });
+        }
+        if let Some(sm) = self.subscribe_namespaces.get(&id) {
+            return Some(if sm.state() == SubscribeNamespaceState::Pending {
+                RequestOkKind::SubscribeNamespace
+            } else {
+                RequestOkKind::RequestUpdate
+            });
+        }
+        if let Some(sm) = self.subscribe_tracks.get(&id) {
+            return Some(if sm.state() == SubscribeNamespaceState::Pending {
+                RequestOkKind::SubscribeTracks
+            } else {
+                RequestOkKind::RequestUpdate
+            });
+        }
+        if let Some(sm) = self.publish_namespaces.get(&id) {
+            return Some(if sm.state() == PublishNamespaceState::Pending {
+                RequestOkKind::PublishNamespace
+            } else {
+                RequestOkKind::RequestUpdate
+            });
+        }
+        if self.track_statuses.contains_key(&id) {
+            return Some(RequestOkKind::TrackStatus);
+        }
+        if self.subscriptions.contains_key(&id) {
+            return Some(RequestOkKind::RequestUpdate);
+        }
+        None
+    }
+
+    /// Process an incoming REQUEST_ERROR on the bidi stream identified by
+    /// `request_id`.
+    pub fn receive_request_error(
+        &mut self,
+        request_id: VarInt,
+        msg: &RequestError,
+    ) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        // Draft-23 Section 9.4.2: receivers "MUST ignore a known Error Detail
+        // type that accompanies an Error Code it is not defined for", and the
+        // REDIRECT detail accompanies Error Code REDIRECT alone (Section
+        // 9.4.2.1). The codec has already refused a REDIRECT without one, or
+        // one that does not decode.
+        let redirect = (msg.error_code.into_inner() == RequestErrorCode::Redirect as u64)
+            .then(|| msg.redirect())
+            .flatten()
+            .and_then(Result::ok);
+        if let Some(redirect) = &redirect {
+            // Draft-23 Section 9.4.2.1: "If a server receives a Redirect with a
+            // non-zero Connect URI Length it MUST close the session with
+            // ROLE_VIOLATION."
+            if self.role == Role::Server && !redirect.connect_uri.is_empty() {
+                return Err(self.fail_session(EndpointError::RedirectUriAtServer));
+            }
+            // Same section: "Track Name is not meaningful for namespace-scoped
+            // requests (SUBSCRIBE_NAMESPACE, PUBLISH_NAMESPACE,
+            // SUBSCRIBE_TRACKS) and MUST be empty; an endpoint that receives a
+            // non-empty Track Name in a Redirect for a namespace-scoped request
+            // MUST close the session with INVALID_FIELD." Which request this
+            // answers is known only here, from the map the stream's id is in.
+            let namespace_scoped = self.subscribe_namespaces.contains_key(&id)
+                || self.subscribe_tracks.contains_key(&id)
+                || self.publish_namespaces.contains_key(&id);
+            if namespace_scoped && !redirect.track_name.is_empty() {
+                return Err(
+                    self.fail_session(EndpointError::RedirectTrackNameOnNamespaceRequest(id))
+                );
+            }
+        }
+        if let Some(sm) = self.subscriptions.get_mut(&id) {
+            sm.on_subscribe_error()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.fetches.get_mut(&id) {
+            sm.on_fetch_error()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.publishes.get_mut(&id) {
+            sm.on_publish_error()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.subscribe_namespaces.get_mut(&id) {
+            sm.on_subscribe_namespace_error()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.subscribe_tracks.get_mut(&id) {
+            sm.on_subscribe_namespace_error()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.publish_namespaces.get_mut(&id) {
+            sm.on_publish_namespace_error()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.track_statuses.get_mut(&id) {
+            sm.on_track_status_error()?;
+            return Ok(());
+        }
+        Err(EndpointError::UnknownRequest(id))
+    }
+
+    /// Record that a request was cancelled at its stream.
+    ///
+    /// This draft withdraws a request by terminating the bidirectional stream
+    /// it was made on rather than by sending a message. Section 6.4.2.3: "Once
+    /// a request stream has been opened, the request MAY be cancelled by either
+    /// endpoint. Senders cancel requests if the response is no longer of
+    /// interest; Receivers cancel requests if they are unable to or choose not
+    /// to respond."
+    ///
+    /// Both of those reach here. A request the peer opened and one this
+    /// endpoint opened share a map and cannot collide, because their Request
+    /// IDs have opposite least significant bits, so one method records a cancel
+    /// from whichever side performed it.
+    ///
+    /// The request moves to its end state, which is what makes the record worth
+    /// keeping: a response arriving afterwards is refused rather than applied to
+    /// a request that is over. The Request ID is not released — nothing here
+    /// reuses one — and the per-request bookkeeping keyed by it is left alone,
+    /// since a cancelled request's stream carries nothing more.
+    ///
+    /// Nothing is written on the wire. The reset that goes with this is
+    /// [`Connection::cancel_request_stream`], which calls this first and
+    /// terminates the stream only if it returns `Ok`.
+    ///
+    /// # Errors
+    ///
+    /// [`EndpointError::UnknownRequest`] when no request of any kind carries
+    /// that id, and the kind's own `InvalidTransition` when the request has not
+    /// been written yet.
+    ///
+    /// [`Connection::cancel_request_stream`]: crate::draft23::connection::Connection::cancel_request_stream
+    pub fn cancel_request(&mut self, request_id: VarInt) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        if let Some(sm) = self.subscriptions.get_mut(&id) {
+            sm.on_request_cancelled()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.fetches.get_mut(&id) {
+            sm.on_request_cancelled()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.publishes.get_mut(&id) {
+            sm.on_request_cancelled()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.subscribe_namespaces.get_mut(&id) {
+            sm.on_request_cancelled()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.subscribe_tracks.get_mut(&id) {
+            sm.on_request_cancelled()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.publish_namespaces.get_mut(&id) {
+            sm.on_request_cancelled()?;
+            return Ok(());
+        }
+        if let Some(sm) = self.track_statuses.get_mut(&id) {
+            sm.on_request_cancelled()?;
+            return Ok(());
+        }
+        Err(EndpointError::UnknownRequest(id))
+    }
+
+    // -- PublishSkipped / Namespace announcements -------------------
+
+    pub fn receive_namespace(&mut self, _msg: &message::Namespace) -> Result<(), EndpointError> {
+        Ok(())
+    }
+
+    pub fn receive_namespace_done(
+        &mut self,
+        _msg: &message::NamespaceDone,
+    ) -> Result<(), EndpointError> {
+        Ok(())
+    }
+
+    pub fn receive_publish_skipped(&mut self, _msg: &PublishSkipped) -> Result<(), EndpointError> {
+        Ok(())
+    }
+
+    // -- Unified message dispatch -----------------------------------
+
+    /// Dispatch a message that arrived on the control stream.
+    ///
+    /// Draft-23 Table 5 gives every message a Stream value, and only two of
+    /// them name the control stream: SETUP is "Control", GOAWAY is "Control,
+    /// Request". Everything else is "Request", so this method's job is to take
+    /// those two and refuse the messages that identify a request they have no
+    /// stream to name.
+    ///
+    /// Four are refused for that reason. REQUEST_UPDATE modifies the request
+    /// its stream carries (Section 9.5). NAMESPACE and NAMESPACE_DONE report
+    /// namespaces on the SUBSCRIBE_NAMESPACE request stream that asked for them
+    /// (Sections 9.15 and 9.16), and PUBLISH_SKIPPED names a track that will
+    /// not be published on the SUBSCRIBE_TRACKS stream that asked for it
+    /// (Section 9.18). All four route through
+    /// [`receive_response_on_stream`](Self::receive_response_on_stream), which
+    /// has the request ID they need.
+    pub fn receive_message(&mut self, msg: ControlMessage) -> Result<(), EndpointError> {
+        match msg {
+            ControlMessage::Setup(ref m) => self.receive_setup(m),
+            ControlMessage::GoAway(ref m) => self.receive_goaway(m),
+            ControlMessage::RequestUpdate(_) => {
+                Err(self.fail_session(EndpointError::RequestUpdateOnControlStream))
+            }
+            // Refused, and the session left running. No draft states a close
+            // for a message arriving on a stream it does not belong on — see
+            // `session_error_code`, which answers `None` for them. A
+            // control message carries its own length, so the next boundary is
+            // known and a refused message costs the session nothing; that is
+            // the answer `ResponseOnControlStream` below has always given.
+            //
+            // REQUEST_UPDATE above is the one that is not like these: Section
+            // 9.5 does close over one that arrives outside the two cases it
+            // names, so it keeps both the close and `fail_session`.
+            ControlMessage::Namespace(_) => {
+                Err(EndpointError::RequestMessageOnControlStream("NAMESPACE"))
+            }
+            ControlMessage::NamespaceDone(_) => {
+                Err(EndpointError::RequestMessageOnControlStream("NAMESPACE_DONE"))
+            }
+            ControlMessage::PublishSkipped(_) => {
+                Err(EndpointError::RequestMessageOnControlStream("PUBLISH_SKIPPED"))
+            }
+            // Section 9.10 puts PUBLISH_STATE_NOTIFY on "a subscription's
+            // bidirectional stream", and the subscription it reports on is the
+            // one that stream carries. One on the control stream names no
+            // subscription, so there is nothing it could be about.
+            //
+            // Not the close Section 9.10 names: its two sentences close over a
+            // PUBLISH_STATE_NOTIFY "for any other request type" and one a
+            // publisher receives, both readings of the request its stream
+            // carries, and one on the control stream names no request at all.
+            ControlMessage::PublishStateNotify(_) => {
+                Err(EndpointError::RequestMessageOnControlStream("PUBLISH_STATE_NOTIFY"))
+            }
+            ControlMessage::SubscribeOk(_)
+            | ControlMessage::PublishDone(_)
+            | ControlMessage::RequestOk(_)
+            | ControlMessage::RequestError(_) => Err(EndpointError::ResponseOnControlStream),
+            _ => Ok(()),
+        }
+    }
+
+    /// Hold the response half of a namespace-scoped request to the rule that
+    /// its first message answers the request.
+    ///
+    /// Sections 4.2 and 3.6 state it once each, for SUBSCRIBE_NAMESPACE and
+    /// for SUBSCRIBE_TRACKS. Section 3.6: "The publisher will respond with
+    /// SUBSCRIBE_TRACKS_OK or SUBSCRIBE_TRACKS_ERROR on the response half of
+    /// the stream. If the subscriber receives any message other than a
+    /// SUBSCRIBE_TRACKS_OK or a SUBSCRIBE_TRACKS_ERROR as the first message on the response half of
+    /// the stream, then it MUST close the session with UNEXPECTED_MESSAGE." Section 1.5 makes both
+    /// names a REQUEST_OK and a
+    /// REQUEST_ERROR.
+    ///
+    /// # Why only these two requests
+    ///
+    /// They are the two whose response half carries more than an answer.
+    /// SUBSCRIBE_NAMESPACE goes on to carry NAMESPACE and NAMESPACE_DONE and
+    /// SUBSCRIBE_TRACKS goes on to carry PUBLISH_SKIPPED, and those are exactly the
+    /// messages that could arrive before the answer and be taken for it. A
+    /// SUBSCRIBE has SUBSCRIBE_OK as its own first message and no such
+    /// ambiguity, which is why the rule is written where it is.
+    ///
+    /// # What "first" is read from
+    ///
+    /// The request's own state machine. `Pending` means the request went out
+    /// and nothing has come back, so it is the same question asked of the state
+    /// rather than of a second counter that could disagree with it. A request
+    /// this endpoint did not open, or one already answered, is not this rule's
+    /// subject and passes through.
+    ///
+    /// # Errors
+    ///
+    /// [`EndpointError::ResponseBeforeTheFirstResponse`], which answers `Some(UnexpectedMessage)`,
+    /// and the session is failed before it returns.
+    fn require_the_first_response_first(
+        &mut self,
+        id: u64,
+        msg: &ControlMessage,
+    ) -> Result<(), EndpointError> {
+        let awaiting = [self.subscribe_namespaces.get(&id), self.subscribe_tracks.get(&id)]
+            .into_iter()
+            .flatten()
+            .any(|sm| sm.state() == SubscribeNamespaceState::Pending);
+        if !awaiting {
+            return Ok(());
+        }
+        if matches!(msg, ControlMessage::RequestOk(_) | ControlMessage::RequestError(_)) {
+            return Ok(());
+        }
+        let ty = msg.message_type();
+        Err(self.fail_session(EndpointError::ResponseBeforeTheFirstResponse(id, ty)))
+    }
+
+    /// Dispatch a message that arrived on the bidi request stream identified
+    /// by `request_id`.
+    ///
+    /// Beyond the five responses this also takes the messages draft-23 Table 5
+    /// places on a request stream without their being answers to it.
+    ///
+    /// REQUEST_UPDATE modifies the request the stream carries (Section 9.5).
+    /// GOAWAY is listed "Control, Request" because "A GOAWAY MAY also be sent
+    /// on a request stream to initiate migration of that individual request"
+    /// (Section 9.2); it has no Request ID, so it has one wire form for both places.
+    ///
+    /// NAMESPACE (0x8) and NAMESPACE_DONE (0xE) arrive on the
+    /// SUBSCRIBE_NAMESPACE request stream that asked for the namespaces they
+    /// report, and PUBLISH_SKIPPED (0xF) on the SUBSCRIBE_TRACKS stream that
+    /// asked for the track it says will not be published. Table 5 marks all
+    /// three "Request", so this is where they land; the control stream refuses
+    /// them.
+    ///
+    /// PUBLISH_STATE_NOTIFY (0x22) is the one message here that is neither a response nor a
+    /// request: Section 9.10
+    /// puts it on "a subscription's bidirectional stream" and answers it with
+    /// nothing at all.
+    pub fn receive_response_on_stream(
+        &mut self,
+        request_id: VarInt,
+        msg: ControlMessage,
+    ) -> Result<(), EndpointError> {
+        self.require_the_first_response_first(request_id.into_inner(), &msg)?;
+        match msg {
+            ControlMessage::SubscribeOk(ref m) => self.receive_subscribe_ok(request_id, m),
+            ControlMessage::PublishDone(ref m) => self.receive_publish_done(request_id, m),
+            // The one message on a request stream that is neither a response
+            // nor a request: Section 9.10 puts it on "a subscription's
+            // bidirectional stream" and answers it with nothing.
+            ControlMessage::PublishStateNotify(ref m) => {
+                self.receive_publish_state_notify(request_id, m)
+            }
+            ControlMessage::RequestOk(ref m) => self.receive_request_ok(request_id, m),
+            ControlMessage::RequestError(ref m) => self.receive_request_error(request_id, m),
+            ControlMessage::RequestUpdate(ref m) => self.receive_request_update(request_id, m),
+            ControlMessage::GoAway(ref m) => self.receive_goaway_on_request_stream(request_id, m),
+            ControlMessage::Namespace(ref m) => self.receive_namespace(m),
+            ControlMessage::NamespaceDone(ref m) => self.receive_namespace_done(m),
+            ControlMessage::PublishSkipped(ref m) => self.receive_publish_skipped(m),
+            _ => Err(EndpointError::ResponseOnControlStream),
+        }
+    }
+
+    /// Process a GOAWAY that arrived on one request stream rather than on the
+    /// control stream.
+    ///
+    /// Draft-23 Section 9.2: "A GOAWAY MAY also be sent on a request stream
+    /// to initiate migration of that individual request. Only the receiver of
+    /// a request can send GOAWAY on its request stream." and "Upon receiving a
+    /// GOAWAY on a request stream, the sender of the request SHOULD re-issue
+    /// that specific request on a session at the specified URI". This is the
+    /// sender's half. The session keeps running —
+    /// only this request is being moved — so the session state machine is not
+    /// touched and no draining event follows. The server-side URI rule of the
+    /// same section still applies.
+    ///
+    /// # Errors
+    ///
+    /// [`EndpointError::RepeatedGoAwayOnRequestStream`] if this request's
+    /// stream has already carried one. The session is over: this endpoint's own
+    /// state has moved to Closed and the code the transport should close with
+    /// is in [`EndpointError::session_error_code`].
+    pub fn receive_goaway_on_request_stream(
+        &mut self,
+        request_id: VarInt,
+        msg: &GoAway,
+    ) -> Result<(), EndpointError> {
+        if self.role == Role::Server && !msg.new_session_uri.is_empty() {
+            return Err(self.fail_session(EndpointError::GoAwayUriAtServer));
+        }
+        let id = request_id.into_inner();
+        if self.subscriptions.contains_key(&id)
+            || self.publishes.contains_key(&id)
+            || self.fetches.contains_key(&id)
+            || self.subscribe_namespaces.contains_key(&id)
+            || self.subscribe_tracks.contains_key(&id)
+            || self.publish_namespaces.contains_key(&id)
+            || self.track_statuses.contains_key(&id)
+        {
+            // Section 9.2 counts per stream, so this is a separate first
+            // GOAWAY on every request and a repeat only on the one that has
+            // already carried one. The set is fed only by GOAWAYs accepted
+            // here, and never pruned: a Request ID is spent once, so an entry
+            // can never come to describe a different request.
+            if self.goaway_request_streams.insert(id) {
+                Ok(())
+            } else {
+                Err(self.fail_session(EndpointError::RepeatedGoAwayOnRequestStream(id)))
+            }
+        } else {
+            Err(EndpointError::UnknownRequest(id))
+        }
+    }
+
+    // -- Responder side: requests the peer opened a stream with -----
+
+    /// Refuse a bidirectional stream the peer opened with a message type that
+    /// does not begin a request, and end the session.
+    ///
+    /// Draft-23 Section 6.3: "Bidirectional streams MUST NOT begin with any
+    /// other message type unless negotiated. If they do, the peer MUST close the Session with
+    /// UNEXPECTED_MESSAGE." The returned error answers `Some(UnexpectedMessage)` from
+    /// [`EndpointError::session_error_code`], which is what tells the
+    /// connection layer to put the close on the wire.
+    pub fn refuse_non_request(&mut self, ty: MessageType) -> EndpointError {
+        self.fail_session(EndpointError::NotARequest(ty))
+    }
+
+    /// Register a request the **peer** opened a bidirectional stream with, and
+    /// hand back the Request ID it carries.
+    ///
+    /// The mirror of [`receive_response_on_stream`](Self::receive_response_on_stream):
+    /// that one is fed what comes back on a stream this endpoint opened, this
+    /// one is fed the first message on a stream the peer opened.
+    ///
+    /// # What it enforces, and with which code
+    ///
+    /// Draft-23 Section 6.4.2.1: "If an endpoint receives a Request ID where the least significant
+    /// bit is incorrect for the sender, it MUST close the session with INVALID_REQUEST_ID. If an
+    /// endpoint detects a duplicate Request ID, it MUST close the session with INVALID_REQUEST_ID."
+    /// Both
+    /// halves are checked here and both are returned as errors that answer
+    /// `Some(InvalidRequestId)` from
+    /// [`EndpointError::session_error_code`]. A message that opens no request
+    /// stream at all is a different rule with a different code — see
+    /// [`refuse_non_request`](Self::refuse_non_request).
+    ///
+    /// # Why there are no separate inbound maps
+    ///
+    /// The peer's ids and this endpoint's ids have opposite least significant
+    /// bits, so they cannot collide. A peer's request goes into the same
+    /// `HashMap` its outbound twin would, keyed the same way, and only the
+    /// transition names differ — `on_subscribe_received` where the outbound
+    /// path calls `on_subscribe_sent`.
+    ///
+    /// # Peer-controlled growth
+    ///
+    /// Every accepted request adds an entry that nothing removes, and the peer
+    /// chooses how many to open. [`peer_request_count`](Self::peer_request_count)
+    /// is what a responder can watch to impose its own ceiling; this method
+    /// imposes none.
+    pub fn receive_request_on_stream(
+        &mut self,
+        msg: &ControlMessage,
+    ) -> Result<VarInt, EndpointError> {
+        let request_id = match msg {
+            ControlMessage::Subscribe(m) => m.request_id,
+            ControlMessage::Publish(m) => m.request_id,
+            ControlMessage::Fetch(m) => m.request_id,
+            ControlMessage::PublishNamespace(m) => m.request_id,
+            ControlMessage::SubscribeNamespace(m) => m.request_id,
+            ControlMessage::SubscribeTracks(m) => m.request_id,
+            ControlMessage::TrackStatus(m) => m.request_id,
+            other => return Err(self.refuse_non_request(other.message_type())),
+        };
+        self.require_active_or_err()?;
+
+        let id = request_id.into_inner();
+        if let Err(e) = self.request_ids.validate_peer_id(id) {
+            return Err(self.fail_session(EndpointError::RequestId(e)));
+        }
+        // `insert` answers false when the id was already present, which is
+        // exactly the duplicate the section names. Doing the check and the
+        // record in one step means no path can record an id it did not check.
+        if !self.peer_request_ids.insert(id) {
+            return Err(self.fail_session(EndpointError::DuplicateRequestId(id)));
+        }
+
+        match msg {
+            ControlMessage::Subscribe(m) => {
+                // Section 9.19.15: "A fill fetch stream is opened only when
+                // FILL_PARAMETERS is present." Noted as the SUBSCRIBE arrives, because this endpoint is the publisher on a stream
+                // the peer opened and the fill is a stream it owes.
+                self.note_fill_requested(id, &m.parameters);
+                let mut sm = SubscriptionStateMachine::new();
+                sm.on_subscribe_received()?;
+                self.subscriptions.insert(id, sm);
+            }
+            ControlMessage::Publish(m) => {
+                let alias = m.track_alias.into_inner();
+                if let Some(conflict) =
+                    self.conflicting_track_alias(id, alias, &m.track_namespace, &m.track_name)
+                {
+                    return Err(self.fail_session(conflict));
+                }
+                let mut sm = PublishStateMachine::new();
+                sm.on_publish_received()?;
+                self.publishes.insert(id, sm);
+                // Section 3.4.1: "A publisher opens a fill fetch stream when it
+                // processes a SUBSCRIBE or REQUEST_UPDATE, or sends a PUBLISH,
+                // that carries FILL_PARAMETERS while the subscription is not
+                // paused", and Section 3.4 puts "the subscription's Request ID"
+                // on its FETCH_HEADER, which for a PUBLISH is this one.
+                self.note_fill_requested(id, &m.parameters);
+                // A PUBLISH names its track and its alias in the one message,
+                // so the binding is complete on arrival. It counts against the
+                // next one only once this endpoint has answered PUBLISH_OK,
+                // which is what moves its state machine to Active.
+                self.track_bindings.insert(
+                    id,
+                    TrackBinding {
+                        namespace: m.track_namespace.clone(),
+                        name: m.track_name.clone(),
+                        alias: Some(alias),
+                        kind: BindingKind::Publish,
+                    },
+                );
+            }
+            ControlMessage::Fetch(_) => {
+                let mut sm = FetchStateMachine::new();
+                sm.on_fetch_received()?;
+                self.fetches.insert(id, sm);
+            }
+            ControlMessage::PublishNamespace(_) => {
+                let mut sm = PublishNamespaceStateMachine::new();
+                sm.on_publish_namespace_received()?;
+                self.publish_namespaces.insert(id, sm);
+            }
+            ControlMessage::SubscribeNamespace(_) => {
+                let mut sm = SubscribeNamespaceStateMachine::new();
+                sm.on_subscribe_namespace_received()?;
+                self.subscribe_namespaces.insert(id, sm);
+            }
+            ControlMessage::SubscribeTracks(_) => {
+                // A FILL_PARAMETERS here opens no fill fetch stream of its own.
+                // Section 3.6.2: the publisher uses it "as the initial
+                // Subscription parameters when a PUBLISH is sent as a result
+                // of SUBSCRIBE_TRACKS, and includes those in the PUBLISH",
+                // and Section 3.4 puts "the subscription's Request ID" on the
+                // fill's FETCH_HEADER, which is that PUBLISH's.
+                let mut sm = SubscribeNamespaceStateMachine::new();
+                sm.on_subscribe_namespace_received()?;
+                self.subscribe_tracks.insert(id, sm);
+            }
+            ControlMessage::TrackStatus(_) => {
+                let mut sm = TrackStatusStateMachine::new();
+                sm.on_track_status_received()?;
+                self.track_statuses.insert(id, sm);
+            }
+            // Unreachable: the match above returned for every other variant.
+            other => return Err(self.refuse_non_request(other.message_type())),
+        }
+
+        // The request as it arrived, recorded last so that nothing above it
+        // can leave one behind for a request it went on to refuse.
+        self.inbound_requests.insert(id, msg.clone());
+
+        // After the request is recorded, never before. The answer to every
+        // Range Filter rule is a REQUEST_ERROR, which names the Request ID of
+        // the request it answers, so refusing here would leave nothing to
+        // answer with.
+        let parameters = request_parameters(msg);
+        if let Some(rejection) = self.filter_verdict(parameters) {
+            self.peer_filter_rejections.insert(id, rejection);
+        } else if matches!(msg, ControlMessage::Fetch(_)) && fetch_location_is_relative(parameters)
+        {
+            self.peer_filter_rejections.insert(id, FilterRejection::RelativeFetchLocation);
+        }
+        self.peer_request_filters.insert(id, range_filter_parameters(parameters));
+        Ok(request_id)
+    }
+
+    // -- What the peer asked for ------------------------------------
+
+    /// The SUBSCRIBE the peer sent under `request_id` and this endpoint has
+    /// not answered yet.
+    ///
+    /// `None` once it has been answered, for an identifier this session has
+    /// carried no SUBSCRIBE under, and for one this endpoint spent on a
+    /// request of its own -- whose state is in the same map, but which never
+    /// arrived here. The record itself lives on past the answer, because the
+    /// subscription it opened runs on after it, for as long as the request
+    /// stream does.
+    pub fn pending_subscribe(&self, request_id: VarInt) -> Option<&Subscribe> {
+        let id = request_id.into_inner();
+        let unanswered = self
+            .subscriptions
+            .get(&id)
+            .is_some_and(|sm| sm.state() == SubscriptionState::Subscribing);
+        match self.inbound_requests.get(&id) {
+            Some(ControlMessage::Subscribe(msg)) if unanswered => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// How many SUBSCRIBEs the peer has sent that are still waiting for an
+    /// answer.
+    pub fn pending_subscribe_count(&self) -> usize {
+        self.inbound_requests
+            .iter()
+            .filter(|(id, msg)| {
+                matches!(msg, ControlMessage::Subscribe(_))
+                    && self
+                        .subscriptions
+                        .get(*id)
+                        .is_some_and(|sm| sm.state() == SubscriptionState::Subscribing)
+            })
+            .count()
+    }
+
+    /// The PUBLISH the peer sent under `request_id` and this endpoint has not
+    /// answered yet.
+    ///
+    /// `None` once it has been answered, for an identifier this session has
+    /// carried no PUBLISH under, and for one this endpoint spent on a request
+    /// of its own -- whose state is in the same map, but which never arrived
+    /// here. The record itself lives on past the answer, because the
+    /// subscription the offer opened runs on after it, for as long as the
+    /// request stream does.
+    pub fn pending_publish(&self, request_id: VarInt) -> Option<&message::Publish> {
+        let id = request_id.into_inner();
+        let unanswered =
+            self.publishes.get(&id).is_some_and(|sm| sm.state() == PublishState::Publishing);
+        match self.inbound_requests.get(&id) {
+            Some(ControlMessage::Publish(msg)) if unanswered => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// How many offers the peer has sent that are still waiting for an
+    /// answer.
+    pub fn pending_publish_count(&self) -> usize {
+        self.inbound_requests
+            .iter()
+            .filter(|(id, msg)| {
+                matches!(msg, ControlMessage::Publish(_))
+                    && self
+                        .publishes
+                        .get(*id)
+                        .is_some_and(|sm| sm.state() == PublishState::Publishing)
+            })
+            .count()
+    }
+
+    /// The FETCH the peer sent under `request_id` and this endpoint has not
+    /// answered yet.
+    ///
+    /// `None` once it has been answered, for an identifier this session has
+    /// carried no FETCH under, and for one this endpoint spent on a request
+    /// of its own -- whose state is in the same map, but which never arrived
+    /// here. The record itself lives on past the answer, because the fetch is
+    /// not over until its response stream is.
+    pub fn pending_fetch(&self, request_id: VarInt) -> Option<&Fetch> {
+        let id = request_id.into_inner();
+        let unanswered = self
+            .fetches
+            .get(&id)
+            .is_some_and(|sm| matches!(sm.state(), FetchState::Pending | FetchState::Unanswered));
+        match self.inbound_requests.get(&id) {
+            Some(ControlMessage::Fetch(msg)) if unanswered => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// How many FETCHes the peer has sent that are still waiting for an
+    /// answer.
+    pub fn pending_fetch_count(&self) -> usize {
+        self.inbound_requests
+            .iter()
+            .filter(|(id, msg)| {
+                matches!(msg, ControlMessage::Fetch(_))
+                    && self.fetches.get(*id).is_some_and(|sm| {
+                        matches!(sm.state(), FetchState::Pending | FetchState::Unanswered)
+                    })
+            })
+            .count()
+    }
+
+    /// The PUBLISH_NAMESPACE the peer sent under `request_id` and this
+    /// endpoint has not answered yet.
+    ///
+    /// `None` once it has been answered, for an identifier this session has
+    /// carried no PUBLISH_NAMESPACE under, and for one this endpoint spent on
+    /// a request of its own -- whose state is in the same map, but which
+    /// never arrived here. The record itself lives on past the answer,
+    /// because an announcement that was accepted stands until it is
+    /// withdrawn.
+    pub fn pending_publish_namespace(&self, request_id: VarInt) -> Option<&PublishNamespace> {
+        let id = request_id.into_inner();
+        let unanswered = self
+            .publish_namespaces
+            .get(&id)
+            .is_some_and(|sm| sm.state() == PublishNamespaceState::Pending);
+        match self.inbound_requests.get(&id) {
+            Some(ControlMessage::PublishNamespace(msg)) if unanswered => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// How many announcements the peer has sent that are still waiting for an
+    /// answer.
+    pub fn pending_publish_namespace_count(&self) -> usize {
+        self.inbound_requests
+            .iter()
+            .filter(|(id, msg)| {
+                matches!(msg, ControlMessage::PublishNamespace(_))
+                    && self
+                        .publish_namespaces
+                        .get(*id)
+                        .is_some_and(|sm| sm.state() == PublishNamespaceState::Pending)
+            })
+            .count()
+    }
+
+    /// The SUBSCRIBE_NAMESPACE the peer sent under `request_id` and this
+    /// endpoint has not answered yet.
+    ///
+    /// `None` once it has been answered, for an identifier this session has
+    /// carried no SUBSCRIBE_NAMESPACE under, and for one this endpoint spent
+    /// on a request of its own -- whose state is in the same map, but which
+    /// never arrived here. The record itself lives on past the answer,
+    /// because a namespace subscription lasts as long as its stream does.
+    pub fn pending_subscribe_namespace(&self, request_id: VarInt) -> Option<&SubscribeNamespace> {
+        let id = request_id.into_inner();
+        let unanswered = self
+            .subscribe_namespaces
+            .get(&id)
+            .is_some_and(|sm| sm.state() == SubscribeNamespaceState::Pending);
+        match self.inbound_requests.get(&id) {
+            Some(ControlMessage::SubscribeNamespace(msg)) if unanswered => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// How many namespace subscriptions the peer has sent that are still
+    /// waiting for an answer.
+    pub fn pending_subscribe_namespace_count(&self) -> usize {
+        self.inbound_requests
+            .iter()
+            .filter(|(id, msg)| {
+                matches!(msg, ControlMessage::SubscribeNamespace(_))
+                    && self
+                        .subscribe_namespaces
+                        .get(*id)
+                        .is_some_and(|sm| sm.state() == SubscribeNamespaceState::Pending)
+            })
+            .count()
+    }
+
+    /// The SUBSCRIBE_TRACKS the peer sent under `request_id` and this
+    /// endpoint has not answered yet.
+    ///
+    /// `None` once it has been answered, for an identifier this session has
+    /// carried no SUBSCRIBE_TRACKS under, and for one this endpoint spent on
+    /// a request of its own -- whose state is in the same map, but which
+    /// never arrived here. The record itself lives on past the answer,
+    /// because the subscription it opened lasts as long as its stream does.
+    pub fn pending_subscribe_tracks(&self, request_id: VarInt) -> Option<&SubscribeTracks> {
+        let id = request_id.into_inner();
+        let unanswered = self
+            .subscribe_tracks
+            .get(&id)
+            .is_some_and(|sm| sm.state() == SubscribeNamespaceState::Pending);
+        match self.inbound_requests.get(&id) {
+            Some(ControlMessage::SubscribeTracks(msg)) if unanswered => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// How many track subscriptions the peer has sent that are still waiting
+    /// for an answer.
+    pub fn pending_subscribe_tracks_count(&self) -> usize {
+        self.inbound_requests
+            .iter()
+            .filter(|(id, msg)| {
+                matches!(msg, ControlMessage::SubscribeTracks(_))
+                    && self
+                        .subscribe_tracks
+                        .get(*id)
+                        .is_some_and(|sm| sm.state() == SubscribeNamespaceState::Pending)
+            })
+            .count()
+    }
+
+    /// The TRACK_STATUS the peer sent under `request_id` and this endpoint
+    /// has not answered yet.
+    ///
+    /// `None` once it has been answered, for an identifier this session has
+    /// carried no TRACK_STATUS under, and for one this endpoint spent on a
+    /// request of its own -- whose state is in the same map, but which never
+    /// arrived here. The record itself lives on past the answer, because an
+    /// update may still name it once it has been answered.
+    pub fn pending_track_status(&self, request_id: VarInt) -> Option<&message::TrackStatus> {
+        let id = request_id.into_inner();
+        let unanswered =
+            self.track_statuses.get(&id).is_some_and(|sm| sm.state() == TrackStatusState::Pending);
+        match self.inbound_requests.get(&id) {
+            Some(ControlMessage::TrackStatus(msg)) if unanswered => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// How many track statuses the peer has sent that are still waiting for
+    /// an answer.
+    pub fn pending_track_status_count(&self) -> usize {
+        self.inbound_requests
+            .iter()
+            .filter(|(id, msg)| {
+                matches!(msg, ControlMessage::TrackStatus(_))
+                    && self
+                        .track_statuses
+                        .get(*id)
+                        .is_some_and(|sm| sm.state() == TrackStatusState::Pending)
+            })
+            .count()
+    }
+
+    /// Whether the Range Filters in `parameters` are ones this endpoint may
+    /// accept.
+    ///
+    /// The three rules that need more than one parameter to see, in the order
+    /// that reports the most specific fault: whether the filters read at all,
+    /// then whether any budget was advertised, then whether the request stays
+    /// inside it, then whether two filters share a key. A request with no Range
+    /// Filter at all is not measured against the ceiling, so an endpoint that
+    /// advertised nothing still takes ordinary requests.
+    fn filter_verdict(&self, parameters: &[KeyValuePair]) -> Option<FilterRejection> {
+        let filters = match range_filter::decode_all_moqt::<Moqt18>(parameters) {
+            Ok(filters) => filters,
+            Err(e) => return Some(FilterRejection::Unreadable(e)),
+        };
+        if filters.is_empty() {
+            return None;
+        }
+        if self.advertised_max_filter_ranges == 0 {
+            return Some(FilterRejection::NoBudgetAdvertised);
+        }
+        let ranges = range_filter::total_ranges(&filters);
+        if ranges as u64 > self.advertised_max_filter_ranges {
+            return Some(FilterRejection::TooManyRanges {
+                ranges,
+                limit: self.advertised_max_filter_ranges,
+            });
+        }
+        if let Some((parameter_type, set_id, property_type)) =
+            range_filter::first_repeated_key(&filters)
+        {
+            return Some(FilterRejection::RepeatedFilter(parameter_type, set_id, property_type));
+        }
+        None
+    }
+
+    /// Why request `id` must be answered with a REQUEST_ERROR, if it must.
+    ///
+    /// The caller builds the message; [`FilterRejection::request_error_code`]
+    /// gives the code and the variant gives the reason phrase. Answering it
+    /// clears the record.
+    pub fn filter_rejection(&self, id: VarInt) -> Option<&FilterRejection> {
+        self.peer_filter_rejections.get(&id.into_inner())
+    }
+
+    /// Whether this response answers a REQUEST_UPDATE rather than the request
+    /// that opened the stream. Section 9.5 gives an update the same two
+    /// answers a request has: "The receiver of a REQUEST_UPDATE MUST respond
+    /// with exactly one REQUEST_UPDATE_OK or REQUEST_UPDATE_ERROR message
+    /// indicating if the update was successful, unless it is coalescing failed
+    /// updates to produce just one REQUEST_UPDATE_ERROR for multiple
+    /// REQUEST_UPDATE messages." Section 1.5 makes those names a REQUEST_OK and
+    /// a REQUEST_ERROR sent in answer to an update. Nothing in
+    /// either message says which of the two it is answering, so the question is
+    /// settled twice over.
+    ///
+    /// A SUBSCRIBE is answered with SUBSCRIBE_OK and a FETCH with FETCH_OK, so a
+    /// REQUEST_OK on one of those streams has no other message it could be
+    /// answering. That is the half that needs no ordering.
+    ///
+    /// Everywhere else it is ordering: the first REQUEST_OK or REQUEST_ERROR on
+    /// a stream answers the request that opened it, and the ones after it answer
+    /// updates. Both endpoints have to resolve it the same way and neither has
+    /// anything else to resolve it with.
+    fn answers_an_update(&self, id: u64, msg: &ControlMessage) -> bool {
+        if !matches!(msg, ControlMessage::RequestOk(_) | ControlMessage::RequestError(_)) {
+            return false;
+        }
+        // A request this endpoint made is answered by the peer, so a response
+        // written here can only be answering an update the peer sent on it.
+        // Section 9.5 names the one request that works that way: "A subscriber
+        // can also send REQUEST_UPDATE to modify parameters of a subscription
+        // established with PUBLISH."
+        if self.publishes.contains_key(&id) && !self.inbound_requests.contains_key(&id) {
+            return true;
+        }
+        // A SUBSCRIBE is answered by SUBSCRIBE_OK, so a REQUEST_OK on its
+        // stream answers an update. A FETCH is not: its first REQUEST_OK is
+        // FETCH_OK (Section 1.5), and only an answered FETCH's next one is an
+        // update's, which the line below covers.
+        if matches!(msg, ControlMessage::RequestOk(_)) && self.subscriptions.contains_key(&id) {
+            return true;
+        }
+        self.answered_peer_requests.contains(&id)
+    }
+
+    /// Record a response as the answer to one or more outstanding updates.
+    ///
+    /// A REQUEST_OK answers exactly one: "The receiver MUST still send a
+    /// REQUEST_UPDATE_OK for each successful update". A REQUEST_ERROR may
+    /// answer every update still waiting, because Section 9.5 permits the
+    /// receiver to coalesce them — "If the coalesced REQUEST_UPDATE results in
+    /// an error, only a single REQUEST_UPDATE_ERROR will be sent and the sender
+    /// of the REQUEST_UPDATEs will not always be able to determine which caused
+    /// an error."
+    ///
+    /// The credit MAX_REQUEST_UPDATES counts is restored once whatever the
+    /// answer covered, which is Section 9.1.7 read literally: "Each
+    /// REQUEST_OK or REQUEST_ERROR response restores one credit on that stream."
+    /// The peer restores by the same sentence, so an endpoint that gave back one
+    /// per coalesced update would be crediting a peer that is not.
+    ///
+    /// No state machine moves. An update changes a request's parameters and not
+    /// its lifecycle, so a subscription that was Active before its update was
+    /// answered is Active after it, whichever answer went out.
+    ///
+    /// # Errors
+    ///
+    /// [`EndpointError::NoUpdateToAnswer`], and nothing is written or spent.
+    fn answer_an_update(&mut self, id: u64, msg: &ControlMessage) -> Result<(), EndpointError> {
+        let Some(queue) = self.unanswered_peer_updates.get_mut(&id).filter(|q| !q.is_empty())
+        else {
+            return Err(EndpointError::NoUpdateToAnswer(id));
+        };
+        // Section 9.5: "REQUEST_UPDATE_OKs MUST be returned in the order the
+        // REQUEST_UPDATEs were received", so an answer settles the oldest. A
+        // REQUEST_ERROR may also settle the coalescable updates after it,
+        // "coalescing failed updates to produce just one REQUEST_UPDATE_ERROR
+        // for multiple REQUEST_UPDATE messages", but never one that may not be
+        // coalesced, and never one after it.
+        let first = queue.pop_front().unwrap_or(true);
+        if first && matches!(msg, ControlMessage::RequestError(_)) {
+            while queue.front() == Some(&true) {
+                queue.pop_front();
+            }
+        }
+        self.restore_update_credit(id);
+        // The same rule the request's own REQUEST_ERROR spends: a filter this
+        // endpoint owes an error about has been answered.
+        if matches!(msg, ControlMessage::RequestError(_)) {
+            self.peer_filter_rejections.remove(&id);
+        }
+        // The prefix moves on the acceptance and not before: "If the update is
+        // accepted, NAMESPACE and NAMESPACE_DONE messages following the
+        // REQUEST_OK will contain Track Namespace suffixes relative to the
+        // updated prefix." A REQUEST_ERROR drops it and the subscription goes
+        // on selecting what it selected before the update was sent.
+        //
+        // Nothing else is recomputed. A subscription this endpoint has already
+        // refused keeps that verdict when ground it wanted comes free, because
+        // the sentence that refused it names the moment it arrived and that
+        // moment has passed.
+        let accepted = matches!(msg, ControlMessage::RequestOk(_));
+        if let Some(prefix) = self.updated_namespace_prefixes.remove(&id) {
+            if accepted {
+                match self.inbound_requests.get_mut(&id) {
+                    Some(ControlMessage::SubscribeNamespace(m)) => m.namespace_prefix = prefix,
+                    Some(ControlMessage::SubscribeTracks(m)) => m.namespace_prefix = prefix,
+                    // Unreachable: nothing else is ever written above.
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Drive the state machine for a message this endpoint is about to write
+    /// on a request stream the peer opened.
+    ///
+    /// The mirror of [`receive_response_on_stream`](Self::receive_response_on_stream),
+    /// and the reason the transitions are named `*_sent` rather than reusing
+    /// the received-side ones: the state edges coincide, so a mis-dispatch
+    /// would otherwise succeed silently instead of naming the wrong event in
+    /// an `InvalidTransition`.
+    ///
+    /// Beyond the four responses this also takes the three messages draft-23
+    /// Table 5 places on a request stream that a responder writes after its
+    /// response: NAMESPACE and NAMESPACE_DONE on a SUBSCRIBE_NAMESPACE stream
+    /// (Sections 9.15 and 9.16) and PUBLISH_SKIPPED on a SUBSCRIBE_TRACKS
+    /// stream (Section 9.18). All three require the request to have been
+    /// accepted first, because each machine only leaves Pending on its
+    /// REQUEST_OK.
+    ///
+    /// The caller writes `msg` only after this returns `Ok`. What it cannot
+    /// undo is the opposite order: a write that fails afterwards leaves the
+    /// state machine one step ahead of the wire, the same asymmetry the
+    /// outbound request path already carries.
+    ///
+    /// # Errors
+    ///
+    /// [`EndpointError::UnknownRequest`] when no request of the answering kind
+    /// carries that identifier, [`EndpointError::NotAResponse`] when the
+    /// message is not one, [`EndpointError::FilterMustBeRejected`] for a
+    /// request whose Range Filters this draft says to reject, and each flow's own
+    /// `InvalidTransition` for a request already answered.
+    pub fn send_response_on_stream(
+        &mut self,
+        request_id: VarInt,
+        msg: &ControlMessage,
+    ) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        // A request whose Range Filters the draft says to reject may be
+        // answered with a REQUEST_ERROR and with nothing else. Checked across
+        // every acceptance rather than inside the REQUEST_OK arm, because
+        // SUBSCRIBE and FETCH — the two requests that most obviously carry these
+        // filters — are accepted with SUBSCRIBE_OK and REQUEST_OK.
+        if matches!(msg, ControlMessage::SubscribeOk(_) | ControlMessage::RequestOk(_)) {
+            if let Some(rejection) = self.peer_filter_rejections.get(&id) {
+                return Err(EndpointError::FilterMustBeRejected(id, rejection.clone()));
+            }
+        }
+        // An answer to an update reaches none of the arms below: the request it
+        // belongs to has its own lifecycle and an update does not move it.
+        // A refused update leaves this endpoint owing the peer a termination,
+        // and the draft names the status that termination must carry. So the
+        // request's ending is what the debt governs: a PUBLISH_DONE under any
+        // other status is refused, and everything else the caller may still
+        // have to write for this request - the answer to a second update it
+        // has not answered yet - is left alone, because the sentence orders
+        // nothing.
+        if let ControlMessage::PublishDone(done) = msg {
+            self.require_update_failure_status(id, done.status_code)?;
+        }
+        if self.answers_an_update(id, msg) {
+            self.answer_an_update(id, msg)?;
+            // Refusing an update is half of what the draft asks for, and which
+            // half it is depends on what was being updated. A subscription is
+            // owed the PUBLISH_DONE that ends it, recorded here so that the
+            // next ending written for this request has to be that one. A
+            // namespace request, a fetch and a track status are owed no
+            // message at all, and recording one for them would keep a stream
+            // open that has nothing left to carry.
+            if matches!(msg, ControlMessage::RequestError(_)) && self.publishes_a_subscription(id) {
+                self.owed_update_failures.insert(id);
+            }
+            return Ok(());
+        }
+        match msg {
+            ControlMessage::SubscribeOk(_) => {
+                let sm =
+                    self.subscriptions.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+                sm.on_subscribe_ok_sent()?;
+            }
+            ControlMessage::PublishDone(_) => {
+                let sm =
+                    self.subscriptions.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+                sm.on_publish_done_sent()?;
+            }
+            // Section 9.10, on the way out. Nothing moves: the message is
+            // unilateral, so there is no answer to wait for and no lifecycle
+            // edge to take. What is checked is the one thing writing it could
+            // get wrong — a subscription this endpoint does not publish, which
+            // is a message the peer must close the session over.
+            ControlMessage::PublishStateNotify(_) => {
+                if !self.subscriptions.contains_key(&id) || !self.inbound_requests.contains_key(&id)
+                {
+                    return Err(EndpointError::StateNotifyThisEndpointMayNotSend(id));
+                }
+            }
+            // REQUEST_OK answers every kind but SUBSCRIBE. The probe order
+            // does not matter: the maps are keyed by Request ID and one id
+            // belongs to one request.
+            ControlMessage::RequestOk(m) => {
+                // Section 9.3: "Track Properties are populated in
+                // TRACK_STATUS_OK and FETCH_OK; they are empty in PUBLISH_OK,
+                // REQUEST_UPDATE_OK, SUBSCRIBE_NAMESPACE_OK and
+                // PUBLISH_NAMESPACE_OK. If an endpoint receives Track
+                // Properties in one of these messages it MUST close the
+                // session with INVALID_FIELD." Refused before the write.
+                if !m.track_properties.is_empty()
+                    && !self.track_statuses.contains_key(&id)
+                    && !self.fetches.contains_key(&id)
+                    && !self.subscribe_tracks.contains_key(&id)
+                {
+                    return Err(EndpointError::TrackPropertiesOnOutgoingRequestOk(id));
+                }
+                if let Some(sm) = self.fetches.get_mut(&id) {
+                    sm.on_fetch_ok_sent()?;
+                } else if let Some(sm) = self.publishes.get_mut(&id) {
+                    sm.on_publish_ok_sent()?;
+                } else if let Some(sm) = self.subscribe_namespaces.get_mut(&id) {
+                    sm.on_subscribe_namespace_ok_sent()?;
+                } else if let Some(sm) = self.subscribe_tracks.get_mut(&id) {
+                    sm.on_subscribe_namespace_ok_sent()?;
+                } else if let Some(sm) = self.publish_namespaces.get_mut(&id) {
+                    sm.on_publish_namespace_ok_sent()?;
+                } else if let Some(sm) = self.track_statuses.get_mut(&id) {
+                    sm.on_track_status_ok_sent()?;
+                } else {
+                    return Err(EndpointError::UnknownRequest(id));
+                }
+            }
+            ControlMessage::RequestError(_) => {
+                if let Some(sm) = self.subscriptions.get_mut(&id) {
+                    sm.on_subscribe_error_sent()?;
+                } else if let Some(sm) = self.fetches.get_mut(&id) {
+                    sm.on_fetch_error_sent()?;
+                } else if let Some(sm) = self.publishes.get_mut(&id) {
+                    sm.on_publish_error_sent()?;
+                } else if let Some(sm) = self.subscribe_namespaces.get_mut(&id) {
+                    sm.on_subscribe_namespace_error_sent()?;
+                } else if let Some(sm) = self.subscribe_tracks.get_mut(&id) {
+                    sm.on_subscribe_namespace_error_sent()?;
+                } else if let Some(sm) = self.publish_namespaces.get_mut(&id) {
+                    sm.on_publish_namespace_error_sent()?;
+                } else if let Some(sm) = self.track_statuses.get_mut(&id) {
+                    sm.on_track_status_error_sent()?;
+                } else {
+                    return Err(EndpointError::UnknownRequest(id));
+                }
+            }
+            ControlMessage::Namespace(_) => {
+                let sm = self
+                    .subscribe_namespaces
+                    .get_mut(&id)
+                    .ok_or(EndpointError::UnknownRequest(id))?;
+                sm.on_namespace_sent()?;
+            }
+            ControlMessage::NamespaceDone(_) => {
+                let sm = self
+                    .subscribe_namespaces
+                    .get_mut(&id)
+                    .ok_or(EndpointError::UnknownRequest(id))?;
+                sm.on_namespace_done_sent()?;
+            }
+            ControlMessage::PublishSkipped(_) => {
+                let sm =
+                    self.subscribe_tracks.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+                sm.on_publish_skipped_sent()?;
+            }
+            other => return Err(EndpointError::NotAResponse(other.message_type())),
+        }
+        // After the match, not before it: the caller writes `msg` only once
+        // this returns `Ok`, so a response that was refused restores nothing.
+        if matches!(msg, ControlMessage::RequestOk(_) | ControlMessage::RequestError(_)) {
+            self.restore_update_credit(id);
+        }
+        // Reached only by a response that answered the request itself, since an
+        // update's answer returned above. From here on, a REQUEST_OK or
+        // REQUEST_ERROR on this stream can only be answering an update.
+        if matches!(
+            msg,
+            ControlMessage::SubscribeOk(_)
+                | ControlMessage::RequestOk(_)
+                | ControlMessage::RequestError(_)
+        ) {
+            self.answered_peer_requests.insert(id);
+        }
+        // For the same reason, and it matters more here: a rejection cleared by
+        // a REQUEST_ERROR that was itself refused would leave the request
+        // acceptable on the next attempt.
+        if matches!(msg, ControlMessage::RequestError(_)) {
+            self.peer_filter_rejections.remove(&id);
+        }
+        Ok(())
+    }
+
+    /// Dispatch a message that arrived on a request stream the **peer** opened,
+    /// after the request that opened it.
+    ///
+    /// Nothing that arrives here is a response: this endpoint is the responder
+    /// on such a stream, so a SUBSCRIBE_OK or REQUEST_ERROR turning up is the
+    /// peer answering its own request, and it is refused with
+    /// [`EndpointError::UnexpectedOnPeerRequestStream`].
+    ///
+    /// Four messages are expected instead.
+    ///
+    /// REQUEST_UPDATE, because draft-23 Section 9.5 puts it on the request's
+    /// own stream: "The sender of a request (SUBSCRIBE, PUBLISH, FETCH,
+    /// PUBLISH_NAMESPACE, SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS) can later send
+    /// a REQUEST_UPDATE on the same bidi stream as the request to modify it."
+    /// It goes through the same [`receive_request_update`](Self::receive_request_update)
+    /// the requester side uses, so the peer's update is held to the same rule
+    /// its own would be: the message's Request ID must name the stream's
+    /// request, and a kind the section does not allow to be updated —
+    /// TRACK_STATUS, by Section 9.12 — closes the session.
+    ///
+    /// GOAWAY, because Section 9.2 lets one arrive on a request stream to
+    /// migrate that request alone, in either direction.
+    ///
+    /// PUBLISH_DONE, because a peer that sent PUBLISH is the publisher and ends
+    /// the publication it opened.
+    ///
+    /// PUBLISH_STATE_NOTIFY (Section 9.10), for the same
+    /// reason: a peer that sent PUBLISH is the publisher, and the publisher is
+    /// the one end that may send it. On a stream the peer opened with a
+    /// SUBSCRIBE the roles are the other way round, and it is refused.
+    pub fn receive_on_peer_request_stream(
+        &mut self,
+        request_id: VarInt,
+        msg: ControlMessage,
+    ) -> Result<(), EndpointError> {
+        let id = request_id.into_inner();
+        match msg {
+            ControlMessage::RequestUpdate(ref m) => self.receive_request_update(request_id, m),
+            // Section 9.2: "Only the receiver of a request can send GOAWAY on
+            // its request stream. If the receiver of a request receives a
+            // GOAWAY on that request stream, it MUST close the session with a
+            // PROTOCOL_VIOLATION." The peer opened this stream, so this
+            // endpoint is the receiver of its request.
+            ControlMessage::GoAway(_) => {
+                Err(self.fail_session(EndpointError::GoAwayFromRequestSender(id)))
+            }
+            ControlMessage::PublishDone(_) => {
+                let sm = self.publishes.get_mut(&id).ok_or(EndpointError::UnknownRequest(id))?;
+                sm.on_publish_done_received()?;
+                Ok(())
+            }
+            // A PUBLISH the peer opened the stream with makes the peer the
+            // publisher and this endpoint the subscriber, so a notify on it is
+            // from the end Section 9.10 permits. On a stream the peer opened
+            // with a SUBSCRIBE the roles are the other way round, and
+            // `receive_publish_state_notify` refuses it with the code the
+            // section names.
+            ControlMessage::PublishStateNotify(ref m) => {
+                self.receive_publish_state_notify(request_id, m)
+            }
+            other => Err(EndpointError::UnexpectedOnPeerRequestStream(other.message_type())),
+        }
+    }
+}
+
+// -- Responder-side state machine transitions -----------------------
+//
+// Each one is the same edge as an existing requester-side transition — the
+// graph does not change with the direction — but under a name that says which
+// way the message went, so a mis-dispatch names the responder event in the
+// `InvalidTransition` it produces instead of quietly succeeding.
+//
+// They are written against the public surface of the machines rather than
+// against the state field, so the rejected-state error has to be rebuilt to
+// carry the responder event name.
+
+impl SubscriptionStateMachine {
+    /// Idle -> Subscribing (SUBSCRIBE received from the peer).
+    pub fn on_subscribe_received(&mut self) -> Result<(), SubscriptionError> {
+        self.on_subscribe_sent().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_subscribe_received".to_string(),
+        })
+    }
+
+    /// Subscribing -> Active (SUBSCRIBE_OK written on the peer's stream).
+    pub fn on_subscribe_ok_sent(&mut self) -> Result<(), SubscriptionError> {
+        self.on_subscribe_ok().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_subscribe_ok_sent".to_string(),
+        })
+    }
+
+    /// Subscribing -> Done (REQUEST_ERROR written on the peer's stream).
+    pub fn on_subscribe_error_sent(&mut self) -> Result<(), SubscriptionError> {
+        self.on_subscribe_error().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_subscribe_error_sent".to_string(),
+        })
+    }
+
+    /// Active -> Done (PUBLISH_DONE written on the peer's stream).
+    pub fn on_publish_done_sent(&mut self) -> Result<(), SubscriptionError> {
+        self.on_publish_done().map_err(|_| SubscriptionError::InvalidTransition {
+            from: self.state(),
+            event: "on_publish_done_sent".to_string(),
+        })
+    }
+}
+
+impl FetchStateMachine {
+    /// Idle -> Pending (FETCH received from the peer).
+    pub fn on_fetch_received(&mut self) -> Result<(), FetchError> {
+        self.on_fetch_sent().map_err(|_| FetchError::InvalidTransition {
+            from: self.state(),
+            event: "on_fetch_received".to_string(),
+        })
+    }
+
+    /// Pending -> Receiving, Unanswered -> Done (FETCH_OK written on the
+    /// peer's stream).
+    ///
+    /// The state is named for the requester's view; for a responder the same
+    /// node means the objects are being served rather than received. It is the
+    /// same node in the graph, with the same edges, so it keeps its name.
+    pub fn on_fetch_ok_sent(&mut self) -> Result<(), FetchError> {
+        self.on_fetch_ok().map_err(|_| FetchError::InvalidTransition {
+            from: self.state(),
+            event: "on_fetch_ok_sent".to_string(),
+        })
+    }
+
+    /// Pending | Unanswered -> Done (REQUEST_ERROR written on the peer's
+    /// stream).
+    pub fn on_fetch_error_sent(&mut self) -> Result<(), FetchError> {
+        self.on_fetch_error().map_err(|_| FetchError::InvalidTransition {
+            from: self.state(),
+            event: "on_fetch_error_sent".to_string(),
+        })
+    }
+
+    /// Receiving -> Done, Pending -> Unanswered (this endpoint finished the
+    /// fetch data stream).
+    pub fn on_stream_fin_sent(&mut self) -> Result<(), FetchError> {
+        self.on_stream_fin().map_err(|_| FetchError::InvalidTransition {
+            from: self.state(),
+            event: "on_stream_fin_sent".to_string(),
+        })
+    }
+}
+
+impl PublishStateMachine {
+    /// Idle -> Publishing (PUBLISH received from the peer).
+    pub fn on_publish_received(&mut self) -> Result<(), PublishFlowError> {
+        self.on_publish_sent().map_err(|_| PublishFlowError::InvalidTransition {
+            from: self.state(),
+            event: "on_publish_received".to_string(),
+        })
+    }
+
+    /// Publishing -> Active (REQUEST_OK written on the peer's stream).
+    ///
+    /// The message that walks this edge is a REQUEST_OK, which draft-23
+    /// Section 1.5 calls PUBLISH_OK as a shorthand.
+    pub fn on_publish_ok_sent(&mut self) -> Result<(), PublishFlowError> {
+        self.on_publish_ok().map_err(|_| PublishFlowError::InvalidTransition {
+            from: self.state(),
+            event: "on_publish_ok_sent".to_string(),
+        })
+    }
+
+    /// Publishing -> Done (REQUEST_ERROR written on the peer's stream).
+    pub fn on_publish_error_sent(&mut self) -> Result<(), PublishFlowError> {
+        self.on_publish_error().map_err(|_| PublishFlowError::InvalidTransition {
+            from: self.state(),
+            event: "on_publish_error_sent".to_string(),
+        })
+    }
+
+    /// Active -> Done (PUBLISH_DONE received from the publishing peer).
+    pub fn on_publish_done_received(&mut self) -> Result<(), PublishFlowError> {
+        self.on_publish_done_sent().map_err(|_| PublishFlowError::InvalidTransition {
+            from: self.state(),
+            event: "on_publish_done_received".to_string(),
+        })
+    }
+}
+
+impl PublishNamespaceStateMachine {
+    /// Idle -> Pending (PUBLISH_NAMESPACE received from the peer).
+    pub fn on_publish_namespace_received(&mut self) -> Result<(), NamespaceError> {
+        self.on_publish_namespace_sent().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_publish_namespace_received".to_string(),
+        })
+    }
+
+    /// Pending -> Active (REQUEST_OK written on the peer's stream).
+    pub fn on_publish_namespace_ok_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_publish_namespace_ok().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_publish_namespace_ok_sent".to_string(),
+        })
+    }
+
+    /// Pending -> Done (REQUEST_ERROR written on the peer's stream).
+    pub fn on_publish_namespace_error_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_publish_namespace_error().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_publish_namespace_error_sent".to_string(),
+        })
+    }
+}
+
+impl SubscribeNamespaceStateMachine {
+    /// Idle -> Pending (SUBSCRIBE_NAMESPACE or SUBSCRIBE_TRACKS received from
+    /// the peer).
+    pub fn on_subscribe_namespace_received(&mut self) -> Result<(), NamespaceError> {
+        self.on_subscribe_namespace_sent().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_subscribe_namespace_received".to_string(),
+        })
+    }
+
+    /// Pending -> Active (REQUEST_OK written on the peer's stream).
+    pub fn on_subscribe_namespace_ok_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_subscribe_namespace_ok().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_subscribe_namespace_ok_sent".to_string(),
+        })
+    }
+
+    /// Pending -> Done (REQUEST_ERROR written on the peer's stream).
+    pub fn on_subscribe_namespace_error_sent(&mut self) -> Result<(), NamespaceError> {
+        self.on_subscribe_namespace_error().map_err(|_| NamespaceError::InvalidTransition {
+            from: format!("{:?}", self.state()),
+            event: "on_subscribe_namespace_error_sent".to_string(),
+        })
+    }
+
+    /// Active -> Active (NAMESPACE written on the peer's SUBSCRIBE_NAMESPACE
+    /// stream).
+    ///
+    /// Draft-23 Section 9.15 puts NAMESPACE "on the response stream of a
+    /// SUBSCRIBE_NAMESPACE request", and Section 4.2 has the publisher send
+    /// them only once the request has been accepted — "On success, the
+    /// publisher MUST send a NAMESPACE message for each namespace it knows
+    /// that matches the Track Namespace Prefix". Requiring Active is what
+    /// makes one written ahead of the REQUEST_OK an error rather than a frame
+    /// on the wire.
+    pub fn on_namespace_sent(&mut self) -> Result<(), NamespaceError> {
+        self.require_active("on_namespace_sent")
+    }
+
+    /// Active -> Active (NAMESPACE_DONE written on the peer's
+    /// SUBSCRIBE_NAMESPACE stream).
+    ///
+    /// Section 9.16: "All NAMESPACE_DONE messages are in response to a
+    /// SUBSCRIBE_NAMESPACE". The namespace subscription outlives it — Section
+    /// 4.2 has the publisher go on sending "further NAMESPACE or
+    /// NAMESPACE_DONE messages as that set changes" — so this ends one
+    /// namespace, not the request, and the state does not move.
+    pub fn on_namespace_done_sent(&mut self) -> Result<(), NamespaceError> {
+        self.require_active("on_namespace_done_sent")
+    }
+
+    /// Active -> Active (PUBLISH_SKIPPED written on the peer's
+    /// SUBSCRIBE_TRACKS stream).
+    ///
+    /// Section 9.18: "All PUBLISH_SKIPPED messages are in response to a
+    /// SUBSCRIBE_TRACKS". One skipped track says nothing about the rest, so
+    /// like the two above this is a self-transition on an accepted request.
+    pub fn on_publish_skipped_sent(&mut self) -> Result<(), NamespaceError> {
+        self.require_active("on_publish_skipped_sent")
+    }
+
+    /// The shared body of the three self-transitions above: accept the event
+    /// when the request has been answered with REQUEST_OK, and name the event
+    /// that was refused otherwise.
+    fn require_active(&self, event: &str) -> Result<(), NamespaceError> {
+        if self.state() == SubscribeNamespaceState::Active {
+            Ok(())
+        } else {
+            Err(NamespaceError::InvalidTransition {
+                from: format!("{:?}", self.state()),
+                event: event.to_string(),
+            })
+        }
+    }
+}
+
+impl TrackStatusStateMachine {
+    /// Idle -> Pending (TRACK_STATUS received from the peer).
+    pub fn on_track_status_received(&mut self) -> Result<(), TrackStatusError> {
+        self.on_track_status_sent().map_err(|_| TrackStatusError::InvalidTransition {
+            from: self.state(),
+            event: "on_track_status_received".to_string(),
+        })
+    }
+
+    /// Pending -> Done (REQUEST_OK written on the peer's stream).
+    pub fn on_track_status_ok_sent(&mut self) -> Result<(), TrackStatusError> {
+        self.on_track_status_ok().map_err(|_| TrackStatusError::InvalidTransition {
+            from: self.state(),
+            event: "on_track_status_ok_sent".to_string(),
+        })
+    }
+
+    /// Pending -> Done (REQUEST_ERROR written on the peer's stream).
+    pub fn on_track_status_error_sent(&mut self) -> Result<(), TrackStatusError> {
+        self.on_track_status_error().map_err(|_| TrackStatusError::InvalidTransition {
+            from: self.state(),
+            event: "on_track_status_error_sent".to_string(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod responder_tests {
+    use super::*;
+    use crate::draft23::namespace::SubscribeNamespaceState;
+    use crate::draft23::publish::PublishState;
+    use crate::draft23::subscription::SubscriptionState;
+    use moqtap_codec::kvp::KvpValue;
+
+    fn active_client() -> Endpoint {
+        let mut ep = Endpoint::new(Role::Client);
+        ep.connect().unwrap();
+        let _ = ep.send_setup(vec![]).unwrap();
+        ep.receive_setup(&Setup { options: vec![] }).unwrap();
+        ep
+    }
+
+    fn v(n: u64) -> VarInt {
+        VarInt::from_u64(n).unwrap()
+    }
+
+    fn ns() -> TrackNamespace {
+        TrackNamespace(vec![b"live".to_vec()])
+    }
+
+    fn peer_subscribe(id: u64) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: v(id),
+            track_namespace: ns(),
+            track_name: b"video".to_vec(),
+            parameters: vec![],
+        })
+    }
+
+    fn peer_publish(id: u64) -> ControlMessage {
+        ControlMessage::Publish(Publish {
+            request_id: v(id),
+            track_namespace: ns(),
+            track_name: b"video".to_vec(),
+            track_alias: v(7),
+            parameters: vec![],
+            track_properties: vec![],
+        })
+    }
+
+    fn request_ok() -> ControlMessage {
+        ControlMessage::RequestOk(RequestOk { parameters: vec![], track_properties: vec![] })
+    }
+
+    fn publish_done() -> ControlMessage {
+        ControlMessage::PublishDone(PublishDone {
+            status_code: v(0),
+            stream_count: v(0),
+            reason_phrase: Vec::new(),
+        })
+    }
+
+    /// The peer's requests and this endpoint's share one map per kind, and the
+    /// opposite Request ID parity is what keeps them apart. Both directions
+    /// are registered here and both are still there afterwards, which is the
+    /// consequence a collision would destroy.
+    #[test]
+    fn a_peers_request_lives_beside_our_own_in_the_same_map() {
+        let mut ep = active_client();
+        let (ours, _) = ep.subscribe(ns(), b"video".to_vec(), vec![]).unwrap();
+        assert_eq!(ours.into_inner(), 0, "a client allocates even Request IDs");
+
+        let theirs = ep.receive_request_on_stream(&peer_subscribe(1)).unwrap();
+        assert_eq!(theirs.into_inner(), 1);
+        assert_eq!(
+            ep.active_subscription_count(),
+            2,
+            "the peer's subscription displaced ours in the map",
+        );
+        assert_eq!(ep.peer_request_count(), 1);
+    }
+
+    /// Draft-23 Section 6.4.2.1: a Request ID whose least significant bit is
+    /// wrong for the sender MUST close the session with INVALID_REQUEST_ID.
+    /// The close is observable twice over — the endpoint stops accepting
+    /// requests, and the code the connection layer will put on the wire is the
+    /// one the section names.
+    #[test]
+    fn a_peer_id_with_our_own_parity_closes_the_session() {
+        let mut ep = active_client();
+        // 2 is even, so it is an id this client allocates, not one the server
+        // may send.
+        let err = ep.receive_request_on_stream(&peer_subscribe(2)).unwrap_err();
+        assert_eq!(err.session_error_code(), Some(SessionErrorCode::InvalidRequestId));
+        assert_eq!(err.to_string(), "request ID error: request ID 2 has wrong parity for Server");
+        assert_eq!(ep.session_state(), SessionState::Closed);
+        assert_eq!(ep.active_subscription_count(), 0, "a refused request was registered anyway");
+        assert!(matches!(
+            ep.receive_request_on_stream(&peer_subscribe(1)),
+            Err(EndpointError::NotActive),
+        ));
+    }
+
+    /// The other half of the same sentence: a duplicate Request ID is also
+    /// INVALID_REQUEST_ID. The id is remembered even though the first request
+    /// is still open, which is why the second is caught.
+    #[test]
+    fn a_repeated_peer_request_id_closes_the_session() {
+        let mut ep = active_client();
+        ep.receive_request_on_stream(&peer_subscribe(1)).unwrap();
+        let err = ep.receive_request_on_stream(&peer_publish(1)).unwrap_err();
+        assert_eq!(err.session_error_code(), Some(SessionErrorCode::InvalidRequestId));
+        assert_eq!(err.to_string(), "request 1 was already used by the peer");
+        assert_eq!(ep.session_state(), SessionState::Closed);
+        assert_eq!(ep.active_publish_count(), 0, "the duplicate was registered anyway");
+    }
+
+    /// Draft-23 Section 6.3 gives a different code for a different rule: a
+    /// bidirectional stream that begins with the wrong message type is
+    /// UNEXPECTED_MESSAGE, not INVALID_REQUEST_ID.
+    #[test]
+    fn a_stream_that_opens_no_request_closes_the_session_with_unexpected_message() {
+        let mut ep = active_client();
+        let not_a_request =
+            ControlMessage::GoAway(GoAway { new_session_uri: Vec::new(), timeout: v(0) });
+        let err = ep.receive_request_on_stream(&not_a_request).unwrap_err();
+        assert_eq!(err.session_error_code(), Some(SessionErrorCode::UnexpectedMessage));
+        assert_eq!(err.to_string(), "GoAway does not begin a request stream");
+        assert_eq!(ep.session_state(), SessionState::Closed);
+    }
+
+    /// A peer's SUBSCRIBE runs the same graph our own does, in the other
+    /// direction: received, then answered, then ended with PUBLISH_DONE by
+    /// this endpoint rather than by the peer.
+    #[test]
+    fn answering_a_peers_subscribe_walks_the_subscription_to_done() {
+        let mut ep = active_client();
+        let id = ep.receive_request_on_stream(&peer_subscribe(1)).unwrap();
+
+        let ok = ControlMessage::SubscribeOk(SubscribeOk {
+            track_alias: v(7),
+            parameters: vec![],
+            track_properties: vec![],
+        });
+        ep.send_response_on_stream(id, &ok).unwrap();
+        assert_eq!(ep.subscriptions[&1].state(), SubscriptionState::Active);
+
+        ep.send_response_on_stream(id, &publish_done()).unwrap();
+        assert_eq!(ep.subscriptions[&1].state(), SubscriptionState::Done);
+    }
+
+    /// The responder transitions are separate from the requester ones so a
+    /// mis-dispatch names the responder event rather than succeeding quietly.
+    #[test]
+    fn a_responder_transition_out_of_order_names_the_responder_event() {
+        let mut ep = active_client();
+        let id = ep.receive_request_on_stream(&peer_subscribe(1)).unwrap();
+        // PUBLISH_DONE before SUBSCRIBE_OK: the subscription is not Active.
+        let err = ep.send_response_on_stream(id, &publish_done()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "subscription error: invalid transition from Subscribing on event on_publish_done_sent",
+        );
+    }
+
+    /// A peer's PUBLISH is accepted with REQUEST_OK. The peer is then the publisher,
+    /// so PUBLISH_DONE comes back from it on the same stream — the one
+    /// direction the requester path never has to handle, because there we are
+    /// the publisher.
+    #[test]
+    fn a_peers_publish_is_accepted_with_request_ok_and_ended_by_the_peer() {
+        let mut ep = active_client();
+        let id = ep.receive_request_on_stream(&peer_publish(1)).unwrap();
+        ep.send_response_on_stream(id, &request_ok()).unwrap();
+        assert_eq!(ep.publishes[&1].state(), PublishState::Active);
+
+        ep.receive_on_peer_request_stream(id, publish_done()).unwrap();
+        assert_eq!(ep.publishes[&1].state(), PublishState::Done);
+        assert!(
+            ep.receive_on_peer_request_stream(id, publish_done()).is_err(),
+            "a second PUBLISH_DONE was accepted on a publication already Done",
+        );
+    }
+
+    /// This endpoint is the responder on a stream the peer opened, so a
+    /// response arriving there is the peer answering itself. Routing it to the
+    /// response dispatcher would look up a request we never made; refusing it
+    /// is what the origin marker buys.
+    #[test]
+    fn a_response_on_a_peer_opened_stream_is_refused() {
+        let mut ep = active_client();
+        let id = ep.receive_request_on_stream(&peer_subscribe(1)).unwrap();
+        let ok = ControlMessage::SubscribeOk(SubscribeOk {
+            track_alias: v(7),
+            parameters: vec![],
+            track_properties: vec![],
+        });
+        let err = ep.receive_on_peer_request_stream(id, ok).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "SubscribeOk may not follow a request on a stream the peer opened",
+        );
+    }
+
+    /// A peer's REQUEST_UPDATE is held to the same rule the requester side is:
+    /// draft-23 Section 9.5 puts it on its request's own stream, and the
+    /// requester's receive path already refuses one whose Request ID names a
+    /// different request. Routing the peer's updates through that same handler
+    /// is what keeps the two directions from disagreeing.
+    #[test]
+    fn a_peers_request_update_is_held_to_its_own_stream() {
+        let mut ep = active_client();
+        let id = ep.receive_request_on_stream(&peer_subscribe(1)).unwrap();
+        let ok = ControlMessage::SubscribeOk(SubscribeOk {
+            track_alias: v(7),
+            parameters: vec![],
+            track_properties: vec![],
+        });
+        ep.send_response_on_stream(id, &ok).unwrap();
+
+        let update = |named: u64| {
+            ControlMessage::RequestUpdate(RequestUpdate {
+                request_id: v(named),
+                parameters: vec![],
+            })
+        };
+        ep.receive_on_peer_request_stream(id, update(1)).unwrap();
+        assert_eq!(ep.subscriptions[&1].state(), SubscriptionState::Active);
+
+        // An update naming a different request than its stream is the
+        // violation the section answers with a close.
+        let err = ep.receive_on_peer_request_stream(id, update(3)).unwrap_err();
+        assert!(matches!(err, EndpointError::UnexpectedRequestUpdate(3)), "{err}");
+        assert_eq!(ep.session_state(), SessionState::Closed);
+    }
+
+    /// SUBSCRIBE_TRACKS (0x51) is a request kind of its own: it is registered
+    /// and answerable, not refused as a non-request.
+    #[test]
+    fn a_peers_subscribe_tracks_is_a_request_of_its_own() {
+        let mut ep = active_client();
+        let tracks = ControlMessage::SubscribeTracks(SubscribeTracks {
+            request_id: v(1),
+            namespace_prefix: ns(),
+            parameters: vec![],
+        });
+        let id = ep.receive_request_on_stream(&tracks).unwrap();
+        assert_eq!(ep.active_subscribe_tracks_count(), 1);
+        assert_eq!(
+            ep.active_subscribe_namespace_count(),
+            0,
+            "SUBSCRIBE_TRACKS landed among the namespace subscriptions",
+        );
+        ep.send_response_on_stream(id, &request_ok()).unwrap();
+        assert_eq!(ep.subscribe_tracks[&1].state(), SubscribeNamespaceState::Active);
+
+        // Section 9.18 puts PUBLISH_SKIPPED on this stream, and only on this
+        // stream: a SUBSCRIBE_NAMESPACE has no such message.
+        let skipped = ControlMessage::PublishSkipped(PublishSkipped {
+            namespace_suffix: ns(),
+            track_name: b"video".to_vec(),
+        });
+        ep.send_response_on_stream(id, &skipped).unwrap();
+
+        let mut other = active_client();
+        let sub_ns = other
+            .receive_request_on_stream(&ControlMessage::SubscribeNamespace(SubscribeNamespace {
+                request_id: v(1),
+                namespace_prefix: ns(),
+                parameters: vec![],
+            }))
+            .unwrap();
+        other.send_response_on_stream(sub_ns, &request_ok()).unwrap();
+        assert!(
+            other.send_response_on_stream(sub_ns, &skipped).is_err(),
+            "PUBLISH_SKIPPED was accepted on a SUBSCRIBE_NAMESPACE stream",
+        );
+    }
+
+    /// Draft-23 Table 5 gives NAMESPACE and NAMESPACE_DONE the Stream value
+    /// "Request", and Section 4.2 has the publisher send them only once the
+    /// SUBSCRIBE_NAMESPACE has been accepted: "On success, the publisher MUST
+    /// send a NAMESPACE message for each namespace it knows that matches the
+    /// Track Namespace Prefix".
+    #[test]
+    fn namespaces_are_announced_on_the_peers_subscribe_namespace_stream() {
+        let mut ep = active_client();
+        let id = ep
+            .receive_request_on_stream(&ControlMessage::SubscribeNamespace(SubscribeNamespace {
+                request_id: v(1),
+                namespace_prefix: ns(),
+                parameters: vec![],
+            }))
+            .unwrap();
+
+        let namespace = ControlMessage::Namespace(message::Namespace {
+            namespace_suffix: ns(),
+            parameters: vec![],
+        });
+        let err = ep.send_response_on_stream(id, &namespace).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "namespace error: invalid transition from Pending on event on_namespace_sent",
+            "a NAMESPACE was allowed ahead of the REQUEST_OK that accepts the request",
+        );
+
+        ep.send_response_on_stream(id, &request_ok()).unwrap();
+        ep.send_response_on_stream(id, &namespace).unwrap();
+        ep.send_response_on_stream(
+            id,
+            &ControlMessage::NamespaceDone(message::NamespaceDone { namespace_suffix: ns() }),
+        )
+        .unwrap();
+        // One namespace ending does not end the subscription to the prefix.
+        assert_eq!(ep.subscribe_namespaces[&1].state(), SubscribeNamespaceState::Active);
+    }
+
+    /// Draft-23 Section 9.3 answers Track Properties on a REQUEST_OK that is
+    /// not a TRACK_STATUS response with a session close. The receive path
+    /// already refuses them; a responder that writes them would be handing a
+    /// conforming peer that reason, so the send path refuses them too — and
+    /// without closing this session, because nothing reached the wire.
+    #[test]
+    fn track_properties_are_refused_on_the_way_out_too() {
+        let properties = vec![KeyValuePair { key: v(0x04), value: KvpValue::Varint(v(1000)) }];
+        let with_properties = ControlMessage::RequestOk(RequestOk {
+            parameters: vec![],
+            track_properties: properties.clone(),
+        });
+
+        let mut ep = active_client();
+        let id = ep
+            .receive_request_on_stream(&ControlMessage::SubscribeNamespace(SubscribeNamespace {
+                request_id: v(1),
+                namespace_prefix: ns(),
+                parameters: vec![],
+            }))
+            .unwrap();
+        let err = ep.send_response_on_stream(id, &with_properties).unwrap_err();
+        assert!(matches!(err, EndpointError::TrackPropertiesOnOutgoingRequestOk(1)), "{err}");
+        assert_eq!(err.session_error_code(), None, "refusing our own write closed the session");
+        assert_eq!(
+            ep.subscribe_namespaces[&1].state(),
+            SubscribeNamespaceState::Pending,
+            "the refused response moved the state machine anyway",
+        );
+        // The request is still answerable without them.
+        ep.send_response_on_stream(id, &request_ok()).unwrap();
+
+        // TRACK_STATUS_OK is the shape that carries them.
+        let mut ep = active_client();
+        let id = ep
+            .receive_request_on_stream(&ControlMessage::TrackStatus(message::TrackStatus {
+                request_id: v(1),
+                track_namespace: ns(),
+                track_name: b"video".to_vec(),
+                parameters: vec![],
+            }))
+            .unwrap();
+        ep.send_response_on_stream(id, &with_properties).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use moqtap_codec::draft23::data_stream::FetchObjectHeader;
+    use moqtap_codec::kvp::KvpValue;
+
+    fn v(n: u64) -> VarInt {
+        VarInt::from_u64_moqt(n)
+    }
+
+    fn ns(label: &str) -> TrackNamespace {
+        TrackNamespace(vec![label.as_bytes().to_vec()])
+    }
+
+    fn peer_subscribe(id: u64, label: &str) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: v(id),
+            track_namespace: ns(label),
+            track_name: b"video".to_vec(),
+            parameters: vec![],
+        })
+    }
+
+    fn peer_fetch(id: u64, label: &str) -> ControlMessage {
+        ControlMessage::Fetch(Fetch {
+            request_id: v(id),
+            track_namespace: ns(label),
+            track_name: b"video".to_vec(),
+            parameters: vec![],
+        })
+    }
+
+    fn peer_subscribe_namespace(id: u64, label: &str) -> ControlMessage {
+        ControlMessage::SubscribeNamespace(SubscribeNamespace {
+            request_id: v(id),
+            namespace_prefix: ns(label),
+            parameters: vec![],
+        })
+    }
+
+    fn peer_subscribe_tracks(id: u64, label: &str) -> ControlMessage {
+        ControlMessage::SubscribeTracks(SubscribeTracks {
+            request_id: v(id),
+            namespace_prefix: ns(label),
+            parameters: vec![],
+        })
+    }
+
+    fn peer_publish_namespace(id: u64, label: &str) -> ControlMessage {
+        ControlMessage::PublishNamespace(PublishNamespace {
+            request_id: v(id),
+            track_namespace: ns(label),
+            parameters: vec![],
+        })
+    }
+
+    fn peer_publish(id: u64, label: &str) -> ControlMessage {
+        ControlMessage::Publish(Publish {
+            request_id: v(id),
+            track_namespace: ns(label),
+            track_name: b"video".to_vec(),
+            track_alias: v(id + 100),
+            parameters: vec![],
+            track_properties: vec![],
+        })
+    }
+
+    fn active(role: Role) -> Endpoint {
+        let mut ep = Endpoint::new(role);
+        ep.connect().unwrap();
+        ep.receive_setup(&Setup { options: vec![] }).unwrap();
+        assert_eq!(ep.session_state(), SessionState::Active);
+        ep
+    }
+
+    fn update(id: u64) -> RequestUpdate {
+        RequestUpdate { request_id: v(id), parameters: vec![] }
+    }
+
+    /// A session-fatal error must leave the endpoint unable to carry on: the
+    /// state machine is Closed and every new request is refused. Asserting the
+    /// error alone would let a caller ignore it and keep the session running,
+    /// which is the behaviour draft-23 Section 9.5 forbids.
+    fn assert_session_failed(ep: &mut Endpoint, err: EndpointError, code: SessionErrorCode) {
+        assert_eq!(err.session_error_code(), Some(code), "{err} should be fatal to the session");
+        assert_eq!(ep.session_state(), SessionState::Closed);
+        assert!(matches!(
+            ep.subscribe(ns("a"), b"b".to_vec(), vec![]),
+            Err(EndpointError::NotActive)
+        ));
+    }
+
+    /// The other answer, and the one this file gives to a rule draft-23
+    /// states no consequence for: the message is refused and the session runs
+    /// on.
+    ///
+    /// The three request-stream messages below take this helper rather than
+    /// [`Self::assert_session_failed`]. Section 6.3's opener sentence does not
+    /// reach a message arriving on the control stream — it is about what a
+    /// bidirectional stream may *begin* with — and no sentence in draft-23
+    /// closes a session over a message being in the wrong place. Table 5's
+    /// Stream column says where each message is sent and attaches no
+    /// consequence to a peer that sends one elsewhere.
+    ///
+    /// REQUEST_UPDATE is the one exception and takes the helper above: Section
+    /// 9.5 names two cases and closes over everything else, so a
+    /// REQUEST_UPDATE on the control stream really is a close the draft asks
+    /// for.
+    ///
+    /// Recovery is not an aspiration here. A control message carries its own
+    /// length, so the next boundary on the stream is known however this one
+    /// was refused, and the endpoint that follows really can carry on — which
+    /// is what the third assertion checks rather than assumes.
+    fn assert_refused_without_closing(ep: &mut Endpoint, err: &EndpointError) {
+        assert_eq!(
+            err.session_error_code(),
+            None,
+            "no sentence in draft-23 answers {err} with a close"
+        );
+        assert_eq!(ep.session_state(), SessionState::Active);
+        ep.subscribe(ns("a"), b"b".to_vec(), vec![])
+            .expect("the session survives a message it could not place");
+    }
+
+    /// Draft-23 Table 5 gives REQUEST_UPDATE the Stream value "Request", and
+    /// Section 9.5 has it sent "on the same bidi stream as the request".
+    ///
+    /// Before the placement was corrected the control stream accepted it and
+    /// the request stream refused it. Routing the request-stream case back
+    /// through the catch-all arm produces, at the first call below:
+    ///
+    /// ```text
+    /// called `Result::unwrap()` on an `Err` value: ResponseOnControlStream
+    /// ```
+    ///
+    /// and leaving the control-stream arm in place produces, at the assertion
+    /// after it:
+    ///
+    /// ```text
+    /// assertion failed: matches!(err, EndpointError::RequestUpdateOnControlStream)
+    /// ```
+    #[test]
+    fn a_request_update_belongs_on_its_request_stream_and_not_the_control_stream() {
+        let mut ep = active(Role::Client);
+        // A PUBLISH this endpoint made and the peer accepted. Section 9.5
+        // allows an update on exactly that among the requests made here, so
+        // this drives the routing question without also being a violation.
+        let (id, _) = ep.publish(ns("live"), b"video".to_vec(), v(7), vec![], vec![]).unwrap();
+        ep.receive_request_ok(id, &RequestOk { parameters: vec![], track_properties: vec![] })
+            .unwrap();
+
+        // The request stream is where it belongs, and the request-stream
+        // dispatcher is the route that has to accept it.
+        ep.receive_response_on_stream(id, ControlMessage::RequestUpdate(update(id.into_inner())))
+            .unwrap();
+
+        // The control stream is not, and the draft answers that with a close.
+        let err =
+            ep.receive_message(ControlMessage::RequestUpdate(update(id.into_inner()))).unwrap_err();
+        assert!(matches!(err, EndpointError::RequestUpdateOnControlStream), "{err}");
+        assert_session_failed(&mut ep, err, SessionErrorCode::UnexpectedMessage);
+    }
+
+    /// The three messages draft-23 Table 5 places on a request stream that are
+    /// not responses: NAMESPACE (0x8), NAMESPACE_DONE (0xE) and PUBLISH_SKIPPED
+    /// (0xF).
+    ///
+    /// Table 5's Stream column reads "Request" for all three, the same value it
+    /// gives REQUEST_UPDATE. Only SETUP is "Control" on its own; GOAWAY is
+    /// "Control, Request". Inverting the placement accepts them on the control
+    /// stream and refuses them on the request stream, so a conforming peer
+    /// sending NAMESPACE on the SUBSCRIBE_NAMESPACE stream that asked for it
+    /// would have its announcement dropped.
+    ///
+    /// Adding control-stream arms (`Namespace(ref m) =>
+    /// self.receive_namespace(m)` and its two siblings) fails this test at the
+    /// second half with:
+    ///
+    /// ```text
+    /// NAMESPACE must be refused on the control stream: Ok(())
+    /// ```
+    ///
+    /// and removing the request-stream arms fails it at the first half with:
+    ///
+    /// ```text
+    /// NAMESPACE belongs on a request stream: ResponseOnControlStream
+    /// ```
+    #[test]
+    fn namespace_and_publish_skipped_belong_on_a_request_stream() {
+        /// A message name paired with a way to build a fresh one, since each
+        /// case needs two copies and `ControlMessage` is consumed by both
+        /// dispatchers.
+        type Case = (&'static str, fn() -> ControlMessage);
+
+        let cases: [Case; 3] = [
+            ("NAMESPACE", || {
+                ControlMessage::Namespace(message::Namespace {
+                    namespace_suffix: ns("live"),
+                    parameters: vec![],
+                })
+            }),
+            ("NAMESPACE_DONE", || {
+                ControlMessage::NamespaceDone(message::NamespaceDone {
+                    namespace_suffix: ns("live"),
+                })
+            }),
+            ("PUBLISH_SKIPPED", || {
+                ControlMessage::PublishSkipped(PublishSkipped {
+                    namespace_suffix: ns("live"),
+                    track_name: b"video".to_vec(),
+                })
+            }),
+        ];
+
+        for (name, build) in cases {
+            let mut ep = active(Role::Client);
+            let id = ep.subscribe_namespace(ns("live"), vec![]).unwrap().0;
+
+            // Sections 4.2 and 3.6 make REQUEST_OK or REQUEST_ERROR the
+            // first message on this stream, so the answer comes before the
+            // messages that follow it. Sending the NAMESPACE first is a
+            // different rule's violation and would answer this test's question
+            // with that rule's error.
+            ep.receive_response_on_stream(
+                id,
+                ControlMessage::RequestOk(RequestOk {
+                    parameters: vec![],
+                    track_properties: vec![],
+                }),
+            )
+            .expect("REQUEST_OK answers the namespace subscription");
+
+            // Where Table 5 puts it.
+            ep.receive_response_on_stream(id, build())
+                .unwrap_or_else(|e| panic!("{name} belongs on a request stream: {e:?}"));
+
+            // Where it does not. Refused, and the session left running.
+            let err = match ep.receive_message(build()) {
+                Err(e) => e,
+                Ok(()) => panic!("{name} must be refused on the control stream: Ok(())"),
+            };
+            assert!(
+                matches!(err, EndpointError::RequestMessageOnControlStream(m) if m == name),
+                "{name} on the control stream gave {err}"
+            );
+            assert_refused_without_closing(&mut ep, &err);
+        }
+    }
+
+    /// Draft-23 Section 9.5: "An endpoint that receives a REQUEST_UPDATE
+    /// other than in the two cases above MUST close the session with UNEXPECTED_MESSAGE." Section
+    /// 9.12 names TRACK_STATUS as one such case:
+    /// "the subscriber cannot send REQUEST_UPDATE."
+    ///
+    /// A handler that consulted only `subscriptions`, answering both of these
+    /// with a recoverable per-request error that leaves the session running,
+    /// gives at the first assertion below:
+    ///
+    /// ```text
+    /// unknown request ID: 40
+    /// ```
+    #[test]
+    fn a_request_update_naming_a_non_updatable_request_closes_the_session() {
+        // An id nothing was ever issued under.
+        let mut ep = active(Role::Client);
+        let err = ep.receive_request_update(v(40), &update(40)).unwrap_err();
+        assert!(matches!(err, EndpointError::UnexpectedRequestUpdate(40)), "{err}");
+        assert_session_failed(&mut ep, err, SessionErrorCode::UnexpectedMessage);
+
+        // TRACK_STATUS, which the draft rules out by name.
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.track_status(ns("live"), b"video".to_vec(), vec![]).unwrap();
+        let err = ep.receive_request_update(id, &update(id.into_inner())).unwrap_err();
+        assert!(matches!(err, EndpointError::UnexpectedRequestUpdate(_)), "{err}");
+        assert_session_failed(&mut ep, err, SessionErrorCode::UnexpectedMessage);
+    }
+
+    /// Draft-23 Section 9.5's first case reaches every request kind: "The
+    /// sender of a request (SUBSCRIBE, PUBLISH, FETCH, PUBLISH_NAMESPACE,
+    /// SUBSCRIBE_NAMESPACE, SUBSCRIBE_TRACKS) can later send a REQUEST_UPDATE
+    /// on the same bidi stream as the request to modify it."
+    ///
+    /// # What it catches
+    ///
+    /// Removing the five-map lookup, so that only a SUBSCRIBE resolves:
+    ///
+    /// ```text
+    /// request 3 should be updatable: REQUEST_UPDATE for request 3, which is
+    /// not an updatable outstanding request
+    /// ```
+    ///
+    /// That cut is not evidence for this gate on its own. It reddens
+    /// twenty-eight tests across the crate, because every update on a fetch or
+    /// a namespace request comes through the same lookup — which makes it a
+    /// poor ablation and a fair measure of how much rests on the line.
+    #[test]
+    fn an_update_from_the_requester_resolves_against_every_request_kind() {
+        let mut ep = active(Role::Client);
+        let mut ids = Vec::new();
+        for msg in [
+            peer_subscribe(1, "a"),
+            peer_fetch(3, "b"),
+            peer_subscribe_namespace(5, "c"),
+            peer_subscribe_tracks(7, "d"),
+            peer_publish_namespace(9, "e"),
+            peer_publish(11, "f"),
+        ] {
+            ids.push(ep.receive_request_on_stream(&msg).unwrap());
+        }
+        for id in ids {
+            ep.receive_request_update(id, &update(id.into_inner()))
+                .unwrap_or_else(|e| panic!("request {} should be updatable: {e}", id.into_inner()));
+        }
+        assert_eq!(ep.session_state(), SessionState::Active);
+    }
+
+    /// Section 9.5's second case: "A subscriber can also send REQUEST_UPDATE
+    /// to modify parameters of a subscription established with PUBLISH."
+    ///
+    /// The publication is this endpoint's, so this is the one request of its
+    /// own that it may be sent an update on, and the one place the sender rule
+    /// and the request-kind rule disagree.
+    #[test]
+    fn an_update_on_a_publish_this_endpoint_made_is_the_second_case() {
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.publish(ns("live"), b"video".to_vec(), v(7), vec![], vec![]).unwrap();
+        ep.receive_request_ok(id, &RequestOk { parameters: vec![], track_properties: vec![] })
+            .unwrap();
+        ep.receive_request_update(id, &update(id.into_inner())).unwrap();
+        assert_eq!(ep.session_state(), SessionState::Active);
+    }
+
+    /// The second case needs the subscription to exist before it can be
+    /// updated, and the first case does not.
+    ///
+    /// Section 3.1: "Once either of these sequences is successful, the
+    /// subscription moves to the Established state and can be updated by the
+    /// subscriber using REQUEST_UPDATE." A PUBLISH this endpoint has sent and
+    /// the peer has not answered is Pending, so a subscriber updating it is
+    /// updating a subscription that does not exist yet.
+    ///
+    /// The first case rests on something else and keeps its own timing:
+    /// Section 9.5 lets the sender of a request update it "later" with
+    /// nothing said about the answer, and five of the six kinds it names are
+    /// not subscriptions at all. Both halves are here so that the asymmetry is
+    /// the thing asserted rather than a side effect of one of them.
+    ///
+    /// # What it catches
+    ///
+    /// Asking only whether the request exists, which is all the map on its own
+    /// can answer: it holds a PUBLISH from the moment it is sent, and the
+    /// peer's answer is what makes it a subscription.
+    ///
+    /// ```text
+    /// a PUBLISH still waiting for its answer is not an established one: ()
+    /// ```
+    ///
+    /// It reddens this gate and nothing else in the client or the proxy, and
+    /// the gate's second half stays green under it — which is what that
+    /// half is for. A cut that tightened both cases would redden it too.
+    #[test]
+    fn only_an_established_publication_may_be_updated_by_its_subscriber() {
+        // Case two, before the answer: the subscription is not established.
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.publish(ns("live"), b"video".to_vec(), v(7), vec![], vec![]).unwrap();
+        let err = ep
+            .receive_request_update(id, &update(id.into_inner()))
+            .expect_err("a PUBLISH still waiting for its answer is not an established one");
+        assert!(matches!(err, EndpointError::UnexpectedRequestUpdate(_)), "{err}");
+        assert_session_failed(&mut ep, err, SessionErrorCode::UnexpectedMessage);
+
+        // Case one, before the answer: allowed, and on the same beat.
+        let mut ep = active(Role::Client);
+        let peer = ep.receive_request_on_stream(&peer_subscribe(1, "live")).unwrap();
+        ep.receive_request_update(peer, &update(peer.into_inner()))
+            .expect("the sender of a request may update it before it is answered");
+        assert_eq!(ep.session_state(), SessionState::Active);
+    }
+
+    /// Section 9.5: "An endpoint that receives a REQUEST_UPDATE other than in the two cases above
+    /// MUST close the session with UNEXPECTED_MESSAGE."
+    ///
+    /// Neither case reaches a SUBSCRIBE, FETCH or namespace request this
+    /// endpoint made. Those are modified by the endpoint that made them, which
+    /// is this one, and an update arriving on one came from the side that has
+    /// no say over it.
+    ///
+    /// # What it catches
+    ///
+    /// Reading the Request ID's map and not the direction the update came
+    /// from, which is what this draft did: all five request kinds this
+    /// endpoint can make were updatable by whoever asked.
+    ///
+    /// ```text
+    /// an update on a request this endpoint made is neither case: ()
+    /// ```
+    ///
+    /// It reddens this gate and nothing else in the client or the proxy. The
+    /// `()` is the `Ok` the call returned, which is the whole defect: the
+    /// update was applied and the session carried on.
+    #[test]
+    fn an_update_on_a_request_this_endpoint_made_closes_the_session() {
+        for which in 0..5 {
+            let mut ep = active(Role::Client);
+            let (id, _) = match which {
+                0 => ep.subscribe(ns("live"), b"video".to_vec(), vec![]).unwrap(),
+                1 => ep.fetch(ns("live"), b"video".to_vec(), vec![]).unwrap(),
+                2 => ep.subscribe_namespace(ns("live"), vec![]).unwrap(),
+                3 => ep.subscribe_tracks(ns("live"), vec![]).unwrap(),
+                _ => ep.publish_namespace(ns("live"), vec![]).unwrap(),
+            };
+            let err = ep
+                .receive_request_update(id, &update(id.into_inner()))
+                .expect_err("an update on a request this endpoint made is neither case");
+            assert!(matches!(err, EndpointError::UnexpectedRequestUpdate(_)), "{which}: {err}");
+            assert_session_failed(&mut ep, err, SessionErrorCode::UnexpectedMessage);
+        }
+    }
+
+    /// A REQUEST_UPDATE whose own Request ID names a different request than
+    /// the stream it arrived on was sent on a stream that is not its
+    /// request's, which is the same violation.
+    #[test]
+    fn a_request_update_whose_id_disagrees_with_its_stream_closes_the_session() {
+        let mut ep = active(Role::Client);
+        let (a, _) = ep.subscribe(ns("live"), b"video".to_vec(), vec![]).unwrap();
+        let (b, _) = ep.subscribe(ns("live"), b"audio".to_vec(), vec![]).unwrap();
+        let err = ep.receive_request_update(a, &update(b.into_inner())).unwrap_err();
+        assert!(matches!(err, EndpointError::UnexpectedRequestUpdate(_)), "{err}");
+        assert_session_failed(&mut ep, err, SessionErrorCode::UnexpectedMessage);
+    }
+
+    /// Draft-23 Section 9.3: Track Properties "are populated in TRACK_STATUS_OK and FETCH_OK; they
+    /// are empty in PUBLISH_OK, REQUEST_UPDATE_OK,
+    /// SUBSCRIBE_NAMESPACE_OK and PUBLISH_NAMESPACE_OK. If an endpoint
+    /// receives Track Properties in one of these messages it MUST close the session with
+    /// INVALID_FIELD."
+    ///
+    /// Binding the message as `_msg` in `receive_request_ok`, so its Track
+    /// Properties go unread, gives:
+    ///
+    /// ```text
+    /// called `Result::unwrap_err()` on an `Ok` value: ()
+    /// ```
+    #[test]
+    fn track_properties_on_a_request_ok_that_is_not_a_track_status_close_the_session() {
+        let properties = vec![KeyValuePair { key: v(0x04), value: KvpValue::Varint(v(1000)) }];
+
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.subscribe_namespace(ns("live"), vec![]).unwrap();
+        let err = ep
+            .receive_request_ok(
+                id,
+                &RequestOk { parameters: vec![], track_properties: properties.clone() },
+            )
+            .unwrap_err();
+        assert!(matches!(err, EndpointError::TrackPropertiesOnNonTrackStatus(_)), "{err}");
+        assert_session_failed(&mut ep, err, SessionErrorCode::InvalidField);
+
+        // TRACK_STATUS_OK is the shape that carries them, and still does.
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.track_status(ns("live"), b"video".to_vec(), vec![]).unwrap();
+        ep.receive_request_ok(id, &RequestOk { parameters: vec![], track_properties: properties })
+            .unwrap();
+        assert_eq!(ep.session_state(), SessionState::Active);
+    }
+
+    /// Draft-23 Section 9.2: "A GOAWAY MAY also be sent on a request stream
+    /// to initiate migration of that individual request." Table 5 gives GOAWAY
+    /// the Stream value "Control, Request".
+    ///
+    /// Without the `GoAway` arm in `receive_response_on_stream` the message
+    /// falls through to the catch-all:
+    ///
+    /// ```text
+    /// called `Result::unwrap()` on an `Err` value: ResponseOnControlStream
+    /// ```
+    ///
+    /// The session must survive it — only the one request is being moved.
+    #[test]
+    fn a_goaway_on_a_request_stream_migrates_that_request_and_not_the_session() {
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.subscribe(ns("live"), b"video".to_vec(), vec![]).unwrap();
+
+        let goaway =
+            GoAway { new_session_uri: b"https://elsewhere.example/moq".to_vec(), timeout: v(0) };
+        ep.receive_response_on_stream(id, ControlMessage::GoAway(goaway)).unwrap();
+
+        assert_eq!(ep.session_state(), SessionState::Active);
+        // Per-request migration leaves the session-wide URI unset; the control
+        // stream is what sets that.
+        assert_eq!(ep.goaway_uri(), None);
+        // And a new request is still allowed.
+        ep.subscribe(ns("live"), b"audio".to_vec(), vec![]).unwrap();
+    }
+
+    /// Draft-23 Section 9.2: "If a server receives a GOAWAY with a non-zero New Session URI Length
+    /// it MUST close the session with ROLE_VIOLATION."
+    ///
+    /// Without the role check the URI is stored and a server-role endpoint
+    /// will follow a redirect it should have refused:
+    ///
+    /// ```text
+    /// called `Result::unwrap_err()` on an `Ok` value: ()
+    /// ```
+    #[test]
+    fn a_server_refuses_a_goaway_carrying_a_new_session_uri() {
+        let mut ep = active(Role::Server);
+        let goaway =
+            GoAway { new_session_uri: b"https://elsewhere.example/moq".to_vec(), timeout: v(0) };
+        let err = ep.receive_goaway(&goaway).unwrap_err();
+        assert!(matches!(err, EndpointError::GoAwayUriAtServer), "{err}");
+        assert_eq!(ep.goaway_uri(), None);
+        assert_session_failed(&mut ep, err, SessionErrorCode::RoleViolation);
+
+        // An empty URI is the form a server may legitimately receive: it says
+        // the peer is going away, not where to go.
+        let mut ep = active(Role::Server);
+        ep.receive_goaway(&GoAway { new_session_uri: vec![], timeout: v(0) }).unwrap();
+        assert_eq!(ep.session_state(), SessionState::Draining);
+
+        // A client is the side that may be redirected.
+        let mut ep = active(Role::Client);
+        ep.receive_goaway(&goaway).unwrap();
+        assert_eq!(ep.goaway_uri(), Some(&b"https://elsewhere.example/moq"[..]));
+    }
+
+    /// Draft-23 Section 9.11 gives FETCH no `Fetch Type` field and no location
+    /// fields, so a FETCH names a track the way a SUBSCRIBE does and the range
+    /// travels in a parameter: Location Filter Type 0x04, then its four fields.
+    ///
+    /// Adding one to the end object fails with:
+    ///
+    /// ```text
+    /// assertion `left == right` failed
+    ///   left: [4, 10, 0, 0, 6]
+    ///  right: [4, 10, 0, 0, 5]
+    /// ```
+    #[test]
+    fn a_fetch_carries_its_range_in_an_inclusive_location_filter() {
+        let mut ep = active(Role::Client);
+        let range = LocationFilter::range_to(10, 0, 0, 5).unwrap();
+        let (_, msg) = ep.fetch_range(ns("live"), b"video".to_vec(), &range, vec![]).unwrap();
+
+        let ControlMessage::Fetch(fetch) = msg else { panic!("expected a FETCH") };
+        assert_eq!(fetch.track_namespace, ns("live"));
+        assert_eq!(fetch.track_name, b"video".to_vec());
+        let filter = fetch
+            .parameters
+            .iter()
+            .find(|p| p.key.into_inner() == 0x21)
+            .expect("the range is a LOCATION_FILTER parameter");
+        let KvpValue::Bytes(bytes) = &filter.value else { panic!("a Location Filter value") };
+        // Type 0x04, Absolute Range. The last object is 5, not 6: Sections 3.2
+        // and 3.3.1 make the range inclusive.
+        assert_eq!(bytes, &vec![0x04, 10, 0, 0, 5]);
+    }
+
+    /// Draft-23 Section 3.4, and what replaced the joining fetch: a
+    /// subscription that carries FILL_PARAMETERS is answered with a
+    /// unidirectional stream whose FETCH_HEADER carries **the subscription's**
+    /// Request ID.
+    ///
+    /// Without the `note_fill_requested` call in `subscribe`, the stream is
+    /// unattributable and the open is refused:
+    ///
+    /// ```text
+    /// called `Result::unwrap()` on an `Err` value: UnrequestedFillStream(0)
+    /// ```
+    #[test]
+    fn a_subscription_that_asks_for_a_fill_can_account_for_its_stream() {
+        let mut ep = active(Role::Client);
+        let fill_parameter = fill::FillParameters::inherited().parameter().unwrap();
+        let (id, _) = ep.subscribe(ns("live"), b"video".to_vec(), vec![fill_parameter]).unwrap();
+
+        assert!(ep.fill_requested(id));
+        ep.on_fill_stream_opened(id).unwrap();
+        ep.on_fill_stream_opened(id).unwrap();
+        // Section 3.4: "a subscription can have multiple fill fetch streams
+        // open at once ... opening a new fill fetch stream does not implicitly
+        // cancel any previously opened fill fetch streams."
+        assert_eq!(ep.open_fill_streams(id), 2);
+
+        ep.on_fill_stream_ended(id);
+        assert_eq!(ep.open_fill_streams(id), 1);
+        // Section 9.9 counts every stream the publisher opened, ended or not.
+        assert_eq!(ep.fill_streams_opened(id), 2);
+
+        // Section 3.4.1: neither ending touches the subscription.
+        ep.on_fill_stream_ended(id);
+        assert_eq!(ep.active_subscription_count(), 1);
+    }
+
+    /// A SUBSCRIBE_TRACKS carrying FILL_PARAMETERS asks for none itself.
+    /// draft-23 Section 3.4: "The FETCH_HEADER on the fill fetch stream carries
+    /// the subscription's Request ID for an initial fill", and the
+    /// subscription is the PUBLISH the publisher sends as its result, which
+    /// Section 3.6.2 has include "those" parameters.
+    #[test]
+    fn a_fill_for_subscribe_tracks_names_the_publish_and_not_the_request() {
+        let mut ep = active(Role::Client);
+        let fill_parameter = fill::FillParameters::inherited().parameter().unwrap();
+        let (tracks_id, _) = ep.subscribe_tracks(ns("live"), vec![fill_parameter.clone()]).unwrap();
+        let err = ep.on_fill_stream_opened(tracks_id).unwrap_err();
+        assert!(matches!(err, EndpointError::UnrequestedFillStream(_)), "{err}");
+
+        let publish = ControlMessage::Publish(Publish {
+            request_id: v(1),
+            track_namespace: ns("live"),
+            track_name: b"video".to_vec(),
+            track_alias: v(3),
+            parameters: vec![fill_parameter],
+            track_properties: vec![],
+        });
+        let publish_id = ep.receive_request_on_stream(&publish).unwrap();
+        ep.on_fill_stream_opened(publish_id).unwrap();
+    }
+
+    /// A subscription that asked for no fill has no fill fetch stream to
+    /// attribute, and Section 9.19.15 is plain that the parameter is the whole
+    /// of the request: "A fill fetch stream is opened only when FILL_PARAMETERS is present."
+    #[test]
+    fn a_stream_for_a_subscription_that_asked_for_no_fill_is_refused() {
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.subscribe(ns("live"), b"video".to_vec(), vec![]).unwrap();
+        assert!(!ep.fill_requested(id));
+        let err = ep.on_fill_stream_opened(id).unwrap_err();
+        assert!(matches!(err, EndpointError::UnrequestedFillStream(_)), "{err}");
+        // Not a session close: draft-23 names no code for it, and Section
+        // 3.4.1 makes cancelling one stream something that "does not affect
+        // the subscription".
+        assert_eq!(err.session_error_code(), None);
+        assert_eq!(ep.session_state(), SessionState::Active);
+    }
+
+    /// Draft-23 Section 9.10: PUBLISH_STATE_NOTIFY "applies only to
+    /// subscriptions, and is sent only by the publisher. An endpoint that receives a
+    /// PUBLISH_STATE_NOTIFY for any other request type MUST close the session with
+    /// UNEXPECTED_MESSAGE. A publisher that receives a PUBLISH_STATE_NOTIFY MUST close the session
+    /// with ROLE_VIOLATION."
+    ///
+    /// It is also unilateral, so it must not spend an update credit: routing it
+    /// through `receive_request_update` instead would leave this endpoint owing
+    /// an answer the section forbids it to send.
+    #[test]
+    fn a_state_notify_is_taken_on_a_subscription_and_refused_anywhere_else() {
+        let notify = PublishStateNotify { parameters: vec![] };
+
+        // On this endpoint's own SUBSCRIBE the peer is the publisher.
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.subscribe(ns("live"), b"video".to_vec(), vec![]).unwrap();
+        ep.receive_publish_state_notify(id, &notify).unwrap();
+        assert_eq!(ep.session_state(), SessionState::Active);
+        // Nothing is owed in reply.
+        assert!(!ep.has_unanswered_update(id));
+
+        // On a FETCH there is no subscription for it to be about.
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.fetch(ns("live"), b"video".to_vec(), vec![]).unwrap();
+        let err = ep.receive_publish_state_notify(id, &notify).unwrap_err();
+        assert!(matches!(err, EndpointError::StateNotifyForNonSubscription(_)), "{err}");
+        assert_eq!(err.session_error_code(), Some(SessionErrorCode::UnexpectedMessage));
+        assert_eq!(ep.session_state(), SessionState::Closed);
+
+        // On a SUBSCRIBE the peer sent, this endpoint is the publisher, so a
+        // notify arriving on it came from the subscriber.
+        let mut ep = active(Role::Server);
+        let id = ep.receive_request_on_stream(&peer_subscribe(0, "live")).unwrap();
+        let err = ep.receive_publish_state_notify(id, &notify).unwrap_err();
+        assert!(matches!(err, EndpointError::StateNotifyFromSubscriber(_)), "{err}");
+        assert_eq!(ep.session_state(), SessionState::Closed);
+    }
+
+    /// A client with a subscription to `live`/`video` bound to alias 9, and a
+    /// FETCH for the same track carrying `parameters`.
+    fn subscribed_and_fetching(parameters: Vec<KeyValuePair>) -> (Endpoint, FetchExistence) {
+        let mut ep = active(Role::Client);
+        let (id, _) = ep.subscribe(ns("live"), b"video".to_vec(), vec![]).unwrap();
+        ep.receive_subscribe_ok(
+            id,
+            &SubscribeOk { track_alias: v(9), parameters: vec![], track_properties: vec![] },
+        )
+        .unwrap();
+        let (fetch_id, _) = ep.fetch(ns("live"), b"video".to_vec(), parameters).unwrap();
+        let mut existence = ep.fetch_existence(fetch_id.into_inner()).unwrap();
+        existence.begin(GroupOrder::Ascending);
+        (ep, existence)
+    }
+
+    /// A resolved FETCH entry at `{group, object}` whose wire form is `hex`.
+    fn entry(hex: &[u8], group: u64, object: u64) -> FetchObject {
+        FetchObject {
+            header: FetchObjectHeader::decode(&mut &hex[..]).unwrap(),
+            group_id: group,
+            subgroup_id: None,
+            object_id: object,
+            publisher_priority: None,
+        }
+    }
+
+    const OBJECT: &[u8] = &[0x00, 0x00];
+    const NON_EXISTENT: &[u8] = &[0x80, 0x8C, 0x00, 0x00, 0x00];
+    const UNKNOWN: &[u8] = &[0x81, 0x0C, 0x00, 0x00, 0x00];
+    const END_OF_GROUP: &[u8] = &[0x80, 0x80];
+
+    fn at(group: u64, object: u64) -> ObjectLocation {
+        ObjectLocation { group, object }
+    }
+
+    fn contradicted(err: &EndpointError) -> Option<(u64, u64)> {
+        match err {
+            EndpointError::ObjectExistenceContradicted { group, object, .. } => {
+                Some((*group, *object))
+            }
+            _ => None,
+        }
+    }
+
+    /// draft-23 Section 12.1, condition 10: "An Object is received after it has
+    /// been recorded as not existing". A FETCH's End of Non-Existent Range is
+    /// the record.
+    #[test]
+    fn an_object_inside_a_fetched_non_existent_range_makes_the_track_malformed() {
+        let (ep, mut fetch) = subscribed_and_fetching(vec![]);
+        fetch.note_entry(&entry(OBJECT, 5, 2)).unwrap();
+        fetch.note_entry(&entry(NON_EXISTENT, 5, 3)).unwrap();
+        let err = ep.note_received_object(9, at(5, 3), ObjectRole::Produced, &[]).unwrap_err();
+        assert_eq!(contradicted(&err), Some((5, 3)), "{err}");
+    }
+
+    /// The other half: "or is signalled as not existing after it was
+    /// received". Without a Range Filter an unmarked gap is that signal.
+    #[test]
+    fn a_fetch_gap_over_a_received_object_makes_the_track_malformed() {
+        let (ep, mut fetch) = subscribed_and_fetching(vec![]);
+        ep.note_received_object(9, at(5, 2), ObjectRole::Produced, &[]).unwrap();
+        fetch.note_entry(&entry(OBJECT, 5, 0)).unwrap();
+        let err = fetch.note_entry(&entry(OBJECT, 5, 4)).unwrap_err();
+        assert_eq!(contradicted(&err), Some((5, 2)), "{err}");
+    }
+
+    /// Section 3.2.2: "When one or more Range Filters are present, unmarked
+    /// gaps indicate objects in the Unknown state."
+    #[test]
+    fn a_gap_in_a_range_filtered_fetch_records_nothing() {
+        let filter = KeyValuePair { key: v(0x26), value: KvpValue::Bytes(vec![0x00, 0x00]) };
+        let (ep, mut fetch) = subscribed_and_fetching(vec![filter]);
+        fetch.note_entry(&entry(OBJECT, 5, 0)).unwrap();
+        fetch.note_entry(&entry(OBJECT, 5, 4)).unwrap();
+        ep.note_received_object(9, at(5, 2), ObjectRole::Produced, &[]).unwrap();
+    }
+
+    /// Section 2.1.2: "receiving an Object that was recorded as Gone or
+    /// Unknown is not an error."
+    #[test]
+    fn an_object_inside_an_unknown_range_is_accepted() {
+        let (ep, mut fetch) = subscribed_and_fetching(vec![]);
+        fetch.note_entry(&entry(OBJECT, 5, 0)).unwrap();
+        fetch.note_entry(&entry(UNKNOWN, 5, 3)).unwrap();
+        for object in 1..=3 {
+            ep.note_received_object(9, at(5, object), ObjectRole::Produced, &[]).unwrap();
+        }
+    }
+
+    /// Section 3.2.2's three logical gaps between Objects in different
+    /// Groups, under both Group Orders, and none after End of Group.
+    #[test]
+    fn a_gap_across_groups_is_the_tail_the_skipped_groups_and_the_head() {
+        let ascending = fetch_gap(at(5, 3), at(8, 2), GroupOrder::Ascending);
+        assert_eq!(
+            ascending,
+            vec![(at(5, 4), at(5, u64::MAX)), (at(6, 0), at(7, u64::MAX)), (at(8, 0), at(8, 1))]
+        );
+        let descending = fetch_gap(at(8, 3), at(5, 2), GroupOrder::Descending);
+        assert_eq!(
+            descending,
+            vec![(at(8, 4), at(8, u64::MAX)), (at(6, 0), at(7, u64::MAX)), (at(5, 0), at(5, 1))]
+        );
+        assert!(fetch_gap(at(5, 3), at(8, 2), GroupOrder::Descending).is_empty());
+        assert_eq!(fetch_gap(at(5, u64::MAX), at(6, 0), GroupOrder::Ascending), vec![]);
+
+        let (ep, mut fetch) = subscribed_and_fetching(vec![]);
+        fetch.note_entry(&entry(OBJECT, 5, 3)).unwrap();
+        fetch.note_entry(&entry(END_OF_GROUP, 5, 3)).unwrap();
+        fetch.note_entry(&entry(OBJECT, 6, 0)).unwrap();
+        ep.note_received_object(9, at(5, 4), ObjectRole::Produced, &[]).unwrap();
+    }
+}

@@ -1135,6 +1135,260 @@ mod draft22 {
         identity(&frame.0)
     }
 }
+#[cfg(feature = "draft23")]
+mod draft23 {
+    use moqtap_codec::draft23::data_stream::{
+        FetchObject, FetchObjectHeader, FetchObjectReader, FetchObjectWriter, GroupOrder,
+    };
+    use moqtap_codec::error::CodecError;
+    use moqtap_codec::varint::VarInt;
+
+    fn v(n: u64) -> VarInt {
+        VarInt::from_u64(n).unwrap()
+    }
+
+    /// A header with nothing on the wire but its flags and payload length.
+    fn header(flags: u64, payload_length: u64) -> FetchObjectHeader {
+        FetchObjectHeader {
+            serialization_flags: v(flags),
+            group_id_delta: None,
+            subgroup_id: None,
+            object_id_delta: None,
+            publisher_priority: None,
+            properties: None,
+            payload_length: v(payload_length),
+        }
+    }
+
+    /// A four-object draft-23 fetch stream: A {10,0}, B {10,2} by an Object ID
+    /// Delta of 0 (Section 11.4.1.1: "the prior Object's ID plus the Object ID
+    /// Delta + 2"), C {10,3} with no delta, D {11,0}.
+    fn sample_stream() -> Vec<u8> {
+        let mut wire = Vec::new();
+
+        let mut a = header(0x08 | 0x04 | 0x10 | 0b11, 2);
+        a.group_id_delta = Some(v(10));
+        a.subgroup_id = Some(v(3));
+        a.object_id_delta = Some(v(0));
+        a.publisher_priority = Some(128);
+        a.encode(&mut wire).unwrap();
+        wire.extend_from_slice(&[0xca, 0xfe]);
+
+        let mut b = header(0x04 | 0b01, 1);
+        b.object_id_delta = Some(v(0));
+        b.encode(&mut wire).unwrap();
+        wire.extend_from_slice(&[0x01]);
+
+        let c = header(0b01, 1);
+        c.encode(&mut wire).unwrap();
+        wire.extend_from_slice(&[0x02]);
+
+        let mut d = header(0x08 | 0x04 | 0b01, 1);
+        d.group_id_delta = Some(v(0));
+        d.object_id_delta = Some(v(0));
+        d.encode(&mut wire).unwrap();
+        wire.extend_from_slice(&[0x03]);
+
+        wire
+    }
+
+    /// Every frame on `wire`, with its payload, resolved by one reader.
+    fn read_all(wire: &[u8]) -> Vec<(FetchObject, Vec<u8>)> {
+        let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
+        let mut cursor: &[u8] = wire;
+        let mut out = Vec::new();
+        while !cursor.is_empty() {
+            let frame = reader.read_object_header(&mut cursor).expect("decode");
+            let len = frame.header.payload_length.into_inner() as usize;
+            let (payload, rest) = cursor.split_at(len);
+            let payload = payload.to_vec();
+            cursor = rest;
+            out.push((frame, payload));
+        }
+        out
+    }
+
+    /// Write `frames` back onto a fresh stream.
+    fn write_all(frames: &[(FetchObject, Vec<u8>)]) -> Vec<u8> {
+        let mut writer = FetchObjectWriter::new(GroupOrder::Ascending);
+        let mut out = Vec::new();
+        for (frame, payload) in frames {
+            writer.write_object_header(frame, &mut out).expect("encode");
+            out.extend_from_slice(payload);
+        }
+        out
+    }
+
+    fn identity(frame: &FetchObject) -> (u64, Option<u64>, u64, Option<u8>) {
+        (frame.group_id, frame.subgroup_id, frame.object_id, frame.publisher_priority)
+    }
+
+    fn identity_of(frame: &(FetchObject, Vec<u8>)) -> (u64, Option<u64>, u64, Option<u8>) {
+        identity(&frame.0)
+    }
+
+    #[test]
+    fn a_stream_written_back_unchanged_is_byte_identical() {
+        let wire = sample_stream();
+        let frames = read_all(&wire);
+        assert_eq!(frames.len(), 4, "the sample stream is four objects");
+        assert_eq!(write_all(&frames), wire, "a stream with nothing removed was rewritten");
+    }
+
+    #[test]
+    fn the_sample_stream_says_what_it_was_built_to_say() {
+        let ids: Vec<_> = read_all(&sample_stream()).iter().map(identity_of).collect();
+        assert_eq!(
+            ids,
+            vec![
+                (10, Some(3), 0, Some(128)),
+                (10, Some(3), 2, Some(128)),
+                (10, Some(3), 3, Some(128)),
+                (11, Some(3), 0, Some(128)),
+            ],
+        );
+    }
+
+    /// With B removed, C follows A and is three past it, which only an Object
+    /// ID Delta of 1 says.
+    #[test]
+    fn a_survivor_after_a_removed_object_still_resolves_to_itself() {
+        let frames = read_all(&sample_stream());
+        let kept: Vec<_> =
+            frames.into_iter().enumerate().filter(|(i, _)| *i != 1).map(|(_, f)| f).collect();
+        let want: Vec<_> = kept.iter().map(identity_of).collect();
+        let got: Vec<_> = read_all(&write_all(&kept)).iter().map(identity_of).collect();
+        assert_eq!(got, want, "a survivor was renumbered by the removal");
+    }
+
+    /// An Object one past its predecessor in the same Group has one encoding,
+    /// with no Object ID Delta: a delta adds at least two.
+    #[test]
+    fn a_successor_in_the_same_group_carries_no_delta() {
+        let frames = read_all(&sample_stream());
+        let mut writer = FetchObjectWriter::new(GroupOrder::Ascending);
+        writer.advance(&frames[1].0);
+        let mut c = frames[2].0.clone();
+        c.header = header(0x04 | 0b01, 1);
+        c.header.object_id_delta = Some(v(5));
+        let reframed = writer.header_for(&c).unwrap();
+        assert_eq!(reframed.object_id_delta, None);
+    }
+
+    #[test]
+    fn removing_the_first_object_promotes_the_second() {
+        let frames = read_all(&sample_stream());
+        let want: Vec<_> = frames.iter().skip(1).map(identity_of).collect();
+        let kept: Vec<_> = frames.into_iter().skip(1).collect();
+        let got: Vec<_> = read_all(&write_all(&kept)).iter().map(identity_of).collect();
+        assert_eq!(got, want, "a survivor was renumbered by the removal");
+    }
+
+    #[test]
+    fn an_object_that_does_not_advance_is_refused() {
+        let frames = read_all(&sample_stream());
+        let mut writer = FetchObjectWriter::new(GroupOrder::Ascending);
+        let mut out = Vec::new();
+        writer.write_object_header(&frames[2].0, &mut out).expect("the first object is free");
+        let err = writer
+            .write_object_header(&frames[0].0, &mut out)
+            .expect_err("object 0 cannot follow object 3");
+        assert!(matches!(err, CodecError::InvalidField), "got {err:?}");
+    }
+
+    #[test]
+    fn a_group_moving_against_the_group_order_is_refused() {
+        let frames = read_all(&sample_stream());
+        let mut writer = FetchObjectWriter::new(GroupOrder::Descending);
+        let mut out = Vec::new();
+        writer.write_object_header(&frames[0].0, &mut out).expect("the first object is free");
+        let err = writer
+            .write_object_header(&frames[3].0, &mut out)
+            .expect_err("group 11 cannot follow group 10 while descending");
+        assert!(matches!(err, CodecError::InvalidField), "got {err:?}");
+    }
+
+    /// An End of Range indicator survives a removal in front of it: Section
+    /// 11.4.2.1 resolves it against "the most recent preceding Object or End of
+    /// Range indicator", so its fields are re-derived.
+    #[test]
+    fn an_end_of_range_marker_is_reframed_against_the_new_predecessor() {
+        for flags in [0x8Cu64, 0x10C, 0x20C, 0x40C] {
+            let mut wire = Vec::new();
+
+            // {10,0} and {11,0}, then an indicator through {12,9}: the Group
+            // ID is the prior plus Group ID Delta, and a nonzero delta makes the
+            // Object ID Delta absolute.
+            let mut a = header(0x08 | 0x04 | 0x10 | 0b11, 1);
+            a.group_id_delta = Some(v(10));
+            a.subgroup_id = Some(v(3));
+            a.object_id_delta = Some(v(0));
+            a.publisher_priority = Some(128);
+            a.encode(&mut wire).unwrap();
+            wire.push(0xaa);
+
+            let mut b = header(0x08 | 0x04 | 0b01, 1);
+            b.group_id_delta = Some(v(0));
+            b.object_id_delta = Some(v(0));
+            b.encode(&mut wire).unwrap();
+            wire.push(0xbb);
+
+            let mut marker = header(flags, 0);
+            marker.group_id_delta = Some(v(1));
+            marker.object_id_delta = Some(v(9));
+            marker.encode(&mut wire).unwrap();
+
+            let frames = read_all(&wire);
+            assert_eq!(frames.len(), 3);
+            let marker_identity = identity(&frames[2].0);
+            assert_eq!((marker_identity.0, marker_identity.2), (12, 9), "flags {flags:#x}");
+            assert_eq!(write_all(&frames), wire, "flags {flags:#x}: an untouched stream moved");
+
+            let kept: Vec<_> =
+                frames.into_iter().enumerate().filter(|(i, _)| *i != 1).map(|(_, f)| f).collect();
+            let got: Vec<_> = read_all(&write_all(&kept)).iter().map(identity_of).collect();
+            assert_eq!(got.last().copied(), Some(marker_identity), "flags {flags:#x}");
+        }
+    }
+
+    /// End of Group carries no field, so it survives any removal unchanged,
+    /// and the Object after it still resolves against an Object ID of 2^64-1
+    /// (Section 11.4.2.2).
+    #[test]
+    fn end_of_group_is_carried_and_resets_the_prior_object_id() {
+        let mut wire = Vec::new();
+        let mut a = header(0x08 | 0x04 | 0x10, 1);
+        a.group_id_delta = Some(v(5));
+        a.object_id_delta = Some(v(2));
+        a.publisher_priority = Some(128);
+        a.encode(&mut wire).unwrap();
+        wire.push(0xaa);
+        header(0x80, 0).encode(&mut wire).unwrap();
+        let mut b = header(0x08 | 0x04, 1);
+        b.group_id_delta = Some(v(0));
+        b.object_id_delta = Some(v(0));
+        b.encode(&mut wire).unwrap();
+        wire.push(0xbb);
+        assert_eq!(&wire[6..8], &[0x80, 0x80]);
+
+        let frames = read_all(&wire);
+        let ids: Vec<_> = frames.iter().map(|(f, _)| (f.group_id, f.object_id)).collect();
+        assert_eq!(ids, vec![(5, 2), (5, 2), (6, 0)]);
+        assert_eq!(write_all(&frames), wire);
+
+        let mut overflow = wire[..8].to_vec();
+        overflow.extend_from_slice(&[0x08, 0x00, 0x01, 0xbb]);
+        let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
+        let mut cursor: &[u8] = &overflow;
+        reader.read_object_header(&mut cursor).unwrap();
+        cursor = &cursor[1..];
+        reader.read_object_header(&mut cursor).unwrap();
+        assert!(matches!(
+            reader.read_object_header(&mut cursor),
+            Err(CodecError::DeltaDecodingOverflow { .. })
+        ));
+    }
+}
 
 // ─────────────────────────────────────────────────────────────
 // Draft-18: the same deltas, and the same Group Order behind them

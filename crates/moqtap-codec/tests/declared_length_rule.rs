@@ -26,7 +26,7 @@
 //!
 //! The gates are one per draft rather than one shared gate because the framing
 //! is not shared. Drafts 07 through 10 carry a variable-length Length; drafts
-//! 11 onward carry a fixed 16-bit one.
+//! 11 through 22 carry a fixed 16-bit one, and draft-23 a `vi64` again.
 
 // Every gate below is behind a `#[cfg(feature = "draftNN")]`, so the zero-draft
 // row - `--no-default-features --all-targets` - compiles this file with none of
@@ -228,3 +228,41 @@ declared_length_gate!(
     2, 1,
     timeout: vi(0),
 );
+
+// ── vi64 Length ────────────────────────────────────────────
+
+/// Draft-23 Section 9, Figure 6: "Message Length (vi64)", and "If the length
+/// does not match the length of the Message Body, the receiver MUST close the
+/// session with MALFORMED_MESSAGE." The GOAWAY body here is under 63 bytes, so
+/// the Length is one byte, as on drafts 07 through 10.
+#[cfg(feature = "draft23")]
+#[test]
+fn draft23_reads_its_whole_declared_payload() {
+    use moqtap_codec::draft23::message::{ControlMessage, GoAway};
+
+    let message = ControlMessage::GoAway(GoAway {
+        new_session_uri: b"moqt://example/next".to_vec(),
+        timeout: vi(0),
+    });
+    let mut encoded = Vec::new();
+    message.encode(&mut encoded).expect("GOAWAY encodes");
+    ControlMessage::decode(&mut &encoded[..]).expect("the frame it wrote decodes");
+
+    let longer = one_byte_longer(&encoded, 1);
+    assert!(matches!(
+        ControlMessage::decode(&mut &longer[..]),
+        Err(CodecError::ControlMessageLengthMismatch {
+            detail: "its fields left bytes unread",
+            ..
+        })
+    ));
+
+    let shorter = shorter_by(&encoded, 1, 1);
+    assert!(matches!(
+        ControlMessage::decode(&mut &shorter[..]),
+        Err(CodecError::ControlMessageLengthMismatch {
+            detail: "its fields need more bytes than its Length gives",
+            ..
+        })
+    ));
+}

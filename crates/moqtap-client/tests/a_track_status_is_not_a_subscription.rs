@@ -9,6 +9,7 @@
     feature = "draft20",
     feature = "draft21",
     feature = "draft22",
+    feature = "draft23",
 ))]
 
 //! A track status creates no subscription, so nothing about a subscription can
@@ -50,7 +51,7 @@
 //!
 //! ## Why the range does not stop at 18
 //!
-//! Eighteen is the tempting boundary, because that is where the outcome changes
+//! Draft-18 is the tempting boundary, because that is where the outcome changes
 //! and a gate asserting a refusal fails on 19 and 20. But the two drafts that
 //! would be left out on that ground are the two the rule is stated most
 //! explicitly for.
@@ -718,6 +719,9 @@ stream_gates!(draft18, "draft18", d18, "10.14");
 /// predecessors here, and what that cost.
 macro_rules! closing_gates {
     ($draft:ident, $feat:literal, $sec:literal) => {
+        closing_gates!($draft, $feat, $sec, ProtocolViolation);
+    };
+    ($draft:ident, $feat:literal, $sec:literal, $code:ident) => {
         #[cfg(feature = $feat)]
         mod $draft {
             use moqtap_client::$draft::endpoint::{Endpoint, EndpointError};
@@ -804,7 +808,7 @@ macro_rules! closing_gates {
                 );
                 assert_eq!(
                     err.session_error_code(),
-                    Some(SessionErrorCode::ProtocolViolation),
+                    Some(SessionErrorCode::$code),
                     "and it closes with the code the sentence names"
                 );
             }
@@ -892,3 +896,4 @@ closing_gates!(draft19, "draft19", "10.14");
 closing_gates!(draft20, "draft20", "10.15");
 closing_gates!(draft21, "draft21", "9.13");
 closing_gates!(draft22, "draft22", "9.13");
+closing_gates!(draft23, "draft23", "9.12", UnexpectedMessage);

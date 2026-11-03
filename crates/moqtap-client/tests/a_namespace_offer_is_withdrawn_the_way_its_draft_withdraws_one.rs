@@ -11,6 +11,7 @@
     feature = "draft20",
     feature = "draft21",
     feature = "draft22",
+    feature = "draft23",
 ))]
 
 //! `AnyConnection::publish_namespace` offers a namespace on every draft that
@@ -615,3 +616,4 @@ request_stream_gate!(draft19, "draft19", Draft19);
 request_stream_gate!(draft20, "draft20", Draft20);
 request_stream_gate!(draft21, "draft21", Draft21);
 request_stream_gate!(draft22, "draft22", Draft22);
+request_stream_gate!(draft23, "draft23", Draft23);

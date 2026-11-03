@@ -97,3 +97,5 @@ fetch_answer_order!(draft20_answers_in_either_order, "draft-20", moqtap_client::
 fetch_answer_order!(draft21_answers_in_either_order, "draft-21", moqtap_client::draft21::fetch);
 #[cfg(feature = "draft22")]
 fetch_answer_order!(draft22_answers_in_either_order, "draft-22", moqtap_client::draft22::fetch);
+#[cfg(feature = "draft23")]
+fetch_answer_order!(draft23_answers_in_either_order, "draft-23", moqtap_client::draft23::fetch);

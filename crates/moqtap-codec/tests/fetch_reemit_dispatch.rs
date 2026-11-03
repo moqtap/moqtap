@@ -55,7 +55,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 mod test_vectors;
@@ -102,6 +103,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
 /// The drafts whose fetch objects are written against the frame before them.
@@ -112,17 +115,25 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
 /// by draft **number**, so it answers for drafts this build did not compile
 /// and cannot fall out of step with the enabled set.
 fn frames_are_written_against_each_other(draft: DraftVersion) -> bool {
-    matches!(
-        draft,
+    match draft {
+        DraftVersion::Draft07
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10
+        | DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13
+        | DraftVersion::Draft14 => false,
         DraftVersion::Draft15
-            | DraftVersion::Draft16
-            | DraftVersion::Draft17
-            | DraftVersion::Draft18
-            | DraftVersion::Draft19
-            | DraftVersion::Draft20
-            | DraftVersion::Draft21
-            | DraftVersion::Draft22
-    )
+        | DraftVersion::Draft16
+        | DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
+    }
 }
 
 /// The corpus directory one draft's vectors live in.
@@ -144,6 +155,7 @@ fn corpus_dir(draft: DraftVersion) -> &'static str {
         DraftVersion::Draft20 => "draft20",
         DraftVersion::Draft21 => "draft21",
         DraftVersion::Draft22 => "draft22",
+        DraftVersion::Draft23 => "draft23",
     }
 }
 
@@ -237,6 +249,23 @@ fn streams(draft: DraftVersion) -> Vec<Stream> {
     }
     assert!(!out.is_empty(), "{draft:?}: the corpus has no fetch stream to read");
     out
+}
+
+/// Whether removing frame `index` leaves an End of Group or End of Track
+/// behind it with no encoding.
+///
+/// Draft-23 Section 11.4.2.2: "The prior Object is the last Object in its
+/// Group, or in the Track, respectively." The indicator is a claim about the
+/// Object it follows and carries no Location of its own, so once that Object is
+/// removed there is nothing true for it to say, and the writer refuses it.
+fn removal_orphans_an_end_marker(stream: &Stream, index: usize) -> bool {
+    use moqtap_codec::dispatch::AnyFetchEndOfRange;
+    stream.frames.get(index + 1).is_some_and(|next| {
+        matches!(
+            next.frame.meta.end_of_range,
+            Some(AnyFetchEndOfRange::EndOfGroup | AnyFetchEndOfRange::EndOfTrack)
+        )
+    })
 }
 
 /// Re-emit `keep` of a stream's frames, in order, through one writer.
@@ -351,6 +380,9 @@ fn removing_a_frame_leaves_every_survivor_where_it_was() {
                 continue;
             }
             for removed in 0..stream.frames.len() {
+                if removal_orphans_an_end_marker(&stream, removed) {
+                    continue;
+                }
                 let expected: Vec<Identity> = stream
                     .frames
                     .iter()
@@ -388,6 +420,9 @@ fn a_removal_reframes_exactly_on_the_drafts_that_encode_against_a_predecessor() 
                 continue;
             }
             for removed in 0..stream.frames.len() {
+                if removal_orphans_an_end_marker(&stream, removed) {
+                    continue;
+                }
                 removals += 1;
                 let (_, outcomes) = reemit(&stream, |index| index != removed);
                 reframed +=

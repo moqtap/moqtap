@@ -24,7 +24,7 @@
 //! That transcript is also the only thing here that can gate the Object ID
 //! encoding. Drafts 14 and later send an ID as a delta from the object before
 //! it, and a writer and a reader that both skipped the delta would round-trip
-//! cleanly. The drafts 14-22 transcripts carry `02` and `03` where the objects
+//! cleanly. The drafts 14-23 transcripts carry `02` and `03` where the objects
 //! were written as 3 and 7; the drafts 07-13 ones carry `03` and `07`.
 //!
 //! # Five object shapes, four header shapes, one signature
@@ -816,6 +816,16 @@ subgroup_gate!(
     draft22,
     "draft22",
     Draft22,
+    uni,
+    none,
+    "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
+    "30",
+    "14070305c800056669727374020d7365636f6e64206f626a656374030000"
+);
+subgroup_gate!(
+    draft23,
+    "draft23",
+    Draft23,
     uni,
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",

@@ -78,7 +78,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 mod common;
@@ -136,6 +137,8 @@ const COMPILED_DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
 /// The draft every media fixture here is built for: the newest one
@@ -285,7 +288,7 @@ fn subgroup_stream_type(draft: DraftVersion) -> u8 {
 }
 
 /// A subgroup stream header on `track_alias`: group 0, subgroup 0,
-/// publisher priority `0x80`. Five bytes on every draft 07-22.
+/// publisher priority `0x80`. Five bytes on every draft 07-23.
 fn subgroup_header(track_alias: u64) -> Vec<u8> {
     assert!(track_alias < 64, "fixture: single-byte varint only");
     vec![subgroup_stream_type(DRAFT), track_alias as u8, 0x00, 0x00, 0x80]
@@ -297,7 +300,7 @@ fn subgroup_header(track_alias: u64) -> Vec<u8> {
 /// per object: the header is written inline by the proxy and the objects
 /// are what the hook holds, so a gate has to be able to name the two
 /// separately. One writer and one pass, because Object IDs are
-/// delta-encoded on drafts 14-22 and encoding the objects independently
+/// delta-encoded on drafts 14-23 and encoding the objects independently
 /// would encode each delta against nothing.
 fn subgroup_pieces(track_alias: u64, count: u64, payload_len: usize) -> (Vec<u8>, Vec<Vec<u8>>) {
     let head = subgroup_header(track_alias);

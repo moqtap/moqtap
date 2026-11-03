@@ -118,18 +118,25 @@ const ARRIVAL: Duration = Duration::from_secs(10);
 
 /// Object IDs are absolute on drafts 07-13 and delta-encoded from draft-14.
 fn delta_encoded(draft: DraftVersion) -> bool {
-    matches!(
-        draft,
+    match draft {
+        DraftVersion::Draft07
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10
+        | DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13 => false,
         DraftVersion::Draft14
-            | DraftVersion::Draft15
-            | DraftVersion::Draft16
-            | DraftVersion::Draft17
-            | DraftVersion::Draft18
-            | DraftVersion::Draft19
-            | DraftVersion::Draft20
-            | DraftVersion::Draft21
-            | DraftVersion::Draft22
-    )
+        | DraftVersion::Draft15
+        | DraftVersion::Draft16
+        | DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
+    }
 }
 
 /// The stream type field for a subgroup stream with an explicit subgroup
@@ -344,6 +351,8 @@ const DRAFTS: &[DraftVersion] = &[
     DraftVersion::Draft21,
     #[cfg(feature = "draft22")]
     DraftVersion::Draft22,
+    #[cfg(feature = "draft23")]
+    DraftVersion::Draft23,
 ];
 
 // ============================================================
@@ -359,7 +368,7 @@ const DRAFTS: &[DraftVersion] = &[
 /// — `framer_tests` uses objects at 1.5x and 8x the cap, where `<` and
 /// `<=` are indistinguishable. It also pins the promise that an oversized
 /// object costs addressability for itself alone: the object *after* it must
-/// still be framed with the correct ID, which on drafts 14-22 requires the
+/// still be framed with the correct ID, which on drafts 14-23 requires the
 /// framer to have advanced its delta state across an object it never
 /// framed.
 ///
@@ -466,7 +475,7 @@ fn an_oversized_object_keeps_buffering_bounded() {
 /// bytes the codec did not write.
 ///
 /// This is the framer-level guard against one specific misreading: on
-/// drafts 17-22 the property block is byte-length-prefixed, and a reader
+/// drafts 17-23 the property block is byte-length-prefixed, and a reader
 /// that took the
 /// prefix for a KVP count would consume past the payload-length field and
 /// mis-frame every following object. Because the framer forwards raw
@@ -518,7 +527,7 @@ fn objects_with_extensions_frame_correctly_from_independent_bytes() {
 /// acceptable, so it is worth a test.
 ///
 /// The framers here are built with [`ObjectFramer::new`], which hands over no
-/// fetch Group Order at all, so on drafts 18-22 every stream below is
+/// fetch Group Order at all, so on drafts 18-23 every stream below is
 /// the case a session reaches when a publisher opens a response to a request
 /// nobody made. Every other draft resolves such a stream from its own bytes
 /// and is framed rather than forwarded, which is why only three appear here.
@@ -542,6 +551,8 @@ fn fetch_streams_whose_group_order_is_unknown_are_forwarded_intact() {
         DraftVersion::Draft21,
         #[cfg(feature = "draft22")]
         DraftVersion::Draft22,
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23,
     ] {
         for chunk in [1usize, 7, stream.len()] {
             let out =

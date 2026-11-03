@@ -8,6 +8,7 @@
     feature = "draft20",
     feature = "draft21",
     feature = "draft22",
+    feature = "draft23",
 ))]
 
 //! `AnyConnection::fetch` asks for the same three ranges on every draft it is
@@ -132,6 +133,18 @@ const FILTER_VALUES: [&[u8]; 3] = [&[4, 0, 2, 9], &[4, 0, 2], &[4, 7, 0, 7]];
 /// which decodes with draft-22's codec.
 #[cfg(feature = "draft22")]
 const FILTER_VALUES_22: [&[u8]; 3] = [&[4, 4, 0, 2, 9], &[3, 4, 0, 2], &[4, 4, 7, 0, 7]];
+/// What draft-23 must put in the `LOCATION_FILTER` value for [`ranges`]: the
+/// same fields as [`FILTER_VALUES`], each behind the `Location Filter Type`
+/// that names them. Section 9.19.9 makes 0x04 the four-field Absolute Range
+/// and 0x03 the three-field form ending at the "last Object of Group
+/// StartGroup + EndGroupDelta".
+///
+/// Every field here fits one byte, so a decoder still reading draft-21's
+/// `Length` would read these bytes too: the type equals the field count for
+/// both forms. What tells the two drafts apart is the gate that sends them,
+/// which decodes with draft-23's codec.
+#[cfg(feature = "draft23")]
+const FILTER_VALUES_23: [&[u8]; 3] = [&[4, 4, 0, 2, 9], &[3, 4, 0, 2], &[4, 4, 7, 0, 7]];
 
 fn namespace() -> TrackNamespace {
     TrackNamespace(vec![b"conformance".to_vec()])
@@ -182,6 +195,10 @@ fn an_end_object_at_the_top_of_the_number_space_has_no_inline_encoding() {
     range
         .location_filter_draft22()
         .expect("draft-22's end is the last Object, so this one is ordinary");
+    #[cfg(feature = "draft23")]
+    range
+        .location_filter_draft23()
+        .expect("draft-23's end is the last Object, so this one is ordinary");
 }
 
 /// A range whose end Group is below its start has no draft-20 filter.
@@ -219,6 +236,17 @@ fn a_range_that_runs_backwards_has_no_draft21_filter() {
 fn a_range_that_runs_backwards_has_no_draft22_filter() {
     let range = FetchRange::through_object(6, 0, 4, 9);
     let err = range.location_filter_draft22().expect_err("an unsigned delta cannot count down");
+    assert!(err.to_string().contains("backwards"), "{err}");
+}
+/// A range whose end Group is below its start has no draft-23 filter.
+///
+/// Section 9.19.9: "EndGroupDelta is delta encoded from StartGroup", and a
+/// delta is unsigned, whichever Location Filter Type carries it.
+#[cfg(feature = "draft23")]
+#[test]
+fn a_range_that_runs_backwards_has_no_draft23_filter() {
+    let range = FetchRange::through_object(6, 0, 4, 9);
+    let err = range.location_filter_draft23().expect_err("an unsigned delta cannot count down");
     assert!(err.to_string().contains("backwards"), "{err}");
 }
 
@@ -600,5 +628,25 @@ request_stream_gate!(
     },
     FILTER_VALUES_22.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
     "draft-22 Sections 3.2 and 3.3.1 make the range inclusive: nothing adds one to the end, \
+     and a range that covers a whole Group is type 0x03 rather than a fourth field of 0"
+);
+request_stream_gate!(
+    draft23,
+    "draft23",
+    Draft23,
+    Vec<u8>,
+    |f| {
+        let filter = f
+            .parameters
+            .iter()
+            .find(|p| p.key.into_inner() == moqtap_codec::draft23::message::LOCATION_FILTER)
+            .expect("draft-23 carries the range in a LOCATION_FILTER and nowhere else");
+        match &filter.value {
+            moqtap_codec::kvp::KvpValue::Bytes(bytes) => bytes.clone(),
+            other => panic!("LOCATION_FILTER is a Location Filter value, got {other:?}"),
+        }
+    },
+    FILTER_VALUES_23.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
+    "draft-23 Sections 3.2 and 3.3.1 make the range inclusive: nothing adds one to the end, \
      and a range that covers a whole Group is type 0x03 rather than a fourth field of 0"
 );

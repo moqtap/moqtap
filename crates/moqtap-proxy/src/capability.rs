@@ -59,7 +59,7 @@ use crate::types::DataStreamType;
 
 /// The fourth value of the two-bit subgroup-ID mode, which no draft assigns.
 ///
-/// Drafts 16 through 22 reserve it by name and list the type bytes that carry
+/// Drafts 16 through 23 reserve it by name and list the type bytes that carry
 /// it; draft-15 arrives at the same eight bytes by leaving them out of its
 /// table. Either way no header the decoder returns holds this value.
 ///
@@ -485,8 +485,8 @@ pub enum Refusal {
         /// What the modifier wrapped.
         detail: &'static str,
     },
-    /// Performing it would be a session-level protocol violation — a reset
-    /// or truncation of a control stream, on any draft 07-22.
+    /// Performing it would end the session — a reset or truncation of a
+    /// control stream, on any draft.
     ControlStreamResetIllegal,
     /// `ReplacePayload` whose length differs from the original.
     LengthChanged {
@@ -603,7 +603,7 @@ pub struct CapCtx {
     /// header did not decode. Drives
     /// [`Precondition::DatagramPayloadDelimited`].
     pub payload_delimited: Option<bool>,
-    /// The two-bit subgroup-ID mode, on the drafts 15-22 whose header type
+    /// The two-bit subgroup-ID mode, on the drafts 15-23 whose header type
     /// carries one. `None` on drafts 07-14, which have no such pair of bits,
     /// and when the caller did not supply it. Mode 1 is *subgroup ID is the
     /// first object's ID*; mode 3 is the value no draft assigns. Drives the
@@ -936,12 +936,12 @@ impl MatcherKey {
 ///
 /// [`Matcher::subgroup_id`] and [`Matcher::priority`] are the two keys whose
 /// absence can be a property of one **header** rather than of the draft — a
-/// header in *subgroup ID is the first object's ID* mode (drafts 11-22) or
-/// drafts 16-22's reserved mode 3 carries no subgroup ID, and drafts 15-22 omit
+/// header in *subgroup ID is the first object's ID* mode (drafts 11-23) or
+/// drafts 16-23's reserved mode 3 carries no subgroup ID, and drafts 15-23 omit
 /// the publisher priority whenever the header sets the default-priority bit, on
 /// a subgroup header and on a datagram alike. Neither is a *draft* fact. Every
 /// one of the drafts also has header shapes that carry both — modes 0
-/// and 2 on 16-22, an explicit subgroup ID field elsewhere, and a clear
+/// and 2 on 16-23, an explicit subgroup ID field elsewhere, and a clear
 /// default-priority bit — and every fetch object on the drafts that frame one
 /// carries both unconditionally. So a rule keyed on either can match on every
 /// draft, and this predicate answers `true`.
@@ -1223,6 +1223,7 @@ pub const fn draft_is_compiled(draft: DraftVersion) -> bool {
         DraftVersion::Draft20 => cfg!(feature = "draft20"),
         DraftVersion::Draft21 => cfg!(feature = "draft21"),
         DraftVersion::Draft22 => cfg!(feature = "draft22"),
+        DraftVersion::Draft23 => cfg!(feature = "draft23"),
     }
 }
 
@@ -1332,7 +1333,7 @@ const _: () = assert!(
 /// for. Either way an absolute Location comes out of the stream and nothing
 /// else, which is all addressing an object needs.
 ///
-/// **True on drafts 18-22**, where the Group ID is a difference and the
+/// **True on drafts 18-23**, where the Group ID is a difference and the
 /// fetch's Group Order decides its sign. Nothing on the data stream states
 /// the order, and the wrong choice decodes as willingly as the right one, so
 /// a reader has to be told — see [`BypassReason::FetchGroupOrderUnknown`],
@@ -1377,7 +1378,8 @@ pub(crate) const fn fetch_group_order_is_needed(draft: DraftVersion) -> bool {
         | DraftVersion::Draft19
         | DraftVersion::Draft20
         | DraftVersion::Draft21
-        | DraftVersion::Draft22 => true,
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
     }
 }
 
@@ -1434,15 +1436,16 @@ const fn has_implicit_subgroup_id_mode(draft: DraftVersion) -> bool {
         | DraftVersion::Draft19
         | DraftVersion::Draft20
         | DraftVersion::Draft21
-        | DraftVersion::Draft22 => true,
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
     }
 }
 
 /// Whether a header's reserved subgroup-ID mode has to be told apart from
-/// mode 1 before an object behind it can be judged. Drafts 15-22.
+/// mode 1 before an object behind it can be judged. Drafts 15-23.
 ///
 /// **Not the drafts that name a SUBGROUP_ID_MODE field**, which is neither a
-/// superset nor a subset of this. Drafts 16 through 22 name one — draft-16:
+/// superset nor a subset of this. Drafts 16 through 23 name one — draft-16:
 /// "Type values with SUBGROUP_ID_MODE set to 0b11: 0x16, 0x17, 0x1E, 0x1F,
 /// 0x36, 0x37, 0x3E, 0x3F. This mode is reserved for future use." Draft-15
 /// names nothing and states the same three carriers as table columns, then
@@ -1450,7 +1453,7 @@ const fn has_implicit_subgroup_id_mode(draft: DraftVersion) -> bool {
 /// differs; the two bits and their four values are not.
 ///
 /// What decides it is where `AnySubgroupHeader::subgroup_id` answers `None`
-/// for more than one reason. On these six it answers `None` for both mode 1
+/// for more than one reason. On these drafts it answers `None` for both mode 1
 /// and the fourth combination, so `None` alone cannot say whether the first
 /// object defines the subgroup or the header is one no receiver should read,
 /// and the mode has to be consulted. Drafts 11 through 14 give each carrier a
@@ -1483,7 +1486,8 @@ const fn subgroup_id_mode_must_be_consulted(draft: DraftVersion) -> bool {
         | DraftVersion::Draft19
         | DraftVersion::Draft20
         | DraftVersion::Draft21
-        | DraftVersion::Draft22 => true,
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
     }
 }
 
@@ -1493,7 +1497,7 @@ const fn subgroup_id_mode_must_be_consulted(draft: DraftVersion) -> bool {
 ///
 /// The site is shown every message the session's control plane carries,
 /// whichever shape that plane has. On drafts 07-16 the plane is the one
-/// client-initiated bidirectional stream. On 17-22 it is a pair of
+/// client-initiated bidirectional stream. On 17-23 it is a pair of
 /// unidirectional streams — each peer opens one and begins it with SETUP —
 /// and bidirectional streams carry requests; `session.rs` identifies the
 /// pair by its stream type and pipes both it and the request streams through
@@ -1522,7 +1526,7 @@ fn classify_control(kind: ActionKind) -> Support {
             Support::No(Refusal::WrongSite { site: Site::Control, action: kind })
         }
         // On every draft: a request stream is still a control-plane
-        // stream, so 17-22 are refused for the same reason as 07-16.
+        // stream, so 17-23 are refused for the same reason as 07-16.
         ActionKind::Truncate | ActionKind::ResetStream => {
             Support::No(Refusal::ControlStreamResetIllegal)
         }
@@ -1915,13 +1919,14 @@ mod tests {
         feature = "draft19",
         feature = "draft20",
         feature = "draft21",
-        feature = "draft22"
+        feature = "draft22",
+        feature = "draft23"
     ))]
     fn some_compiled_draft() -> DraftVersion {
         DRAFTS
             .into_iter()
             .find(|d| draft_is_compiled(*d))
-            .expect("gated on `any(draft07..draft22)`, so the compiled set is non-empty")
+            .expect("gated on every draft feature, so the compiled set is non-empty")
     }
 
     /// A configuration nobody edited can shape the traffic it will see.
@@ -1970,7 +1975,7 @@ mod tests {
     /// would make each of them agree with whatever it said. Removing draft-15
     /// from it — the omission that lets the engine forward a stream whose
     /// Subgroup ID has silently become the second object's — would leave both
-    /// passing, as would narrowing it all the way to drafts 17-22.
+    /// passing, as would narrowing it all the way to drafts 17-23.
     ///
     /// Eight other tests catch that second cut, so the fence is real; it is
     /// simply not here. `tests/action_matrix.rs` keeps its own copy of this
@@ -2000,7 +2005,8 @@ mod tests {
             | DraftVersion::Draft19
             | DraftVersion::Draft20
             | DraftVersion::Draft21
-            | DraftVersion::Draft22 => true,
+            | DraftVersion::Draft22
+            | DraftVersion::Draft23 => true,
         }
     }
 
@@ -2438,7 +2444,8 @@ mod tests {
         feature = "draft19",
         feature = "draft20",
         feature = "draft21",
-        feature = "draft22"
+        feature = "draft22",
+        feature = "draft23"
     ))]
     #[test]
     fn replace_payload_length_mismatch_is_length_changed() {
@@ -2475,7 +2482,8 @@ mod tests {
         feature = "draft19",
         feature = "draft20",
         feature = "draft21",
-        feature = "draft22"
+        feature = "draft22",
+        feature = "draft23"
     ))]
     #[test]
     fn replace_payload_on_a_status_object_is_refused() {
@@ -2493,7 +2501,7 @@ mod tests {
     }
 
     /// The reserved-mode split, on every draft whose two mode bits have to be
-    /// consulted **and** was compiled. Empty in a build that left all six
+    /// consulted **and** was compiled. Empty in a build that left all of them
     /// out, which is the honest answer there: those cells are `Unreachable`.
     #[test]
     fn elide_guards_follow_the_execution_order() {
@@ -2560,7 +2568,7 @@ mod tests {
     ///   Subgroup ID is a first-object header and nothing else — the mode
     ///   field is not theirs to read, and `WouldRedefineSubgroupId` is exactly
     ///   what is true of one.
-    /// - Drafts 15-22 encode the carrier in two bits with a fourth
+    /// - Drafts 15-23 encode the carrier in two bits with a fourth
     ///   combination none of them assigns, so a header can determine no
     ///   Subgroup ID for either reason and the mode is what separates them.
     ///
@@ -2604,7 +2612,8 @@ mod tests {
                 | DraftVersion::Draft19
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
-                | DraftVersion::Draft22 => {
+                | DraftVersion::Draft22
+                | DraftVersion::Draft23 => {
                     Support::No(Refusal::ReservedHeaderMode { mode: RESERVED_SUBGROUP_ID_MODE })
                 }
             };
@@ -2709,7 +2718,7 @@ mod tests {
     /// header's.
     ///
     /// Draft-15 is the only draft where the status half can be shown at all
-    /// — 16 through 22 removed the Object Status field from fetch objects,
+    /// — 16 through 23 removed the Object Status field from fetch objects,
     /// so nothing there is ever `is_status_object: Some(true)` off the wire.
     /// It is swept on every addressable draft anyway, because the guard is
     /// draft-neutral and a context this crate cannot produce is still a
@@ -2777,7 +2786,7 @@ mod tests {
 
     // ── The control column does not split on the draft ──────────────────
 
-    /// The control site is honoured on all the drafts, 17-22 included.
+    /// The control site is honoured on all the drafts, 17-23 included.
     ///
     /// Those drafts carry the control plane on a pair of unidirectional
     /// streams and requests on bidirectional ones. `session.rs` identifies
@@ -2791,13 +2800,14 @@ mod tests {
     /// their rows goes red.
     #[test]
     fn the_control_site_is_honoured_on_every_draft() {
-        const UNI_CONTROL_PLANE: [DraftVersion; 6] = [
+        const UNI_CONTROL_PLANE: &[DraftVersion] = &[
             DraftVersion::Draft17,
             DraftVersion::Draft18,
             DraftVersion::Draft19,
             DraftVersion::Draft20,
             DraftVersion::Draft21,
             DraftVersion::Draft22,
+            DraftVersion::Draft23,
         ];
 
         // The kinds the control site honours — including the two whose
@@ -3023,7 +3033,8 @@ mod tests {
             feature = "draft19",
             feature = "draft20",
             feature = "draft21",
-            feature = "draft22"
+            feature = "draft22",
+            feature = "draft23"
         ));
         assert_eq!(
             !compiled.is_empty(),

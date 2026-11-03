@@ -14,7 +14,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 //! Every control message name this crate answers with, on every draft it
 //! implements, is checked against the shared vector corpus.
@@ -64,7 +65,7 @@ use test_vectors::{load_vectors, vectors_dir};
 
 /// Every draft this crate implements, with the corpus directory that holds its
 /// vectors.
-const DRAFTS: [(u8, &str); 16] = [
+const DRAFTS: [(u8, &str); 17] = [
     (7, "draft07"),
     (8, "draft08"),
     (9, "draft09"),
@@ -81,6 +82,7 @@ const DRAFTS: [(u8, &str); 16] = [
     (20, "draft20"),
     (21, "draft21"),
     (22, "draft22"),
+    (23, "draft23"),
 ];
 
 /// Highest id swept when reading a draft's names back out of this crate.
@@ -105,7 +107,7 @@ const UNASSIGNED: &str = "unknown";
 /// the alias, the name this crate answers with)`.
 ///
 /// Draft-18 collapsed PUBLISH_OK into REQUEST_OK, and the corpus kept a
-/// `publish-ok.json` on drafts 18 through 22 whose vectors are REQUEST_OK bytes
+/// `publish-ok.json` on drafts 18 through 23 whose vectors are REQUEST_OK bytes
 /// at 0x07 — `PUBLISH_OK (REQUEST_OK alias, Type 0x07)`, as the file's own
 /// description puts it. There is one message type at 0x07 on those drafts and it
 /// is `request_ok`, which is also the only name the JavaScript codec's
@@ -122,6 +124,7 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("draft20", "publish_ok", "request_ok"),
     ("draft21", "publish_ok", "request_ok"),
     ("draft22", "publish_ok", "request_ok"),
+    ("draft23", "publish_ok", "request_ok"),
 ];
 
 /// The `codec/messages` directory for one draft.
@@ -174,18 +177,27 @@ fn corpus_names(draft: &str) -> BTreeMap<u64, BTreeMap<String, String>> {
 
     for file in message_files(draft) {
         let parsed = load_vectors(&messages_dir(draft).join(&file));
-        let id = declared_id(draft, &file, parsed.message_type_id.as_deref());
 
         if parsed.message_type == UNASSIGNED {
             unassigned += 1;
-            assert_eq!(
-                message_type_name(draft_number(draft), id),
-                None,
-                "{draft}/{file} says {id:#x} is a type code the draft does not assign, and this \
-                 crate names it"
-            );
+            // The file may hold more than one unassigned code, as draft-23's
+            // does with 0x3F and the reserved 0x18, and then declares none:
+            // each vector's own leading type is the code it carries.
+            let ids: Vec<u64> = match parsed.message_type_id.as_deref() {
+                Some(raw) => vec![declared_id(draft, &file, Some(raw))],
+                None => parsed.vectors.iter().map(|v| leading_type(draft, &v.hex)).collect(),
+            };
+            for id in ids {
+                assert_eq!(
+                    message_type_name(draft_number(draft), id),
+                    None,
+                    "{draft}/{file} says {id:#x} is a type code the draft does not assign, and \
+                     this crate names it"
+                );
+            }
             continue;
         }
+        let id = declared_id(draft, &file, parsed.message_type_id.as_deref());
 
         let previous =
             named.entry(id).or_default().insert(parsed.message_type.clone(), file.clone());
@@ -204,6 +216,17 @@ fn corpus_names(draft: &str) -> BTreeMap<u64, BTreeMap<String, String>> {
     );
     assert!(!named.is_empty(), "{draft}: the message corpus named no ids at all");
     named
+}
+
+/// The control message type a vector's bytes open with, read in `draft`'s
+/// varint encoding.
+fn leading_type(draft: &str, hex: &str) -> u64 {
+    let bytes = hex::decode(hex).expect("vector hex");
+    moqtap_codec::version::DraftVersion::from_number(draft_number(draft))
+        .expect("a draft this crate implements")
+        .decode_varint(&mut &bytes[..])
+        .expect("a vector opens with its type")
+        .into_inner()
 }
 
 /// The draft number for a corpus directory name.
@@ -316,6 +339,7 @@ corpus_names_agree!(draft19_names_agree_with_the_corpus, "draft19", 19, "draft19
 corpus_names_agree!(draft20_names_agree_with_the_corpus, "draft20", 20, "draft20");
 corpus_names_agree!(draft21_names_agree_with_the_corpus, "draft21", 21, "draft21");
 corpus_names_agree!(draft22_names_agree_with_the_corpus, "draft22", 22, "draft22");
+corpus_names_agree!(draft23_names_agree_with_the_corpus, "draft23", 23, "draft23");
 
 /// The draft pairs whose whole name table coincides.
 ///
@@ -353,7 +377,8 @@ corpus_names_agree!(draft22_names_agree_with_the_corpus, "draft22", 22, "draft22
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 const IDENTICAL_TABLES: [(u8, u8); 6] = [(8, 9), (8, 10), (9, 10), (20, 21), (20, 22), (21, 22)];
 
@@ -373,7 +398,8 @@ const IDENTICAL_TABLES: [(u8, u8); 6] = [(8, 9), (8, 10), (9, 10), (20, 21), (20
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 #[test]
 fn the_drafts_are_distinguishable_from_each_other() {

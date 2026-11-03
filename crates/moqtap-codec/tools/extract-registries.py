@@ -357,7 +357,7 @@ are not admitted by (C), and they have nothing to do with Object Status, so they
 are not admitted by (D). The extension that admits them is:
 
   (E) One ``<tr>`` of a table that assigns a parameter, property, setup option
-      or auth token code point.
+      or auth token code point, or, from draft-23, an Error Detail type.
 
 Same anchor as (C) -- a ``<tr>`` of an identified table -- and the same row-level
 rules: the header row is not a row, an empty code cell is a line-wrap
@@ -376,6 +376,14 @@ reading it at (C)'s code column would read the Name cell as the code.
     ``Parameter Type | Parameter Name | Specification``  message parameters, 15-20
     ``Type | Name | Scope | Specification``        properties, 16-20
     ``Type | Name | Specification``                setup options, 18-20
+
+Draft-23 Section 16.11 adds a registry in the ``Type | Name | Specification``
+layout: "This document establishes the "MOQT Error Detail Types" registry,
+governing the Type field of Error Details in REQUEST_ERROR (Section 9.4.2)."
+Its Table 19 assigns ``0x01`` REDIRECT and ``0x02`` UNSUPPORTED_PROPERTY. An
+Error Detail type is not an error code -- it rides alongside one -- so the
+registry is extracted here as ``error_detail_types``, family ``error-detail``,
+and never under ``registries``.
 
 Matching is on the whole header tuple, not on the first cell. Three of the wire
 type matrices also open with a ``Type`` column -- ``Type | End Of Group |
@@ -909,6 +917,10 @@ PARAMETER_REGISTRIES = {
     "extension headers": ("properties", "property"),
     "properties": ("properties", "property"),
     "setup options": ("setup_options", "setup-option"),
+    # Draft-23 Section 16.11: "This document establishes the "MOQT Error
+    # Detail Types" registry, governing the Type field of Error Details in
+    # REQUEST_ERROR (Section 9.4.2)."
+    "error detail types": ("error_detail_types", "error-detail"),
 }
 
 # Drafts 18-20 print two Properties tables under one "15.8. Properties" heading,

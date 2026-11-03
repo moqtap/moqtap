@@ -4,7 +4,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 //! Drafts 17 through 20 carry control messages on a **pair of
@@ -136,6 +137,33 @@ use tokio::task::JoinHandle;
 /// the value is 0x3 on all four).
 const PROTOCOL_VIOLATION: u32 = 0x3;
 
+/// The code a draft closes the session with when a bidirectional stream opens
+/// with a message that begins no request: PROTOCOL_VIOLATION through draft-22,
+/// and on draft-23 UNEXPECTED_MESSAGE (0x303), Section 6.3: "If they do, the
+/// peer MUST close the Session with UNEXPECTED_MESSAGE."
+#[allow(dead_code)]
+fn non_request_opener_code(draft: DraftVersion) -> (u32, &'static str) {
+    match draft {
+        DraftVersion::Draft23 => (0x303, "UNEXPECTED_MESSAGE"),
+        DraftVersion::Draft07
+        | DraftVersion::Draft08
+        | DraftVersion::Draft09
+        | DraftVersion::Draft10
+        | DraftVersion::Draft11
+        | DraftVersion::Draft12
+        | DraftVersion::Draft13
+        | DraftVersion::Draft14
+        | DraftVersion::Draft15
+        | DraftVersion::Draft16
+        | DraftVersion::Draft17
+        | DraftVersion::Draft18
+        | DraftVersion::Draft19
+        | DraftVersion::Draft20
+        | DraftVersion::Draft21
+        | DraftVersion::Draft22 => (PROTOCOL_VIOLATION, "PROTOCOL_VIOLATION"),
+    }
+}
+
 /// Session termination code `INVALID_REQUEST_ID`, 0x4 on all four drafts:
 /// "The endpoint received a Request ID with an incorrect least significant bit
 /// for the sender, or a duplicate Request ID."
@@ -235,7 +263,7 @@ const SUBSCRIBE_OK_TYPE: u64 = 0x04;
 /// puts it "on a subscription's bidirectional stream" — a stream a SUBSCRIBE or
 /// a PUBLISH has already opened — so it opens none of its own, and the refusal
 /// gate holds draft-20 to that.
-#[cfg(any(feature = "draft20", feature = "draft21", feature = "draft22"))]
+#[cfg(any(feature = "draft20", feature = "draft21", feature = "draft22", feature = "draft23"))]
 const PUBLISH_STATE_NOTIFY_TYPE: u64 = 0x22;
 
 /// `LARGEST_OBJECT`, Parameter Type 0x09: the parameter Section 10.10 says a
@@ -243,7 +271,7 @@ const PUBLISH_STATE_NOTIFY_TYPE: u64 = 0x22;
 ///
 /// The refusal gate's notify carries one, so what is refused is a message the
 /// rule recognises rather than an empty frame no publisher would send.
-#[cfg(any(feature = "draft20", feature = "draft21", feature = "draft22"))]
+#[cfg(any(feature = "draft20", feature = "draft21", feature = "draft22", feature = "draft23"))]
 const LARGEST_OBJECT: u64 = 0x09;
 
 /// PUBLISH's message type, 0x1D on all four drafts.
@@ -263,7 +291,8 @@ const DRAFT17_SUBSCRIBE_NAMESPACE_TYPE: u64 = 0x11;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 const SUBSCRIBE_NAMESPACE_TYPE: u64 = 0x50;
 
@@ -274,7 +303,8 @@ const SUBSCRIBE_NAMESPACE_TYPE: u64 = 0x50;
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 const SUBSCRIBE_TRACKS_TYPE: u64 = 0x51;
 
@@ -295,7 +325,8 @@ const DRAFT17_REQUEST_TYPES: &[u64] = &[0x0D, 0x03, 0x1D, 0x16, 0x06, 0x11];
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 const DRAFT18_REQUEST_TYPES: &[u64] = &[0x0D, 0x03, 0x1D, 0x16, 0x06, 0x50, 0x51];
 
@@ -634,6 +665,39 @@ fn draft22_fetch_request(
         ],
     )
 }
+/// A draft-23 FETCH, rendered.
+///
+/// The same four fields a SUBSCRIBE carries — Section 9.11 gives FETCH the
+/// same fields as SUBSCRIBE under its own type code — plus the range, which is
+/// not a field of the message at all. `range` is
+/// [`draft23_range_text`] over the message's own parameters, so a helper that
+/// forgot the filter, wrote it under the wrong type, or shifted an end
+/// location by one renders differently from one that got it right.
+///
+/// The range stays in the rendering because the end location changed meaning:
+/// draft-19 wrote "the last Object, plus 1", draft-23 Sections 3.2 and 3.3.1
+/// make the range inclusive, and a ported `+ 1` is invisible in a parameter
+/// count.
+#[cfg(feature = "draft23")]
+fn draft23_fetch_request(
+    request_id: u64,
+    track_namespace: &TrackNamespace,
+    track_name: &[u8],
+    range: &str,
+    parameters: usize,
+) -> String {
+    render(
+        "FETCH",
+        FETCH_TYPE,
+        &[
+            ("request id", request_id.to_string()),
+            ("namespace", namespace_text(track_namespace)),
+            ("track", text(track_name)),
+            ("range", range.to_string()),
+            ("parameters", parameters.to_string()),
+        ],
+    )
+}
 
 /// The `LOCATION_FILTER` fields of a draft-20 message, rendered for
 /// [`draft20_fetch_request`].
@@ -709,6 +773,39 @@ fn draft21_range_text(parameters: &[KeyValuePair]) -> String {
 #[cfg(feature = "draft22")]
 fn draft22_range_text(parameters: &[KeyValuePair]) -> String {
     use moqtap_codec::draft22::message::{decode_location_filter, LOCATION_FILTER};
+
+    let Some(filter) = parameters.iter().find(|p| p.key.into_inner() == LOCATION_FILTER) else {
+        return "none".to_string();
+    };
+    let KvpValue::Bytes(value) = &filter.value else {
+        return "not a Location Filter value".to_string();
+    };
+    match decode_location_filter(value) {
+        Ok((filter_type, fields)) => format!(
+            "type {filter_type}: {}",
+            fields.iter().map(u64::to_string).collect::<Vec<_>>().join(",")
+        ),
+        Err(e) => format!("undecodable ({e:?})"),
+    }
+}
+/// The `LOCATION_FILTER` of a draft-23 message, rendered for
+/// [`draft23_fetch_request`].
+///
+/// `none` when the message carries no filter, which Section 3.2 defines as
+/// `{0, 0}` through Largest Object. Otherwise the `Location Filter Type` and
+/// the `vi64` fields it names, decoded by the codec's own decoder rather than
+/// by anything here: `type 4: 0,0,1,1` is an Absolute Range ending at
+/// Object 1. The type is rendered because two types carry no fields at all
+/// and mean opposite things, so a field list alone would print None and Next
+/// Object the same way.
+///
+/// A value that is not a well-formed filter renders as its own complaint
+/// instead of panicking. The peer is reporting what arrived, and a filter it
+/// cannot read is a fact about the client under test rather than about this
+/// function.
+#[cfg(feature = "draft23")]
+fn draft23_range_text(parameters: &[KeyValuePair]) -> String {
+    use moqtap_codec::draft23::message::{decode_location_filter, LOCATION_FILTER};
 
     let Some(filter) = parameters.iter().find(|p| p.key.into_inner() == LOCATION_FILTER) else {
         return "none".to_string();
@@ -813,7 +910,8 @@ fn draft17_subscribe_namespace_request(
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn subscribe_namespace_request(
     request_id: u64,
@@ -839,7 +937,8 @@ fn subscribe_namespace_request(
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 fn subscribe_tracks_request(
     request_id: u64,
@@ -3356,11 +3455,11 @@ macro_rules! uni_control_plane_gates {
                 }
 
                 let (code, reason) = close_the_client_sent(&mut seen, "non-request opener").await;
+                let (expected, name) = non_request_opener_code($version);
                 assert_eq!(
                     code,
-                    u64::from(PROTOCOL_VIOLATION),
-                    "{}: Section 3.3 answers a non-request opener with PROTOCOL_VIOLATION; \
-                     the close said {reason:?}",
+                    u64::from(expected),
+                    "{}: a non-request opener is answered with {name}; the close said {reason:?}",
                     $draft_label
                 );
                 assert!(
@@ -4503,6 +4602,27 @@ fn draft22_describe_fetch(m: &moqtap_codec::draft22::message::Fetch) -> String {
         m.parameters.len(),
     )
 }
+/// Draft-23's FETCH, rendered. See [`Describe`].
+///
+/// There is no Fetch Type to render and no payload to switch on: Section 9.11
+/// gives FETCH the same fields as SUBSCRIBE under its own type code. What is
+/// left is the four fields the message now carries, plus the range read back
+/// out of the parameter list by [`draft23_range_text`].
+///
+/// The range belongs in the rendering because it is still something the
+/// *caller* chose. Rendering only `parameters=N` would let a FETCH for the
+/// wrong range — or one whose end location carried draft-19's `+ 1` — pass the
+/// sweep with the right count.
+#[cfg(feature = "draft23")]
+fn draft23_describe_fetch(m: &moqtap_codec::draft23::message::Fetch) -> String {
+    draft23_fetch_request(
+        m.request_id.into_inner(),
+        &m.track_namespace,
+        &m.track_name,
+        &draft23_range_text(&m.parameters),
+        m.parameters.len(),
+    )
+}
 
 /// Draft-20's fetch helpers, and the fill that replaced the joining fetch.
 ///
@@ -4865,6 +4985,127 @@ async fn draft22_fetch_requests(
     .await;
     held.push(stream);
 }
+/// Draft-23's fetch helpers, and the fill that takes the joining fetch's place.
+///
+/// Three requests, and each is a separate thing to get wrong:
+///
+/// * **`fetch` with no filter** — the unfiltered FETCH Section 3.2 defines
+///   as `{0, 0}` through Largest Object. Its meaning is the *absence* of a
+///   parameter, so the rendering says `range=none` and a helper that invented
+///   a filter is caught.
+/// * **`fetch_range`** — the same message with the caller's range carried as
+///   `LOCATION_FILTER`. This is where the inclusive end reaches the wire: the
+///   range ends at object 1 and the filter, Location Filter Type 0x04, must
+///   say 1. A draft-19 encoder ported forward would write 2 there, and with
+///   the range in the rendering that is a failure rather than a fetch of one
+///   object too many.
+/// * **a SUBSCRIBE carrying `FILL_PARAMETERS`** — what takes the joining
+///   fetch's place on draft-23. Sections 3.4 and 9.20.15: the parameter's presence
+///   asks the publisher to open a fill fetch stream carrying the Objects
+///   behind the live edge, which is the job `joining_fetch` did on drafts 17,
+///   18 and 19. The request half of that is a request stream and so is swept
+///   here. The stream that answers it is a data stream, and its bytes — the
+///   nested block, its count prefix and its restarted delta chain — are gated
+///   in `draft23_fill_and_state_notify.rs`; what this asserts is only what
+///   this file is about, that the request went out alone at the front of a
+///   bidirectional stream of its own still carrying both parameters.
+///
+/// # What it catches, observed by making the change and running it
+///
+/// The ported `+ 1` — building the ranged FETCH's filter with `range_to(0, 0,
+/// 1, 2)`, which is what a draft-19 encoder carried forward writes for a range
+/// whose last object is 1. The message is well formed, the type is right, the
+/// parameter count is right, and the FETCH asks for one object too many:
+///
+/// ```text
+/// assertion `left == right` failed: draft-23: the ranged FETCH must arrive alone at the front of a bidirectional stream of its own, and must be the request the helper was asked for
+///   left: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=type 4: 0,0,1,2 parameters=2"))
+///  right: Some(RequestOnBidiStream("FETCH 0x16 request id=4 namespace=uni-control-plane track=track-1 range=type 4: 0,0,1,1 parameters=2"))
+/// ```
+///
+/// A rendering that stopped at `parameters=2` would print the same on both
+/// sides, which is why the filter is decoded into it.
+#[cfg(feature = "draft23")]
+async fn draft23_fetch_requests(
+    conn: &mut moqtap_client::draft23::connection::Connection,
+    held: &mut Vec<moqtap_client::draft23::connection::RequestStream>,
+    seen: &mut mpsc::UnboundedReceiver<PeerEvent>,
+) {
+    use moqtap_client::draft23::fill::{FillParameters, LocationFilter};
+
+    let stream = made(
+        "draft-23",
+        "FETCH",
+        seen,
+        conn.fetch(namespace(), TRACK_ONE.to_vec(), vec![attached()]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-23",
+        "FETCH",
+        &draft23_fetch_request(
+            stream.request_id().into_inner(),
+            &namespace(),
+            TRACK_ONE,
+            "none",
+            1,
+        ),
+    )
+    .await;
+    held.push(stream);
+
+    // Group 0 object 0 through group 0 + 1 object 1, inclusive at both ends.
+    let range = LocationFilter::range_to(0, 0, 1, 1).expect("the end group is in range");
+    let stream = made(
+        "draft-23",
+        "ranged FETCH",
+        seen,
+        conn.fetch_range(namespace(), TRACK_ONE.to_vec(), &range, vec![attached()]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-23",
+        "ranged FETCH",
+        &draft23_fetch_request(
+            stream.request_id().into_inner(),
+            &namespace(),
+            TRACK_ONE,
+            "type 4: 0,0,1,1",
+            2,
+        ),
+    )
+    .await;
+    held.push(stream);
+
+    // A fill relative to the live edge, which is the shape the joining FETCH
+    // of drafts 17, 18 and 19 had. Section 9.19.9 resolves a Relative Start
+    // to `{Largest Object.Group + 1 - StartGroup, 0}`, so 2 starts one group
+    // before the current one. The number is not draft-19's Joining Start and
+    // is not meant to be: the two drafts count from different places, which is
+    // half of why one message could not become the other.
+    let fill = FillParameters::inherited()
+        .with_range(&LocationFilter::relative(2))
+        .expect("a LOCATION_FILTER may be nested inside FILL_PARAMETERS")
+        .parameter()
+        .expect("the fill block encodes");
+    let stream = made(
+        "draft-23",
+        "SUBSCRIBE asking for a fill",
+        seen,
+        conn.subscribe(namespace(), TRACK_TWO.to_vec(), vec![attached(), fill]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-23",
+        "SUBSCRIBE asking for a fill",
+        &subscribe_request(stream.request_id().into_inner(), &namespace(), TRACK_TWO, 2),
+    )
+    .await;
+    held.push(stream);
+}
 
 /// Draft-17's namespace requests: a SUBSCRIBE_NAMESPACE that still carries
 /// the `subscribe_options` field. Draft-17 has no SUBSCRIBE_TRACKS.
@@ -5149,6 +5390,47 @@ async fn draft22_namespace_requests(
     .await;
     held.push(stream);
 }
+/// Draft-23's namespace requests. The split draft-18 made is untouched by
+/// draft-23 — same two messages, same numbers — and is checked rather than
+/// assumed to be.
+#[cfg(feature = "draft23")]
+async fn draft23_namespace_requests(
+    conn: &mut moqtap_client::draft23::connection::Connection,
+    held: &mut Vec<moqtap_client::draft23::connection::RequestStream>,
+    seen: &mut mpsc::UnboundedReceiver<PeerEvent>,
+) {
+    let stream = made(
+        "draft-23",
+        "SUBSCRIBE_NAMESPACE",
+        seen,
+        conn.subscribe_namespace(namespace(), vec![attached()]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-23",
+        "SUBSCRIBE_NAMESPACE",
+        &subscribe_namespace_request(stream.request_id().into_inner(), &namespace(), 1),
+    )
+    .await;
+    held.push(stream);
+
+    let stream = made(
+        "draft-23",
+        "SUBSCRIBE_TRACKS",
+        seen,
+        conn.subscribe_tracks(namespace(), vec![attached()]),
+    )
+    .await;
+    saw_request(
+        seen,
+        "draft-23",
+        "SUBSCRIBE_TRACKS",
+        &subscribe_tracks_request(stream.request_id().into_inner(), &namespace(), 1),
+    )
+    .await;
+    held.push(stream);
+}
 
 /// Draft-20's namespace requests, rendered. Same two as draft-18's and the
 /// same numbers. See [`draft18_describe_namespace`].
@@ -5193,6 +5475,25 @@ fn draft21_describe_namespace(msg: &moqtap_codec::draft21::message::ControlMessa
 #[cfg(feature = "draft22")]
 fn draft22_describe_namespace(msg: &moqtap_codec::draft22::message::ControlMessage) -> String {
     use moqtap_codec::draft22::message::ControlMessage;
+    match msg {
+        ControlMessage::SubscribeNamespace(m) => subscribe_namespace_request(
+            m.request_id.into_inner(),
+            &m.namespace_prefix,
+            m.parameters.len(),
+        ),
+        ControlMessage::SubscribeTracks(m) => subscribe_tracks_request(
+            m.request_id.into_inner(),
+            &m.namespace_prefix,
+            m.parameters.len(),
+        ),
+        other => render(&format!("{:?}", other.message_type()), other.message_type().id(), &[]),
+    }
+}
+/// Draft-23's namespace requests, rendered. Same two as draft-18's and the
+/// same numbers. See [`draft18_describe_namespace`].
+#[cfg(feature = "draft23")]
+fn draft23_describe_namespace(msg: &moqtap_codec::draft23::message::ControlMessage) -> String {
+    use moqtap_codec::draft23::message::ControlMessage;
     match msg {
         ControlMessage::SubscribeNamespace(m) => subscribe_namespace_request(
             m.request_id.into_inner(),
@@ -5430,6 +5731,51 @@ fn the_numbers_the_renderings_carry_are_draft21s() {
 #[test]
 fn the_numbers_the_renderings_carry_are_draft22s() {
     use moqtap_codec::draft22::message::MessageType;
+    assert_eq!(MessageType::Subscribe.id(), SUBSCRIBE_TYPE, "SUBSCRIBE");
+    assert_eq!(MessageType::TrackStatus.id(), TRACK_STATUS_TYPE, "TRACK_STATUS");
+    assert_eq!(MessageType::Fetch.id(), FETCH_TYPE, "FETCH");
+    assert_eq!(MessageType::SubscribeOk.id(), SUBSCRIBE_OK_TYPE, "SUBSCRIBE_OK");
+    assert_eq!(MessageType::Publish.id(), PUBLISH_TYPE, "PUBLISH");
+    assert_eq!(MessageType::PublishNamespace.id(), PUBLISH_NAMESPACE_TYPE, "PUBLISH_NAMESPACE");
+    assert_eq!(
+        MessageType::SubscribeNamespace.id(),
+        SUBSCRIBE_NAMESPACE_TYPE,
+        "SUBSCRIBE_NAMESPACE"
+    );
+    assert_eq!(MessageType::SubscribeTracks.id(), SUBSCRIBE_TRACKS_TYPE, "SUBSCRIBE_TRACKS");
+    assert_eq!(MessageType::Setup.id(), SETUP_STREAM_TYPE, "SETUP");
+    assert_eq!(
+        MessageType::PublishStateNotify.id(),
+        PUBLISH_STATE_NOTIFY_TYPE,
+        "PUBLISH_STATE_NOTIFY, which draft-20 added"
+    );
+    assert!(
+        !DRAFT18_REQUEST_TYPES.contains(&PUBLISH_STATE_NOTIFY_TYPE),
+        "Section 6.3 names seven request types and PUBLISH_STATE_NOTIFY is not one of them; \
+         a peer that allowed it on a bidirectional stream would make the refusal gate \
+         assert nothing"
+    );
+}
+/// See [`the_numbers_the_renderings_carry_are_draft17s`]. Draft-23 keeps every
+/// number drafts 18 and 19 assign — FETCH included, which is the trap — and
+/// the one draft-20 adds.
+///
+/// The three `FetchType` assertions its siblings carry are absent, because
+/// there is no such type on this draft to assert about. Section 9.11 has no
+/// such field and no registry for it, with FETCH still on 0x16, which is why the
+/// FETCH assertion above is the one worth reading: the codepoint is the same
+/// and the body behind it is not, so a draft-19 decoder reads a draft-23 FETCH
+/// as a well-formed request for something else and nothing on the wire says
+/// otherwise.
+///
+/// PUBLISH_STATE_NOTIFY is checked against the number the refusal gate refuses,
+/// and against the request-type list it must **not** be in: Section 9.10 puts
+/// it on a subscription's existing stream, and Section 6.3 still names seven
+/// request types.
+#[cfg(feature = "draft23")]
+#[test]
+fn the_numbers_the_renderings_carry_are_draft23s() {
+    use moqtap_codec::draft23::message::MessageType;
     assert_eq!(MessageType::Subscribe.id(), SUBSCRIBE_TYPE, "SUBSCRIBE");
     assert_eq!(MessageType::TrackStatus.id(), TRACK_STATUS_TYPE, "TRACK_STATUS");
     assert_eq!(MessageType::Fetch.id(), FETCH_TYPE, "FETCH");
@@ -5782,6 +6128,64 @@ uni_control_plane_gates!(
     // byte.
     moqtap_codec::draft22::message::ControlMessage::PublishStateNotify(
         moqtap_codec::draft22::message::PublishStateNotify {
+            parameters: vec![KeyValuePair {
+                key: VarInt::from_u64_moqt(LARGEST_OBJECT),
+                value: KvpValue::Bytes(vec![EARLY_GROUP_ID as u8, 0]),
+            }],
+        }
+    ),
+    PUBLISH_STATE_NOTIFY_TYPE
+);
+#[cfg(feature = "draft23")]
+uni_control_plane_gates!(
+    draft23,
+    Draft23,
+    DraftVersion::Draft23,
+    DRAFT18_REQUEST_TYPES,
+    "draft-23",
+    moqtap_codec::draft23::message::ControlMessage::TrackStatus(
+        moqtap_codec::draft23::message::TrackStatus {
+            request_id: VarInt::from_u64_moqt(0),
+            track_namespace: namespace(),
+            track_name: b"stray".to_vec(),
+            parameters: Vec::new(),
+        }
+    ),
+    |request_id| moqtap_codec::draft23::message::ControlMessage::Subscribe(
+        moqtap_codec::draft23::message::Subscribe {
+            request_id,
+            track_namespace: namespace(),
+            track_name: PEER_TRACK.to_vec(),
+            parameters: Vec::new(),
+        }
+    ),
+    |request_id| moqtap_codec::draft23::message::ControlMessage::Publish(
+        moqtap_codec::draft23::message::Publish {
+            request_id,
+            track_namespace: namespace(),
+            track_name: PEER_TRACK.to_vec(),
+            track_alias: VarInt::from_u64_moqt(EARLY_TRACK_ALIAS),
+            parameters: Vec::new(),
+            track_properties: Vec::new(),
+        }
+    ),
+    respond_ok,
+    moqtap_codec::draft23::message::RequestOk {
+        parameters: Vec::new(),
+        track_properties: Vec::new(),
+    },
+    draft23_namespace_requests,
+    draft23_describe_namespace,
+    draft23_describe_fetch,
+    draft23_fetch_requests,
+    // The one message here that is not draft-19's. A `LARGEST_OBJECT` rides on
+    // it because Section 9.10 says a publisher MUST send one when it knows the
+    // value, so what the refusal gate refuses is a notify a publisher would
+    // really write. Its value is a Location, which Section 9.19.17 encodes as
+    // two bare varints with no length in front of them; both of these fit one
+    // byte.
+    moqtap_codec::draft23::message::ControlMessage::PublishStateNotify(
+        moqtap_codec::draft23::message::PublishStateNotify {
             parameters: vec![KeyValuePair {
                 key: VarInt::from_u64_moqt(LARGEST_OBJECT),
                 value: KvpValue::Bytes(vec![EARLY_GROUP_ID as u8, 0]),

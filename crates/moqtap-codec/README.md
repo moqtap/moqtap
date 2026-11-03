@@ -1,7 +1,7 @@
 # moqtap-codec
 
 MoQT wire codec — a parser and writer for every MoQT draft from draft-07
-through draft-22.
+through draft-23.
 
 Pure encoding and decoding: no I/O, no async runtime, no network dependencies.
 It depends only on `bytes` and `thiserror`.
@@ -27,12 +27,12 @@ It depends only on `bytes` and `thiserror`.
   `AnySubgroupObjectWriter`, `AnyFetchObjectReader`, `AnyFetchObjectWriter` and
   the values they hand back), so a caller frames a data stream into
   individually addressable objects without naming a `draftNN` type. Subgroup
-  and fetch streams on every draft 07-22
+  and fetch streams on every draft 07-23
 - Structured parameter values, rather than opaque bytes: the AUTHORIZATION
   TOKEN structure (`auth_token`), the subscription filter of drafts 15-19
   (`subscription_filter`), and the Range Filter parameters of drafts 19 through
-  22 (`range_filter`). Drafts 20 and 21 give the LOCATION_FILTER value's shape
-  by its field count and draft-22 by a `Location Filter Type` of its own, so
+  23 (`range_filter`). Drafts 20 and 21 give the LOCATION_FILTER value's shape
+  by its field count and drafts 22 and 23 by a `Location Filter Type`, so
   each reads its filters through its own `draftNN::message::decode_location_filter`,
   and the nested parameter block of `FILL_PARAMETERS` through its own
   `draftNN::message::decode_fill_parameters`
@@ -53,7 +53,7 @@ moqtap_codec::
                                           FieldValue, FieldMap)
     dispatch, data_dispatch              (per-draft dispatch: runtime Any*
                                           enums and object framing)
-    draft07, draft08, ..., draft22       (per-draft wire format)
+    draft07, draft08, ..., draft23       (per-draft wire format)
 ```
 
 `dispatch` and `data_dispatch` select the draft at runtime and forward to that

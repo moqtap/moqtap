@@ -11,6 +11,7 @@
     feature = "draft20",
     feature = "draft21",
     feature = "draft22",
+    feature = "draft23",
 ))]
 
 //! `AnyConnection::publish` offers a track on every draft that has PUBLISH,
@@ -20,7 +21,7 @@
 //! # What held still and what did not
 //!
 //! PUBLISH is message type `0x1D` from draft-12, where it first appears,
-//! through draft-22, and the message that ends it is `0x0B` throughout. The
+//! through draft-23, and the message that ends it is `0x0B` throughout. The
 //! rest moved:
 //!
 //! * **The end's name.** Drafts 12 and 13 end a PUBLISH-established
@@ -29,8 +30,9 @@
 //! * **The acceptance.** PUBLISH_OK (`0x1E`) through draft-17; from draft-18
 //!   the acceptance is REQUEST_OK (`0x07`). The rejection is PUBLISH_ERROR on
 //!   drafts 12 through 14 and REQUEST_ERROR from draft-15.
-//! * **Forward.** A field of the message on drafts 12 through 14, and the
-//!   FORWARD parameter (key 0x10) from draft-15. The peer below reads it from
+//! * **Forward.** A field of the message on drafts 12 through 14, the
+//!   FORWARD parameter (key 0x10) on drafts 15 through 22, and the inverse of
+//!   the PAUSED parameter (key 0x11) on draft-23. The peer below reads it from
 //!   wherever its draft keeps it, so a facade that dropped it, or handed it to
 //!   the wrong argument, reads as absent.
 //! * **Where it travels.** The control stream through draft-16, its own
@@ -97,8 +99,9 @@ fn field_text(value: &FieldValue) -> String {
 }
 
 /// Forward, from wherever this draft keeps it: the message's own field on
-/// drafts 12 through 14, the parameter of type 0x10 after that. `absent` when
-/// neither holds it.
+/// drafts 12 through 14, the parameter of type 0x10 after that, and the
+/// inverse of PAUSED (0x11) on draft-23, whose Section 9.19.18 reads "0
+/// (unpaused) or 1 (paused)". `absent` when none holds it.
 fn forward_text(message: &AnyControlMessage) -> String {
     let fields = message.fields();
     if let Some(forward) = fields.get("forward") {
@@ -109,6 +112,13 @@ fn forward_text(message: &AnyControlMessage) -> String {
             if let FieldValue::Map(entry) = param {
                 if entry.get("type") == Some(&FieldValue::Text("0x10".to_string())) {
                     return entry.get("value").map(field_text).unwrap_or_default();
+                }
+                if entry.get("type") == Some(&FieldValue::Text("0x11".to_string())) {
+                    return match entry.get("value") {
+                        Some(FieldValue::Uint(0)) => "1".to_string(),
+                        Some(FieldValue::Uint(1)) => "0".to_string(),
+                        other => format!("paused={other:?}"),
+                    };
                 }
             }
         }
@@ -800,6 +810,19 @@ request_stream_gates!(
         retry_interval: v(0),
         reason_phrase: b"unauthorized".to_vec(),
         redirect: None,
+    }),
+    "request_ok"
+);
+request_stream_gates!(
+    draft23,
+    "draft23",
+    Draft23,
+    ControlMessage::RequestOk(RequestOk { parameters: Vec::new(), track_properties: Vec::new() }),
+    ControlMessage::RequestError(RequestError {
+        error_code: v(0x1),
+        retry_interval: v(0),
+        reason_phrase: b"unauthorized".to_vec(),
+        error_details: Vec::new(),
     }),
     "request_ok"
 );

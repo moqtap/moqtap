@@ -481,7 +481,7 @@ pub enum CodecError {
     /// A delta-encoded Object ID would exceed 2^64 - 1 once the delta is added
     /// to the previous Object ID on the same stream.
     ///
-    /// Drafts 18 through 20 Section 11.4.2, and drafts 21 and 22 Section 11.3.1: "The
+    /// Drafts 18 through 20 Section 11.4.2, and drafts 21 through 23 Section 11.3.1: "The
     /// Object ID Delta + 1 is added to the previous Object ID in the Subgroup
     /// stream if there was one... If the resulting Object ID would be greater
     /// than 2^64 - 1, the endpoint MUST close the session with a
@@ -535,7 +535,7 @@ pub enum CodecError {
     ///
     /// Either one makes the Track malformed: draft-14 and draft-16 Section
     /// 11.2, draft-15 Section 11.1, draft-17 Section 11.6, drafts 18-20 Section
-    /// 12.7, drafts 21-22 Section 10.7. No draft closes the session over it.
+    /// 12.7, drafts 21-23 Section 10.7. No draft closes the session over it.
     ///
     /// Raised by the readers that hand back a whole object. The framing readers
     /// a relay uses delimit the block by its length and never read inside it.
@@ -649,13 +649,14 @@ pub enum CodecError {
     /// but held a combination the draft separately names as invalid.
     ///
     /// Distinct from [`CodecError::UnknownStreamType`], which reports a value
-    /// no table assigns. Drafts 16 through 22 describe the subgroup Type as a
+    /// no table assigns. Drafts 16 through 23 describe the subgroup Type as a
     /// bit field rather than as a list of code points, and then rule
-    /// combinations out *within* the form: on all seven a SUBGROUP_ID_MODE of
+    /// combinations out *within* the form: on each of them a SUBGROUP_ID_MODE of
     /// 0b11, and from draft-20 also a Type that leaves the subgroup form's own
     /// bit clear or that runs past the one-byte flags space. The enclosing
     /// form is assigned, so calling these unknown would misname them; the
-    /// drafts call them invalid and require a close with PROTOCOL_VIOLATION.
+    /// drafts call them invalid and require a close, with PROTOCOL_VIOLATION
+    /// through draft-22 and INVALID_STREAM_HEADER in draft-23.
     ///
     /// Separate from [`CodecError::InvalidDatagramTypeValue`] because the
     /// drafts state the two as separate sentences in separate sections — "If
@@ -683,8 +684,8 @@ pub enum CodecError {
     ///
     /// The datagram half of [`CodecError::InvalidStreamTypeValue`], which
     /// carries the reason the two are separate variants rather than one.
-    /// Drafts 16 through 22 rule out a Type asking to be both an object status
-    /// and an end-of-group marker; drafts 20 through 22 add the bit reserved for a
+    /// Drafts 16 through 23 rule out a Type asking to be both an object status
+    /// and an end-of-group marker; drafts 20 through 23 add the bit reserved for a
     /// datagram, and any other bit their form leaves unspecified.
     ///
     /// `detail` names which combination was seen, for the reason the stream
@@ -746,6 +747,132 @@ pub enum CodecError {
         /// different in each direction and neither is knowable in the other.
         detail: &'static str,
     },
+    /// A control message's Length is larger than the receiver's
+    /// MAX_CONTROL_MESSAGE_SIZE, or one about to be sent is larger than the
+    /// peer's.
+    ///
+    /// Draft-23 Section 9: "If an endpoint receives a control message with a
+    /// length larger than its MAX_CONTROL_MESSAGE_SIZE, it MUST close the
+    /// session with FIELD_LENGTH_EXCEEDED." Drafts 11 through 22 cap the
+    /// Length at 2^16-1 by its width and report an oversized body on encode as
+    /// [`CodecError::MessageTooLong`].
+    #[error("control message body of {length} bytes exceeds the limit of {limit}")]
+    ControlMessageExceedsLimit {
+        /// The body length, as declared or as about to be written.
+        length: u64,
+        /// The MAX_CONTROL_MESSAGE_SIZE in force.
+        limit: u64,
+    },
+    /// A REQUEST_ERROR whose Error Code requires an Error Detail carries none.
+    ///
+    /// Draft-23 Section 9.4.2.1: "An endpoint that receives a REQUEST_ERROR
+    /// with Error Code REDIRECT and no REDIRECT Error Detail MUST close the
+    /// session with MALFORMED_MESSAGE."
+    #[error("REQUEST_ERROR code {error_code:#x} carries no Error Detail of type {detail_type:#x}")]
+    MissingErrorDetail {
+        /// The Error Code that requires the detail.
+        error_code: u64,
+        /// The Error Detail type it requires.
+        detail_type: u64,
+    },
+    /// A known Error Detail whose value is not the structure its Type defines.
+    ///
+    /// Draft-23 Section 9.4.2.1 gives the REDIRECT Error Detail a structure,
+    /// and Section 8.3: "If a receiver understands a Type, and the following
+    /// Value or Length/Value does not match the serialization defined by that
+    /// Type, the receiver MUST close the session with MALFORMED_KEY_VALUE."
+    #[error(
+        "error detail of type {detail_type:#x} is not the structure that type defines: {detail}"
+    )]
+    MalformedErrorDetail {
+        /// The Error Detail type.
+        detail_type: u64,
+        /// How the value failed to match.
+        detail: &'static str,
+    },
+    /// A SETUP whose AUTHORIZATION TOKEN option names an Alias with DELETE or
+    /// USE_ALIAS.
+    ///
+    /// SETUP is the first message on the control stream, so no Alias is
+    /// registered when it arrives. Draft-23 Section 9.1.4: "If a server
+    /// receives Alias Type DELETE (0x0) or USE_ALIAS (0x2) in a SETUP message,
+    /// it MUST close the session with ROLE_VIOLATION." At a client, Section
+    /// 8.9: "The receiver of a message referencing an Alias that is not
+    /// currently registered MUST reject the message with
+    /// UNKNOWN_AUTH_TOKEN_ALIAS." Which applies is the receiver's role.
+    #[error("SETUP carries an authorization token with Alias Type {alias_type:#x}")]
+    TokenAliasInSetup {
+        /// The Alias Type, DELETE (0x0) or USE_ALIAS (0x2).
+        alias_type: u64,
+    },
+    /// A Track Name with a length of zero.
+    ///
+    /// Draft-23 Section 2.4.1: "If an endpoint receives a Track Name with a
+    /// length of 0, it MUST close the session with a PROTOCOL_VIOLATION."
+    /// Drafts 07 through 22 allow an empty Track Name.
+    #[error("track name is empty; a track name must contain at least one byte")]
+    EmptyTrackName,
+    /// An AUTHORIZATION TOKEN whose Token structure cannot be decoded.
+    ///
+    /// Draft-23 Section 8.9: "If the Token structure cannot be decoded,
+    /// including an unknown Alias Type, the receiver MUST close the Session
+    /// with MALFORMED_AUTH_TOKEN." Drafts 11 through 22 report the same
+    /// failure as [`CodecError::KeyValueFormatting`].
+    #[error("authorization token in parameter type {key} cannot be decoded: {detail}")]
+    MalformedAuthToken {
+        /// The parameter or Setup Option type that carried the token.
+        key: u64,
+        /// How the token failed to decode.
+        detail: &'static str,
+    },
+    /// Track Properties in a REQUEST_OK that answers a request whose OK must
+    /// carry none.
+    ///
+    /// Draft-23 Section 9.3: Track Properties "are empty in PUBLISH_OK,
+    /// REQUEST_UPDATE_OK, SUBSCRIBE_NAMESPACE_OK and PUBLISH_NAMESPACE_OK. If
+    /// an endpoint receives Track Properties in one of these messages it MUST
+    /// close the session with INVALID_FIELD."
+    #[error("REQUEST_OK carries Track Properties where its request permits none")]
+    TrackPropertiesNotPermitted,
+    /// A Group ID or Object ID decoded from a delta on a fetch stream is
+    /// below 0 or above 2^64-1.
+    ///
+    /// Draft-23 Section 12.2: "DELTA_ENCODING_OVERFLOW (0x400): A value
+    /// decoded from a delta encoding is less than 0 or greater than 2^64 - 1."
+    #[error("fetch stream {detail} is outside 0 to 2^64 - 1")]
+    DeltaDecodingOverflow {
+        /// Which value overflowed.
+        detail: &'static str,
+    },
+    /// An Object on a fetch stream whose serialization cannot be decoded.
+    ///
+    /// Draft-23 Section 12.2: "MALFORMED_OBJECT (0x201): The serialization of
+    /// an Object on a data stream or in a datagram cannot be decoded, for
+    /// example a flag references a prior Object that does not exist."
+    #[error("fetch object cannot be decoded: {detail}")]
+    MalformedObject {
+        /// What could not be decoded.
+        detail: &'static str,
+    },
+    /// An Object whose Prior Group ID Gap or Prior Object ID Gap makes its
+    /// Track malformed.
+    ///
+    /// Draft-23 Section 10.8: "A Track is considered malformed (see Section
+    /// 12.1) if any of the following conditions are detected", and Section
+    /// 10.9 the same for Prior Object ID Gap. Only the conditions one Object,
+    /// or one subgroup stream, shows are detected here.
+    #[error("malformed track: {detail}")]
+    MalformedTrack {
+        /// Which condition was detected.
+        detail: String,
+    },
+    /// An Object Status the draft does not assign, on a subgroup stream or in
+    /// a datagram.
+    ///
+    /// Draft-23 Section 11.1.1: "If an endpoint receives any other value, it
+    /// SHOULD close the session with INVALID_OBJECT_STATUS (Section 12.2)."
+    #[error("Object Status {0:#x} is not an assigned status")]
+    UnknownObjectStatus(u64),
     /// Reason phrase exceeds [`MAX_REASON_PHRASE_LENGTH`].
     #[error("reason phrase exceeds {MAX_REASON_PHRASE_LENGTH} bytes")]
     ReasonPhraseTooLong,

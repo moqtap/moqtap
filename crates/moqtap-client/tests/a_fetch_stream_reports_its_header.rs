@@ -184,7 +184,8 @@ async fn accepting_a_fetch_stream_reports_the_header_it_decoded() {
             feature = "draft19",
             feature = "draft20",
             feature = "draft21",
-            feature = "draft22"
+            feature = "draft22",
+            feature = "draft23"
         ))]
         other => panic!("expected a draft-14 fetch header, got {other:?}"),
     }
@@ -243,7 +244,8 @@ async fn accepting_a_fetch_stream_reports_the_header_it_decoded() {
             feature = "draft19",
             feature = "draft20",
             feature = "draft21",
-            feature = "draft22"
+            feature = "draft22",
+            feature = "draft23"
         ))]
         other => panic!("expected a draft-14 fetch header on the event, got {other:?}"),
     }

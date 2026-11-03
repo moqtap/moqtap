@@ -833,6 +833,74 @@ fetch_gate!(
         );
     },
 );
+fetch_gate!(
+    draft23,
+    "draft23",
+    Draft23,
+    uni,
+    none,
+    4,
+    "fetch-stream-two-objects",
+    "05041c00008004deadbeef0002cafe",
+    "group=0 subgroup=0 object=0 payload=deadbeef status=none eor=none | \
+     group=0 subgroup=0 object=1 payload=cafe status=none eor=none",
+    #[tokio::test]
+    async fn an_end_of_range_marker_is_a_record_and_not_an_object() {
+        assert_eq!(
+            read_back("0504808c050a00", GroupOrder::Ascending).await,
+            "group=5 subgroup=none object=10 payload=- status=none eor=0x8c",
+            "reading fetch-end-of-non-existent-range back through the facade"
+        );
+    },
+    /// The third marker, which no draft before draft-20 has: a span the
+    /// publisher gave up on rather than one it knows about.
+    #[tokio::test]
+    async fn the_third_marker_this_draft_added_comes_back_as_its_own_code() {
+        assert_eq!(
+            read_back("0504820c050a00", GroupOrder::Ascending).await,
+            "group=5 subgroup=none object=10 payload=- status=none eor=0x20c",
+            "reading fetch-end-of-timed-out-range back through the facade"
+        );
+    },
+    /// draft-23 Section 11.4.2.2: "The prior Object is the last Object in its
+    /// Group, or in the Track, respectively." The marker comes back at the
+    /// prior Object's Location, as a record and not as a second Object there.
+    #[tokio::test]
+    async fn end_of_group_and_end_of_track_come_back_as_their_own_codes() {
+        assert_eq!(
+            read_back("05041c05008001aa0001aa0001aa80801c00008001aa", GroupOrder::Ascending).await,
+            "group=5 subgroup=0 object=0 payload=aa status=none eor=none | \
+             group=5 subgroup=0 object=1 payload=aa status=none eor=none | \
+             group=5 subgroup=0 object=2 payload=aa status=none eor=none | \
+             group=5 subgroup=none object=2 payload=- status=none eor=0x80 | \
+             group=6 subgroup=0 object=0 payload=aa status=none eor=none",
+            "reading fetch-end-of-group-then-object back through the facade"
+        );
+        assert_eq!(
+            read_back("05041c09048001aa8081", GroupOrder::Ascending).await,
+            "group=9 subgroup=0 object=4 payload=aa status=none eor=none | \
+             group=9 subgroup=none object=4 payload=- status=none eor=0x81",
+            "reading fetch-end-of-track back through the facade"
+        );
+    },
+    #[tokio::test]
+    async fn the_same_bytes_walk_the_other_way_under_descending() {
+        let wire = "05041c05008001aa0c000001bb";
+        assert_eq!(
+            read_back(wire, GroupOrder::Ascending).await,
+            "group=5 subgroup=0 object=0 payload=aa status=none eor=none | \
+             group=6 subgroup=0 object=0 payload=bb status=none eor=none",
+            "under Ascending a Group ID Delta of 0 is the prior Group plus one"
+        );
+        assert_eq!(
+            read_back(wire, GroupOrder::Descending).await,
+            "group=5 subgroup=0 object=0 payload=aa status=none eor=none | \
+             group=4 subgroup=0 object=0 payload=bb status=none eor=none",
+            "under Descending the same delta subtracts, and the same bytes are a \
+             different answer"
+        );
+    },
+);
 
 // ── Where the Group Order comes from ────────────────────────────────────────
 
@@ -964,6 +1032,48 @@ fn the_group_order_is_read_off_the_property_that_carries_it_or_defaulted_draft22
             end_of_track: 0,
             end_group: v(0),
             end_object: v(0),
+            parameters: Vec::new(),
+            track_properties: properties,
+        }))
+    };
+    let order = |code: u64| vec![KeyValuePair { key: v(0x22), value: KvpValue::Varint(v(code)) }];
+
+    assert_eq!(
+        fetch_group_order(&fetch_ok(order(0x2))),
+        GroupOrder::Descending,
+        "a FETCH_OK naming Descending is read as Descending"
+    );
+    assert_eq!(
+        fetch_group_order(&fetch_ok(order(0x1))),
+        GroupOrder::Ascending,
+        "a FETCH_OK naming Ascending is read as Ascending"
+    );
+    assert_eq!(
+        fetch_group_order(&fetch_ok(Vec::new())),
+        GroupOrder::Ascending,
+        "an omitted DEFAULT PUBLISHER GROUP ORDER is Ascending, which is the \
+         draft's answer and not this function's guess"
+    );
+    assert_eq!(
+        fetch_group_order(&fetch_ok(order(0x0))),
+        GroupOrder::Ascending,
+        "Publisher states no direction, and a delta reader needs one"
+    );
+}
+/// The same conversion on draft-23, where FETCH_OK is a REQUEST_OK (Section
+/// 1.5) and GROUP_ORDER keeps the Ascending default for a FETCH (Section
+/// 9.19.8).
+#[cfg(feature = "draft23")]
+#[test]
+fn the_group_order_is_read_off_the_property_that_carries_it_or_defaulted_draft23() {
+    use moqtap_client::dispatch::fetch_group_order;
+    use moqtap_codec::draft23::message::{ControlMessage, RequestOk};
+    use moqtap_codec::kvp::KvpValue;
+    use moqtap_codec::varint::VarInt;
+
+    let v = |n: u64| VarInt::from_u64(n).expect("fixture value fits a varint");
+    let fetch_ok = |properties: Vec<KeyValuePair>| {
+        AnyControlMessage::Draft23(ControlMessage::RequestOk(RequestOk {
             parameters: Vec::new(),
             track_properties: properties,
         }))

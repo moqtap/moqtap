@@ -903,7 +903,7 @@ pub(crate) fn execute_stream(
 /// unit anyway** — the queue overshoots its depth by one. A shaper may not
 /// corrupt a stream to honour a depth limit: eliding an object the framer
 /// cannot renumber around does not lose one object, it makes every
-/// successor decode with a wrong absolute ID on drafts 14-22.
+/// successor decode with a wrong absolute ID on drafts 14-23.
 ///
 /// The refusal is reported as an ordinary
 /// [`ProxyEvent::ActionRefused`] and bumps `Counters::actions_refused`,
@@ -1509,7 +1509,8 @@ const fn stream_reset_code_defined(draft: DraftVersion) -> bool {
         | DraftVersion::Draft19
         | DraftVersion::Draft20
         | DraftVersion::Draft21
-        | DraftVersion::Draft22 => true,
+        | DraftVersion::Draft22
+        | DraftVersion::Draft23 => true,
     }
 }
 
@@ -1560,7 +1561,8 @@ fn elide_renumbers_successor(unit: &Unit<'_>) -> bool {
             | DraftVersion::Draft19
             | DraftVersion::Draft20
             | DraftVersion::Draft21
-            | DraftVersion::Draft22 => true,
+            | DraftVersion::Draft22
+            | DraftVersion::Draft23 => true,
         },
         DataStreamType::Fetch => match unit.draft {
             DraftVersion::Draft07
@@ -1578,7 +1580,8 @@ fn elide_renumbers_successor(unit: &Unit<'_>) -> bool {
             | DraftVersion::Draft19
             | DraftVersion::Draft20
             | DraftVersion::Draft21
-            | DraftVersion::Draft22 => true,
+            | DraftVersion::Draft22
+            | DraftVersion::Draft23 => true,
         },
     }
 }
@@ -1933,6 +1936,8 @@ mod tests {
         DraftVersion::Draft21,
         #[cfg(feature = "draft22")]
         DraftVersion::Draft22,
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23,
     ];
 
     // ── how many events one action produces ─────────────────────────
@@ -3261,7 +3266,8 @@ mod tests {
                 | DraftVersion::Draft19
                 | DraftVersion::Draft20
                 | DraftVersion::Draft21
-                | DraftVersion::Draft22 => true,
+                | DraftVersion::Draft22
+                | DraftVersion::Draft23 => true,
             };
             let mut h = Harness::new();
             let m = meta(draft);
@@ -3344,6 +3350,7 @@ mod tests {
             DraftVersion::Draft20,
             DraftVersion::Draft21,
             DraftVersion::Draft22,
+            DraftVersion::Draft23,
         ]
         .into_iter()
         .filter(|d| COMPILED_DRAFTS.contains(d))

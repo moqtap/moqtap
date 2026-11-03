@@ -88,11 +88,18 @@ use test_vectors::{vector_files, vectors_dir};
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 use test_vectors::error_category;
 
-#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21", feature = "draft22"))]
+#[cfg(any(
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22",
+    feature = "draft23"
+))]
 fn hex(s: &str) -> Vec<u8> {
     hex::decode(s.replace(' ', "")).expect("test hex")
 }
@@ -101,7 +108,13 @@ fn hex(s: &str) -> Vec<u8> {
 ///
 /// Panics if the bytes decode, because a case that stopped failing is a case
 /// that stopped testing anything.
-#[cfg(any(feature = "draft19", feature = "draft20", feature = "draft21", feature = "draft22"))]
+#[cfg(any(
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22",
+    feature = "draft23"
+))]
 fn category_of(
     what: &str,
     decode: impl FnOnce() -> Result<(), moqtap_codec::error::CodecError>,
@@ -277,6 +290,28 @@ fn draft22_names_every_invalid_type_inside_the_byte_space() {
     });
     assert_eq!(category, "unknown_message", "draft-22 subgroup Type 0x0100");
 }
+#[cfg(feature = "draft23")]
+#[test]
+fn draft23_names_every_invalid_type_inside_the_byte_space() {
+    use moqtap_codec::draft23::data_stream::SubgroupHeader;
+
+    for (label, bytes) in
+        [("the reserved SUBGROUP_ID_MODE", "16"), ("bit 4 clear", "60"), ("128 or greater", "8090")]
+    {
+        let bytes = hex(bytes);
+        let category = category_of(&format!("draft-23 subgroup Type, {label}"), || {
+            SubgroupHeader::decode(&mut &bytes[..]).map(|_| ())
+        });
+        assert_eq!(category, "invalid_type", "draft-23 subgroup Type, {label}");
+    }
+
+    // Above the byte space, Section 6.4.1's rule is the one that answers.
+    let bytes = hex("810007090380");
+    let category = category_of("draft-23 subgroup Type 0x0100", || {
+        SubgroupHeader::decode(&mut &bytes[..]).map(|_| ())
+    });
+    assert_eq!(category, "unknown_message", "draft-23 subgroup Type 0x0100");
+}
 
 /// Draft-20's new LOCATION_FILTER value shape is the first thing in the corpus
 /// to claim `invalid_parameter` for a malformed filter.
@@ -376,6 +411,40 @@ fn a_malformed_location_filter_is_two_categories_draft22() {
             "16001b0201046c69766505766964656f012103ffffffffffffffffff0001",
             "invalid_parameter",
             "draft-22 LOCATION_FILTER end group overflow",
+        ),
+    ];
+    for (wire, expected, what) in cases {
+        let bytes = hex(wire);
+        let category = category_of(what, || ControlMessage::decode(&mut &bytes[..]).map(|_| ()));
+        assert_eq!(category, expected, "{what}");
+    }
+}
+#[cfg(feature = "draft23")]
+#[test]
+fn a_malformed_location_filter_is_two_categories_draft23() {
+    use moqtap_codec::draft23::message::ControlMessage;
+
+    let cases = [
+        // `messages/fetch.json [invalid-filter-type]`: Location Filter Type
+        // 0x40, which Section 9.19.9 does not assign.
+        (
+            "16100201046c69766505766964656f012140",
+            "invalid_parameter",
+            "draft-23 LOCATION_FILTER of an unassigned type",
+        ),
+        // `messages/fetch.json [location-filter-fields-overrun-payload]`:
+        // type 0x04 names four fields and the message ends after two.
+        (
+            "16120201046c69766505766964656f0121040a03",
+            "invalid_parameter",
+            "draft-23 LOCATION_FILTER whose fields overrun the message",
+        ),
+        // `messages/fetch.json [location-filter-end-group-overflow]`: type
+        // 0x03, StartGroup 2^64 - 1 with an EndGroupDelta of 1.
+        (
+            "161b0201046c69766505766964656f012103ffffffffffffffffff0001",
+            "invalid_parameter",
+            "draft-23 LOCATION_FILTER end group overflow",
         ),
     ];
     for (wire, expected, what) in cases {

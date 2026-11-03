@@ -24,8 +24,8 @@
 //!
 //! What is gated here is `ObjectStatus::from_u64` — the conversion, and only
 //! the conversion. Every draft's decoders now route the wire code through it:
-//! drafts 07-14 call it directly from each status read, and drafts 15-22 call
-//! it from their `data_stream` module's `checked_status`, which is how the
+//! drafts 07-14 call it directly from each status read, and drafts 15-23 call
+//! it from their `data_stream` module's `decoded_status`, which is how the
 //! raw-coded `SubgroupObject::object_status` and `DatagramHeader::
 //! object_status` fields on those drafts come to hold only assigned values.
 //!
@@ -127,6 +127,7 @@ per_draft_gate!(draft19_object_status, "draft19", draft19, "draft-19");
 per_draft_gate!(draft20_object_status, "draft20", draft20, "draft-20");
 per_draft_gate!(draft21_object_status, "draft21", draft21, "draft-21");
 per_draft_gate!(draft22_object_status, "draft22", draft22, "draft-22");
+per_draft_gate!(draft23_object_status, "draft23", draft23, "draft-23");
 
 /// The draft-neutral `ObjectStatus` in the shared `types` module, which follows
 /// draft-14's assignment and takes a `u8` rather than a varint.

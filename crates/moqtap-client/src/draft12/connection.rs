@@ -1923,6 +1923,18 @@ impl Connection {
             // and the session stays open.
             | CodecError::PayloadNotPermitted { .. }
             | CodecError::MalformedObjectProperties { .. }
+            // Raised only by the draft-23 codec.
+            | CodecError::ControlMessageExceedsLimit { .. }
+            | CodecError::MissingErrorDetail { .. }
+            | CodecError::MalformedErrorDetail { .. }
+            | CodecError::TokenAliasInSetup { .. }
+            | CodecError::EmptyTrackName
+            | CodecError::MalformedAuthToken { .. }
+            | CodecError::TrackPropertiesNotPermitted
+            | CodecError::DeltaDecodingOverflow { .. }
+            | CodecError::MalformedObject { .. }
+            | CodecError::MalformedTrack { .. }
+            | CodecError::UnknownObjectStatus(_)
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(
                 KvpError::MissingLength | KvpError::UnexpectedEnd | KvpError::VarInt(_),

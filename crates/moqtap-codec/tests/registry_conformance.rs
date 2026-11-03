@@ -14,7 +14,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 //! Every code point this crate assigns, on every draft it implements, is
 //! checked against the registries extracted from the rendered Internet-Drafts.
@@ -151,10 +152,12 @@ use moqtap_codec::draft20;
 use moqtap_codec::draft21;
 #[cfg(feature = "draft22")]
 use moqtap_codec::draft22;
+#[cfg(feature = "draft23")]
+use moqtap_codec::draft23;
 
 /// Every draft with a committed extraction, which is every draft this crate
 /// implements.
-const DRAFTS: [u64; 16] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+const DRAFTS: [u64; 17] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
 
 /// Highest code point swept when reading a registry back out of the crate.
 ///
@@ -800,6 +803,18 @@ fn draft22_error_registries_match_the_extracted_draft() {
         "stream_reset" => StreamResetErrorCode,
     });
 }
+#[cfg(feature = "draft23")]
+#[test]
+fn draft23_error_registries_match_the_extracted_draft() {
+    use draft23::error_codes as ec;
+
+    registries!(23, {
+        "session_termination" => SessionErrorCode,
+        "request_error" => RequestErrorCode,
+        "publish_done" => PublishDoneStatusCode,
+        "stream_reset" => StreamResetErrorCode,
+    });
+}
 
 // ── Object Status registry ────────────────────────────────────
 
@@ -930,6 +945,12 @@ fn object_status_registries_match_the_extracted_drafts() {
         &extracted(22),
         &codec_registry!(draft22::types::ObjectStatus, "draft22 ObjectStatus"),
     );
+    #[cfg(feature = "draft23")]
+    same_object_status(
+        23,
+        &extracted(23),
+        &codec_registry!(draft23::types::ObjectStatus, "draft23 ObjectStatus"),
+    );
 }
 
 // ── The extractions have to be able to disagree ───────────────
@@ -939,7 +960,7 @@ fn object_status_registries_match_the_extracted_drafts() {
 ///
 /// Drafts 08, 09 and 10 changed nothing in any of their six registries, and
 /// drafts 21 and 22 changed nothing in these four; every other draft changed
-/// something. The runs are a partition of
+/// something, draft-23 all four. The runs are a partition of
 /// [`DRAFTS`], so every pair is claimed one way or the other rather than
 /// merely not being claimed to differ.
 const ERROR_REGISTRY_ERAS: &[&[u64]] = &[
@@ -955,6 +976,7 @@ const ERROR_REGISTRY_ERAS: &[&[u64]] = &[
     &[18],
     &[19],
     &[20, 21, 22],
+    &[23],
 ];
 
 /// The same, for Object Status.
@@ -963,10 +985,10 @@ const ERROR_REGISTRY_ERAS: &[&[u64]] = &[
 /// renamed `0x5` from END_OF_SUBGROUP to END_OF_TRACK, draft-11 dropped `0x5`
 /// and renamed `0x4` from END_OF_TRACK_AND_GROUP to END_OF_TRACK, and draft-16
 /// dropped OBJECT_DOES_NOT_EXIST. Draft-19 changed how the registry is printed,
-/// not what it assigns, and drafts 20, 21 and 22 changed nothing at all, which
+/// not what it assigns, and drafts 20 through 23 changed nothing at all, which
 /// is why they share a run with 16.
 const OBJECT_STATUS_ERAS: &[&[u64]] =
-    &[&[7], &[8, 9, 10], &[11, 12, 13, 14, 15], &[16, 17, 18, 19, 20, 21, 22]];
+    &[&[7], &[8, 9, 10], &[11, 12, 13, 14, 15], &[16, 17, 18, 19, 20, 21, 22, 23]];
 
 /// Every draft checked against its own file only proves something if the
 /// files differ.

@@ -4,7 +4,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 //! Rules drafts 17 and later state and this codec must hold itself to.
 //!

@@ -228,3 +228,4 @@ withdrawal_gate!(draft19, "draft19", on_publish_done);
 withdrawal_gate!(draft20, "draft20", on_publish_done);
 withdrawal_gate!(draft21, "draft21", on_publish_done);
 withdrawal_gate!(draft22, "draft22", on_publish_done);
+withdrawal_gate!(draft23, "draft23", on_publish_done);

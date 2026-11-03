@@ -204,6 +204,14 @@ pub enum AboveCodecRule {
     /// request streams is two first GOAWAYs and not a repeat. Both are the same
     /// sentence read at two scopes.
     RepeatedGoAway,
+    /// A GOAWAY arrived on a request stream from the endpoint that sent the
+    /// request.
+    ///
+    /// Draft-23 Section 9.2: "Only the receiver of a request can send GOAWAY
+    /// on its request stream. If the receiver of a request receives a GOAWAY on
+    /// that request stream, it MUST close the session with a
+    /// PROTOCOL_VIOLATION."
+    GoAwayFromRequestSender,
     /// A server received a Redirect carrying a Connect URI.
     ///
     /// Drafts 18 through 20. The same standing [`Self::GoAwayAtServer`] is
@@ -369,6 +377,13 @@ pub enum AboveCodecRule {
     /// receives a PUBLISH_STATE_NOTIFY for any other request type, or from the
     /// subscriber, MUST close the session with a PROTOCOL_VIOLATION."
     StateNotifyOnTheWrongRequest,
+    /// A PUBLISH_STATE_NOTIFY arrived from a subscription's subscriber.
+    ///
+    /// Draft-23 Section 9.10 gives this half of the rule a code of its own: "A
+    /// publisher that receives a PUBLISH_STATE_NOTIFY MUST close the session
+    /// with ROLE_VIOLATION." Drafts 20 through 22 state both halves in one
+    /// sentence, under [`Self::StateNotifyOnTheWrongRequest`].
+    StateNotifyFromTheSubscriber,
     /// A fill fetch stream opened against a request that asked for no fill.
     ///
     /// Draft-20, where `FILL_PARAMETERS` is the whole of the request: "Its
@@ -411,6 +426,18 @@ pub enum AboveCodecRule {
     /// error code PREFIX_OVERLAP" is a reply, and a reply needs the request it
     /// answers to have been taken.
     NamespacePrefixOverlap,
+    /// An Object both received and signalled as not existing.
+    ///
+    /// Draft-23 Section 12.1: "An Object is received after it has been
+    /// recorded as not existing, or is signalled as not existing after it was
+    /// received (see Section 2.1.2)." A Malformed Track, with no session close.
+    ObjectExistenceContradicted,
+    /// A data stream ended with a FIN inside an Object.
+    ///
+    /// Draft-23 Section 11.3: "If a stream ends gracefully (i.e., the stream
+    /// terminates with a FIN) in the middle of a serialized Object, the
+    /// receiver SHOULD close the session with TRUNCATED_OBJECT."
+    TruncatedObject,
 }
 
 /// One draft's own words for one rule: the sentence, the section it sits in,
@@ -532,6 +559,98 @@ impl RuleCitation {
 // preference sentence really does end without a full stop. `check-drafts.py`
 // rule 8 compares each of these against the rendering it came from, so a
 // correction of the drafts' spelling is a red gate.
+const PROPERTIES_ON_STATUS_23: &str = "If an endpoint receives properties on an Object with \
+                                       status that is not Normal, it MUST close the session with \
+                                       INVALID_OBJECT_STATUS.";
+const BIDI_OPENER_23: &str = "Bidirectional streams MUST NOT begin with any other message type \
+                              unless negotiated. If they do, the peer MUST close the Session with \
+                              UNEXPECTED_MESSAGE.";
+const FIRST_RESPONSE_23: &str = "The publisher MUST send a single SUBSCRIBE_NAMESPACE_OK or \
+                                 SUBSCRIBE_NAMESPACE_ERROR as the first message on the response \
+                                 half of the stream; if the subscriber receives any other message \
+                                 first, it MUST close the session with UNEXPECTED_MESSAGE.";
+const GOAWAY_URI_CLOSE_23: &str = "If a server receives a GOAWAY with a non-zero New Session URI \
+                                   Length it MUST close the session with ROLE_VIOLATION.";
+const REPEATED_GOAWAY_23: &str = "The endpoint MUST close the session with UNEXPECTED_MESSAGE \
+                                  (Section 12.2) if it receives more than one GOAWAY on the \
+                                  control stream or on a single request stream.";
+const GOAWAY_FROM_REQUEST_SENDER: &str = "If the receiver of a request receives a GOAWAY on that \
+                                          request stream, it MUST close the session with a \
+                                          PROTOCOL_VIOLATION.";
+const REDIRECT_URI_AT_SERVER_23: &str = "If a server receives a Redirect with a non-zero Connect \
+                                         URI Length it MUST close the session with \
+                                         ROLE_VIOLATION.";
+const REDIRECT_TRACK_NAME_23: &str = "an endpoint that receives a non-empty Track Name in a \
+                                      Redirect for a namespace-scoped request MUST close the \
+                                      session with INVALID_FIELD.";
+const REQUEST_ID_PARITY_23: &str = "If an endpoint receives a Request ID where the least \
+                                    significant bit is incorrect for the sender, it MUST close \
+                                    the session with INVALID_REQUEST_ID.";
+const REQUEST_ID_DUPLICATE_23: &str = "If an endpoint detects a duplicate Request ID, it MUST \
+                                       close the session with INVALID_REQUEST_ID.";
+const UPDATE_WRONG_23: &str = "An endpoint that receives a REQUEST_UPDATE other than in the two \
+                               cases above MUST close the session with UNEXPECTED_MESSAGE.";
+const TRACK_PROPERTIES_23: &str = "Track Properties are populated in TRACK_STATUS_OK and \
+                                   FETCH_OK; they are empty in PUBLISH_OK, REQUEST_UPDATE_OK, \
+                                   SUBSCRIBE_NAMESPACE_OK and PUBLISH_NAMESPACE_OK. If an \
+                                   endpoint receives Track Properties in one of these messages it \
+                                   MUST close the session with INVALID_FIELD.";
+const STATE_NOTIFY_23: &str = "PUBLISH_STATE_NOTIFY applies only to subscriptions, and is sent \
+                               only by the publisher. An endpoint that receives a \
+                               PUBLISH_STATE_NOTIFY for any other request type MUST close the \
+                               session with UNEXPECTED_MESSAGE.";
+const STATE_NOTIFY_FROM_SUBSCRIBER: &str = "A publisher that receives a PUBLISH_STATE_NOTIFY MUST \
+                                            close the session with ROLE_VIOLATION.";
+const MESSAGE_LENGTH_23: &str = "If the length does not match the length of the Message Body, the \
+                                 receiver MUST close the session with MALFORMED_MESSAGE.";
+const TRUNCATED_OBJECT_23: &str =
+    "If a stream ends gracefully (i.e., the stream terminates with a \
+                                   FIN) in the middle of a serialized Object, the receiver SHOULD \
+                                   close the session with TRUNCATED_OBJECT.";
+const TRACK_NAME_MAX_23: &str = "The maximum total length of a Full Track Name is 4,096 bytes. \
+                                 The length of a Full Track Name is computed as the sum of the \
+                                 Track Namespace Field Length fields and the Track Name Length \
+                                 field. The length of a Track Namespace is the sum of the Track \
+                                 Namespace Field Length fields. If an endpoint receives a Track \
+                                 Namespace or a Full Track Name exceeding 4,096 bytes, it MUST \
+                                 close the session with FIELD_LENGTH_EXCEEDED.";
+const REASON_PHRASE_MAX_23: &str = "The reason phrase length has a maximum value of 1024 bytes. \
+                                    If an endpoint receives a length exceeding the maximum, it \
+                                    MUST close the session with FIELD_LENGTH_EXCEEDED.";
+const GOAWAY_URI_MAX_23: &str = "The maximum length of the New Session URI is 8,192 bytes. If an \
+                                 endpoint receives a length exceeding the maximum, it MUST close \
+                                 the session with FIELD_LENGTH_EXCEEDED.";
+const KVP_VALUE_MAX_23: &str = "The maximum length of a value is 2^16-1 bytes. If an endpoint \
+                                receives a length larger than the maximum, it MUST close the \
+                                session with FIELD_LENGTH_EXCEEDED.";
+const KVP_FORMATTING_23: &str = "If a receiver understands a Type, and the following Value or \
+                                 Length/Value does not match the serialization defined by that \
+                                 Type, the receiver MUST close the session with \
+                                 MALFORMED_KEY_VALUE.";
+const UNKNOWN_PARAMETER_23: &str = "All Message Parameters MUST be defined in the negotiated \
+                                    version of MOQT or negotiated via Setup Options. An endpoint \
+                                    that receives an unknown Message Parameter MUST close the \
+                                    session with INVALID_PARAMETER.";
+const PARAMETER_SCOPE_23: &str = "Each Message Parameter definition indicates the message types \
+                                  in which it can appear, and each control message definition \
+                                  lists the parameters it allows. If a parameter appears in some \
+                                  other type of message, the receiving endpoint MUST close the \
+                                  session with INVALID_PARAMETER.";
+const FILTER_TYPE_23: &str = "If an endpoint receives any other Location Filter Type, it MUST \
+                              close the session with INVALID_PARAMETER.";
+const END_GROUP_WRAP_23: &str = "If StartGroup + EndGroupDelta exceeds 2^64 - 1, the endpoint \
+                                 MUST close the session with DELTA_ENCODING_OVERFLOW.";
+const OBJECT_ID_WRAP_23: &str = "The Object ID Delta + 1 is added to the previous Object ID in \
+                                 the Subgroup stream if there was one. The Object ID is the \
+                                 Object ID Delta if it's the first Object in the Subgroup stream. \
+                                 If the resulting Object ID would be greater than 2^64 - 1, the \
+                                 endpoint MUST close the session with DELTA_ENCODING_OVERFLOW.";
+const INVALID_STREAM_TYPE_23: &str = "If an endpoint receives a stream header with any of these \
+                                      values, it MUST close the session with \
+                                      INVALID_STREAM_HEADER:";
+const INVALID_DATAGRAM_TYPE_23: &str = "If an endpoint receives a datagram with any of these \
+                                        values, it MUST close the session with \
+                                        INVALID_STREAM_HEADER:";
 const EXTENSION_HEADERS_ON_STATUS: &str = "If an endpoint receives extension headers on Objects \
                                            with status that is not Normal, it MUST close the \
                                            session with a PROTOCOL_VIOLATION.";
@@ -798,6 +917,12 @@ impl AboveCodecRule {
                     sentence: PROPERTIES_ON_STATUS,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "11.1.2",
+                    sentence: PROPERTIES_ON_STATUS_23,
+                    code_name: Some("INVALID_OBJECT_STATUS"),
+                },
             ],
             Self::BidiStreamOpener => &[
                 RuleCitation {
@@ -817,6 +942,12 @@ impl AboveCodecRule {
                     section: "6.3",
                     sentence: BIDI_OPENER_17,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "6.3",
+                    sentence: BIDI_OPENER_23,
+                    code_name: Some("UNEXPECTED_MESSAGE"),
                 },
             ],
             Self::ResponseBeforeItsFirstResponse => &[
@@ -843,6 +974,12 @@ impl AboveCodecRule {
                     section: "4.2",
                     sentence: FIRST_RESPONSE_22,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "4.2",
+                    sentence: FIRST_RESPONSE_23,
+                    code_name: Some("UNEXPECTED_MESSAGE"),
                 },
             ],
             Self::GoAwayAtServer => &[
@@ -900,6 +1037,12 @@ impl AboveCodecRule {
                     sentence: GOAWAY_URI_CLOSE,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.2",
+                    sentence: GOAWAY_URI_CLOSE_23,
+                    code_name: Some("ROLE_VIOLATION"),
+                },
             ],
             Self::RepeatedGoAway => &[
                 RuleCitation {
@@ -956,7 +1099,31 @@ impl AboveCodecRule {
                     sentence: REPEATED_GOAWAY_21,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.2",
+                    sentence: REPEATED_GOAWAY_23,
+                    code_name: Some("UNEXPECTED_MESSAGE"),
+                },
             ],
+            Self::GoAwayFromRequestSender => &[RuleCitation {
+                drafts: (23, 23),
+                section: "9.2",
+                sentence: GOAWAY_FROM_REQUEST_SENDER,
+                code_name: Some("PROTOCOL_VIOLATION"),
+            }],
+            Self::TruncatedObject => &[RuleCitation {
+                drafts: (23, 23),
+                section: "11.3",
+                sentence: TRUNCATED_OBJECT_23,
+                code_name: Some("TRUNCATED_OBJECT"),
+            }],
+            Self::StateNotifyFromTheSubscriber => &[RuleCitation {
+                drafts: (23, 23),
+                section: "9.10",
+                sentence: STATE_NOTIFY_FROM_SUBSCRIBER,
+                code_name: Some("ROLE_VIOLATION"),
+            }],
             Self::RedirectUriAtServer => &[
                 RuleCitation {
                     drafts: (18, 20),
@@ -969,6 +1136,12 @@ impl AboveCodecRule {
                     section: "9.4.1",
                     sentence: REDIRECT_URI_AT_SERVER,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.4.2.1",
+                    sentence: REDIRECT_URI_AT_SERVER_23,
+                    code_name: Some("ROLE_VIOLATION"),
                 },
             ],
             Self::RedirectTrackNameOnNamespaceRequest => &[
@@ -983,6 +1156,12 @@ impl AboveCodecRule {
                     section: "9.4.1",
                     sentence: REDIRECT_TRACK_NAME,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.4.2.1",
+                    sentence: REDIRECT_TRACK_NAME_23,
+                    code_name: Some("INVALID_FIELD"),
                 },
             ],
             Self::RequestIdParity => &[
@@ -1020,6 +1199,12 @@ impl AboveCodecRule {
                     drafts: (21, 22),
                     section: "6.4.2.1",
                     sentence: REQUEST_ID_17,
+                    code_name: Some("INVALID_REQUEST_ID"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "6.4.2.1",
+                    sentence: REQUEST_ID_PARITY_23,
                     code_name: Some("INVALID_REQUEST_ID"),
                 },
             ],
@@ -1083,6 +1268,12 @@ impl AboveCodecRule {
                     drafts: (21, 22),
                     section: "6.4.2.1",
                     sentence: REQUEST_ID_17,
+                    code_name: Some("INVALID_REQUEST_ID"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "6.4.2.1",
+                    sentence: REQUEST_ID_DUPLICATE_23,
                     code_name: Some("INVALID_REQUEST_ID"),
                 },
             ],
@@ -1236,7 +1427,7 @@ impl AboveCodecRule {
                     code_name: Some("DUPLICATE_TRACK_ALIAS"),
                 },
                 RuleCitation {
-                    drafts: (22, 22),
+                    drafts: (22, 23),
                     section: "3.1.3",
                     sentence: ALIAS_18,
                     code_name: Some("DUPLICATE_TRACK_ALIAS"),
@@ -1331,6 +1522,12 @@ impl AboveCodecRule {
                     sentence: UPDATE_WRONG_19,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.5",
+                    sentence: UPDATE_WRONG_23,
+                    code_name: Some("UNEXPECTED_MESSAGE"),
+                },
             ],
             Self::TooManyRequestUpdates => &[
                 RuleCitation {
@@ -1340,7 +1537,7 @@ impl AboveCodecRule {
                     code_name: Some("TOO_MANY_REQUEST_UPDATES"),
                 },
                 RuleCitation {
-                    drafts: (21, 22),
+                    drafts: (21, 23),
                     section: "9.1.7",
                     sentence: TOO_MANY_UPDATES,
                     code_name: Some("TOO_MANY_REQUEST_UPDATES"),
@@ -1359,6 +1556,12 @@ impl AboveCodecRule {
                     sentence: TRACK_PROPERTIES,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.3",
+                    sentence: TRACK_PROPERTIES_23,
+                    code_name: Some("INVALID_FIELD"),
+                },
             ],
             Self::StateNotifyOnTheWrongRequest => &[
                 RuleCitation {
@@ -1372,6 +1575,12 @@ impl AboveCodecRule {
                     section: "9.10",
                     sentence: STATE_NOTIFY,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.10",
+                    sentence: STATE_NOTIFY_23,
+                    code_name: Some("UNEXPECTED_MESSAGE"),
                 },
             ],
             Self::SubscribeAfterAnnounceCancel => &[RuleCitation {
@@ -1392,7 +1601,8 @@ impl AboveCodecRule {
             | Self::UnrequestedFillStream
             | Self::TrackStatusIsNotASubscription
             | Self::MessageNamesAnUnknownRequest
-            | Self::NamespacePrefixOverlap => &[],
+            | Self::NamespacePrefixOverlap
+            | Self::ObjectExistenceContradicted => &[],
         }
     }
 
@@ -1466,7 +1676,7 @@ impl AboveCodecRule {
 /// [`CodecRule::InvalidStreamTypeValue`] and
 /// [`CodecRule::InvalidDatagramTypeValue`] are one condition as a reader thinks
 /// of it — a Type inside its form holding a combination the draft rules out —
-/// and two rules here, because drafts 16 through 22 state them as **two**
+/// and two rules here, because drafts 16 through 23 state them as **two**
 /// sentences in two sections, one about a datagram's Type and one about a
 /// subgroup stream header's.
 ///
@@ -1680,13 +1890,20 @@ pub enum CodecRule {
     InvalidFetchType,
     /// A subscription filter parameter whose value is not a filter.
     ///
-    /// Drafts 15 through 22, and the one rule here whose **code changes** within
-    /// its own range rather than only being spelled differently. Drafts 15 and
-    /// 16 state it of this parameter directly and answer PROTOCOL_VIOLATION;
-    /// drafts 17 through 22 drop that sentence and leave the general key-value
-    /// rule, which answers KEY_VALUE_FORMATTING_ERROR. A filter three bytes long
-    /// inside a four-byte parameter ends a draft-16 session with one code and a
-    /// draft-17 session with the other.
+    /// Drafts 15 through 23. Its **code changes** within that range rather than
+    /// only being spelled differently. Drafts 15 and 16 state it of this
+    /// parameter directly and answer PROTOCOL_VIOLATION; drafts 17 through 22
+    /// drop that sentence and leave the general key-value rule, which answers
+    /// KEY_VALUE_FORMATTING_ERROR. A filter three bytes long inside a four-byte
+    /// parameter ends a draft-16 session with one code and a draft-17 session
+    /// with the other.
+    ///
+    /// Draft-23 raises it for a LOCATION_FILTER (Section 9.19.9) or
+    /// FILL_PARAMETERS (Section 9.19.15) value whose fields run past the end
+    /// of the message. Neither carries a length of its own, so the body is
+    /// shorter than the message's fields, and draft-23 Section 9 answers that:
+    /// "If the length does not match the length of the Message Body, the
+    /// receiver MUST close the session with MALFORMED_MESSAGE."
     ///
     /// The later run cites the same sentence [`Self::KeyValueFormatting`] does,
     /// which is what a shared constant is for. The reading that a malformed
@@ -1702,7 +1919,7 @@ pub enum CodecRule {
     /// An AbsoluteRange filter whose End Group Delta carries the last Group ID
     /// past the end of the varint space.
     ///
-    /// Drafts 18 through 22. Draft-17 introduced the delta and states the
+    /// Drafts 18 through 23. Draft-17 introduced the delta and states the
     /// arithmetic with no consequence for overflowing it — that draft contains
     /// exactly one mention of the bound in the whole document and it is the
     /// Delta Type rule, not this one — so there an overflowing filter is a
@@ -1714,7 +1931,8 @@ pub enum CodecRule {
     /// splice. Draft-20 rewrote the pair as one self-contained sentence naming
     /// its own operands, which is the second run; drafts 21 and 22 keep that
     /// sentence and state it in the LOCATION_FILTER section (9.20.10 and 9.20.9
-    /// respectively).
+    /// respectively). Draft-23 Section 9.19.9 keeps the condition and answers
+    /// it with DELTA_ENCODING_OVERFLOW instead of PROTOCOL_VIOLATION.
     FilterEndGroupOverflow,
 
     // ── The data plane ─────────────────────────────────────────
@@ -1723,7 +1941,8 @@ pub enum CodecRule {
     ///
     /// Drafts 18 through 20 in Section 11.4.2 and drafts 21 and 22 in Section
     /// 11.3.1, two runs: the wording does not change and the section number
-    /// does.
+    /// does. Draft-23 Section 11.3.1 is a third run, answering with
+    /// DELTA_ENCODING_OVERFLOW instead of PROTOCOL_VIOLATION.
     ///
     /// Drafts 14 through 17 carry the identical arithmetic in Section 10.4.2
     /// and state no consequence for overflowing it — all four of them, not
@@ -1738,11 +1957,13 @@ pub enum CodecRule {
     /// A subgroup stream header's Type holding a combination its draft names as
     /// invalid.
     ///
-    /// Drafts 16 through 22, four runs: the section moves twice and the wording
-    /// changes once, and the two moves do not coincide. Sections 10.4.2 on
-    /// drafts 16 and 17, 11.4.2 on 18, 19 and 20, and 11.3.1 on drafts 21 and
-    /// 22; drafts 16 through 19 enumerate the code points after the sentence
-    /// and drafts 20 through 22 state the bit pattern alone.
+    /// Drafts 16 through 23, five runs: the section moves twice and the wording
+    /// changes twice, and the moves and the changes do not coincide. Sections
+    /// 10.4.2 on drafts 16 and 17, 11.4.2 on 18, 19 and 20, and 11.3.1 on
+    /// drafts 21 through 23; drafts 16 through 19 enumerate the code points
+    /// after the sentence and drafts 20 through 23 state the bit pattern alone.
+    /// Draft-23's sentence answers with INVALID_STREAM_HEADER instead of
+    /// PROTOCOL_VIOLATION.
     ///
     /// The sentence is quoted as far as the colon it ends on, because what
     /// follows it is a bulleted list of values rather than more sentence. That
@@ -1757,10 +1978,11 @@ pub enum CodecRule {
     InvalidStreamTypeValue,
     /// A datagram's Type holding a combination its draft names as invalid.
     ///
-    /// Drafts 16 through 22, four runs, cut where
+    /// Drafts 16 through 23, five runs, cut where
     /// [`CodecRule::InvalidStreamTypeValue`]'s are cut and at different
     /// numbers: Sections 10.3.1 on drafts 16 and 17, 11.3.1 on 18, 19 and 20,
-    /// and 11.2.1 on drafts 21 and 22.
+    /// and 11.2.1 on drafts 21 through 23. Draft-23's sentence answers with
+    /// INVALID_STREAM_HEADER.
     ///
     /// Draft-21 is why the two rules cannot share a run. It splits the section
     /// that held both, so the datagram sentence lands at 11.2.1 and the stream
@@ -2040,6 +2262,12 @@ impl CodecRule {
                     sentence: TRACK_NAME_MAX_16,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "8.7",
+                    sentence: TRACK_NAME_MAX_23,
+                    code_name: Some("FIELD_LENGTH_EXCEEDED"),
+                },
             ],
             Self::ReasonPhraseTooLong => &[
                 RuleCitation {
@@ -2071,6 +2299,12 @@ impl CodecRule {
                     section: "8.5",
                     sentence: REASON_PHRASE_MAX_15,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "8.5",
+                    sentence: REASON_PHRASE_MAX_23,
+                    code_name: Some("FIELD_LENGTH_EXCEEDED"),
                 },
             ],
             Self::GoAwayUriTooLong => &[
@@ -2104,6 +2338,12 @@ impl CodecRule {
                     sentence: GOAWAY_URI_MAX_17,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.2",
+                    sentence: GOAWAY_URI_MAX_23,
+                    code_name: Some("FIELD_LENGTH_EXCEEDED"),
+                },
             ],
             Self::KvpValueTooLong => &[
                 RuleCitation {
@@ -2135,6 +2375,12 @@ impl CodecRule {
                     section: "8.3",
                     sentence: KVP_VALUE_MAX_16,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "8.3",
+                    sentence: KVP_VALUE_MAX_23,
+                    code_name: Some("FIELD_LENGTH_EXCEEDED"),
                 },
             ],
             Self::KeyValueFormatting => &[
@@ -2168,6 +2414,12 @@ impl CodecRule {
                     sentence: KVP_FORMATTING_16,
                     code_name: Some("KEY_VALUE_FORMATTING_ERROR"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "8.3",
+                    sentence: KVP_FORMATTING_23,
+                    code_name: Some("MALFORMED_KEY_VALUE"),
+                },
             ],
             Self::UnknownMessageParameter => &[
                 RuleCitation {
@@ -2194,6 +2446,12 @@ impl CodecRule {
                     sentence: UNKNOWN_PARAMETER_17,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.19",
+                    sentence: UNKNOWN_PARAMETER_23,
+                    code_name: Some("INVALID_PARAMETER"),
+                },
             ],
             Self::ParameterOutOfScope => &[
                 RuleCitation {
@@ -2219,6 +2477,12 @@ impl CodecRule {
                     section: "9.20.1",
                     sentence: PARAMETER_SCOPE_22,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.19.1",
+                    sentence: PARAMETER_SCOPE_23,
+                    code_name: Some("INVALID_PARAMETER"),
                 },
             ],
             Self::ParameterLengthMismatch => &[
@@ -2259,6 +2523,12 @@ impl CodecRule {
                     section: "9.20.9",
                     sentence: FILTER_TYPE_22,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.19.9",
+                    sentence: FILTER_TYPE_23,
+                    code_name: Some("INVALID_PARAMETER"),
                 },
             ],
             Self::InvalidFetchType => &[
@@ -2312,6 +2582,12 @@ impl CodecRule {
                     sentence: KVP_FORMATTING_16,
                     code_name: Some("KEY_VALUE_FORMATTING_ERROR"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9",
+                    sentence: MESSAGE_LENGTH_23,
+                    code_name: Some("MALFORMED_MESSAGE"),
+                },
             ],
             Self::FilterEndGroupOverflow => &[
                 RuleCitation {
@@ -2338,6 +2614,12 @@ impl CodecRule {
                     sentence: END_GROUP_WRAP_20,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.19.9",
+                    sentence: END_GROUP_WRAP_23,
+                    code_name: Some("DELTA_ENCODING_OVERFLOW"),
+                },
             ],
             Self::ObjectIdOverflow => &[
                 RuleCitation {
@@ -2351,6 +2633,12 @@ impl CodecRule {
                     section: "11.3.1",
                     sentence: OBJECT_ID_WRAP,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "11.3.1",
+                    sentence: OBJECT_ID_WRAP_23,
+                    code_name: Some("DELTA_ENCODING_OVERFLOW"),
                 },
             ],
             Self::InvalidStreamTypeValue => &[
@@ -2378,6 +2666,12 @@ impl CodecRule {
                     sentence: INVALID_STREAM_TYPE_20,
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "11.3.1",
+                    sentence: INVALID_STREAM_TYPE_23,
+                    code_name: Some("INVALID_STREAM_HEADER"),
+                },
             ],
             Self::InvalidDatagramTypeValue => &[
                 RuleCitation {
@@ -2403,6 +2697,12 @@ impl CodecRule {
                     section: "11.2.1",
                     sentence: INVALID_DATAGRAM_TYPE_20,
                     code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "11.2.1",
+                    sentence: INVALID_DATAGRAM_TYPE_23,
+                    code_name: Some("INVALID_STREAM_HEADER"),
                 },
             ],
             Self::EndOfTrackObjectId => &[
@@ -2479,6 +2779,7 @@ mod tests {
         AboveCodecRule::ResponseBeforeItsFirstResponse,
         AboveCodecRule::GoAwayAtServer,
         AboveCodecRule::RepeatedGoAway,
+        AboveCodecRule::GoAwayFromRequestSender,
         AboveCodecRule::RedirectUriAtServer,
         AboveCodecRule::RedirectTrackNameOnNamespaceRequest,
         AboveCodecRule::RequestIdParity,
@@ -2494,11 +2795,14 @@ mod tests {
         AboveCodecRule::TooManyRequestUpdates,
         AboveCodecRule::TrackPropertiesOnNonTrackStatus,
         AboveCodecRule::StateNotifyOnTheWrongRequest,
+        AboveCodecRule::StateNotifyFromTheSubscriber,
         AboveCodecRule::UnrequestedFillStream,
         AboveCodecRule::SubscribeAfterAnnounceCancel,
         AboveCodecRule::TrackStatusIsNotASubscription,
         AboveCodecRule::MessageNamesAnUnknownRequest,
         AboveCodecRule::NamespacePrefixOverlap,
+        AboveCodecRule::ObjectExistenceContradicted,
+        AboveCodecRule::TruncatedObject,
     ];
 
     /// Every rule the *decoder* raises that a draft answers with a close.
@@ -2552,7 +2856,7 @@ mod tests {
     /// not need the enum to be iterable.
     #[test]
     fn every_variant_is_swept() {
-        assert_eq!(ALL.len(), 28, "a rule was added or removed without updating ALL");
+        assert_eq!(ALL.len(), 32, "a rule was added or removed without updating ALL");
     }
 
     /// And the same for the decoder's half.
@@ -2646,7 +2950,7 @@ mod tests {
         }
         assert_eq!(
             seen.len(),
-            94,
+            122,
             "the sentence count moved; recount the cited sentences against the rendered drafts \
              and update this number"
         );

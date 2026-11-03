@@ -65,7 +65,8 @@
     feature = "draft19",
     feature = "draft20",
     feature = "draft21",
-    feature = "draft22"
+    feature = "draft22",
+    feature = "draft23"
 ))]
 
 use moqtap_codec::varint::VarInt;
@@ -89,6 +90,8 @@ const PAST_THE_MAXIMUM: usize = 65536;
 #[allow(dead_code)]
 const AT_THE_MAXIMUM: usize = 65535;
 
+// Draft-23 has its own module below, so a draft-23-only build uses none of it.
+#[allow(unused_macros)]
 macro_rules! kvp_value_maximum_gates {
     ($draft:ident, $carrier:ident) => {
         use moqtap_codec::error::CodecError;
@@ -478,4 +481,54 @@ mod draft22 {
     }
 
     kvp_value_maximum_gates!(draft22, subscribe, setup);
+}
+#[cfg(feature = "draft23")]
+mod draft23 {
+    use moqtap_codec::draft23::message::*;
+    use moqtap_codec::error::CodecError;
+    use moqtap_codec::kvp::{KeyValuePair, KvpError, KvpValue};
+    use moqtap_codec::types::*;
+
+    fn opaque(len: usize) -> KeyValuePair {
+        KeyValuePair {
+            key: super::varint(super::AN_UNASSIGNED_ODD_TYPE),
+            value: KvpValue::Bytes(vec![0xAB; len]),
+        }
+    }
+
+    fn subscribe(parameters: Vec<KeyValuePair>) -> ControlMessage {
+        ControlMessage::Subscribe(Subscribe {
+            request_id: super::varint(1),
+            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+            track_name: b"t".to_vec(),
+            parameters,
+        })
+    }
+
+    /// Section 8.3: "The maximum length of a value is 2^16-1 bytes." Setup
+    /// Options are Key-Value-Pairs, so their writer holds the value to it.
+    #[test]
+    fn a_setup_option_past_the_maximum_is_refused_by_the_rule_it_broke() {
+        let message =
+            ControlMessage::Setup(Setup { options: vec![opaque(super::PAST_THE_MAXIMUM)] });
+        let mut buf = Vec::new();
+        let got = message.encode_with_limit(&mut buf, u64::MAX);
+        assert_eq!(got, Err(CodecError::Kvp(KvpError::ValueTooLong(super::PAST_THE_MAXIMUM))));
+        assert!(buf.is_empty());
+    }
+
+    /// Message Parameters are not Key-Value-Pairs, and Section 9.19 bounds
+    /// them by the message alone: "the total length of a control message is
+    /// limited by MAX_CONTROL_MESSAGE_SIZE (Section 9.1.8)."
+    #[test]
+    fn a_message_parameter_is_bounded_by_the_message_alone() {
+        let message = subscribe(vec![opaque(super::PAST_THE_MAXIMUM)]);
+        let mut buf = Vec::new();
+        assert!(matches!(
+            message.encode(&mut buf),
+            Err(CodecError::ControlMessageExceedsLimit { limit: 65535, .. })
+        ));
+        assert!(buf.is_empty());
+        message.encode_with_limit(&mut buf, 1 << 20).expect("a larger limit admits it");
+    }
 }

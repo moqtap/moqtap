@@ -16,9 +16,9 @@
 //! value's own and the message's declared Length, and both are recomputed here
 //! rather than copied from anywhere.
 //!
-//! Every draft from 11 to 20 frames a control message the same way: a type as a
-//! varint, a 16-bit big-endian Length, then the body. That is what makes one
-//! function enough for all ten.
+//! Drafts 11 to 22 frame a control message as a type varint, a 16-bit
+//! big-endian Length, then the body. Draft-23 makes the Length a `vi64`
+//! (Section 9, Figure 6), which the `_vi64_length` functions read.
 //!
 //! The value has to be the last thing in the frame, which for a parameter means
 //! the last parameter of a message whose parameters come last. That is asserted
@@ -93,5 +93,37 @@ fn replace_tail(frame: &[u8], good: &[u8], bad: &[u8]) -> Vec<u8> {
     out.extend_from_slice(bad);
     let length = u16::try_from(out.len() - body).expect("the rewritten body fits the Length field");
     out[body - 2..body].copy_from_slice(&length.to_be_bytes());
+    out
+}
+
+/// [`with_length_prefixed_value`] for a frame whose Length is a MoQT `vi64`.
+pub fn with_length_prefixed_value_vi64_length(frame: &[u8], good: &[u8], bad: &[u8]) -> Vec<u8> {
+    replace_tail_vi64_length(frame, &length_prefixed(good), &length_prefixed(bad))
+}
+
+/// [`with_varint_value`] for a frame whose Length is a MoQT `vi64`.
+pub fn with_varint_value_vi64_length(frame: &[u8], good: u64, bad: u64) -> Vec<u8> {
+    replace_tail_vi64_length(frame, &varint_bytes(good), &varint_bytes(bad))
+}
+
+fn replace_tail_vi64_length(frame: &[u8], good: &[u8], bad: &[u8]) -> Vec<u8> {
+    use moqtap_codec::varint::Moqt18;
+    let mut cursor = frame;
+    VarInt::decode_moqt::<Moqt18>(&mut cursor).expect("a message type");
+    let type_len = frame.len() - cursor.len();
+    let declared = VarInt::decode_moqt::<Moqt18>(&mut cursor).expect("a Length").into_inner();
+    let body = frame.len() - cursor.len();
+    assert_eq!(
+        declared as usize,
+        frame.len() - body,
+        "the frame handed here is not one this codec wrote",
+    );
+    assert!(frame.ends_with(good), "the value to rewrite must be the last thing in the frame");
+
+    let rest = &frame[body..frame.len() - good.len()];
+    let mut out = frame[..type_len].to_vec();
+    VarInt::from_usize(rest.len() + bad.len()).encode_moqt::<Moqt18>(&mut out);
+    out.extend_from_slice(rest);
+    out.extend_from_slice(bad);
     out
 }
