@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-04
+
 ### Changed
 
 - **Breaking.** `MalformedTrackCondition` gains `PriorGroupIdGap`, `PriorGap` and `MalformedPropertyBlock`; an exhaustive match over it no longer compiles without them.

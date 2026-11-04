@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-04
+
 ### Added
 
 - Whole-datagram readers that apply the Prior Gap rules: `Datagram::decode_object` on drafts 11-13, `DatagramObject::decode_object` on draft-14 and `DatagramHeader::decode_object` on drafts 15-16, with `PriorGaps` and `SubgroupGaps` in the `data_stream` module of drafts 11-13, and `FetchGaps` in the `data_stream` module of drafts 11-23, which refuses the Prior gap conditions one fetch stream shows.

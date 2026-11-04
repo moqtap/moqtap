@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-04
+
+### Changed
+
+- **Breaking.** Requires `moqtap-codec` and `moqtap-client` 0.11.0, whose types appear in this crate's API.
+
+### Fixed
+
+- Two error messages no longer carry a run of spaces.
+
 ## [0.12.0] - 2026-11-03
 
 ### Changed
