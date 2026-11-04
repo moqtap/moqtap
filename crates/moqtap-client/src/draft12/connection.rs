@@ -97,19 +97,30 @@ pub enum ConnectionError {
     /// A datagram whose Type announces extension headers arrived with an
     /// Extension Headers Length of 0.
     ///
-    /// draft-12 Section 9.3.1: "If an endpoint receives a datagram with Type
-    /// 0x01 and Extension Headers Length is 0, it MUST close the session with
-    /// Protocol Violation."
+    /// Types 0x01, 0x03 and 0x05 close the session. The two close rules still
+    /// carry draft-11's code points, and are read through the datagram table in
+    /// draft-12 Section 9, which assigns 0x00-0x03 to OBJECT_DATAGRAM and
+    /// 0x04-0x05 to OBJECT_DATAGRAM_STATUS:
     ///
-    /// Only Type 0x01 is answered with a close. Which Type the matching
-    /// sentence for OBJECT_DATAGRAM_STATUS names is ambiguous, and this does not
-    /// settle it. draft-12 Section 9.3.2: "The Type field takes the form
-    /// 0b0000001X (or the set of values from 0x02 to 0x03)." and "If an
-    /// endpoint receives a datagram with Type 0x03 and Extension Headers Length
-    /// is 0, it MUST close the session with Protocol Violation." The datagram
-    /// table in draft-12 Section 9 instead assigns 0x00-0x03 to OBJECT_DATAGRAM
-    /// and 0x04-0x05 to OBJECT_DATAGRAM_STATUS, under which Type 0x03 is an
-    /// OBJECT_DATAGRAM.
+    ///   - draft-12 Section 9.3.2: "The Type field takes the form 0b0000001X (or
+    ///     the set of values from 0x02 to 0x03)" and "If an endpoint receives a
+    ///     datagram with Type 0x03 and Extension Headers Length is 0, it MUST
+    ///     close the session with Protocol Violation." draft-11 Section 9 assigns
+    ///     0x02-0x03 to OBJECT_DATAGRAM_STATUS. draft-14 Appendix A.1 lists
+    ///     "Corrected missed code point updates to Object Datagram Status
+    ///     (#1082)", and that change rewrites the sentence to "Type 0x05". It
+    ///     names 0x05.
+    ///   - draft-12 Section 9.3.1: "If an endpoint receives a datagram with Type
+    ///     0x01 and Extension Headers Length is 0, it MUST close the session with
+    ///     Protocol Violation." In draft-11 Section 9.2, 0x01 is the only
+    ///     OBJECT_DATAGRAM Type with extensions. draft-12 Section 9.3.1 Table 12
+    ///     adds 0x03, End Of Group with Extensions Present "Yes", and the
+    ///     sentence was not updated. draft-14 Section 10.3.1 states the rule for
+    ///     every such Type: "If an endpoint receives a datagram with Extensions
+    ///     Present as "Yes" and a Extension Headers Length of 0, it MUST close
+    ///     the session with PROTOCOL_VIOLATION." It names 0x01 and 0x03.
+    ///
+    /// The codec's `DatagramType` carries the same ruling.
     ///
     /// The codec's header decoder refuses such a datagram as a bare
     /// `InvalidField`. [`Connection::recv_datagram`] names it here, and
@@ -127,12 +138,15 @@ pub enum ConnectionError {
 /// decoder refused as `InvalidField`, when its empty extension block was the
 /// fault.
 ///
-/// Type 0x01 is the one draft-12 Section 9.3.1 names, and it carries an Object
-/// ID and a Publisher Priority.
+/// Every Type the codec's `DatagramType` says carries extensions: 0x01, 0x03
+/// and 0x05. Each carries an Object ID and a Publisher Priority.
 fn empty_datagram_extensions(data: &[u8]) -> Option<ConnectionError> {
     use crate::datagram_prefix::{empty_extension_block, Prefix};
+    use moqtap_codec::draft12::data_stream::DatagramType;
     empty_extension_block(data, |datagram_type, _| {
-        (datagram_type == 0x01).then_some(Prefix { object_id: true, priority: true })
+        DatagramType::from_id(datagram_type)?
+            .has_extensions()
+            .then_some(Prefix { object_id: true, priority: true })
     })
     .map(|object_id| ConnectionError::EmptyDatagramExtensions { object_id })
 }
@@ -2294,6 +2308,25 @@ mod tests {
             &ErrorCause::Facade,
             "nothing reached the wire, so there is no rule and no close code to read"
         );
+    }
+
+    /// Types 0x01, 0x03 and 0x05 carry extensions, so a zero byte where their
+    /// Extension Headers Length sits is the close. Types 0x00, 0x02 and 0x04
+    /// have no such field. The ruling is on `EmptyDatagramExtensions`.
+    #[test]
+    fn an_empty_extension_block_is_named_on_exactly_the_types_with_extensions() {
+        for datagram_type in [0x00u8, 0x01, 0x02, 0x03, 0x04, 0x05] {
+            let datagram = [datagram_type, 0x07, 0x01, 0x09, 0x80, 0x00, 0x00];
+            let got = empty_datagram_extensions(&datagram);
+            if matches!(datagram_type, 0x01 | 0x03 | 0x05) {
+                assert!(
+                    matches!(got, Some(ConnectionError::EmptyDatagramExtensions { object_id: 9 })),
+                    "Type {datagram_type:#04x}: expected the close, got {got:?}"
+                );
+            } else {
+                assert!(got.is_none(), "Type {datagram_type:#04x}: carries no extensions");
+            }
+        }
     }
 
     #[test]

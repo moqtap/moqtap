@@ -3,10 +3,13 @@
 //! Drafts 11 through 16 all state it, in three different wordings for the same
 //! rule. Drafts 11, 12 and 13 name the types: "If an endpoint receives a
 //! datagram with Type 0x01 and Extension Headers Length is 0, it MUST close the
-//! session with Protocol Violation", and again for Type 0x03. Drafts 14 and 15
-//! say it of the field: "If an endpoint receives a datagram with Extensions
-//! Present as 'Yes' and a Extension Headers Length of 0". Draft-16 says it of
-//! the bit: "with the EXTENSIONS bit set and an Extension Headers Length of 0".
+//! session with Protocol Violation", and again for Type 0x03. On drafts 12 and
+//! 13 those are draft-11's code points, and the Types they name are 0x01, 0x03
+//! and 0x05; `DatagramType` in each draft's `data_stream` gives the ruling.
+//! Drafts 14 and 15 say it of the field: "If an endpoint receives a datagram
+//! with Extensions Present as 'Yes' and a Extension Headers Length of 0".
+//! Draft-16 says it of the bit: "with the EXTENSIONS bit set and an Extension
+//! Headers Length of 0".
 //!
 //! Drafts 07 through 10 state no such rule, and drafts 17, 18 and 19 drop the
 //! sentence, so neither end of the series is gated here. The reason at the
@@ -193,3 +196,51 @@ fn draft14_datagram_extensions_are_not_empty() {
 
 typed_datagram_gate!(draft15_datagram_extensions_are_not_empty, "draft15", draft15);
 typed_datagram_gate!(draft16_datagram_extensions_are_not_empty, "draft16", draft16);
+
+/// Drafts 12 and 13, through the type byte: Types 0x01, 0x03 and 0x05 carry
+/// extensions and are refused with an Extension Headers Length of 0. Types
+/// 0x00, 0x02 and 0x04 carry no Extension Headers Length, so the same zero
+/// byte is the start of the payload or the Object Status, and they decode.
+/// The ruling is on `DatagramType` in each draft's `data_stream`.
+macro_rules! typed_early_datagram_gate {
+    ($fname:ident, $feat:literal, $draft:ident) => {
+        #[cfg(feature = $feat)]
+        #[test]
+        fn $fname() {
+            use moqtap_codec::$draft::data_stream::Datagram;
+
+            for datagram_type in [0x01u8, 0x03, 0x05] {
+                let mut wire = vec![datagram_type];
+                wire.extend_from_slice(&datagram_body(0));
+                wire.push(0x00);
+                let got = Datagram::decode(&mut &wire[..]);
+                assert!(
+                    matches!(got, Err(CodecError::InvalidField)),
+                    "Type {datagram_type:#04x} with an Extension Headers Length of 0, got {got:?}"
+                );
+
+                let mut wire = vec![datagram_type];
+                wire.extend_from_slice(&datagram_body(2));
+                wire.push(0x00);
+                Datagram::decode(&mut &wire[..]).unwrap_or_else(|err| {
+                    panic!("Type {datagram_type:#04x} with a real block is lawful: {err:?}")
+                });
+            }
+
+            for datagram_type in [0x00u8, 0x02, 0x04] {
+                let mut wire = vec![datagram_type];
+                wire.extend_from_slice(&datagram_body(0));
+                let got = Datagram::decode(&mut &wire[..]).unwrap_or_else(|err| {
+                    panic!("Type {datagram_type:#04x} carries no extensions: {err:?}")
+                });
+                assert!(
+                    !got.datagram_type().has_extensions(),
+                    "Type {datagram_type:#04x} decoded with extensions"
+                );
+            }
+        }
+    };
+}
+
+typed_early_datagram_gate!(draft12_each_datagram_type_reads_the_rule, "draft12", draft12);
+typed_early_datagram_gate!(draft13_each_datagram_type_reads_the_rule, "draft13", draft13);

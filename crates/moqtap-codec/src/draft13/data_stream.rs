@@ -33,7 +33,7 @@ use bytes::{Buf, BufMut};
 ///
 /// Table 13 is the surviving half: a code-point update that missed a spot.
 /// The datagram-status disagreement recorded on [`DatagramType`] has the same
-/// shape and is left unsettled there.
+/// shape and is settled the same way there.
 ///
 ///   - The range 0x08-0x0D holds six values, and this draft defines twelve
 ///     types. Draft-11 Section 9.4.2 Table 11 lists exactly six, at 0x08
@@ -187,21 +187,32 @@ impl StreamType {
 /// FETCH_HEADER among stream types and OBJECT_DATAGRAM_STATUS with extensions
 /// among datagram types.
 ///
-/// Which Type values the OBJECT_DATAGRAM_STATUS rules name is ambiguous in
-/// draft-13, and this does not settle it. The datagram table in
-/// draft-13 Section 9 assigns 0x00-0x03 to OBJECT_DATAGRAM and 0x04-0x05 to
-/// OBJECT_DATAGRAM_STATUS, the four OBJECT_DATAGRAM values being the End Of
-/// Group bit, which draft-12 added, crossed with the Extensions bit. Under the
-/// OBJECT_DATAGRAM_STATUS figure, draft-13 Section 9.3.2: "The Type field
-/// takes the form 0b0000001X (or the set of values from 0x02 to 0x03)." and
-/// "If an endpoint receives a datagram with Type 0x03 and Extension Headers
-/// Length is 0, it MUST close the session with Protocol Violation."
-/// Draft-12 says the same. draft-14 lists "Corrected missed code point
-/// updates to Object Datagram Status (#1082)" in its change log, which is
-/// context from a later draft, not a ruling on this one.
+/// The values follow the table in draft-13 Section 9: 0x00-0x03 are
+/// OBJECT_DATAGRAM and 0x04-0x05 are OBJECT_DATAGRAM_STATUS. The two close rules
+/// for an empty extension block still carry draft-11's code points, and are
+/// read through the table:
 ///
-/// The values below follow the table. The client's `EmptyDatagramExtensions`
-/// records the same question for the close over a zero-length block.
+///   - draft-13 Section 9.3.2: "The Type field takes the form 0b0000001X (or
+///     the set of values from 0x02 to 0x03)" and "If an endpoint receives a
+///     datagram with Type 0x03 and Extension Headers Length is 0, it MUST close
+///     the session with Protocol Violation." draft-11 Section 9 assigns
+///     0x02-0x03 to OBJECT_DATAGRAM_STATUS. draft-14 Appendix A.1 lists
+///     "Corrected missed code point updates to Object Datagram Status (#1082)",
+///     and that change rewrites the sentence to "Type 0x05". It names 0x05.
+///   - draft-13 Section 9.3.1: "If an endpoint receives a datagram with Type
+///     0x01 and Extension Headers Length is 0, it MUST close the session with
+///     Protocol Violation." In draft-11 Section 9.2, 0x01 is the only
+///     OBJECT_DATAGRAM Type with extensions. draft-13 Section 9.3.1 Table 12
+///     adds 0x03, End Of Group with Extensions Present "Yes", and the sentence
+///     was not updated. draft-14 Section 10.3.1 states the rule for every such
+///     Type: "If an endpoint receives a datagram with Extensions Present as
+///     "Yes" and a Extension Headers Length of 0, it MUST close the session
+///     with PROTOCOL_VIOLATION." It names 0x01 and 0x03.
+///
+/// So 0x01, 0x03 and 0x05 carry extensions, and each is refused with an
+/// Extension Headers Length of 0. 0x00, 0x02 and 0x04 carry no Extension
+/// Headers Length. The client's `EmptyDatagramExtensions` closes the session
+/// over the same three Types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u64)]
 pub enum DatagramType {
