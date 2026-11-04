@@ -699,6 +699,6 @@ fn the_test_reader_agrees_with_the_goldens() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 33);
+    assert_eq!(checked, 34);
     let _ = unique(&[1]);
 }

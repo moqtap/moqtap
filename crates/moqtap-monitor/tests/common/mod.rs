@@ -601,7 +601,9 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
                 }
                 out.end = Some(r["reason"].as_str().unwrap_or("").to_string());
             }
-            "ident" | "stream-end" => fail!("a viewer record: {t}"),
+            "ident" | "stream-end" | "bw" | "conn-open" | "conn-close" => {
+                fail!("a viewer record: {t}")
+            }
             _ => {}
         }
     }

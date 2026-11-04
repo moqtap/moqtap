@@ -521,7 +521,7 @@
     {
       "name": "zero-length-normal",
       "file": "zero-length-normal.bin",
-      "bodyBytes": 988,
+      "bodyBytes": 990,
       "expect": {
         "ok": true
       },
@@ -998,7 +998,7 @@
               {
                 "c": 7,
                 "draft": 22,
-                "relay": "https://relay-a.example.net/"
+                "relay": "moqt://relay-a.example.net/"
               }
             ],
             "timing": "object",
@@ -10840,6 +10840,19 @@
       }
     },
     {
+      "name": "refuse-bw-in-source",
+      "file": "refuse-bw-in-source.bin",
+      "bodyBytes": 879,
+      "expect": {
+        "ok": false,
+        "reason": "bad-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "bad-record"
+      }
+    },
+    {
       "name": "refuse-bad-timing",
       "file": "refuse-bad-timing.bin",
       "bodyBytes": 852,
@@ -11089,7 +11102,7 @@
     {
       "name": "refuse-viewer-body",
       "file": "refuse-viewer-body.bin",
-      "bodyBytes": 927,
+      "bodyBytes": 928,
       "expect": {
         "ok": false,
         "reason": "wrong-path"

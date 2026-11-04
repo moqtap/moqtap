@@ -68,6 +68,11 @@ fn conn(c: u64, draft: u64, relay: &str) -> ConnRec {
     ConnRec { c, draft: Some(draft), relay: relay.into() }
 }
 
+/// A connection whose relay is written as the monitor writes a connection URL.
+fn conn_to(c: u64, draft: u64, url: &str) -> ConnRec {
+    conn(c, draft, &crate::relay::relay_endpoint(url).expect("relay URL"))
+}
+
 struct Spec {
     seq: u64,
     first: u64,
@@ -258,9 +263,9 @@ fn names_as_bytes() {
 #[test]
 fn zero_length_normal() {
     let conns = vec![
-        conn(0, 10, "https://relay-a.example.net"),
-        conn(1, 14, "https://relay-b.example.net"),
-        conn(2, 22, "moqt://relay-c.example.net:4443"),
+        conn_to(0, 10, "https://relay-a.example.net"),
+        conn_to(1, 14, "https://relay-b.example.net"),
+        conn_to(2, 22, "moqt://relay-c.example.net:4443"),
     ];
     let runs = (0..3u64)
         .flat_map(|c| {
@@ -303,7 +308,7 @@ fn negative_dt() {
 #[test]
 fn u64_ids() {
     let mut s = Spec::new(
-        vec![conn(7, 22, "https://relay-a.example.net")],
+        vec![conn_to(7, 22, "moqt://relay-a.example.net/")],
         vec![video()],
         vec![Record::Runs(vec![
             run(
