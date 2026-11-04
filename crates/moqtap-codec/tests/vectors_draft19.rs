@@ -87,6 +87,7 @@ d19_test!(d19_unknown_type, "unknown-type.json");
 // ─────────────────────────────────────────────────────────────
 
 use bytes::Buf;
+use moqtap_codec::data_dispatch::AnyFetchGroupOrder;
 use moqtap_codec::draft19::data_stream::{
     DatagramHeader, FetchHeader, FetchObjectHeader, SubgroupHeader,
 };
@@ -345,11 +346,11 @@ fn run_datagram_vectors(relative_path: &str) {
 /// The arithmetic is the section's, restated:
 ///
 ///   - The first object carries both deltas and they are absolute.
-///   - Later, a Group ID Delta moves the group by `delta + 1` (Ascending
-///     order, the only ordering these vectors use) and the Object ID becomes
-///     the Object ID Delta; with no Group ID Delta the group is unchanged and
-///     the Object ID Delta is added to the previous ID, or the previous ID
-///     plus one when there is no Object ID Delta either.
+///   - Later, a Group ID Delta moves the group by `delta + 1`, up under
+///     Ascending and down under Descending (the vector's `group_order`), and
+///     the Object ID becomes the Object ID Delta; with no Group ID Delta the
+///     group is unchanged and the Object ID Delta is added to the previous ID,
+///     or the previous ID plus one when there is no Object ID Delta either.
 ///   - The Subgroup ID follows Table 8: zero, the previous object's, the
 ///     previous object's plus one, or an explicit field.
 ///   - An End of Range indicator (Section 11.4.4.2) supplies the prior Group
@@ -471,7 +472,10 @@ fn run_fetch_vectors(relative_path: &str) {
                 let group_id = if first_object {
                     group_id_delta.expect("first fetch object must include Group ID Delta")
                 } else if let Some(d) = group_id_delta {
-                    prev_group_id + d + 1
+                    match vector.fetch_group_order() {
+                        AnyFetchGroupOrder::Ascending => prev_group_id + d + 1,
+                        AnyFetchGroupOrder::Descending => prev_group_id - (d + 1),
+                    }
                 } else {
                     prev_group_id
                 };
@@ -596,6 +600,25 @@ fn run_fetch_vectors(relative_path: &str) {
                 vector.id,
                 cursor.remaining()
             );
+
+            // The arithmetic above is this file's; the codec's own reader has
+            // to reach the same Locations and accept the stream.
+            let expected_locations: Vec<(u64, u64)> = expected_objs
+                .iter()
+                .map(|eo| {
+                    (
+                        js_str(eo, "group_id").parse().unwrap(),
+                        js_str(eo, "object_id").parse().unwrap(),
+                    )
+                })
+                .collect();
+            let locations = test_vectors::fetch_stream::locations(
+                moqtap_codec::version::DraftVersion::Draft19,
+                &bytes,
+                vector.fetch_group_order(),
+            )
+            .unwrap_or_else(|e| panic!("[{}] the codec's reader refused: {e}", vector.id));
+            assert_eq!(locations, expected_locations, "[{}] Locations mismatch", vector.id);
         }
 
         if vector.error.is_some() {
@@ -606,6 +629,7 @@ fn run_fetch_vectors(relative_path: &str) {
                 test_vectors::fetch_stream::first_failure(
                     moqtap_codec::version::DraftVersion::Draft19,
                     &bytes,
+                    vector.fetch_group_order(),
                 )
             }) {
                 Some(e) => vector.assert_error(&e),

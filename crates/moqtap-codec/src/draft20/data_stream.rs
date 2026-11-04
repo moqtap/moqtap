@@ -1665,22 +1665,13 @@ impl FetchObjectHeader {
     /// equality test on the whole field and not a mask.
     ///
     /// An indicator uses the same two positions on the wire an ordinary Object
-    /// uses for its deltas, and Section 11.4.4.2 says only that "the Group ID
-    /// and Object ID fields are present". They are reached through
-    /// [`Self::group_id_delta`] and [`Self::object_id_delta`], since those are
-    /// the fields the wire has.
-    ///
-    /// **The ordinary delta arithmetic applies to them.** The draft does not
-    /// say so: Section 11.4.4.2 states what is *absent* from a marker
-    /// ("Subgroup ID, Priority and Properties are not present") and says
-    /// nothing about whether the two present fields are absolute or deltas.
-    /// This codec applies Section 11.4.4.1 unchanged, because the marker's
-    /// flags are literally the ordinary flags — the low bits of all three
-    /// markers are `0x0C`, the everyday "both deltas present" pattern — so a
-    /// marker that is not the first record on the stream resolves against its
-    /// predecessor exactly as an Object would. Draft-19 read them as absolute;
-    /// on a first record the two readings agree, and after an Object they do
-    /// not. [`FetchObjectReader`] is where the arithmetic is applied.
+    /// uses for its deltas, so they are reached through [`Self::group_id_delta`]
+    /// and [`Self::object_id_delta`], but they hold an absolute Group ID and
+    /// Object ID. draft-20 Section 11.4.4.2: "the Group ID and Object ID fields are
+    /// present". The delta rules of draft-20 Section 11.4.4.1 cover "an Object other
+    /// than the first", and draft-20 Section 11.4.4 reads the flag bits only "When less
+    /// than 128". draft-23 made the fields deltas ("Delta encode FETCH End of
+    /// Range indicators").
     pub fn end_of_range(&self) -> Option<FetchEndOfRange> {
         match self.flags() {
             FETCH_END_OF_NON_EXISTENT_RANGE => Some(FetchEndOfRange::NonExistent),
@@ -2018,10 +2009,20 @@ impl FetchObjectReader {
         // indicator", which means a marker neither states them nor disturbs
         // them, and a marker arriving before any Object has none to report.
         //
-        // Its two present fields go through the ordinary arithmetic below. The
-        // draft does not say they do — see [`FetchObjectHeader::end_of_range`]
-        // for why this codec reads them that way and where draft-19 differed.
-        let is_marker = header.end_of_range().is_some();
+        // Its two present fields are the absolute Location; see
+        // [`FetchObjectHeader::end_of_range`].
+        if header.end_of_range().is_some() {
+            let group_id = header.group_id_delta.ok_or(CodecError::InvalidField)?.into_inner();
+            let object_id = header.object_id_delta.ok_or(CodecError::InvalidField)?.into_inner();
+            self.prior_location = Some((group_id, object_id));
+            return Ok(FetchObject {
+                header,
+                group_id,
+                subgroup_id: None,
+                object_id,
+                publisher_priority: self.prior_publisher_priority,
+            });
+        }
 
         let group_id = match (self.prior_location, header.group_id_delta) {
             // The first object's delta is its absolute Group ID.
@@ -2057,17 +2058,6 @@ impl FetchObjectReader {
                 }
                 (None, _, _) => return Err(CodecError::InvalidField),
             };
-
-        if is_marker {
-            self.prior_location = Some((group_id, object_id));
-            return Ok(FetchObject {
-                header,
-                group_id,
-                subgroup_id: None,
-                object_id,
-                publisher_priority: self.prior_publisher_priority,
-            });
-        }
 
         let subgroup_id = if header.is_datagram() {
             None
@@ -2180,35 +2170,15 @@ impl FetchObjectWriter {
     pub fn header_for(&self, frame: &FetchObject) -> Result<FetchObjectHeader, CodecError> {
         let original = &frame.header;
 
-        // An End of Range marker carries no Subgroup ID, Priority or
-        // Properties, and its flags are a fixed Table 7 value rather than
-        // something derived from which fields are present — so only the two
-        // identity fields are re-derived, through the same arithmetic an
-        // ordinary Object uses. The mirror of the reader; see
-        // [`FetchObjectHeader::end_of_range`] for why the arithmetic applies at
-        // all, and note the consequence: a marker after a removed run does not
-        // keep its original bytes, which is precisely what draft-19's
-        // absolute reading would have got wrong.
+        // An End of Range marker states its Location outright and inherits
+        // nothing, so its two fields are the same whatever precedes it; see
+        // [`FetchObjectHeader::end_of_range`].
         if original.end_of_range().is_some() {
-            let (group_id_delta, object_id_delta) = self.identity_fields(frame, original)?;
-            // Table 7's three values all carry the low bits `0x0C`, so a
-            // marker's flags fix both fields as present and there is no shorter
-            // form to fall back on. A marker whose Group ID matches its
-            // predecessor's therefore has no encoding at all: the Group ID
-            // Delta moves the group by `delta + 1` and cannot stand still.
-            // `identity_fields` answers `None` for a field the ordinary rules
-            // would leave off, which is exactly that case, and it is refused
-            // rather than written as an absolute value the reader would resolve
-            // against its predecessor.
-            let (Some(group_id_delta), Some(object_id_delta)) = (group_id_delta, object_id_delta)
-            else {
-                return Err(CodecError::InvalidField);
-            };
             return Ok(FetchObjectHeader {
                 serialization_flags: original.serialization_flags,
-                group_id_delta: Some(group_id_delta),
+                group_id_delta: Some(VarInt::from_u64(frame.group_id)?),
                 subgroup_id: None,
-                object_id_delta: Some(object_id_delta),
+                object_id_delta: Some(VarInt::from_u64(frame.object_id)?),
                 publisher_priority: None,
                 properties: None,
                 payload_length: original.payload_length,
@@ -2291,12 +2261,7 @@ impl FetchObjectWriter {
             //
             // Gated on the frame's own framing, like the same-group case below,
             // so re-emitting a stream reproduces the publisher's bytes instead
-            // of silently rewriting the shorter form into the longer one. It
-            // also keeps markers correct without a special case: Table 7's
-            // three values all carry the low bits `0x0C`, so a marker always
-            // arrives with an Object ID Delta and never takes this branch —
-            // which matters, because the marker path above requires both fields
-            // to be `Some` and refuses the frame otherwise.
+            // of silently rewriting the shorter form into the longer one.
             if original.object_id_delta.is_none()
                 && frame.object_id == prior_object.wrapping_add(1)
                 && prior_object != u64::MAX

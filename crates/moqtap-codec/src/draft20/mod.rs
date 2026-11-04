@@ -82,8 +82,7 @@
 //!   Section 10.20.1 says and their own definitions do not —
 //!   [`message::parameter_in_scope`]
 //! - `Object Payload Length` is present on an End-of-Range marker record,
-//!   encoded as 0, and the ordinary delta arithmetic applies to the marker's
-//!   two fields — [`data_stream::FetchObjectHeader`]
+//!   encoded as 0 — [`data_stream::FetchObjectHeader`]
 
 #[allow(missing_docs)]
 pub mod data_stream;

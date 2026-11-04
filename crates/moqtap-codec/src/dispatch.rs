@@ -465,7 +465,7 @@ impl AnyControlMessage {
     /// outright, whether or not it carries the parameter, and that is what
     /// this returns.
     ///
-    /// The answer matters most on drafts 18 and 19, whose fetch Objects write
+    /// The answer matters most on drafts 18-23, whose fetch Objects write
     /// a Group ID as a difference from the Object before and leave the order
     /// to decide its sign — see
     /// [`AnyFetchObjectReader::new`]. Drafts 15, 16 and 17
@@ -1674,7 +1674,7 @@ impl AnyFetchHeader {
     ///
     /// It is what ties a fetch data stream back to the control exchange that
     /// opened it, which is the only route by which anything the stream does
-    /// not state — on drafts 18 and 19, the Group Order its Group ID Deltas
+    /// not state — on drafts 18-23, the Group Order its Group ID Deltas
     /// resolve against — can reach a reader.
     #[allow(unreachable_patterns)]
     pub fn request_id(&self) -> u64 {

@@ -1997,29 +1997,19 @@ fn an_end_of_range_marker_reports_the_priority_in_force_on_every_draft() {
             Some(AnyFetchEndOfRange::NonExistent),
             "{draft}: the second frame is the marker"
         );
-        // Where the marker's two fields point is the one thing the drafts do
-        // not agree on, and neither of them says so outright. Drafts 16
-        // through 19 read them as the absolute Location the marker names, so a
-        // Group ID Delta of 9 is group 9. Draft-20 Section 11.4.4.2 says only
-        // that "the Group ID and Object ID fields are present" and this codec
-        // applies Section 11.4.4.1's ordinary arithmetic to them, so the same
-        // 9 after an Object in group 1 is group 1 + 9 + 1 = 11. Draft-21 moved
-        // both sentences, to draft-21 Section 11.4.1.2 and
-        // draft-21 Section 11.4.1.1, and reworded
-        // neither, and draft-22 keeps them there, so both read the marker
-        // draft-20's way.
+        // Drafts 16 through 22 read the marker's two fields as the absolute
+        // Location it names, so a Group ID Delta of 9 is group 9.
+        // draft-20 Section 11.4.4.2: "the Group ID and Object ID fields are present";
+        // the delta rules of draft-20 Section 11.4.4.1 cover "an Object other
+        // than the first". draft-21 Section 11.4.1.2 and draft-22 Section 11.4.1.2
+        // keep the sentence unchanged.
         //
-        // Both readings are defensible from the text; what would not be
-        // defensible is a draft-neutral test asserting one of them for every
-        // draft, which is why the expectation is per draft.
-        //
-        // Draft-23 Section 11.4.2.1 settles it a third way: "the Group ID is
-        // the prior Group ID plus Group ID Delta for Ascending Group Order",
-        // with no + 1, so 1 + 9 = 10, and "When Group ID Delta is nonzero, the
+        // draft-23 Section 11.4.2.1 makes them deltas: "the Group ID is the
+        // prior Group ID plus Group ID Delta for Ascending Group Order", with
+        // no + 1, so 1 + 9 = 10, and "When Group ID Delta is nonzero, the
         // Object ID Delta field contains the absolute Object ID in the new
         // Group".
         let expected_location = match *draft {
-            "draft-20" | "draft-21" | "draft-22" => (11, 4),
             "draft-23" => (10, 4),
             _ => (9, 4),
         };

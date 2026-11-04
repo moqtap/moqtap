@@ -396,6 +396,14 @@ fn run_datagram_vectors(relative_path: &str) -> usize {
     run
 }
 
+/// The per-draft Group Order a fetch vector is read in.
+fn group_order(vector: &test_vectors::TestVector) -> GroupOrder {
+    match vector.fetch_group_order() {
+        moqtap_codec::data_dispatch::AnyFetchGroupOrder::Ascending => GroupOrder::Ascending,
+        moqtap_codec::data_dispatch::AnyFetchGroupOrder::Descending => GroupOrder::Descending,
+    }
+}
+
 /// Decode a draft-23 fetch stream and check every entry against the vectors.
 ///
 /// Resolution runs through `FetchObjectReader`, the same public API a consumer
@@ -435,7 +443,7 @@ fn run_fetch_vectors(relative_path: &str) -> usize {
             // new group continuing `prior + 1` rather than resetting the Object
             // ID to 0 — the shadow copy's error and the corpus gap hide each
             // other exactly.
-            let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
+            let mut reader = FetchObjectReader::new(group_order(vector));
 
             for eo in expected_objs {
                 let before = cursor.len();
@@ -595,7 +603,7 @@ fn run_fetch_vectors(relative_path: &str) -> usize {
             let failure = match FetchHeader::decode(&mut cursor) {
                 Err(e) => Some(e),
                 Ok(_) => {
-                    let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
+                    let mut reader = FetchObjectReader::new(group_order(vector));
                     let mut found = None;
                     while cursor.has_remaining() && found.is_none() {
                         match reader.read_object_header(&mut cursor).map(|frame| frame.header) {
@@ -617,6 +625,7 @@ fn run_fetch_vectors(relative_path: &str) -> usize {
                 test_vectors::fetch_stream::first_failure(
                     moqtap_codec::version::DraftVersion::Draft23,
                     &bytes,
+                    vector.fetch_group_order(),
                 )
             }) {
                 Some(e) => vector.assert_error(&e),
@@ -743,8 +752,8 @@ fn d23_every_committed_vector_is_run() {
     );
     assert_eq!(
         on_disk_count,
-        425,
-        "the committed draft-23 corpus is 425 vectors across 24 files; it now has \
+        427,
+        "the committed draft-23 corpus is 427 vectors across 24 files; it now has \
          {on_disk_count} across {}",
         on_disk.len()
     );

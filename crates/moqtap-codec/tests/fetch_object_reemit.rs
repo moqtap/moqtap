@@ -468,22 +468,17 @@ mod draft20 {
         assert!(matches!(err, moqtap_codec::error::CodecError::InvalidField), "got {err:?}");
     }
 
-    /// An End of Range marker survives a removal in front of it, because the
-    /// writer re-derives its two fields against the new predecessor.
-    ///
-    /// Draft-19's writer reproduces a marker's bytes verbatim, on the reading
-    /// that its Group ID and Object ID are absolute. Draft-20's corpus reads
-    /// them as ordinary deltas — Section 11.4.4.2 says only that the two
-    /// fields "are present" and settles neither — so a marker after a removed
-    /// object is exactly the frame that needs reframing, and forwarding its
-    /// bytes would move the Location it names.
+    /// An End of Range marker survives a removal in front of it unchanged: its
+    /// two fields are the absolute Location it names, so nothing before it
+    /// changes what it says. draft-20 Section 11.4.4.2: "the Group ID and Object ID
+    /// fields are present".
     #[test]
-    fn an_end_of_range_marker_is_reframed_against_the_new_predecessor() {
+    fn an_end_of_range_marker_survives_a_removal_unchanged() {
         for flags in [0x8Cu64, 0x10C, 0x20C] {
             let mut wire = Vec::new();
 
-            // Two ordinary objects in groups 10 and 11, then a marker whose
-            // Group ID Delta of 0 puts it in group 12.
+            // Two ordinary objects in groups 10 and 11, then a marker in
+            // group 12.
             let mut a = header(0x08 | 0x04 | 0x10 | 0b11, 1);
             a.group_id_delta = Some(v(10));
             a.subgroup_id = Some(v(3));
@@ -499,7 +494,7 @@ mod draft20 {
             wire.push(0xbb);
 
             let mut marker = header(flags, 0);
-            marker.group_id_delta = Some(v(0));
+            marker.group_id_delta = Some(v(12));
             marker.object_id_delta = Some(v(9));
             marker.encode(&mut wire).unwrap();
 
@@ -508,7 +503,7 @@ mod draft20 {
             let marker_identity = identity(&frames[2].0);
             assert_eq!(
                 marker_identity.0, 12,
-                "flags {flags:#x}: the marker resolves against the object before it"
+                "flags {flags:#x}: the marker states its Group ID outright"
             );
 
             // A stream with nothing removed is reproduced byte for byte.
@@ -746,22 +741,17 @@ mod draft21 {
         assert!(matches!(err, moqtap_codec::error::CodecError::InvalidField), "got {err:?}");
     }
 
-    /// An End of Range marker survives a removal in front of it, because the
-    /// writer re-derives its two fields against the new predecessor.
-    ///
-    /// Draft-19's writer reproduces a marker's bytes verbatim, on the reading
-    /// that its Group ID and Object ID are absolute. Draft-21's corpus reads
-    /// them as ordinary deltas — Section 11.4.1.2 says only that the two
-    /// fields "are present" and settles neither — so a marker after a removed
-    /// object is exactly the frame that needs reframing, and forwarding its
-    /// bytes would move the Location it names.
+    /// An End of Range marker survives a removal in front of it unchanged: its
+    /// two fields are the absolute Location it names, so nothing before it
+    /// changes what it says. draft-21 Section 11.4.1.2: "the Group ID and Object ID
+    /// fields are present".
     #[test]
-    fn an_end_of_range_marker_is_reframed_against_the_new_predecessor() {
+    fn an_end_of_range_marker_survives_a_removal_unchanged() {
         for flags in [0x8Cu64, 0x10C, 0x20C] {
             let mut wire = Vec::new();
 
-            // Two ordinary objects in groups 10 and 11, then a marker whose
-            // Group ID Delta of 0 puts it in group 12.
+            // Two ordinary objects in groups 10 and 11, then a marker in
+            // group 12.
             let mut a = header(0x08 | 0x04 | 0x10 | 0b11, 1);
             a.group_id_delta = Some(v(10));
             a.subgroup_id = Some(v(3));
@@ -777,7 +767,7 @@ mod draft21 {
             wire.push(0xbb);
 
             let mut marker = header(flags, 0);
-            marker.group_id_delta = Some(v(0));
+            marker.group_id_delta = Some(v(12));
             marker.object_id_delta = Some(v(9));
             marker.encode(&mut wire).unwrap();
 
@@ -786,7 +776,7 @@ mod draft21 {
             let marker_identity = identity(&frames[2].0);
             assert_eq!(
                 marker_identity.0, 12,
-                "flags {flags:#x}: the marker resolves against the object before it"
+                "flags {flags:#x}: the marker states its Group ID outright"
             );
 
             // A stream with nothing removed is reproduced byte for byte.
@@ -1025,22 +1015,17 @@ mod draft22 {
         assert!(matches!(err, moqtap_codec::error::CodecError::InvalidField), "got {err:?}");
     }
 
-    /// An End of Range marker survives a removal in front of it, because the
-    /// writer re-derives its two fields against the new predecessor.
-    ///
-    /// Draft-19's writer reproduces a marker's bytes verbatim, on the reading
-    /// that its Group ID and Object ID are absolute. Draft-22's corpus reads
-    /// them as ordinary deltas — Section 11.4.1.2 says only that the two
-    /// fields "are present" and settles neither — so a marker after a removed
-    /// object is exactly the frame that needs reframing, and forwarding its
-    /// bytes would move the Location it names.
+    /// An End of Range marker survives a removal in front of it unchanged: its
+    /// two fields are the absolute Location it names, so nothing before it
+    /// changes what it says. draft-22 Section 11.4.1.2: "the Group ID and Object ID
+    /// fields are present".
     #[test]
-    fn an_end_of_range_marker_is_reframed_against_the_new_predecessor() {
+    fn an_end_of_range_marker_survives_a_removal_unchanged() {
         for flags in [0x8Cu64, 0x10C, 0x20C] {
             let mut wire = Vec::new();
 
-            // Two ordinary objects in groups 10 and 11, then a marker whose
-            // Group ID Delta of 0 puts it in group 12.
+            // Two ordinary objects in groups 10 and 11, then a marker in
+            // group 12.
             let mut a = header(0x08 | 0x04 | 0x10 | 0b11, 1);
             a.group_id_delta = Some(v(10));
             a.subgroup_id = Some(v(3));
@@ -1056,7 +1041,7 @@ mod draft22 {
             wire.push(0xbb);
 
             let mut marker = header(flags, 0);
-            marker.group_id_delta = Some(v(0));
+            marker.group_id_delta = Some(v(12));
             marker.object_id_delta = Some(v(9));
             marker.encode(&mut wire).unwrap();
 
@@ -1065,7 +1050,7 @@ mod draft22 {
             let marker_identity = identity(&frames[2].0);
             assert_eq!(
                 marker_identity.0, 12,
-                "flags {flags:#x}: the marker resolves against the object before it"
+                "flags {flags:#x}: the marker states its Group ID outright"
             );
 
             // A stream with nothing removed is reproduced byte for byte.

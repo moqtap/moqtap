@@ -332,6 +332,14 @@ fn run_datagram_vectors(relative_path: &str) {
     }
 }
 
+/// The per-draft Group Order a fetch vector is read in.
+fn group_order(vector: &test_vectors::TestVector) -> GroupOrder {
+    match vector.fetch_group_order() {
+        moqtap_codec::data_dispatch::AnyFetchGroupOrder::Ascending => GroupOrder::Ascending,
+        moqtap_codec::data_dispatch::AnyFetchGroupOrder::Descending => GroupOrder::Descending,
+    }
+}
+
 /// Decode a draft-18 fetch stream with the crate's own fetch object codec and
 /// check every frame against the vector's stated fields.
 ///
@@ -342,8 +350,7 @@ fn run_datagram_vectors(relative_path: &str) {
 /// before. `FetchObjectReader` is what applies them; this runner only states
 /// what the corpus says the answers are.
 ///
-/// The corpus does not name a Group Order, and its descriptions say Ascending,
-/// which is also the order every multi-group vector's stated Group IDs follow.
+/// A vector's `group_order` names the Group Order; absent, it is Ascending.
 ///
 /// Re-encoding is checked frame by frame and then over the whole stream, so a
 /// decoder that silently dropped a field — or an encoder that wrote one the
@@ -372,7 +379,7 @@ fn run_fetch_vectors(relative_path: &str) {
                 .and_then(|v| v.as_array())
                 .unwrap_or_else(|| panic!("[{}] missing objects array", vector.id));
 
-            let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
+            let mut reader = FetchObjectReader::new(group_order(vector));
             let mut re_encoded = Vec::new();
             header.encode(&mut re_encoded);
 
@@ -484,6 +491,7 @@ fn run_fetch_vectors(relative_path: &str) {
                 test_vectors::fetch_stream::first_failure(
                     moqtap_codec::version::DraftVersion::Draft18,
                     &bytes,
+                    vector.fetch_group_order(),
                 )
             }) {
                 Some(e) => vector.assert_error(&e),

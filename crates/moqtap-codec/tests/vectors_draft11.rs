@@ -491,6 +491,7 @@ fn run_fetch_vectors(relative_path: &str) {
                 test_vectors::fetch_stream::first_failure(
                     moqtap_codec::version::DraftVersion::Draft11,
                     &bytes,
+                    vector.fetch_group_order(),
                 )
             }) {
                 Some(e) => vector.assert_error(&e),

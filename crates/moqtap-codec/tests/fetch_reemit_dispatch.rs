@@ -167,6 +167,7 @@ struct Stream {
     header: AnyFetchHeader,
     header_bytes: Vec<u8>,
     frames: Vec<Frame>,
+    group_order: AnyFetchGroupOrder,
 }
 
 struct Frame {
@@ -219,7 +220,8 @@ fn streams(draft: DraftVersion) -> Vec<Stream> {
             .unwrap_or_else(|e| panic!("[{draft:?} {}] stream header: {e}", vector.id));
         let header_len = wire.len() - cursor.len();
 
-        let mut reader = AnyFetchObjectReader::new(&header, AnyFetchGroupOrder::Ascending)
+        let group_order = vector.fetch_group_order();
+        let mut reader = AnyFetchObjectReader::new(&header, group_order)
             .unwrap_or_else(|e| panic!("[{draft:?} {}] reader: {e}", vector.id));
         let mut frames = Vec::new();
         while !cursor.is_empty() {
@@ -245,6 +247,7 @@ fn streams(draft: DraftVersion) -> Vec<Stream> {
             header,
             header_bytes: wire[..header_len].to_vec(),
             frames,
+            group_order,
         });
     }
     assert!(!out.is_empty(), "{draft:?}: the corpus has no fetch stream to read");
@@ -273,7 +276,7 @@ fn removal_orphans_an_end_marker(stream: &Stream, index: usize) -> bool {
 /// Returns the whole stream — header included — and what the writer had to do
 /// to each frame.
 fn reemit(stream: &Stream, keep: impl Fn(usize) -> bool) -> (Vec<u8>, Vec<FetchReemit>) {
-    let mut writer = AnyFetchObjectWriter::new(&stream.header, AnyFetchGroupOrder::Ascending)
+    let mut writer = AnyFetchObjectWriter::new(&stream.header, stream.group_order)
         .unwrap_or_else(|e| panic!("[{:?} {}] writer: {e}", stream.draft, stream.id));
     assert_eq!(
         writer.draft(),
@@ -312,11 +315,12 @@ fn reemit(stream: &Stream, keep: impl Fn(usize) -> bool) -> (Vec<u8>, Vec<FetchR
 }
 
 /// Decode a re-emitted stream back into the identities a subscriber would see.
-fn identities(draft: DraftVersion, wire: &[u8], id: &str) -> Vec<Identity> {
+fn identities(stream: &Stream, wire: &[u8]) -> Vec<Identity> {
+    let (draft, id) = (stream.draft, &stream.id);
     let mut cursor: &[u8] = wire;
     let header = AnyFetchHeader::decode_stream(draft, &mut cursor)
         .unwrap_or_else(|e| panic!("[{draft:?} {id}] re-emitted stream header: {e}"));
-    let mut reader = AnyFetchObjectReader::new(&header, AnyFetchGroupOrder::Ascending)
+    let mut reader = AnyFetchObjectReader::new(&header, stream.group_order)
         .unwrap_or_else(|e| panic!("[{draft:?} {id}] re-emitted reader: {e}"));
     let mut out = Vec::new();
     while !cursor.is_empty() {
@@ -392,7 +396,7 @@ fn removing_a_frame_leaves_every_survivor_where_it_was() {
                     .collect();
                 let (wire, _) = reemit(&stream, |index| index != removed);
                 assert_eq!(
-                    identities(draft, &wire, &stream.id),
+                    identities(&stream, &wire),
                     expected,
                     "[{draft:?} {}] removing frame {removed} moved a survivor",
                     stream.id
@@ -470,16 +474,14 @@ fn the_framing_is_re_emitted_from_a_prefix_of_the_frame() {
             }
 
             let mut writer =
-                AnyFetchObjectWriter::new(&stream.header, AnyFetchGroupOrder::Ascending)
-                    .expect("writer");
+                AnyFetchObjectWriter::new(&stream.header, stream.group_order).expect("writer");
             let mut whole = Vec::new();
             let full = writer
                 .reemit_object(&survivor.frame, &survivor.raw, &mut whole)
                 .expect("re-emit the whole frame");
 
             let mut writer =
-                AnyFetchObjectWriter::new(&stream.header, AnyFetchGroupOrder::Ascending)
-                    .expect("writer");
+                AnyFetchObjectWriter::new(&stream.header, stream.group_order).expect("writer");
             let mut chunk = Vec::new();
             let prefix = writer
                 .reemit_object(&survivor.frame, &survivor.raw[..framing + 1], &mut chunk)
@@ -550,8 +552,7 @@ fn a_frame_from_another_draft_is_refused() {
             }
             let frame = &source.frames[0];
             let mut writer =
-                AnyFetchObjectWriter::new(&target.header, AnyFetchGroupOrder::Ascending)
-                    .expect("writer");
+                AnyFetchObjectWriter::new(&target.header, target.group_order).expect("writer");
             let mut out = Vec::new();
             let err = writer
                 .reemit_object(&frame.frame, &frame.raw, &mut out)

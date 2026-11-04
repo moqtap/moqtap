@@ -7,6 +7,7 @@ pub mod fields_json;
 #[allow(dead_code)]
 pub mod properties;
 
+use moqtap_codec::data_dispatch::AnyFetchGroupOrder;
 use moqtap_codec::error::CodecError;
 use moqtap_codec::varint::VarIntError;
 use serde::Deserialize;
@@ -35,6 +36,10 @@ pub struct TestVector {
     /// the corpus's way of writing "all of them", and is what almost every
     /// vector says: a truncated frame is refused by anything that reads it.
     pub profiles: Option<Vec<String>>,
+    /// The GROUP_ORDER a fetch stream vector is read in, "1" or "2"; absent
+    /// means Ascending.
+    #[serde(default)]
+    pub group_order: Option<String>,
 }
 
 /// The conformance profile these runners implement.
@@ -52,6 +57,17 @@ impl TestVector {
     #[allow(dead_code)]
     pub fn is_canonical(&self) -> bool {
         self.canonical.unwrap_or(true)
+    }
+
+    /// The Group Order a fetch stream vector is read in. draft-23 Section 9.19.8:
+    /// "If omitted from FETCH, the receiver uses Ascending (0x1)."
+    #[allow(dead_code)]
+    pub fn fetch_group_order(&self) -> AnyFetchGroupOrder {
+        match self.group_order.as_deref() {
+            None | Some("1") => AnyFetchGroupOrder::Ascending,
+            Some("2") => AnyFetchGroupOrder::Descending,
+            Some(other) => panic!("[{}] group_order {other:?} is neither \"1\" nor \"2\"", self.id),
+        }
     }
 
     /// Whether this vector's expectation binds `profile`.

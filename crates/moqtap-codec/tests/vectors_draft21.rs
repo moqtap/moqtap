@@ -406,6 +406,14 @@ fn run_datagram_vectors(relative_path: &str) -> usize {
     run
 }
 
+/// The per-draft Group Order a fetch vector is read in.
+fn group_order(vector: &test_vectors::TestVector) -> GroupOrder {
+    match vector.fetch_group_order() {
+        moqtap_codec::data_dispatch::AnyFetchGroupOrder::Ascending => GroupOrder::Ascending,
+        moqtap_codec::data_dispatch::AnyFetchGroupOrder::Descending => GroupOrder::Descending,
+    }
+}
+
 /// Decode a draft-21 fetch stream and check every object against the vectors.
 ///
 /// The framing comes from [`FetchObjectHeader`], which is what the vectors are
@@ -417,11 +425,11 @@ fn run_datagram_vectors(relative_path: &str) -> usize {
 /// The arithmetic is the section's, restated:
 ///
 ///   - The first record carries both deltas and they are absolute.
-///   - Later, a Group ID Delta moves the group by `delta + 1` (Ascending
-///     order, the only ordering these vectors use) and the Object ID becomes
-///     the Object ID Delta; with no Group ID Delta the group is unchanged and
-///     the Object ID Delta is added to the previous ID, or the previous ID
-///     plus one when there is no Object ID Delta either.
+///   - Later, a Group ID Delta moves the group by `delta + 1`, up under
+///     Ascending and down under Descending (the vector's `group_order`), and
+///     the Object ID becomes the Object ID Delta; with no Group ID Delta the
+///     group is unchanged and the Object ID Delta is added to the previous ID,
+///     or the previous ID plus one when there is no Object ID Delta either.
 ///   - The Subgroup ID follows Table 8: zero, the previous object's, the
 ///     previous object's plus one, or an explicit field.
 ///
@@ -467,7 +475,7 @@ fn run_fetch_vectors(relative_path: &str) -> usize {
             // new group continuing `prior + 1` rather than resetting the Object
             // ID to 0 — the shadow copy's error and the corpus gap hide each
             // other exactly.
-            let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
+            let mut reader = FetchObjectReader::new(group_order(vector));
 
             for eo in expected_objs {
                 let before = cursor.len();
@@ -633,6 +641,7 @@ fn run_fetch_vectors(relative_path: &str) -> usize {
                 test_vectors::fetch_stream::first_failure(
                     moqtap_codec::version::DraftVersion::Draft21,
                     &bytes,
+                    vector.fetch_group_order(),
                 )
             }) {
                 Some(e) => vector.assert_error(&e),
@@ -759,8 +768,8 @@ fn d21_every_committed_vector_is_run() {
     );
     assert_eq!(
         on_disk_count,
-        346,
-        "the committed draft-21 corpus is 346 vectors across 25 files; it now has \
+        348,
+        "the committed draft-21 corpus is 348 vectors across 25 files; it now has \
          {on_disk_count} across {}",
         on_disk.len()
     );

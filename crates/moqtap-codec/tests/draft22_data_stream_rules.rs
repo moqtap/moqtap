@@ -954,34 +954,29 @@ fn the_three_end_of_range_indicators_are_distinguished() {
     }
 }
 
-/// An End of Range marker's two fields go through the ordinary delta
-/// arithmetic, and the marker leaves the prior Subgroup ID and priority alone.
+/// An End of Range marker's two fields are the absolute Location it names,
+/// and the marker leaves the prior Subgroup ID and priority alone.
 ///
-/// **This is a decision, and draft-22 does not settle it.** Section 11.4.1.2
-/// says only that "the Group ID and Object ID fields are present. Subgroup ID,
-/// Priority and Properties are not present", and says nothing about whether the
-/// two present fields are absolute or deltas. This codec applies Section
-/// 11.4.1.1 unchanged, because a marker's flags are literally the ordinary
-/// flags — all three Table 8 values carry the low bits `0x0C`, the everyday
-/// "both deltas present" pattern. Draft-19's reader read them as absolute;
-/// on a first record the two readings agree, and after an Object they do not,
-/// which is what this pins.
+/// draft-22 Section 11.4.1.2: "the Group ID and Object ID fields are present". The
+/// delta rules of draft-22 Section 11.4.1.1 cover "an Object other than the first",
+/// so a marker after an Object does not resolve against it. draft-23 made the
+/// fields deltas.
 ///
-/// The half the draft *does* settle is checked alongside it: "Prior Subgroup
-/// ID: The Subgroup ID from the last actual Object before the End of Range
-/// indicator", and the same for Priority. So a marker supplies the prior Group
-/// ID and Object ID and nothing else, and an Object after it inherits its
-/// Subgroup ID and priority from across the marker.
+/// The prior-Object half: "Prior Subgroup ID: The Subgroup ID from the last
+/// actual Object before the End of Range indicator", and the same for
+/// Priority. So a marker supplies the prior Group ID and Object ID and nothing
+/// else, and an Object after it inherits its Subgroup ID and priority from
+/// across the marker.
 ///
-/// Fails under draft-19's absolute reading, which resolves the marker's Group
-/// ID Delta of 0 to group 0 rather than to the group after the Object's.
+/// Fails if the marker's fields are read as deltas: its Group ID field of 6
+/// after group 5 then resolves to group 12.
 #[test]
-fn an_end_of_range_marker_resolves_against_the_object_before_it() {
+fn an_end_of_range_marker_states_an_absolute_location() {
     use moqtap_codec::draft22::data_stream::{FetchObjectReader, GroupOrder};
 
     for &(flags, marker) in END_OF_RANGE_FLAGS {
         // An ordinary Object at {5, 0} with priority 128 and subgroup 0, then a
-        // marker with both deltas 0, then an Object with no fields at all.
+        // marker at {6, 9}, then an Object with no fields at all.
         let mut wire = Vec::new();
         FetchObjectHeader {
             serialization_flags: vi(0x1C),
@@ -996,7 +991,7 @@ fn an_end_of_range_marker_resolves_against_the_object_before_it() {
         .unwrap();
         FetchObjectHeader {
             serialization_flags: vi(flags),
-            group_id_delta: Some(vi(0)),
+            group_id_delta: Some(vi(6)),
             subgroup_id: None,
             object_id_delta: Some(vi(9)),
             publisher_priority: None,
@@ -1026,14 +1021,8 @@ fn an_end_of_range_marker_resolves_against_the_object_before_it() {
 
         let seen = reader.read_object_header(&mut cursor).unwrap();
         assert_eq!(seen.header.end_of_range(), Some(marker));
-        assert_eq!(
-            seen.group_id, 6,
-            "a marker after an Object resolves its Group ID against that Object"
-        );
-        assert_eq!(
-            seen.object_id, 9,
-            "a Group ID Delta is present, so the Object ID Delta is the Object ID"
-        );
+        assert_eq!(seen.group_id, 6, "a marker states its Group ID outright");
+        assert_eq!(seen.object_id, 9, "and its Object ID");
         assert_eq!(seen.subgroup_id, None, "Section 11.4.1.2: a marker carries no Subgroup ID");
         assert_eq!(
             seen.publisher_priority,
@@ -1052,9 +1041,7 @@ fn an_end_of_range_marker_resolves_against_the_object_before_it() {
         assert_eq!(after.publisher_priority, Some(PRIORITY), "and so does the prior priority");
     }
 
-    // A marker that is the first record on the stream has no predecessor, so
-    // Section 11.4.1.1's first-Object rule makes both fields absolute — which
-    // is where the two readings of Section 11.4.1.2 agree.
+    // A marker that is the first record on the stream reads the same way.
     let mut wire = Vec::new();
     FetchObjectHeader {
         serialization_flags: vi(0x20C),

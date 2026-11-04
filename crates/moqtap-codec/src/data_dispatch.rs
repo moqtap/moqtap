@@ -156,7 +156,7 @@ pub enum AnyFetchEndOfRange {
 
 /// The order a fetch response's groups arrive in.
 ///
-/// Drafts 18 and 19 encode an Object's Group ID as a difference from the
+/// Drafts 18-23 encode an Object's Group ID as a difference from the
 /// previous Object's, and the direction that difference moves is the fetch's
 /// Group Order — which is settled by the control exchange that opened the
 /// fetch and never appears on the data stream. A reader therefore has to be
@@ -181,7 +181,7 @@ pub enum AnyFetchGroupOrder {
 pub struct AnyFetchObject {
     /// Absolute Group ID. Already resolved against the objects before it on
     /// drafts 15-23, whose fetch objects may omit the field or (on drafts
-    /// 18-19) encode it as a difference; copied verbatim on drafts 07-14.
+    /// 18-23) encode it as a difference; copied verbatim on drafts 07-14.
     pub group_id: u64,
     /// Absolute Subgroup ID, resolved as [`Self::group_id`] is. Zero and
     /// meaningless when [`Self::has_subgroup_id`] is `false`.
@@ -2691,7 +2691,7 @@ impl AnyFetchObjectReader {
     /// Create a reader from the stream's fetch header and the Group Order the
     /// fetch was opened with.
     ///
-    /// The order matters only on drafts 18 and 19, where an Object's Group ID
+    /// The order matters only on drafts 18-23, where an Object's Group ID
     /// is a difference from the previous Object's and the order decides its
     /// sign. Nothing on the data stream carries it — the FETCH settles it — and
     /// it is an argument rather than a default because a descending stream read
@@ -3227,7 +3227,7 @@ enum FetchWriterState {
 /// arrived. A stream with nothing removed from it therefore forwards every
 /// frame's own bytes and copies no payload.
 ///
-/// # Drafts 18 and 19 need the Group Order
+/// # Drafts 18-23 need the Group Order
 ///
 /// Their Group ID is a difference whose sign the fetch's Group Order decides,
 /// exactly as for [`AnyFetchObjectReader`], and it is settled on the control

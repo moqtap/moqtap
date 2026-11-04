@@ -110,8 +110,7 @@
 //!   from a well-formed exact count —
 //!   [`message::publish_done_codes::STREAM_COUNT_UNKNOWN`]
 //! - `Object Payload Length` is present on an End-of-Range marker record,
-//!   encoded as 0, and the ordinary delta arithmetic applies to the marker's
-//!   two fields — [`data_stream::FetchObjectHeader`]
+//!   encoded as 0 — [`data_stream::FetchObjectHeader`]
 //!
 //! # What this codec does not enforce
 //!
