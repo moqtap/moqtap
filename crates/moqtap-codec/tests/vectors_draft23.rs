@@ -613,7 +613,12 @@ fn run_fetch_vectors(relative_path: &str) -> usize {
                     found
                 }
             };
-            match failure {
+            match failure.or_else(|| {
+                test_vectors::fetch_stream::first_failure(
+                    moqtap_codec::version::DraftVersion::Draft23,
+                    &bytes,
+                )
+            }) {
                 Some(e) => vector.assert_error(&e),
                 None => panic!("[{}] expected decode error but succeeded", vector.id),
             }
@@ -738,8 +743,8 @@ fn d23_every_committed_vector_is_run() {
     );
     assert_eq!(
         on_disk_count,
-        419,
-        "the committed draft-23 corpus is 419 vectors across 24 files; it now has \
+        425,
+        "the committed draft-23 corpus is 425 vectors across 24 files; it now has \
          {on_disk_count} across {}",
         on_disk.len()
     );

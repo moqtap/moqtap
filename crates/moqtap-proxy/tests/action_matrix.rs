@@ -2666,7 +2666,7 @@ async fn sweep_fetch_streams(draft: DraftVersion, sw: &mut Sweep) {
             "~S has no failing side here: a zero-length fetch object is not a status object",
         );
         sw.notes.push(format!(
-            "[{draft}] ~S failing is unreachable on a fetch stream: this draft removed the              Object Status field from fetch objects, so a zero-length fetch frame is an object              with no bytes rather than a status object. Both probes are holding-side, and the              first one is the byte shape that refuses on draft-15"
+            "[{draft}] ~S failing is unreachable on a fetch stream: this draft removed the Object Status field from fetch objects, so a zero-length fetch frame is an object with no bytes rather than a status object. Both probes are holding-side, and the first one is the byte shape that refuses on draft-15"
         ));
     }
     one_applied(

@@ -522,7 +522,12 @@ fn run_fetch_vectors(relative_path: &str) {
                 Err(e) => Some(CodecError::from(e)),
                 Ok(_) => FetchHeader::decode(&mut cursor).err(),
             };
-            match failure {
+            match failure.or_else(|| {
+                test_vectors::fetch_stream::first_failure(
+                    moqtap_codec::version::DraftVersion::Draft13,
+                    &bytes,
+                )
+            }) {
                 Some(e) => vector.assert_error(&e),
                 None => panic!("[{}] expected decode error but succeeded", vector.id),
             }

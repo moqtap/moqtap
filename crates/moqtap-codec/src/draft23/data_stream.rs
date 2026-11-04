@@ -553,6 +553,63 @@ fn collect_gaps(properties: &[ObjectProperty<'_>], gaps: &mut PriorGaps) -> Resu
     Ok(())
 }
 
+/// The Prior Group ID Gap and Prior Object ID Gap conditions of
+/// draft-23 Section 10.8 and draft-23 Section 10.9 that one fetch stream
+/// shows.
+///
+/// [`PriorGaps::from_properties`] refuses what one Object shows. Across the
+/// stream this refuses "A Group contains more than one Object with different
+/// values for Prior Group ID Gap" for the Objects of one Group, "An endpoint
+/// receives an Object with a Prior Group ID Gap covering an Object it
+/// previously received", "An endpoint receives an Object with a Group ID
+/// within a previously communicated gap", and the same two for Prior Object ID
+/// Gap, for the Group and the Object before on the stream.
+/// draft-23 Section 3.2.1: "Within each group, objects are sent in Object ID
+/// order; subgroup ID is not used for ordering."
+///
+/// [`FetchObjectReader::read_object_header`] applies it to each Object it reads.
+///
+/// End of Range, End of Group and End of Track indicators are not Objects;
+/// the caller passes Objects only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+// Boxed so that the fetch readers holding one stay small.
+pub struct FetchGaps(Box<crate::prior_gaps::FetchGapTracker>);
+
+impl Default for FetchGaps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FetchGaps {
+    /// Track the Objects of one fetch stream.
+    pub fn new() -> Self {
+        Self(Box::new(crate::prior_gaps::FetchGapTracker::new(
+            crate::prior_gaps::GapRules::Draft23On,
+        )))
+    }
+
+    /// Check the next Object on the stream, from its resolved Group ID and
+    /// Object ID and its property block, refusing a gap condition with
+    /// [`CodecError::MalformedTrack`] and a block that does not parse as
+    /// [`crate::object_properties::parse_object_properties`] does. Records the
+    /// Object only when it passes.
+    pub fn check(
+        &mut self,
+        group_id: u64,
+        object_id: u64,
+        property_block: &[u8],
+    ) -> Result<PriorGaps, CodecError> {
+        let properties = crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft23,
+            property_block,
+        )?;
+        let gaps = PriorGaps::from_properties(&properties, group_id, object_id)?;
+        self.0.check(group_id, object_id, gaps.group.as_slice(), gaps.object)?;
+        Ok(gaps)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SubgroupObjectReader {
     extensions_present: bool,
@@ -1727,6 +1784,8 @@ pub struct FetchObjectReader {
     prior_subgroup_id: Option<u64>,
     /// Publisher Priority of the last actual Object.
     prior_publisher_priority: Option<u8>,
+    /// The Prior gap conditions the stream's Objects show.
+    gaps: FetchGaps,
 }
 
 impl FetchObjectReader {
@@ -1737,6 +1796,7 @@ impl FetchObjectReader {
             prior_location: None,
             prior_subgroup_id: None,
             prior_publisher_priority: None,
+            gaps: FetchGaps::new(),
         }
     }
 
@@ -1753,7 +1813,30 @@ impl FetchObjectReader {
     ///
     /// [`CodecError::DeltaDecodingOverflow`] for an ID below 0 or above
     /// 2^64-1 (Section 11.4.1.1 and Section 11.4.2.1).
+    ///
+    /// Refuses, with [`CodecError::MalformedTrack`], the Prior gap conditions an
+    /// Object shows alone or after the Objects before it on the stream, as
+    /// [`FetchGaps`] does, and a property block that does not parse as
+    /// [`crate::object_properties::parse_object_properties`] does.
     pub fn read_object_header(&mut self, buf: &mut impl Buf) -> Result<FetchObject, CodecError> {
+        let object = self.read_frame_header(buf)?;
+        if !object.header.is_indicator() {
+            self.gaps.check(
+                object.group_id,
+                object.object_id,
+                object.header.properties.as_deref().unwrap_or_default(),
+            )?;
+        }
+        Ok(object)
+    }
+
+    /// [`Self::read_object_header`] without the Prior gap conditions and without reading
+    /// inside the property block, for the facade's frame and meta reads, which
+    /// a forwarder uses.
+    pub(crate) fn read_frame_header(
+        &mut self,
+        buf: &mut impl Buf,
+    ) -> Result<FetchObject, CodecError> {
         let header = FetchObjectHeader::decode(buf)?;
 
         if header.end_marker().is_some() {

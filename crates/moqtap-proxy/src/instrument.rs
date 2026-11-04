@@ -357,7 +357,7 @@ impl Recorder {
     );
     bump!("One object was removed by `DropMode::Elide`.", note_object_elided, objects_elided);
     bump!(
-        "One elide fix-up was written: a leading Object ID varint on a          subgroup stream, a re-encoded framing on a fetch stream.",
+        "One elide fix-up was written: a leading Object ID varint on a subgroup stream, a re-encoded framing on a fetch stream.",
         note_object_id_rewritten,
         object_ids_rewritten
     );

@@ -458,7 +458,8 @@ pub const PRIOR_GROUP_ID_GAP: u64 = 0x40;
 /// draft-11 Section 10.1: "A track with a Group that contains more than one
 /// Object with different values for Prior Group ID Gap or has a Prior Group ID
 /// Gap larger than the Group ID is considered malformed." This draft does not
-/// limit an Object to one instance, so every value is kept.
+/// limit an Object to one instance, so every value is kept. The least is
+/// held to the Group ID, for the reason [`SubgroupGaps`] gives.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PriorGaps {
     /// Each Prior Group ID Gap, in wire order.
@@ -466,8 +467,9 @@ pub struct PriorGaps {
 }
 
 impl PriorGaps {
-    /// Read the gaps from an Object's parsed extension headers, refusing one
-    /// larger than `group_id` with [`CodecError::MalformedTrack`].
+    /// Read the gaps from an Object's parsed extension headers, refusing them
+    /// with [`CodecError::MalformedTrack`] when every one is larger than
+    /// `group_id`.
     pub fn from_properties(
         properties: &[ObjectProperty<'_>],
         group_id: u64,
@@ -479,7 +481,7 @@ impl PriorGaps {
                 _ => None,
             })
             .collect();
-        if let Some(gap) = group.iter().copied().find(|&gap| gap > group_id) {
+        if let Some(gap) = group.iter().copied().min().filter(|&gap| gap > group_id) {
             return Err(CodecError::MalformedTrack {
                 detail: format!("Prior Group ID Gap {gap} is larger than Group ID {group_id}"),
             });
@@ -501,38 +503,112 @@ impl PriorGaps {
 /// A subgroup stream carries one Group, so its Objects are where "a Group that
 /// contains more than one Object with different values for Prior Group ID Gap"
 /// (draft-11 Section 10.1) shows on one stream.
+///
+/// This draft does not say whether an Object may carry 0x40 more than once, or
+/// which value is that Object's when it does. draft-11 Section 9.1.1.2 says
+/// only "Object Extension Headers are serialized as Key-Value-Pairs", and the
+/// no-repeat rule of draft-11 Section 8.2, "Senders MUST NOT repeat the same
+/// parameter type in a message", covers message Parameters. So the Objects
+/// carry different values only when no value is carried by every one of them:
+/// then, whichever of its values is taken as each Object's, two of them differ.
+/// While a value is common to all, taking it as each Object's makes them equal,
+/// and they are not refused. The values one Object carries are not compared
+/// with each other, since the condition needs "more than one Object".
+///
+/// "has a Prior Group ID Gap larger than the Group ID" (draft-11 Section 10.1)
+/// also depends on which value is the Object's. An Object carrying a value
+/// larger than the Group ID and one that is not has a gap larger than the Group
+/// ID under one reading and not under another, so it is refused only when every
+/// value it carries is larger.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubgroupGaps {
     group_id: u64,
-    seen: Vec<u64>,
+    /// The values every earlier Object that carried a gap carried, or `None`
+    /// before the first such Object.
+    common: Option<Vec<u64>>,
 }
 
 impl SubgroupGaps {
     /// Track the Objects of the stream `header` opens.
     pub fn new(header: &SubgroupHeader) -> Self {
-        Self { group_id: header.group_id.into_inner(), seen: Vec::new() }
+        Self { group_id: header.group_id.into_inner(), common: None }
     }
 
     /// Check the next Object on this stream, refusing with
-    /// [`CodecError::MalformedTrack`] a gap larger than the Group ID or one
-    /// that differs from a gap an earlier Object on the stream carried. The
-    /// values one Object carries are not compared with each other. Records the
-    /// Object only when it passes.
+    /// [`CodecError::MalformedTrack`] a gap larger than the Group ID, or
+    /// values that leave no value common to every Object on the stream that
+    /// carried a gap. Records the Object only when it passes.
     pub fn check(&mut self, object: &ObjectHeader) -> Result<PriorGaps, CodecError> {
         let gaps = PriorGaps::from_extensions(&object.extensions, self.group_id)?;
-        if gaps.group.iter().any(|gap| self.seen.iter().any(|seen| seen != gap)) {
+        if gaps.group.is_empty() {
+            return Ok(gaps);
+        }
+        let common: Vec<u64> = match &self.common {
+            Some(common) => common.iter().copied().filter(|v| gaps.group.contains(v)).collect(),
+            None => {
+                let mut values = gaps.group.clone();
+                values.sort_unstable();
+                values.dedup();
+                values
+            }
+        };
+        if common.is_empty() {
             return Err(CodecError::MalformedTrack {
                 detail: format!(
-                    "two Objects in Group {} carry different Prior Group ID Gap values",
+                    "the Objects in Group {} carry no Prior Group ID Gap value in common",
                     self.group_id
                 ),
             });
         }
-        for &gap in &gaps.group {
-            if !self.seen.contains(&gap) {
-                self.seen.push(gap);
-            }
-        }
+        self.common = Some(common);
+        Ok(gaps)
+    }
+}
+
+/// The Prior Group ID Gap conditions of draft-11 Section 10.1 that one
+/// fetch stream shows.
+///
+/// [`PriorGaps::from_extensions`] refuses a gap larger than the Group ID. Across
+/// the stream this refuses Objects of one Group with no value in common, read
+/// as [`SubgroupGaps`] reads them, and "an Object with a Group ID within a
+/// previously communicated gap" for the Group before on the stream. An Object
+/// whose values differ has communicated at least the least of them, whichever
+/// is that Object's. draft-11 Section 8.13: "Within each group,
+/// objects are sent in Object ID order; subgroup ID is not used for ordering."
+///
+/// [`FetchObjectHeader::decode`] reads one Object and applies none of this: a
+/// reader of a fetch stream checks each Object with one `FetchGaps`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+// Boxed so that the fetch readers holding one stay small.
+pub struct FetchGaps(Box<crate::prior_gaps::FetchGapTracker>);
+
+impl Default for FetchGaps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FetchGaps {
+    /// Track the Objects of one fetch stream.
+    pub fn new() -> Self {
+        Self(Box::new(crate::prior_gaps::FetchGapTracker::new(
+            crate::prior_gaps::GapRules::Draft11To13,
+        )))
+    }
+
+    /// Check the next Object on the stream, from its Group ID, Object ID and
+    /// extension block, refusing a gap condition with
+    /// [`CodecError::MalformedTrack`] and a block that does not parse as
+    /// [`parse_object_properties`] does. Records the Object only when it
+    /// passes.
+    pub fn check(
+        &mut self,
+        group_id: u64,
+        object_id: u64,
+        extensions: &[u8],
+    ) -> Result<PriorGaps, CodecError> {
+        let gaps = PriorGaps::from_extensions(extensions, group_id)?;
+        self.0.check(group_id, object_id, &gaps.group, None)?;
         Ok(gaps)
     }
 }
@@ -1135,7 +1211,39 @@ mod prior_gap_tests {
     fn values_within_one_object_are_not_compared() {
         let mut gaps = SubgroupGaps::new(&header(5));
         assert_eq!(gaps.check(&object(0, &[2, 3])).unwrap().group, vec![2, 3]);
-        assert!(is_malformed_track(gaps.check(&object(1, &[2]))));
+        assert_eq!(gaps.check(&object(1, &[3, 2, 3])).unwrap().group, vec![3, 2, 3]);
+    }
+
+    #[test]
+    fn objects_with_a_common_value_are_accepted() {
+        let mut gaps = SubgroupGaps::new(&header(5));
+        gaps.check(&object(0, &[2, 3])).unwrap();
+        gaps.check(&object(1, &[3, 4])).unwrap();
+        gaps.check(&object(2, &[])).unwrap();
+        gaps.check(&object(3, &[3])).unwrap();
+    }
+
+    #[test]
+    fn objects_that_share_no_value_are_refused() {
+        let mut gaps = SubgroupGaps::new(&header(5));
+        gaps.check(&object(0, &[2, 3])).unwrap();
+        assert!(is_malformed_track(gaps.check(&object(1, &[4, 5]))));
+        gaps.check(&object(2, &[3, 4])).unwrap();
+        assert!(is_malformed_track(gaps.check(&object(3, &[4]))));
+    }
+
+    #[test]
+    fn objects_with_no_value_common_to_all_are_refused() {
+        let mut gaps = SubgroupGaps::new(&header(5));
+        gaps.check(&object(0, &[1, 2])).unwrap();
+        gaps.check(&object(1, &[2, 3])).unwrap();
+        assert!(is_malformed_track(gaps.check(&object(2, &[1, 3]))));
+    }
+
+    #[test]
+    fn a_gap_larger_than_the_group_id_under_every_reading_is_refused() {
+        assert!(is_malformed_track(SubgroupGaps::new(&header(5)).check(&object(0, &[7, 6]))));
+        SubgroupGaps::new(&header(5)).check(&object(0, &[2, 6])).unwrap();
     }
 
     #[test]

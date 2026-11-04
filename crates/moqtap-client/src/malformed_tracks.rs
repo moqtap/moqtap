@@ -105,6 +105,28 @@ pub enum MalformedTrackCondition {
     /// Detected by the codec's `SubgroupGaps`, which a subgroup stream reader
     /// holds for one stream.
     PriorGroupIdGap,
+    /// A Prior Group ID Gap or Prior Object ID Gap condition, on drafts 14-23:
+    /// draft-14 Section 11.1, draft-14 Section 11.3, draft-15 Section 11.1,
+    /// draft-15 Section 11.2, draft-16 Section 11.3, draft-16 Section 11.4,
+    /// draft-17 Section 11.7, draft-17 Section 11.8, draft-18 Section 12.8,
+    /// draft-18 Section 12.9, draft-19 Section 12.8, draft-19 Section 12.9,
+    /// draft-20 Section 12.8, draft-20 Section 12.9, draft-21 Section 10.8,
+    /// draft-21 Section 10.9, draft-22 Section 10.8, draft-22 Section 10.9,
+    /// draft-23 Section 10.8 and draft-23 Section 10.9.
+    ///
+    /// Detected by the codec's subgroup, datagram and fetch readers, whose
+    /// `MalformedTrack` error does not say which of the two gaps it was.
+    PriorGap,
+    /// "An Object contains an Immutable Extensions header that contains another
+    /// Immutable Extensions key" (Immutable Properties from draft-17) or "A
+    /// Key-Value-Pair cannot be parsed", on drafts 14-23: draft-14 Section 11.2,
+    /// draft-15 Section 11.1, draft-16 Section 11.2, draft-17 Section 11.6,
+    /// draft-18 Section 12.7, draft-19 Section 12.7, draft-20 Section 12.7,
+    /// draft-21 Section 10.7, draft-22 Section 10.7 and draft-23 Section 10.7.
+    ///
+    /// Detected by the codec's subgroup, datagram and fetch readers, whose
+    /// `MalformedObjectProperties` error does not say which of the two it was.
+    MalformedPropertyBlock,
 }
 
 impl std::fmt::Display for MalformedTrackCondition {
@@ -121,6 +143,14 @@ impl std::fmt::Display for MalformedTrackCondition {
             }
             MalformedTrackCondition::PriorGroupIdGap => {
                 f.write_str("an Object carried a Prior Group ID Gap its Group cannot have")
+            }
+            MalformedTrackCondition::PriorGap => {
+                f.write_str("an Object carried a Prior Group ID Gap or Prior Object ID Gap its Track cannot have")
+            }
+            MalformedTrackCondition::MalformedPropertyBlock => {
+                f.write_str(
+                    "an Object carried an extension or property block its draft makes malformed (a Key-Value-Pair that cannot be parsed, or Immutable nested in Immutable)",
+                )
             }
         }
     }

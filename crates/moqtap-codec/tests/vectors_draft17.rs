@@ -493,9 +493,14 @@ fn run_fetch_vectors(relative_path: &str) {
             let bytes =
                 hex::decode(&vector.hex).unwrap_or_else(|e| panic!("[{}] bad hex: {e}", vector.id));
             let mut cursor: &[u8] = &bytes;
-            match FetchHeader::decode(&mut cursor) {
-                Ok(_) => panic!("[{}] expected decode error but succeeded", vector.id),
-                Err(e) => vector.assert_error(&e),
+            match FetchHeader::decode(&mut cursor).err().or_else(|| {
+                test_vectors::fetch_stream::first_failure(
+                    moqtap_codec::version::DraftVersion::Draft17,
+                    &bytes,
+                )
+            }) {
+                Some(e) => vector.assert_error(&e),
+                None => panic!("[{}] expected decode error but succeeded", vector.id),
             }
         }
     }

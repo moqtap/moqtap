@@ -6,7 +6,9 @@
 //! draft-11 Section 10.1, draft-12 Section 10.1 and draft-13 Section 10.1: "A
 //! track with a Group that contains more than one Object with different values
 //! for Prior Group ID Gap or has a Prior Group ID Gap larger than the Group ID
-//! is considered malformed."
+//! is considered malformed." These drafts do not say which value is an
+//! Object's when it carries several, so the Objects differ only when no value
+//! is common to all of them, as the codec's `SubgroupGaps` documents.
 //!
 //! draft-12 Section 2.5 and draft-13 Section 2.5: "When a subscriber detects a
 //! Malformed Track, it MUST UNSUBSCRIBE from the Track and SHOULD deliver an
@@ -20,12 +22,14 @@ fn v(n: u64) -> VarInt {
     VarInt::from_u64(n).unwrap()
 }
 
-/// One Prior Group ID Gap extension header (type 0x40).
+/// One Prior Group ID Gap extension header (type 0x40) per entry of `gaps`.
 #[allow(dead_code)]
-fn gap_block(gap: u64) -> Vec<u8> {
+fn gap_block(gaps: &[u64]) -> Vec<u8> {
     let mut block = Vec::new();
-    v(0x40).encode(&mut block);
-    v(gap).encode(&mut block);
+    for &gap in gaps {
+        v(0x40).encode(&mut block);
+        v(gap).encode(&mut block);
+    }
     block
 }
 
@@ -49,6 +53,13 @@ macro_rules! gap_reader_gates {
             /// extension block, then one Object per entry of `gaps`, each with
             /// that Prior Group ID Gap.
             pub fn stream_bytes(alias: u64, group: u64, gaps: &[u64]) -> Vec<u8> {
+                let objects: Vec<&[u64]> = gaps.iter().map(std::slice::from_ref).collect();
+                stream_bytes_with(alias, group, &objects)
+            }
+
+            /// [`stream_bytes`], each Object carrying every Prior Group ID Gap
+            /// its entry of `objects` lists.
+            fn stream_bytes_with(alias: u64, group: u64, objects: &[&[u64]]) -> Vec<u8> {
                 let mut buf = Vec::new();
                 AnySubgroupHeader::$version(SubgroupHeader {
                     stream_type: StreamType::SubgroupExplicitExt,
@@ -59,8 +70,8 @@ macro_rules! gap_reader_gates {
                 })
                 .encode_stream_checked(&mut buf)
                 .expect("encode the subgroup header");
-                for (id, &gap) in gaps.iter().enumerate() {
-                    let extensions = gap_block(gap);
+                for (id, &gaps) in objects.iter().enumerate() {
+                    let extensions = gap_block(gaps);
                     ObjectHeader {
                         object_id: v(id as u64),
                         extension_headers_length: v(extensions.len() as u64),
@@ -130,6 +141,41 @@ macro_rules! gap_reader_gates {
                 for result in read(stream_bytes(1, 5, &[2, 2]), 2).await {
                     result.expect("one gap value within the Group ID is conforming");
                 }
+            }
+
+            #[tokio::test]
+            async fn objects_that_share_a_gap_are_accepted() {
+                let objects: [&[u64]; 3] = [&[2, 3], &[2], &[3, 2]];
+                for result in read(stream_bytes_with(1, 5, &objects), 3).await {
+                    result.expect("Objects that share a gap value are not refused");
+                }
+            }
+
+            #[tokio::test]
+            async fn objects_that_share_no_gap_are_refused() {
+                let objects: [&[u64]; 2] = [&[2, 3], &[4]];
+                let results = read(stream_bytes_with(1, 5, &objects), 2).await;
+                results[0].as_ref().expect("one Object's values are not compared");
+                assert_malformed_track(&results[1]);
+            }
+
+            #[tokio::test]
+            async fn objects_with_no_gap_common_to_all_are_refused() {
+                let objects: [&[u64]; 3] = [&[1, 2], &[2, 3], &[1, 3]];
+                let results = read(stream_bytes_with(1, 5, &objects), 3).await;
+                results[0].as_ref().expect("the first Object's gaps are within its Group ID");
+                results[1].as_ref().expect("the first two Objects share gap 2");
+                assert_malformed_track(&results[2]);
+            }
+
+            #[tokio::test]
+            async fn a_gap_larger_than_the_group_id_under_every_reading_is_refused() {
+                let objects: [&[u64]; 1] = [&[7, 6]];
+                assert_malformed_track(&read(stream_bytes_with(1, 5, &objects), 1).await[0]);
+                let objects: [&[u64]; 1] = [&[2, 6]];
+                read(stream_bytes_with(1, 5, &objects), 1).await[0]
+                    .as_ref()
+                    .expect("one of the Object's gaps is within its Group ID");
             }
         }
     };

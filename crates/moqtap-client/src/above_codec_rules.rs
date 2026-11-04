@@ -3106,7 +3106,7 @@ mod tests {
 /// The split is the whole point: the two are opposite findings, one this build
 /// declining to do something and the other a relay having done something the
 /// draft forbids. Without it both reach a consumer as prose.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DraftSpecificCause {
     /// This endpoint refused the call. Nothing was written and no state moved.
     ///
@@ -3151,6 +3151,18 @@ pub enum DraftSpecificCause {
         /// Exactly the contract [`crate::dispatch::ErrorCause::Codec`] gives
         /// `close`, and for the same reason: a rule a draft attaches no
         /// consequence to is not grounds to name a peer.
+        close: Option<u64>,
+    },
+    /// The decoder refused what the peer sent, and the draft's own variant
+    /// carries the refusal with something the codec's error does not name.
+    ///
+    /// [`crate::dispatch::AnyConnectionError`] reports it as
+    /// [`crate::dispatch::ErrorCause::Codec`], as it does a bare codec error.
+    Codec {
+        /// The decoder's refusal.
+        error: moqtap_codec::error::CodecError,
+        /// The session error code this draft's `codec_session_error_code`
+        /// names for it, where it names one.
         close: Option<u64>,
     },
 }

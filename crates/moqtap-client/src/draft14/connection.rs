@@ -90,9 +90,44 @@ pub enum ConnectionError {
     /// [`LocalRefusal`]: crate::above_codec_rules::DraftSpecificCause::LocalRefusal
     /// [`ErrorCause::Facade`]: crate::dispatch::ErrorCause::Facade
     #[error(
-        "a control message decoded for draft-14 did not narrow to draft-14: a defect in this          build, and evidence about nothing the peer did"
+        "a control message decoded for draft-14 did not narrow to draft-14: a defect in this build, and evidence about nothing the peer did"
     )]
     ControlMessageNarrowing,
+    /// A datagram whose Type announces extension headers arrived with an
+    /// Extension Headers Length of 0.
+    ///
+    /// draft-14 Section 10.3.1: "If an endpoint receives a datagram with
+    /// Extensions Present as "Yes" and a Extension Headers Length of 0, it MUST
+    /// close the session with PROTOCOL_VIOLATION."
+    ///
+    /// The codec's header decoder refuses such a datagram as a bare
+    /// `InvalidField`. [`Connection::recv_datagram`] names it here, and
+    /// [`Connection::close_for_data_stream`] closes the session over it.
+    #[error(
+        "the datagram for object {object_id} announces extension headers and has an Extension Headers Length of 0"
+    )]
+    EmptyDatagramExtensions {
+        /// The Object ID the datagram named.
+        object_id: u64,
+    },
+}
+
+/// [`ConnectionError::EmptyDatagramExtensions`] for a datagram the header
+/// decoder refused as `InvalidField`, when its empty extension block was the
+/// fault.
+///
+/// Every Type the draft-14 Section 10.3.1 table marks Extensions Present, with
+/// the Object ID where the table marks it present.
+fn empty_datagram_extensions(data: &[u8]) -> Option<ConnectionError> {
+    use crate::datagram_prefix::{empty_extension_block, Prefix};
+    empty_extension_block(data, |datagram_type, _| {
+        let ty = moqtap_codec::draft14::data_stream::DatagramType::from_u8(
+            u8::try_from(datagram_type).ok()?,
+        )?;
+        ty.extensions_present()
+            .then_some(Prefix { object_id: ty.object_id_present(), priority: true })
+    })
+    .map(|object_id| ConnectionError::EmptyDatagramExtensions { object_id })
 }
 
 impl From<crate::transport::DialError> for ConnectionError {
@@ -339,12 +374,22 @@ pub struct FramedRecvStream {
     /// without being measured, because `note_subgroup_object` has nothing to
     /// measure it against.
     tracking: Option<(TrackObjects, u64)>,
+    /// The Prior gap conditions this fetch stream's Objects show. Reset by
+    /// [`FramedRecvStream::read_fetch_header`].
+    fetch_gaps: moqtap_codec::draft14::data_stream::FetchGaps,
 }
 
 impl FramedRecvStream {
     /// Create a new framed receive stream for the given draft version.
     pub fn new(inner: RecvStream, draft: DraftVersion) -> Self {
-        Self { inner, buf: BytesMut::with_capacity(4096), draft, subgroup_io: None, tracking: None }
+        Self {
+            inner,
+            buf: BytesMut::with_capacity(4096),
+            draft,
+            subgroup_io: None,
+            tracking: None,
+            fetch_gaps: moqtap_codec::draft14::data_stream::FetchGaps::new(),
+        }
     }
 
     /// Get the transport-level stream ID.
@@ -504,6 +549,7 @@ impl FramedRecvStream {
                 Ok(header) => {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
+                    self.fetch_gaps = moqtap_codec::draft14::data_stream::FetchGaps::new();
                     return Ok(header);
                 }
                 Err(e) if e.is_incomplete() => {
@@ -554,6 +600,11 @@ impl FramedRecvStream {
     /// Read the next draft-14 fetch object from this stream. Fetch objects
     /// are self-describing, so no prior `read_fetch_header` state is needed
     /// to decode each object.
+    ///
+    /// A Prior Group ID Gap or Prior Object ID Gap fault the stream shows is
+    /// returned as [`CodecError::MalformedTrack`], and an extension block that
+    /// does not parse as [`CodecError::MalformedObjectProperties`];
+    /// [`Connection::withdraw_for_fetch_stream`] withdraws from the track.
     pub async fn read_fetch_object(&mut self) -> Result<FetchObject, ConnectionError> {
         loop {
             let mut cursor = &self.buf[..];
@@ -561,6 +612,13 @@ impl FramedRecvStream {
                 Ok(obj) => {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
+                    self.fetch_gaps
+                        .check(
+                            obj.group_id.into_inner(),
+                            obj.object_id.into_inner(),
+                            &obj.extension_headers,
+                        )
+                        .map_err(ConnectionError::Codec)?;
                     return Ok(obj);
                 }
                 Err(e) if e.is_incomplete() => {
@@ -1394,6 +1452,20 @@ impl Connection {
         }
     }
 
+    /// [`Self::withdraw_malformed_track`] for the track the FETCH `request_id`
+    /// asked for.
+    async fn withdraw_malformed_fetch_track(
+        &self,
+        request_id: u64,
+        condition: MalformedTrackCondition,
+    ) {
+        for msg in self.endpoint.withdraw_malformed_fetch_track(request_id, condition) {
+            if self.send_control(&msg).await.is_err() {
+                break;
+            }
+        }
+    }
+
     /// Record the framing an arriving object was sent with, and withdraw from
     /// the track when it is the second framing that track has been sent.
     ///
@@ -1569,11 +1641,34 @@ impl Connection {
         Ok(())
     }
 
-    /// Receive a datagram and decode its header.
+    /// Receive a datagram and decode it whole.
+    ///
+    /// An extension block announced with a length of 0 is returned as
+    /// [`ConnectionError::EmptyDatagramExtensions`], which
+    /// [`Connection::close_for_data_stream`] closes the session over.
+    ///
+    /// The codec's `DatagramObject::decode_object` then reads the whole datagram,
+    /// and its refusals are returned as [`ConnectionError::Codec`]: an extension
+    /// block that does not parse, a payload after a status, and a Prior Group ID
+    /// Gap or Prior Object ID Gap fault. A gap fault,
+    /// [`CodecError::MalformedTrack`], and an extension block that does not
+    /// parse, [`CodecError::MalformedObjectProperties`] (draft-14 Section 11.2),
+    /// make the track malformed, and this withdraws from it before returning,
+    /// as draft-14 Section 2.5 requires: "When a subscriber detects a Malformed
+    /// Track, it MUST UNSUBSCRIBE any subscription and FETCH_CANCEL any fetch
+    /// for that Track from that publisher, and SHOULD deliver an error to the
+    /// application." The session stays open.
     pub async fn recv_datagram(&self) -> Result<(AnyDatagramHeader, Bytes), ConnectionError> {
         let data = self.transport.recv_datagram().await?;
         let mut cursor = &data[..];
-        let header = AnyDatagramHeader::decode(self.draft, &mut cursor)?;
+        let header = match AnyDatagramHeader::decode(self.draft, &mut cursor) {
+            Ok(header) => header,
+            Err(CodecError::InvalidField) => {
+                return Err(empty_datagram_extensions(&data)
+                    .unwrap_or(ConnectionError::Codec(CodecError::InvalidField)));
+            }
+            Err(err) => return Err(err.into()),
+        };
         let consumed = data.len() - cursor.len();
         let payload = data.slice(consumed..);
         self.emit(ClientEvent::DatagramReceived {
@@ -1581,6 +1676,20 @@ impl Connection {
             header: header.clone(),
             payload_len: payload.len(),
         });
+        // Refutable only in a build with more than one draft enabled.
+        #[allow(irrefutable_let_patterns)]
+        if let AnyDatagramHeader::Draft14(_) = &header {
+            let whole =
+                moqtap_codec::draft14::data_stream::DatagramObject::decode_object(&mut &data[..]);
+            if let Err(err) = whole {
+                if let Some(condition) =
+                    malformed_track_condition(&ConnectionError::Codec(err.clone()))
+                {
+                    self.withdraw_malformed_track(header.meta().track_alias, condition).await;
+                }
+                return Err(err.into());
+            }
+        }
         // A datagram is the other framing, and it settles the track's just as a
         // subgroup header does.
         self.note_received_framing(header.meta().track_alias, ObjectForwardingPreference::Datagram)
@@ -1648,10 +1757,11 @@ impl Connection {
     /// Which of this draft's *own* `ConnectionError` variants this error is,
     /// and which kind of thing it says.
     ///
-    /// Draft-14 adds none. Every variant of its [`ConnectionError`] is one of the
-    /// ten every draft carries, and [`AnyConnectionError`] classifies those
-    /// itself — so `None` here is this draft's answer rather than a stub, and it
-    /// stays right for exactly as long as that list does.
+    /// The ten every draft carries answer `None` here: [`AnyConnectionError`]
+    /// classifies those itself. Draft-14 adds two:
+    /// [`ConnectionError::ControlMessageNarrowing`], a defect in this build, and
+    /// [`ConnectionError::EmptyDatagramExtensions`], a decoder refusal the draft
+    /// answers with a close.
     ///
     /// Matched exhaustively, with no wildcard arm and deliberately so: a
     /// variant added to this draft's error type has to arrive here as a compile
@@ -1683,6 +1793,18 @@ impl Connection {
             // doc.
             ConnectionError::ControlMessageNarrowing => {
                 Some(crate::above_codec_rules::DraftSpecificCause::LocalRefusal)
+            }
+            // The codec refuses the datagram as a bare `InvalidField`, and
+            // `recv_datagram` names the rule, so `close_for_data_stream` reads
+            // the close here. See the variant's own doc.
+            ConnectionError::EmptyDatagramExtensions { .. } => {
+                Some(crate::above_codec_rules::DraftSpecificCause::Codec {
+                    error: CodecError::InvalidField,
+                    close: Some(
+                        moqtap_codec::draft14::error_codes::SessionErrorCode::ProtocolViolation
+                            .as_u64(),
+                    ),
+                })
             }
         }
     }
@@ -1992,6 +2114,56 @@ impl Connection {
         true
     }
 
+    /// [`Connection::withdraw_for_data_stream`] for an error read from the
+    /// subgroup stream `header` opened, which also withdraws from the track
+    /// over the [`CodecError::MalformedTrack`] that
+    /// [`FramedRecvStream::read_subgroup_object`] returns for a Prior Group ID
+    /// Gap or Prior Object ID Gap fault, and over the
+    /// [`CodecError::MalformedObjectProperties`] it returns for an extension
+    /// block that does not parse (draft-14 Section 11.2). Those errors name no
+    /// track, so the header supplies its alias.
+    ///
+    /// draft-14 Section 2.5: "When a subscriber detects a Malformed Track, it
+    /// MUST UNSUBSCRIBE any subscription and FETCH_CANCEL any fetch for that
+    /// Track from that publisher, and SHOULD deliver an error to the
+    /// application."
+    pub async fn withdraw_for_subgroup_stream(
+        &self,
+        header: &AnySubgroupHeader,
+        err: &ConnectionError,
+    ) -> bool {
+        let Some(condition) = malformed_track_condition(err) else {
+            return self.withdraw_for_data_stream(err).await;
+        };
+        self.withdraw_malformed_track(header.track_alias(), condition).await;
+        true
+    }
+
+    /// [`Connection::withdraw_for_data_stream`] for an error read from the fetch
+    /// stream `header` opened, which also withdraws from the track the FETCH
+    /// asked for over the [`CodecError::MalformedTrack`] that
+    /// [`FramedRecvStream::read_fetch_object`] returns for a Prior Group ID Gap
+    /// or Prior Object ID Gap fault, and over the
+    /// [`CodecError::MalformedObjectProperties`] it returns for an extension
+    /// block that does not parse (draft-14 Section 11.2). Those errors name no
+    /// track, so the header's Request ID supplies it.
+    ///
+    /// draft-14 Section 2.5: "When a subscriber detects a Malformed Track, it
+    /// MUST UNSUBSCRIBE any subscription and FETCH_CANCEL any fetch for that
+    /// Track from that publisher, and SHOULD deliver an error to the
+    /// application."
+    pub async fn withdraw_for_fetch_stream(
+        &self,
+        header: &AnyFetchHeader,
+        err: &ConnectionError,
+    ) -> bool {
+        let Some(condition) = malformed_track_condition(err) else {
+            return self.withdraw_for_data_stream(err).await;
+        };
+        self.withdraw_malformed_fetch_track(header.request_id(), condition).await;
+        true
+    }
+
     /// Close the session over a rule broken on a data stream, reporting whether
     /// it did.
     ///
@@ -2031,6 +2203,20 @@ impl Connection {
                 self.close(wire_code, inner.to_string().as_bytes());
                 true
             }
+            // Not a `Codec` failure: the codec refuses the datagram as a bare
+            // `InvalidField`, which `recv_datagram` names, so the code comes
+            // from `draft_specific_cause`.
+            ConnectionError::EmptyDatagramExtensions { .. } => {
+                let Some(crate::above_codec_rules::DraftSpecificCause::Codec {
+                    close: Some(code),
+                    ..
+                }) = Self::draft_specific_cause(err)
+                else {
+                    return false;
+                };
+                self.close(u32::try_from(code).unwrap_or(u32::MAX), err.to_string().as_bytes());
+                true
+            }
             _ => false,
         }
     }
@@ -2039,6 +2225,21 @@ impl Connection {
     pub fn close(&self, code: u32, reason: &[u8]) {
         self.emit(ClientEvent::Closed { code, reason: reason.to_vec() });
         self.transport.close(code, reason);
+    }
+}
+
+/// The Malformed Track condition a codec refusal on a data path is, on this
+/// draft, or `None` for a refusal that is not one.
+fn malformed_track_condition(err: &ConnectionError) -> Option<MalformedTrackCondition> {
+    match err {
+        ConnectionError::Codec(CodecError::MalformedTrack { .. }) => {
+            Some(MalformedTrackCondition::PriorGap)
+        }
+        // draft-14 Section 11.2: "A Key-Value-Pair cannot be parsed"
+        ConnectionError::Codec(CodecError::MalformedObjectProperties { .. }) => {
+            Some(MalformedTrackCondition::MalformedPropertyBlock)
+        }
+        _ => None,
     }
 }
 

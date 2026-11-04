@@ -1087,7 +1087,7 @@ mod fo15 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let header = reader.read_object_header(buf)?;
+        let header = reader.read_frame_header(buf)?;
         let payload_length = header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
         let meta = AnyFetchObjectMeta {
@@ -1133,9 +1133,11 @@ mod fo16 {
     fn parts(
         reader: &mut FetchObjectReader,
         buf: &mut impl Buf,
+        checked: bool,
     ) -> Result<(FetchObjectHeader, FetchObjectLocation), CodecError> {
         let header = FetchObjectHeader::decode(buf)?;
-        let location = reader.resolve(&header)?;
+        let location =
+            if checked { reader.resolve(&header)? } else { reader.resolve_frame(&header)? };
         Ok((header, location))
     }
 
@@ -1163,7 +1165,7 @@ mod fo16 {
         reader: &mut FetchObjectReader,
         buf: &mut impl Buf,
     ) -> Result<AnyFetchObject, CodecError> {
-        let (header, location) = parts(reader, buf)?;
+        let (header, location) = parts(reader, buf, true)?;
         let payload = conv::take(buf, header.payload_length.into_inner())?;
         Ok(resolved(&location).into_object(header.extensions.unwrap_or_default(), payload))
     }
@@ -1173,7 +1175,7 @@ mod fo16 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let (header, location) = parts(reader, buf)?;
+        let (header, location) = parts(reader, buf, false)?;
         let payload_length = header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
         let meta = resolved(&location).into_meta(
@@ -1233,7 +1235,7 @@ mod fo17 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let object = reader.read_object_header(buf)?;
+        let object = reader.read_frame_header(buf)?;
         let resolved = resolved(&object);
         let payload_length = object.header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
@@ -1294,7 +1296,7 @@ mod fo18 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let object = reader.read_object_header(buf)?;
+        let object = reader.read_frame_header(buf)?;
         let resolved = resolved(&object);
         let payload_length = object.header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
@@ -1355,7 +1357,7 @@ mod fo19 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let object = reader.read_object_header(buf)?;
+        let object = reader.read_frame_header(buf)?;
         let resolved = resolved(&object);
         let payload_length = object.header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
@@ -1419,7 +1421,7 @@ mod fo20 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let object = reader.read_object_header(buf)?;
+        let object = reader.read_frame_header(buf)?;
         let resolved = resolved(&object);
         let payload_length = object.header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
@@ -1482,7 +1484,7 @@ mod fo21 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let object = reader.read_object_header(buf)?;
+        let object = reader.read_frame_header(buf)?;
         let resolved = resolved(&object);
         let payload_length = object.header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
@@ -1546,7 +1548,7 @@ mod fo22 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let object = reader.read_object_header(buf)?;
+        let object = reader.read_frame_header(buf)?;
         let resolved = resolved(&object);
         let payload_length = object.header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
@@ -1615,7 +1617,7 @@ mod fo23 {
         buf: &mut impl Buf,
     ) -> Result<super::AnyFetchFrame, CodecError> {
         let start = buf.remaining();
-        let object = reader.read_object_header(buf)?;
+        let object = reader.read_frame_header(buf)?;
         let resolved = resolved(&object);
         let payload_length = object.header.payload_length.into_inner();
         conv::skip(buf, payload_length)?;
@@ -1906,10 +1908,10 @@ impl AnySubgroupObjectReader {
     /// callers that may be fed partial buffers must probe against a clone.
     ///
     /// Refuses a property block that does not parse, as
-    /// [`crate::object_properties::parse_object_properties`] does, and the
-    /// Prior Group ID Gap conditions one stream shows on drafts 11-23, and the
-    /// Prior Object ID Gap ones on drafts 14-23, as
-    /// [`CodecError::MalformedTrack`];
+    /// [`crate::object_properties::parse_object_properties`] does, and, as
+    /// [`CodecError::MalformedTrack`], the Prior Group ID Gap conditions one
+    /// stream shows on drafts 11-23 and the Prior Object ID Gap ones on drafts
+    /// 14-23, as each draft's subgroup reader does;
     /// [`read_object_meta`](Self::read_object_meta) does not read inside it.
     #[allow(unused_variables, unreachable_code)]
     pub fn read_object(&mut self, buf: &mut impl Buf) -> Result<AnySubgroupObject, CodecError> {
@@ -2606,6 +2608,55 @@ enum FetchReaderState {
     Draft23(crate::draft23::data_stream::FetchObjectReader),
 }
 
+/// The Prior gap conditions one fetch stream shows, on drafts 11-14, whose
+/// fetch objects decode one at a time. From draft-15 each draft's
+/// `FetchObjectReader` applies them in `read_object_header` (`resolve` on
+/// draft-16); drafts 07-10 define no Prior gap.
+#[derive(Debug, Clone)]
+enum FetchGapsState {
+    None,
+    #[cfg(feature = "draft11")]
+    Draft11(crate::draft11::data_stream::FetchGaps),
+    #[cfg(feature = "draft12")]
+    Draft12(crate::draft12::data_stream::FetchGaps),
+    #[cfg(feature = "draft13")]
+    Draft13(crate::draft13::data_stream::FetchGaps),
+    #[cfg(feature = "draft14")]
+    Draft14(crate::draft14::data_stream::FetchGaps),
+}
+
+impl FetchGapsState {
+    fn for_draft(draft: DraftVersion) -> Self {
+        match draft {
+            #[cfg(feature = "draft11")]
+            DraftVersion::Draft11 => Self::Draft11(crate::draft11::data_stream::FetchGaps::new()),
+            #[cfg(feature = "draft12")]
+            DraftVersion::Draft12 => Self::Draft12(crate::draft12::data_stream::FetchGaps::new()),
+            #[cfg(feature = "draft13")]
+            DraftVersion::Draft13 => Self::Draft13(crate::draft13::data_stream::FetchGaps::new()),
+            #[cfg(feature = "draft14")]
+            DraftVersion::Draft14 => Self::Draft14(crate::draft14::data_stream::FetchGaps::new()),
+            #[allow(unreachable_patterns)]
+            _ => Self::None,
+        }
+    }
+
+    #[allow(unused_variables)]
+    fn check(&mut self, group_id: u64, object_id: u64, block: &[u8]) -> Result<(), CodecError> {
+        match self {
+            Self::None => Ok(()),
+            #[cfg(feature = "draft11")]
+            Self::Draft11(gaps) => gaps.check(group_id, object_id, block).map(|_| ()),
+            #[cfg(feature = "draft12")]
+            Self::Draft12(gaps) => gaps.check(group_id, object_id, block).map(|_| ()),
+            #[cfg(feature = "draft13")]
+            Self::Draft13(gaps) => gaps.check(group_id, object_id, block).map(|_| ()),
+            #[cfg(feature = "draft14")]
+            Self::Draft14(gaps) => gaps.check(group_id, object_id, block).map(|_| ()),
+        }
+    }
+}
+
 /// Stateful reader for the frames on a fetch data stream, for any enabled
 /// draft.
 ///
@@ -2633,6 +2684,7 @@ enum FetchReaderState {
 #[derive(Debug, Clone)]
 pub struct AnyFetchObjectReader {
     state: FetchReaderState,
+    gaps: FetchGapsState,
 }
 
 impl AnyFetchObjectReader {
@@ -2763,7 +2815,8 @@ impl AnyFetchObjectReader {
                 )));
             }
         };
-        Ok(Self { state })
+        let gaps = FetchGapsState::for_draft(header.draft());
+        Ok(Self { state, gaps })
     }
 
     /// The draft this reader decodes.
@@ -2824,6 +2877,13 @@ impl AnyFetchObjectReader {
     /// Refuses a property block that does not parse, as
     /// [`crate::object_properties::parse_object_properties`] does;
     /// [`read_object_frame`](Self::read_object_frame) does not read inside it.
+    ///
+    /// Refuses, with [`CodecError::MalformedTrack`], the Prior gap conditions
+    /// the stream shows on drafts 11-23, as each draft's `FetchGaps` does. The
+    /// reader has moved past the Object when it does. Neither
+    /// [`read_object_frame`](Self::read_object_frame) nor
+    /// [`read_object_meta`](Self::read_object_meta) applies them, so a
+    /// forwarder reading with those passes the Objects on as they arrived.
     #[allow(unused_variables, unreachable_code)]
     pub fn read_object(&mut self, buf: &mut impl Buf) -> Result<AnyFetchObject, CodecError> {
         let read: Result<AnyFetchObject, CodecError> = match &mut self.state {
@@ -2866,6 +2926,9 @@ impl AnyFetchObjectReader {
         };
         let object = read?;
         crate::object_properties::parse_object_properties(self.draft(), &object.extension_headers)?;
+        if object.end_of_range.is_none() {
+            self.gaps.check(object.group_id, object.object_id, &object.extension_headers)?;
+        }
         Ok(object)
     }
 

@@ -1,6 +1,8 @@
 #[allow(dead_code)]
 pub mod dispatch_check;
 #[allow(dead_code)]
+pub mod fetch_stream;
+#[allow(dead_code)]
 pub mod fields_json;
 #[allow(dead_code)]
 pub mod properties;

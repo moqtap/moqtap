@@ -297,6 +297,9 @@ macro_rules! dispatch_all {
                             Some(DraftSpecificCause::PeerViolation { rule, close }) => {
                                 ErrorCause::PeerViolation { rule, close }
                             }
+                            Some(DraftSpecificCause::Codec { error, close }) => {
+                                ErrorCause::Codec { error, close }
+                            }
                             None => ErrorCause::Unclassified,
                         },
                     };
@@ -2603,6 +2606,18 @@ impl AnyFetchReader {
     /// is refused here rather than resolved against zero — draft-16 Section
     /// 10.4.4.1 makes it a PROTOCOL_VIOLATION, and there is no value to produce
     /// even where it does not.
+    ///
+    /// On drafts 11-23, the Prior gap conditions the stream shows, refused with
+    /// `CodecError::MalformedTrack` as each draft's `FetchGaps` refuses them,
+    /// and a property block that does not parse, refused with
+    /// `CodecError::MalformedObjectProperties`, which drafts 14-23 make a
+    /// Malformed Track.
+    ///
+    /// This reader does not withdraw from the track over either. The caller
+    /// answers them with the draft's own `Connection::withdraw_for_fetch_stream`
+    /// (drafts 12-16) or `Connection::requests_to_cancel_for_fetch_stream`
+    /// (drafts 17-23), passing `ConnectionError::Codec` of the error that
+    /// [`ErrorCause::Codec`] carries.
     pub async fn read_object(&mut self) -> Result<AnyFetchObject, AnyConnectionError> {
         data_stream_dispatch! {
             AnyFetchReader, self,
@@ -2662,8 +2677,17 @@ impl AnyFetchReader {
             [Draft16 @ "draft16"] => |s, _draft| {
                 let (header, payload) = s.stream.read_fetch_object().await
                     .map_err(AnyConnectionError::from)?;
-                let at = s.reader.resolve(&header)
-                    .map_err(|e| AnyConnectionError::facade(e.to_string()))?;
+                // A Malformed Track is the peer's, and reaches the caller as
+                // the codec error the draft's withdrawal reads.
+                let at = s.reader.resolve(&header).map_err(|e| match e {
+                    moqtap_codec::error::CodecError::MalformedTrack { .. }
+                    | moqtap_codec::error::CodecError::MalformedObjectProperties { .. } => {
+                        AnyConnectionError::from(
+                            crate::draft16::connection::ConnectionError::Codec(e),
+                        )
+                    }
+                    e => AnyConnectionError::facade(e.to_string()),
+                })?;
                 Ok(AnyFetchObject {
                     group_id: at.group_id,
                     subgroup_id: at.subgroup_id,

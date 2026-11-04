@@ -810,7 +810,7 @@ fn fetch_streams_with_a_codec_are_framed() {
             );
             assert!(
                 out.bypasses.is_empty(),
-                "[{draft}] chunk {chunk}: a draft whose fetch objects are addressed must not                  bypass: {:?}",
+                "[{draft}] chunk {chunk}: a draft whose fetch objects are addressed must not bypass: {:?}",
                 out.bypasses
             );
         }

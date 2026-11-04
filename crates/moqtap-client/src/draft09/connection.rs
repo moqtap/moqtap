@@ -89,7 +89,7 @@ pub enum ConnectionError {
     /// [`LocalRefusal`]: crate::above_codec_rules::DraftSpecificCause::LocalRefusal
     /// [`ErrorCause::Facade`]: crate::dispatch::ErrorCause::Facade
     #[error(
-        "a control message decoded for draft-09 did not narrow to draft-09: a defect in this          build, and evidence about nothing the peer did"
+        "a control message decoded for draft-09 did not narrow to draft-09: a defect in this build, and evidence about nothing the peer did"
     )]
     ControlMessageNarrowing,
 }

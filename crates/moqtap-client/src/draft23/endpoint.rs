@@ -1653,6 +1653,19 @@ impl Endpoint {
         self.requests_for_malformed_track_named(namespace, name, condition)
     }
 
+    /// [`Self::requests_for_malformed_track`] for the track the FETCH
+    /// `request_id` asked for, which a FETCH stream found malformed: the stream
+    /// names no alias. Empty for a Request ID this endpoint sent no FETCH under.
+    pub fn requests_for_malformed_fetch_track(
+        &self,
+        request_id: u64,
+        condition: MalformedTrackCondition,
+    ) -> Vec<VarInt> {
+        let Some(track) = self.fetch_tracks.get(&request_id) else { return Vec::new() };
+        let (namespace, name) = (track.namespace.clone(), track.name.clone());
+        self.requests_for_malformed_track_named(&namespace, &name, condition)
+    }
+
     /// [`Self::requests_for_malformed_track`] for a track named directly, as
     /// one a FETCH stream found malformed is: the stream names no alias.
     pub fn requests_for_malformed_track_named(

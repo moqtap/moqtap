@@ -2068,7 +2068,7 @@ mod tests {
                 assert_eq!(
                     bypassed.clone(),
                     None,
-                    "{draft:?} is compiled, so its fetch objects are the per-kind rules' to                      decide"
+                    "{draft:?} is compiled, so its fetch objects are the per-kind rules' to decide"
                 );
             }
 

@@ -9,15 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking.** `MalformedTrackCondition` gains `PriorGroupIdGap`; an exhaustive match over it no longer compiles without it.
+- **Breaking.** `MalformedTrackCondition` gains `PriorGroupIdGap`, `PriorGap` and `MalformedPropertyBlock`; an exhaustive match over it no longer compiles without them.
+- **Breaking.** `ConnectionError` gains `EmptyDatagramExtensions` on drafts 11-16, `EmptyDatagramProperties` on drafts 17-22, and `MalformedTrackDatagram` on drafts 17-23, which `recv_datagram` returns for a Prior gap fault or a property block that does not parse; an exhaustive match over it no longer compiles without them. `DraftSpecificCause` gains `Codec` and is no longer `Copy`. The signatures of `recv_datagram` and `requests_to_cancel` are unchanged.
 
 ### Added
 
-- Drafts 12-13: `Connection::withdraw_for_subgroup_stream`, which sends the UNSUBSCRIBE for the Malformed Track a subgroup stream reported, the Prior Group ID Gap fault included.
+- `Connection::withdraw_for_subgroup_stream` and `withdraw_for_fetch_stream` on drafts 12-16, and `requests_to_cancel_for_subgroup_stream` and `requests_to_cancel_for_fetch_stream` on drafts 17-23, which answer the Malformed Track a subgroup or fetch stream reported: an UNSUBSCRIBE on drafts 12-13, an UNSUBSCRIBE and FETCH_CANCEL on drafts 14-16, and the requests to cancel on drafts 17-23. `Endpoint::withdraw_malformed_fetch_track` (drafts 12-16) and `Endpoint::requests_for_malformed_fetch_track` (drafts 17-23) find the track by the FETCH's Request ID.
 
 ### Fixed
 
-- Drafts 11-13: `FramedRecvStream::read_subgroup_object` accepted a Prior Group ID Gap larger than the Group ID, or one that differs from an earlier Object's on the same stream. It now returns `CodecError::MalformedTrack`, and the session stays open. It also refuses an extension block that does not parse, as drafts 14-23 do.
+- Drafts 11-13: `FramedRecvStream::read_subgroup_object` accepted a Prior Group ID Gap larger than the Group ID, or Objects on the same stream with no Prior Group ID Gap value in common. It now returns `CodecError::MalformedTrack`, and the session stays open. It also refuses an extension block that does not parse, as drafts 14-23 do.
+- Drafts 11-23: `recv_datagram` read only a datagram's header. It now also refuses a property block that does not parse, a Prior gap fault and, on drafts 11-16, a payload after a status. The session stays open.
+- Drafts 12-16: `recv_datagram` now withdraws from the track over a Prior gap fault, with an UNSUBSCRIBE on drafts 12-13 and an UNSUBSCRIBE and FETCH_CANCEL on drafts 14-16. On drafts 17-23, `requests_to_cancel` names the requests to cancel for it.
+- Drafts 11-23: `FramedRecvStream::read_fetch_object` accepted the Prior gap faults a fetch stream shows. It now returns `CodecError::MalformedTrack`, and the session stays open, except for the ones a draft's own object-state text contradicts (a gap covering an earlier Object on drafts 16-22, an Object within an earlier gap on drafts 18-22). On draft-16, whose stream does not resolve Locations, the codec's `FetchObjectReader::resolve` and `AnyFetchReader::read_object` refuse them.
+- Drafts 16-22: `FramedRecvStream::read_subgroup_object` refused a Prior Object ID Gap covering an earlier Object on the stream, which these drafts allow. It no longer does.
+- Drafts 14-23: a property block that does not parse, which these drafts make a Malformed Track, was refused but never answered. The datagram, subgroup and fetch paths now withdraw from the track over it on drafts 14-16 and name the requests to cancel on drafts 17-23. Drafts 11-13 state no such condition and withdraw nothing.
+- Drafts 11-16: `recv_datagram` refused a datagram announcing an extension block with a length of 0 as `CodecError::InvalidField`, which `close_for_data_stream` did not close the session over. It now returns `EmptyDatagramExtensions`, which `close_for_data_stream` closes the session over with PROTOCOL_VIOLATION.
+- Drafts 17-22: `recv_datagram` accepted a datagram with the PROPERTIES bit set and a Properties Length of 0. It now returns `EmptyDatagramProperties`, which `close_for_data_stream` closes the session over with PROTOCOL_VIOLATION.
+- Drafts 15-18: `recv_datagram` accepted extension headers or properties on a datagram whose status is not Normal. It now returns `ExtensionsOnNonNormalStatus` or `PropertiesOnNonNormalStatus`, which `close_for_data_stream` closes the session over with PROTOCOL_VIOLATION.
 
 ## [0.10.0] - 2026-11-03
 

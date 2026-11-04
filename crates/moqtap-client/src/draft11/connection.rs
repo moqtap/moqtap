@@ -90,9 +90,42 @@ pub enum ConnectionError {
     /// [`LocalRefusal`]: crate::above_codec_rules::DraftSpecificCause::LocalRefusal
     /// [`ErrorCause::Facade`]: crate::dispatch::ErrorCause::Facade
     #[error(
-        "a control message decoded for draft-11 did not narrow to draft-11: a defect in this          build, and evidence about nothing the peer did"
+        "a control message decoded for draft-11 did not narrow to draft-11: a defect in this build, and evidence about nothing the peer did"
     )]
     ControlMessageNarrowing,
+    /// A datagram whose Type announces extension headers arrived with an
+    /// Extension Headers Length of 0.
+    ///
+    /// draft-11 Section 9.2: "If an endpoint receives a datagram with Type 0x01
+    /// and Extension Headers Length is 0, it MUST close the session with
+    /// Protocol Violation." draft-11 Section 9.3: "If an endpoint receives a
+    /// datagram with Type 0x03 and Extension Headers Length is 0, it MUST close
+    /// the session with Protocol Violation."
+    ///
+    /// The codec's header decoder refuses such a datagram as a bare
+    /// `InvalidField`. [`Connection::recv_datagram`] names it here, and
+    /// [`Connection::close_for_data_stream`] closes the session over it.
+    #[error(
+        "the datagram for object {object_id} announces extension headers and has an Extension Headers Length of 0"
+    )]
+    EmptyDatagramExtensions {
+        /// The Object ID the datagram named.
+        object_id: u64,
+    },
+}
+
+/// [`ConnectionError::EmptyDatagramExtensions`] for a datagram the header
+/// decoder refused as `InvalidField`, when its empty extension block was the
+/// fault.
+///
+/// Types 0x01 and 0x03 are the two draft-11 Section 9.2 and draft-11 Section 9.3
+/// name, and both carry an Object ID and a Publisher Priority.
+fn empty_datagram_extensions(data: &[u8]) -> Option<ConnectionError> {
+    use crate::datagram_prefix::{empty_extension_block, Prefix};
+    empty_extension_block(data, |datagram_type, _| {
+        matches!(datagram_type, 0x01 | 0x03).then_some(Prefix { object_id: true, priority: true })
+    })
+    .map(|object_id| ConnectionError::EmptyDatagramExtensions { object_id })
 }
 
 impl From<crate::transport::DialError> for ConnectionError {
@@ -374,6 +407,9 @@ pub struct FramedRecvStream {
     /// The Prior Group ID Gap values this subgroup stream's Objects carried.
     /// Set by [`FramedRecvStream::read_subgroup_header`].
     subgroup_gaps: Option<SubgroupGaps>,
+    /// The Prior gap conditions this fetch stream's Objects show. Reset by
+    /// [`FramedRecvStream::read_fetch_header`].
+    fetch_gaps: moqtap_codec::draft11::data_stream::FetchGaps,
 }
 
 impl FramedRecvStream {
@@ -385,6 +421,7 @@ impl FramedRecvStream {
             subgroup_has_extensions: false,
             subgroup_gaps: None,
             tracking: None,
+            fetch_gaps: moqtap_codec::draft11::data_stream::FetchGaps::new(),
         }
     }
 
@@ -529,6 +566,7 @@ impl FramedRecvStream {
                 Ok(header) => {
                     let consumed = self.buf.len() - cursor.remaining();
                     self.buf.advance(consumed);
+                    self.fetch_gaps = moqtap_codec::draft11::data_stream::FetchGaps::new();
                     return Ok(header);
                 }
                 Err(e) if e.is_incomplete() => {
@@ -555,9 +593,9 @@ impl FramedRecvStream {
     /// within reach on a subgroup stream. A reader that never reads the block
     /// cannot notice that a non-existent Object carried one.
     ///
-    /// A Prior Group ID Gap larger than the stream's Group ID, or one that
-    /// differs from an earlier Object's on the stream, is returned as
-    /// [`CodecError::MalformedTrack`] (draft-11 Section 10.1).
+    /// A Prior Group ID Gap larger than the stream's Group ID, or gaps that
+    /// leave no value common to every Object on the stream that carried one,
+    /// are returned as [`CodecError::MalformedTrack`] (draft-11 Section 10.1).
     pub async fn read_subgroup_object(&mut self) -> Result<SubgroupObject, ConnectionError> {
         loop {
             let mut cursor = &self.buf[..];
@@ -591,6 +629,10 @@ impl FramedRecvStream {
     }
 
     /// Read the next draft-11 fetch object (header + payload).
+    ///
+    /// A Prior Group ID Gap fault the stream shows (draft-11 Section 10.1) is
+    /// returned as [`CodecError::MalformedTrack`], and an extension block that
+    /// does not parse as [`CodecError::MalformedObjectProperties`].
     pub async fn read_fetch_object(&mut self) -> Result<FetchObject, ConnectionError> {
         loop {
             let mut cursor = &self.buf[..];
@@ -607,6 +649,13 @@ impl FramedRecvStream {
                     }
                     let payload = self.buf[header_consumed..total].to_vec();
                     self.buf.advance(total);
+                    self.fetch_gaps
+                        .check(
+                            header.group_id.into_inner(),
+                            header.object_id.into_inner(),
+                            &header.extensions,
+                        )
+                        .map_err(ConnectionError::Codec)?;
                     return Ok(FetchObject { header, payload });
                 }
                 Err(e) if e.is_incomplete() => {
@@ -1428,11 +1477,29 @@ impl Connection {
         Ok(())
     }
 
-    /// Receive a datagram and decode its header.
+    /// Receive a datagram and decode it whole.
+    ///
+    /// An extension block announced with a length of 0 is returned as
+    /// [`ConnectionError::EmptyDatagramExtensions`], which
+    /// [`Connection::close_for_data_stream`] closes the session over.
+    ///
+    /// The codec's `Datagram::decode_object` then reads the whole datagram, and its
+    /// refusals are returned as [`ConnectionError::Codec`]: an extension block that
+    /// does not parse, a payload after a status, and a Prior Group ID Gap larger
+    /// than the Group ID, which draft-11 Section 10.1 calls a malformed track. This
+    /// draft has no Malformed Tracks section and names no answer, so nothing is
+    /// withdrawn and the session stays open.
     pub async fn recv_datagram(&self) -> Result<(AnyDatagramHeader, Bytes), ConnectionError> {
         let data = self.transport.recv_datagram().await?;
         let mut cursor = &data[..];
-        let header = AnyDatagramHeader::decode(DraftVersion::Draft11, &mut cursor)?;
+        let header = match AnyDatagramHeader::decode(DraftVersion::Draft11, &mut cursor) {
+            Ok(header) => header,
+            Err(CodecError::InvalidField) => {
+                return Err(empty_datagram_extensions(&data)
+                    .unwrap_or(ConnectionError::Codec(CodecError::InvalidField)));
+            }
+            Err(err) => return Err(err.into()),
+        };
         let consumed = data.len() - cursor.len();
         let payload = data.slice(consumed..);
         self.emit(ClientEvent::DatagramReceived {
@@ -1440,6 +1507,7 @@ impl Connection {
             header: header.clone(),
             payload_len: payload.len(),
         });
+        moqtap_codec::draft11::data_stream::Datagram::decode_object(&mut &data[..])?;
         // A datagram is the other framing, and it settles the track's just as a
         // subgroup header does.
         self.endpoint.note_object_forwarding_preference(
@@ -1495,10 +1563,11 @@ impl Connection {
     /// Which of this draft's *own* `ConnectionError` variants this error is,
     /// and which kind of thing it says.
     ///
-    /// Draft-11 adds none. Every variant of its [`ConnectionError`] is one of the
-    /// ten every draft carries, and [`AnyConnectionError`] classifies those
-    /// itself — so `None` here is this draft's answer rather than a stub, and it
-    /// stays right for exactly as long as that list does.
+    /// The ten every draft carries answer `None` here: [`AnyConnectionError`]
+    /// classifies those itself. Draft-11 adds two:
+    /// [`ConnectionError::ControlMessageNarrowing`], a defect in this build, and
+    /// [`ConnectionError::EmptyDatagramExtensions`], a decoder refusal the draft
+    /// answers with a close.
     ///
     /// Matched exhaustively, with no wildcard arm and deliberately so: a
     /// variant added to this draft's error type has to arrive here as a compile
@@ -1530,6 +1599,18 @@ impl Connection {
             // doc.
             ConnectionError::ControlMessageNarrowing => {
                 Some(crate::above_codec_rules::DraftSpecificCause::LocalRefusal)
+            }
+            // The codec refuses the datagram as a bare `InvalidField`, and
+            // `recv_datagram` names the rule, so `close_for_data_stream` reads
+            // the close here. See the variant's own doc.
+            ConnectionError::EmptyDatagramExtensions { .. } => {
+                Some(crate::above_codec_rules::DraftSpecificCause::Codec {
+                    error: CodecError::InvalidField,
+                    close: Some(
+                        moqtap_codec::draft11::error_codes::SessionErrorCode::ProtocolViolation
+                            .as_u64(),
+                    ),
+                })
             }
         }
     }
@@ -1849,6 +1930,20 @@ impl Connection {
                 let Some(code) = inner.session_error_code() else { return false };
                 let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
                 self.close(wire_code, inner.to_string().as_bytes());
+                true
+            }
+            // Not a `Codec` failure: the codec refuses the datagram as a bare
+            // `InvalidField`, which `recv_datagram` names, so the code comes
+            // from `draft_specific_cause`.
+            ConnectionError::EmptyDatagramExtensions { .. } => {
+                let Some(crate::above_codec_rules::DraftSpecificCause::Codec {
+                    close: Some(code),
+                    ..
+                }) = Self::draft_specific_cause(err)
+                else {
+                    return false;
+                };
+                self.close(u32::try_from(code).unwrap_or(u32::MAX), err.to_string().as_bytes());
                 true
             }
             _ => false,

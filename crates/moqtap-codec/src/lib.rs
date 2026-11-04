@@ -93,6 +93,22 @@ pub mod fields;
 pub mod kvp;
 pub mod message_names;
 pub mod object_properties;
+#[cfg(any(
+    feature = "draft11",
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22",
+    feature = "draft23"
+))]
+mod prior_gaps;
 pub mod setup_option_names;
 /// Core protocol types shared across drafts.
 pub mod types;

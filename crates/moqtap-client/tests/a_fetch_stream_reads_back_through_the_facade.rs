@@ -365,6 +365,14 @@ macro_rules! fetch_gate {
             /// the expectation rather than by this function, which is what makes
             /// a decode that gave up early visible instead of merely shorter.
             async fn read_back(hex: &str, order: GroupOrder) -> String {
+                read_back_and_refusal(hex, order).await.0
+            }
+
+            /// [`read_back`], and the error that ended the read, if one did.
+            async fn read_back_and_refusal(
+                hex: &str,
+                order: GroupOrder,
+            ) -> (String, Option<moqtap_client::dispatch::AnyConnectionError>) {
                 common::init_crypto();
                 let (endpoint, addr) = common::spawn_server(&[DRAFT.quic_alpn()]);
                 let peer = tokio::spawn(serve(endpoint, wire(hex)));
@@ -398,18 +406,20 @@ macro_rules! fetch_gate {
                 );
 
                 let mut objects = Vec::new();
-                while let Ok(Ok(object)) =
-                    tokio::time::timeout(PATIENCE, reader.read_object()).await
-                {
-                    objects.push(object);
-                }
+                let refusal = loop {
+                    match tokio::time::timeout(PATIENCE, reader.read_object()).await {
+                        Ok(Ok(object)) => objects.push(object),
+                        Ok(Err(e)) => break Some(e),
+                        Err(_) => break None,
+                    }
+                };
 
                 // Releases the peer, which is holding its connection open until
                 // this side is done reading.
                 conn.close(0, b"gate complete");
                 tokio::time::timeout(PATIENCE * 2, peer).await.expect("the peer hung").ok();
 
-                describe_all(&objects)
+                (describe_all(&objects), refusal)
             }
 
             /// The vector every draft has: two objects, the second of which
@@ -580,6 +590,28 @@ fetch_gate!(
             read_back("0504408c050a00", GroupOrder::Ascending).await,
             "group=5 subgroup=0 object=10 payload=- status=none eor=0x8c",
             "reading fetch-end-of-non-existent-range back through the facade"
+        );
+    },
+    /// A Prior gap fault is the peer's, and arrives as the codec error the
+    /// draft's `withdraw_for_fetch_stream` reads: Objects 0 and 1 of Group 5
+    /// with Prior Group ID Gap 2 then 3, the second resolved from the first.
+    #[tokio::test]
+    async fn a_prior_gap_fault_is_a_codec_refusal() {
+        use moqtap_client::dispatch::ErrorCause;
+        use moqtap_codec::error::CodecError;
+
+        let (read, refusal) =
+            read_back_and_refusal("05043c050080023c0201aa20023c0301bb", GroupOrder::Ascending)
+                .await;
+        assert_eq!(read, "group=5 subgroup=0 object=0 payload=aa status=none eor=none");
+        let refusal = refusal.expect("the second Object was accepted");
+        assert!(
+            matches!(
+                refusal.cause(),
+                ErrorCause::Codec { error: CodecError::MalformedTrack { .. }, .. }
+            ),
+            "{:?}",
+            refusal.cause()
         );
     },
 );

@@ -635,7 +635,7 @@ async fn a_namespace_on_the_control_stream_is_refused_without_closing() {
         wait.await.expect("the client finished reading");
         assert!(
             conn.close_reason().is_none(),
-            "draft-16 states no close for a NAMESPACE on the control stream, and the client              made one: {:?}",
+            "draft-16 states no close for a NAMESPACE on the control stream, and the client made one: {:?}",
             conn.close_reason()
         );
     });

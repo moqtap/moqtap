@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Whole-datagram readers that apply the Prior Gap rules: `Datagram::decode_object` on drafts 11-13, `DatagramObject::decode_object` on draft-14 and `DatagramHeader::decode_object` on drafts 15-16, with `PriorGaps` and `SubgroupGaps` in the `data_stream` module of drafts 11-13.
+- Whole-datagram readers that apply the Prior Gap rules: `Datagram::decode_object` on drafts 11-13, `DatagramObject::decode_object` on draft-14 and `DatagramHeader::decode_object` on drafts 15-16, with `PriorGaps` and `SubgroupGaps` in the `data_stream` module of drafts 11-13, and `FetchGaps` in the `data_stream` module of drafts 11-23, which refuses the Prior gap conditions one fetch stream shows.
 
 ### Fixed
 
-- Drafts 11-13: `AnySubgroupObjectReader::read_object` accepted a Prior Group ID Gap larger than the Group ID, and two Objects on one subgroup stream with different values, and no datagram reader refused a gap larger than the datagram's Group ID. `read_object` and the new `Datagram::decode_object` refuse them with `MalformedTrack`.
-- Drafts 14-16: no datagram reader refused the Prior Group ID Gap and Prior Object ID Gap conditions one Object shows. The new `decode_object` readers refuse them with `MalformedTrack`, as drafts 17-22 do.
+- Drafts 11-13: `AnySubgroupObjectReader::read_object` accepted a Prior Group ID Gap larger than the Group ID, and Objects on one subgroup stream with no Prior Group ID Gap value in common, and no datagram reader refused a gap larger than the datagram's Group ID. `read_object` and the new `Datagram::decode_object` refuse them with `MalformedTrack`.
+- Drafts 14-16: no datagram reader refused the Prior Group ID Gap and Prior Object ID Gap conditions one Object shows. The new `decode_object` readers refuse them with `MalformedTrack`, as drafts 17-22 do, and bytes after a status with `PayloadNotPermitted`.
+- Drafts 11-23: no fetch reader applied the Prior gap conditions. `AnyFetchObjectReader::read_object`, and on drafts 15-23 each draft's `FetchObjectReader::read_object_header` (`resolve` on draft-16), now refuse those one fetch stream shows with `MalformedTrack`, except the ones a draft's own object-state text contradicts (a gap covering an earlier Object on drafts 16-22, an Object within an earlier gap on drafts 18-22), and the per-draft readers also refuse a property block that does not parse. `read_object_frame` and `read_object_meta` apply neither.
+- Drafts 16-22: `SubgroupObjectReader::read_object` and `AnySubgroupObjectReader::read_object` refused a Prior Object ID Gap covering an earlier Object on the stream, which these drafts allow: an Object known to exist "can transition to not existing". They no longer refuse it. A gap larger than the Object ID, a second instance of a gap, and different Prior Group ID Gap values in one Group are still `MalformedTrack`.
 
 ## [0.10.0] - 2026-11-03
 

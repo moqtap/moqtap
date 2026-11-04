@@ -996,7 +996,7 @@ fn fetch_objects_draft14() {
 
     let mut wire = Vec::new();
     FetchObject {
-        group_id: VarInt::from_usize(1),
+        group_id: VarInt::from_usize(5),
         subgroup_id: VarInt::from_usize(2),
         object_id: VarInt::from_usize(3),
         publisher_priority: 128,

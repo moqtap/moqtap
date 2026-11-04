@@ -1105,6 +1105,28 @@ impl Endpoint {
     ) -> Vec<ControlMessage> {
         let Some((namespace, name)) = self.track_for_alias(alias) else { return Vec::new() };
         let (namespace, name) = (namespace.clone(), name.to_vec());
+        self.withdraw_malformed_track_named(namespace, name, condition)
+    }
+
+    /// [`Self::withdraw_malformed_track`] for the track the FETCH `request_id`
+    /// asked for, which a FETCH stream found malformed: the stream names no
+    /// alias. Empty for a Request ID this endpoint sent no FETCH under.
+    pub fn withdraw_malformed_fetch_track(
+        &self,
+        request_id: u64,
+        condition: MalformedTrackCondition,
+    ) -> Vec<ControlMessage> {
+        let Some(track) = self.fetch_tracks.get(&request_id) else { return Vec::new() };
+        let (namespace, name) = (track.namespace.clone(), track.name.clone());
+        self.withdraw_malformed_track_named(namespace, name, condition)
+    }
+
+    fn withdraw_malformed_track_named(
+        &self,
+        namespace: TrackNamespace,
+        name: Vec<u8>,
+        condition: MalformedTrackCondition,
+    ) -> Vec<ControlMessage> {
         self.malformed
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

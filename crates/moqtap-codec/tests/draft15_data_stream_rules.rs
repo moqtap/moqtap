@@ -373,14 +373,14 @@ fn a_fetch_object_states_a_status_only_where_it_has_no_payload() {
 #[test]
 fn a_fetch_object_carries_its_extensions_block_verbatim() {
     let mut object = FetchObject::explicit(0, 0, 0, 0x80).flags(0x3f);
-    object.extensions = hex("3c01");
+    object.extensions = hex("1001");
     let stream = fetch_stream(&[object]);
 
     let objects = decode_fetch_stream(&stream).expect("stream decodes");
     assert!(objects[0].header.has_extensions());
     assert_eq!(
         objects[0].header.extension_headers,
-        hex("3c01"),
+        hex("1001"),
         "the extensions blob excludes its length prefix"
     );
     assert_eq!(encode_fetch_stream(&objects).expect("re-encodes"), stream, "re-encoded stream");

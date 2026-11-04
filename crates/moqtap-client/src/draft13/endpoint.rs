@@ -633,6 +633,10 @@ pub struct Endpoint {
     advertised_max_id: u64,
     subscriptions: HashMap<u64, Mutex<SubscriptionStateMachine>>,
     fetches: HashMap<u64, FetchStateMachine>,
+    /// The track each fetch this endpoint made asked for, keyed by its
+    /// Request ID, for a FETCH stream found malformed: the stream names no
+    /// alias.
+    fetch_tracks: HashMap<u64, FetchTrack>,
     subscribe_namespaces: HashMap<u64, SubscribeNamespaceStateMachine>,
     /// Namespace subscriptions the **peer** made, keyed by the Request ID it
     /// opened each under.
@@ -736,6 +740,14 @@ pub struct Endpoint {
     /// it that every path ending a subscription would have to remember to
     /// prune.
     track_bindings: HashMap<u64, TrackBinding>,
+}
+
+/// The track a fetch this endpoint made asked for: the one a standalone
+/// FETCH names, or the one the subscription a Joining Fetch joins is for.
+#[derive(Debug, Clone)]
+struct FetchTrack {
+    namespace: TrackNamespace,
+    name: Vec<u8>,
 }
 
 /// A Track Alias the peer has attached to a Full Track Name, and the request
@@ -862,6 +874,7 @@ impl Endpoint {
             advertised_max_id: 0,
             subscriptions: HashMap::new(),
             fetches: HashMap::new(),
+            fetch_tracks: HashMap::new(),
             subscribe_namespaces: HashMap::new(),
             inbound_subscribe_namespaces: HashMap::new(),
             announces: HashMap::new(),
@@ -1154,6 +1167,28 @@ impl Endpoint {
     ) -> Vec<ControlMessage> {
         let Some((namespace, name)) = self.track_for_alias(alias) else { return Vec::new() };
         let (namespace, name) = (namespace.clone(), name.to_vec());
+        self.withdraw_malformed_track_named(namespace, name, condition)
+    }
+
+    /// [`Self::withdraw_malformed_track`] for the track the FETCH `request_id`
+    /// asked for, which a FETCH stream found malformed: the stream names no
+    /// alias. Empty for a Request ID this endpoint sent no FETCH under.
+    pub fn withdraw_malformed_fetch_track(
+        &self,
+        request_id: u64,
+        condition: MalformedTrackCondition,
+    ) -> Vec<ControlMessage> {
+        let Some(track) = self.fetch_tracks.get(&request_id) else { return Vec::new() };
+        let (namespace, name) = (track.namespace.clone(), track.name.clone());
+        self.withdraw_malformed_track_named(namespace, name, condition)
+    }
+
+    fn withdraw_malformed_track_named(
+        &self,
+        namespace: TrackNamespace,
+        name: Vec<u8>,
+        condition: MalformedTrackCondition,
+    ) -> Vec<ControlMessage> {
         self.malformed
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -2058,6 +2093,11 @@ impl Endpoint {
         let mut sm = FetchStateMachine::new();
         sm.on_fetch_sent()?;
         self.fetches.insert(req_id.into_inner(), sm);
+        // Recorded before the two of them are moved into the message.
+        self.fetch_tracks.insert(
+            req_id.into_inner(),
+            FetchTrack { namespace: track_namespace.clone(), name: track_name.clone() },
+        );
 
         let msg = ControlMessage::Fetch(Fetch {
             request_id: req_id,
@@ -2172,6 +2212,15 @@ impl Endpoint {
         let mut sm = FetchStateMachine::new();
         sm.on_fetch_sent()?;
         self.fetches.insert(req_id.into_inner(), sm);
+        // draft-13 Section 8.16: "A publisher receiving a Joining Fetch uses
+        // properties of the associated Subscribe to determine the Track
+        // Namespace, Track". A Request ID this session holds no track for
+        // leaves the fetch out of the record.
+        if let Some(binding) = self.track_bindings.get(&joining_request_id.into_inner()) {
+            let track =
+                FetchTrack { namespace: binding.namespace.clone(), name: binding.name.clone() };
+            self.fetch_tracks.insert(req_id.into_inner(), track);
+        }
 
         let msg = ControlMessage::Fetch(Fetch {
             request_id: req_id,

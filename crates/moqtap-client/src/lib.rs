@@ -168,6 +168,16 @@ pub mod track_locations;
 ))]
 pub mod malformed_tracks;
 
+#[cfg(any(
+    feature = "draft11",
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16"
+))]
+pub(crate) mod datagram_prefix;
+
 pub mod above_codec_rules;
 
 pub mod dispatch;

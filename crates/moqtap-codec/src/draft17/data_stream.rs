@@ -526,6 +526,65 @@ fn collect_gaps(properties: &[ObjectProperty<'_>], gaps: &mut PriorGaps) -> Resu
     Ok(())
 }
 
+/// The Prior Group ID Gap and Prior Object ID Gap conditions of
+/// draft-17 Section 11.7 and draft-17 Section 11.8 that one fetch stream
+/// shows.
+///
+/// [`PriorGaps::from_properties`] refuses what one Object shows. Across the
+/// stream this refuses "A Group contains more than one Object with different
+/// values for Prior Group ID Gap" for the Objects of one Group, and "An
+/// endpoint receives an Object with a Group ID within a previously communicated
+/// gap" and its Prior Object ID Gap twin, for the Group and the Object before
+/// on the stream. It does not refuse "An endpoint receives an Object with a
+/// Prior Group ID Gap covering an Object it previously received" or its Prior
+/// Object ID Gap twin: draft-17 Section 2.1 says of an Object known to exist,
+/// "From this state, it can transition to not existing, but not vice versa", so
+/// whether such a gap makes the Track malformed is ambiguous.
+/// draft-17 Section 9.14.3: "Within each group, objects are sent in Object ID
+/// order; subgroup ID is not used for ordering."
+///
+/// [`FetchObjectReader::read_object_header`] applies it to each Object it reads.
+///
+/// End of Range indicators are not Objects; the caller passes Objects only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+// Boxed so that the fetch readers holding one stay small.
+pub struct FetchGaps(Box<crate::prior_gaps::FetchGapTracker>);
+
+impl Default for FetchGaps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FetchGaps {
+    /// Track the Objects of one fetch stream.
+    pub fn new() -> Self {
+        Self(Box::new(crate::prior_gaps::FetchGapTracker::new(
+            crate::prior_gaps::GapRules::Draft16To17,
+        )))
+    }
+
+    /// Check the next Object on the stream, from its resolved Group ID and
+    /// Object ID and its property block, refusing a gap condition with
+    /// [`CodecError::MalformedTrack`] and a block that does not parse as
+    /// [`crate::object_properties::parse_object_properties`] does. Records the
+    /// Object only when it passes.
+    pub fn check(
+        &mut self,
+        group_id: u64,
+        object_id: u64,
+        property_block: &[u8],
+    ) -> Result<PriorGaps, CodecError> {
+        let properties = crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft17,
+            property_block,
+        )?;
+        let gaps = PriorGaps::from_properties(&properties, group_id, object_id)?;
+        self.0.check(group_id, object_id, gaps.group.as_slice(), gaps.object)?;
+        Ok(gaps)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SubgroupObjectReader {
     extensions_present: bool,
@@ -553,17 +612,18 @@ impl SubgroupObjectReader {
     /// frames such an object without judging it, as
     /// [`DatagramHeader::decode`] does a datagram.
     ///
-    /// Refuses, with [`CodecError::MalformedTrack`], the Prior Group ID Gap
-    /// and Prior Object ID Gap conditions of Section 11.7 and Section 11.8
-    /// this stream shows: those [`PriorGaps::from_properties`] refuses, "A
-    /// Group contains more than one Object with different values for Prior
-    /// Group ID Gap", and "An endpoint receives an Object with a Prior Object
-    /// ID Gap covering an Object it previously received" for an Object earlier
-    /// on this stream. [`Self::read_object_meta`] does not read properties and
-    /// applies none of them.
+    /// Refuses, with [`CodecError::MalformedTrack`], the Prior Group ID Gap and
+    /// Prior Object ID Gap conditions of Section 11.7 and Section 11.8 this stream
+    /// shows: those [`PriorGaps::from_properties`] refuses, and "A Group contains
+    /// more than one Object with different values for Prior Group ID Gap". It does
+    /// not refuse "An endpoint receives an Object with a Prior Object ID Gap
+    /// covering an Object it previously received": draft-17 Section 2.1 says of an
+    /// Object known to exist, "From this state, it can transition to not existing,
+    /// but not vice versa", so whether such a gap makes the Track malformed is
+    /// ambiguous. [`Self::read_object_meta`] does not read properties and applies
+    /// none of them.
     pub fn read_object(&mut self, buf: &mut impl Buf) -> Result<SubgroupObject, CodecError> {
         let delta = VarInt::decode_moqt::<Wire>(buf)?.into_inner();
-        let prior_object_id = self.prev_object_id;
         let object_id_val = match self.prev_object_id {
             None => delta,
             Some(prev) => prev
@@ -599,7 +659,7 @@ impl SubgroupObjectReader {
             &extension_headers,
         )?;
         let gaps = PriorGaps::from_properties(&properties, self.group_id, object_id_val)?;
-        self.check_stream_gaps(gaps, prior_object_id, object_id_val)?;
+        self.check_stream_gaps(gaps)?;
         let object = SubgroupObject {
             object_id,
             extension_headers,
@@ -613,12 +673,7 @@ impl SubgroupObjectReader {
         Ok(object)
     }
 
-    fn check_stream_gaps(
-        &mut self,
-        gaps: PriorGaps,
-        prior_object_id: Option<u64>,
-        object_id: u64,
-    ) -> Result<(), CodecError> {
+    fn check_stream_gaps(&mut self, gaps: PriorGaps) -> Result<(), CodecError> {
         if let Some(gap) = gaps.group {
             match self.group_gap {
                 Some(seen) if seen != gap => {
@@ -630,17 +685,6 @@ impl SubgroupObjectReader {
                     });
                 }
                 _ => self.group_gap = Some(gap),
-            }
-        }
-        // Object IDs rise along a subgroup stream, so the latest earlier
-        // Object is the only one a gap below this Object can reach.
-        if let (Some(gap), Some(prior)) = (gaps.object, prior_object_id) {
-            if gap > 0 && prior >= object_id - gap {
-                return Err(CodecError::MalformedTrack {
-                    detail: format!(
-                        "Prior Object ID Gap {gap} of Object {object_id} covers Object {prior}"
-                    ),
-                });
             }
         }
         Ok(())
@@ -1687,6 +1731,8 @@ pub struct FetchObjectReader {
     prior_subgroup_id: Option<u64>,
     /// Publisher Priority of the last actual Object.
     prior_publisher_priority: Option<u8>,
+    /// The Prior gap conditions the stream's Objects show.
+    gaps: FetchGaps,
 }
 
 impl FetchObjectReader {
@@ -1708,7 +1754,26 @@ impl FetchObjectReader {
     /// prior Object, the Subscriber MUST close the session with a
     /// PROTOCOL_VIOLATION" — and when a Subgroup ID or Object ID one past the
     /// prior one would leave the 64-bit range.
+    ///
+    /// Refuses, with [`CodecError::MalformedTrack`], the Prior gap conditions an
+    /// Object shows alone or after the Objects before it on the stream, as
+    /// [`FetchGaps`] does, and a property block that does not parse as
+    /// [`crate::object_properties::parse_object_properties`] does.
     pub fn read_object_header(&mut self, buf: &mut impl Buf) -> Result<FetchObject, CodecError> {
+        let object = self.read_frame_header(buf)?;
+        if object.header.end_of_range().is_none() {
+            self.gaps.check(object.group_id, object.object_id, &object.header.properties)?;
+        }
+        Ok(object)
+    }
+
+    /// [`Self::read_object_header`] without the Prior gap conditions and without reading
+    /// inside the property block, for the facade's frame and meta reads, which
+    /// a forwarder uses.
+    pub(crate) fn read_frame_header(
+        &mut self,
+        buf: &mut impl Buf,
+    ) -> Result<FetchObject, CodecError> {
         let header = FetchObjectHeader::decode(buf)?;
 
         // An End of Range marker states a Location outright and inherits
@@ -2191,8 +2256,10 @@ mod tests {
         // Group ID Gap", at the top level and inside Immutable Properties.
         assert!(malformed("1101058000043c01000104deadbeef"));
         assert!(malformed("1101058000060b023c01310104deadbeef"));
-        // Section 11.8: Object 2's gap of 2 covers Object 0, received earlier.
-        assert!(malformed("11010580000004deadbeef01023e0202cafe"));
+        // Section 11.8: Object 2's gap of 2 covers Object 0, received earlier,
+        // which draft-17 Section 2.1 allows: an Object known to exist "can
+        // transition to not existing".
+        assert_eq!(first_error("11010580000004deadbeef01023e0202cafe"), None);
         // Object 3's gap of 2 covers Objects 1 and 2, neither received.
         assert_eq!(first_error("11010580000004deadbeef02023e0202cafe"), None);
         // Equal Prior Group ID Gap values in one Group are fine.

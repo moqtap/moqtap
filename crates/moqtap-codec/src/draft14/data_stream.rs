@@ -457,6 +457,61 @@ fn collect_gaps(properties: &[ObjectProperty<'_>], gaps: &mut PriorGaps) -> Resu
     Ok(())
 }
 
+/// The Prior Group ID Gap and Prior Object ID Gap conditions of
+/// draft-14 Section 11.1 and draft-14 Section 11.3 that one fetch stream
+/// shows.
+///
+/// [`PriorGaps::from_properties`] refuses what one Object shows. Across the
+/// stream this refuses "A Group contains more than one Object with different
+/// values for Prior Group ID Gap" for the Objects of one Group, "An endpoint
+/// receives an Object with a Prior Group ID Gap covering an Object it
+/// previously received", "An endpoint receives an Object with a Group ID
+/// within a previously communicated gap", and the same two for Prior Object ID
+/// Gap, for the Group and the Object before on the stream.
+/// draft-14 Section 9.16.3: "Within each group, objects are sent in Object ID
+/// order; subgroup ID is not used for ordering."
+///
+/// [`FetchObject::decode`] reads one Object and applies none of this: a reader
+/// of a fetch stream checks each Object with one `FetchGaps`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+// Boxed so that the fetch readers holding one stay small.
+pub struct FetchGaps(Box<crate::prior_gaps::FetchGapTracker>);
+
+impl Default for FetchGaps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FetchGaps {
+    /// Track the Objects of one fetch stream.
+    pub fn new() -> Self {
+        Self(Box::new(crate::prior_gaps::FetchGapTracker::new(
+            crate::prior_gaps::GapRules::Draft14To15,
+        )))
+    }
+
+    /// Check the next Object on the stream, from its resolved Group ID and
+    /// Object ID and its extension block, refusing a gap condition with
+    /// [`CodecError::MalformedTrack`] and a block that does not parse as
+    /// [`crate::object_properties::parse_object_properties`] does. Records the
+    /// Object only when it passes.
+    pub fn check(
+        &mut self,
+        group_id: u64,
+        object_id: u64,
+        extension_block: &[u8],
+    ) -> Result<PriorGaps, CodecError> {
+        let properties = crate::object_properties::parse_object_properties(
+            crate::version::DraftVersion::Draft14,
+            extension_block,
+        )?;
+        let gaps = PriorGaps::from_properties(&properties, group_id, object_id)?;
+        self.0.check(group_id, object_id, gaps.group.as_slice(), gaps.object)?;
+        Ok(gaps)
+    }
+}
+
 /// Stateful reader for the object fields on a subgroup stream.
 ///
 /// Object IDs on a subgroup stream are delta-encoded against the
@@ -1238,8 +1293,24 @@ impl DatagramObject {
     /// [`CodecError::MalformedTrack`], the Prior Group ID Gap and Prior Object
     /// ID Gap conditions one Object shows (draft-14 Section 11.1,
     /// draft-14 Section 11.3), through [`PriorGaps::from_properties`].
+    ///
+    /// It also refuses bytes after a status datagram's Object Status, with
+    /// [`CodecError::PayloadNotPermitted`], which [`Self::decode`] leaves in
+    /// `buf`. draft-14 Section 10.2.1.1: "Any object with a status code other
+    /// than zero MUST have an empty payload." draft-14 Section 10.3.1: "For
+    /// Type values 0x20 and 0x21, the Object Status field is present and there
+    /// is no Object Payload."
     pub fn decode_object(buf: &mut impl Buf) -> Result<Self, CodecError> {
         let object = Self::decode(buf)?;
+        if let Some(status) = object.status {
+            if buf.has_remaining() {
+                return Err(CodecError::PayloadNotPermitted {
+                    status: status.as_u64(),
+                    len: buf.remaining(),
+                    detail: "its type states a status in place of a payload",
+                });
+            }
+        }
         let properties = crate::object_properties::parse_object_properties(
             crate::version::DraftVersion::Draft14,
             &object.extension_headers,
@@ -1908,5 +1979,28 @@ mod datagram_gap_tests {
         }
         let wire = datagram(2, 1, &[0x3C, 2, 0x3E, 1]);
         assert!(DatagramObject::decode_object(&mut &wire[..]).is_ok());
+    }
+
+    #[test]
+    fn decode_object_refuses_a_payload_after_a_status_datagram() {
+        let mut wire = Vec::new();
+        DatagramObject {
+            datagram_type: DatagramType::from_u8(0x20).unwrap(),
+            track_alias: VarInt::from_u64(1).unwrap(),
+            group_id: VarInt::from_u64(0).unwrap(),
+            object_id: VarInt::from_u64(0).unwrap(),
+            publisher_priority: 0x80,
+            extension_headers: Vec::new(),
+            status: Some(ObjectStatus::Normal),
+            payload: Vec::new(),
+        }
+        .encode(&mut wire);
+        assert!(DatagramObject::decode_object(&mut &wire[..]).is_ok());
+        wire.push(0xAA);
+        assert!(DatagramObject::decode(&mut &wire[..]).is_ok());
+        assert!(matches!(
+            DatagramObject::decode_object(&mut &wire[..]),
+            Err(CodecError::PayloadNotPermitted { len: 1, .. })
+        ));
     }
 }

@@ -293,14 +293,14 @@ fn include_properties_is_held_to_its_range_in_both_directions() {
         let result = encode(&message);
         assert!(
             result.is_err(),
-            "INCLUDE_PROPERTIES {value} was written; the decoder refuses it, so the peer              closes the session over a frame this codec produced"
+            "INCLUDE_PROPERTIES {value} was written; the decoder refuses it, so the peer closes the session over a frame this codec produced"
         );
         assert!(
             matches!(
                 result,
                 Err(CodecError::ParameterValueOutOfRange { key: INCLUDE_PROPERTIES, .. })
             ),
-            "INCLUDE_PROPERTIES {value} was refused as something other than an out-of-range              value: {result:?}"
+            "INCLUDE_PROPERTIES {value} was refused as something other than an out-of-range value: {result:?}"
         );
     }
 

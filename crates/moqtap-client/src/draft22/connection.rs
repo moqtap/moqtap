@@ -183,6 +183,38 @@ pub enum ConnectionError {
     /// no meaning without one around it.
     #[error("{0:?} belongs on a request stream, not on the control stream")]
     RequestStreamMessageOnControlStream(MessageType),
+    /// The codec refused a datagram with [`CodecError::MalformedTrack`], for a
+    /// Prior Group ID Gap or Prior Object ID Gap fault (draft-22 Section 10.8,
+    /// draft-22 Section 10.9), or with [`CodecError::MalformedObjectProperties`],
+    /// for a property block that does not parse (draft-22 Section 10.7). Either
+    /// makes the datagram's track malformed.
+    ///
+    /// Carries the datagram's Track Alias, which the codec's error does not
+    /// name, so [`Connection::requests_to_cancel`] can name the requests to
+    /// cancel. The session stays open.
+    #[error("datagram for track alias {track_alias}: {error}")]
+    MalformedTrackDatagram {
+        /// The Track Alias the datagram named.
+        track_alias: u64,
+        /// The codec's refusal.
+        error: CodecError,
+    },
+    /// A datagram with the PROPERTIES bit set arrived with a Properties Length
+    /// of 0.
+    ///
+    /// draft-22 Section 11.2.1: "If an endpoint receives a datagram with the
+    /// PROPERTIES bit set and an Properties Length of 0, it MUST close the
+    /// session with a PROTOCOL_VIOLATION."
+    ///
+    /// [`Connection::recv_datagram`] checks the decoded header for it, and
+    /// [`Connection::close_for_data_stream`] closes the session over it.
+    #[error(
+        "the datagram for object {object_id} sets the PROPERTIES bit and has a Properties Length of 0"
+    )]
+    EmptyDatagramProperties {
+        /// The Object ID the datagram named.
+        object_id: u64,
+    },
     /// A datagram carrying an Object Status arrived with bytes after its
     /// header.
     /// Draft-22 Section 11.1.1: "An Object MUST have an empty payload unless
@@ -899,6 +931,12 @@ impl FramedRecvStream {
     /// every rule Section 11.4.1.1 states — a first Object that inherits, a
     /// delta that runs off either end of the space, or an Object ID above
     /// 2^64-1.
+    ///
+    /// A Prior Group ID Gap or Prior Object ID Gap fault the stream shows is
+    /// returned as [`CodecError::MalformedTrack`], and a property block that
+    /// does not parse as [`CodecError::MalformedObjectProperties`];
+    /// [`Connection::requests_to_cancel_for_fetch_stream`] names the requests to
+    /// cancel.
     pub async fn read_fetch_object(&mut self) -> Result<(FetchObject, Vec<u8>), ConnectionError> {
         if self.fetch_io.is_none() {
             return Err(ConnectionError::DataStreamState("fetch object reader not started"));
@@ -3252,7 +3290,11 @@ impl Connection {
         Ok(())
     }
 
-    /// Receive a datagram and decode its header.
+    /// Receive a datagram and decode it whole.
+    ///
+    /// Errors with [`ConnectionError::EmptyDatagramProperties`] on a datagram
+    /// with the PROPERTIES bit set and a Properties Length of 0, which
+    /// [`Connection::close_for_data_stream`] closes the session over.
     ///
     /// Errors with [`ConnectionError::PropertiesOnNonNormalStatus`] on a
     /// draft-22 datagram carrying properties on a status other than Normal.
@@ -3261,7 +3303,16 @@ impl Connection {
     /// combination with a session close — the same rule the subgroup form
     /// obeys, on the same receive side.
     ///
-    /// The event is emitted before the check, so an observer of the client's
+    /// A payload after a status is returned as
+    /// [`ConnectionError::PayloadOnStatusDatagram`], and the session stays open.
+    /// The codec's `DatagramHeader::decode_object` then reads the whole
+    /// datagram. A Prior Group ID Gap or Prior Object ID Gap fault, and a
+    /// property block that does not parse, are returned as
+    /// [`ConnectionError::MalformedTrackDatagram`], for
+    /// [`Connection::requests_to_cancel`]; its other refusals as
+    /// [`ConnectionError::Codec`].
+    ///
+    /// The event is emitted before the checks, so an observer of the client's
     /// event stream still sees the datagram that caused the error.
     pub async fn recv_datagram(&self) -> Result<(AnyDatagramHeader, Bytes), ConnectionError> {
         let data = self.transport.recv_datagram().await?;
@@ -3278,6 +3329,25 @@ impl Connection {
         // in a single-draft build `AnyDatagramHeader` has one variant.
         #[allow(irrefutable_let_patterns)]
         if let AnyDatagramHeader::Draft22(h) = &header {
+            // draft-22 Section 11.2.1: "If an endpoint receives a datagram with the
+            // PROPERTIES bit set and an Properties Length of 0, it MUST close
+            // the session with a PROTOCOL_VIOLATION."
+            if !h.properties_block_well_formed() {
+                return Err(ConnectionError::EmptyDatagramProperties {
+                    object_id: h.object_id.into_inner(),
+                });
+            }
+            // draft-22 Section 11.2.1: "If an Object Datagram includes both the
+            // STATUS bit and PROPERTIES bit, and the Object Status is not Normal
+            // (0x0), the endpoint MUST close the session with a PROTOCOL_VIOLATION, because
+            // only Normal Objects can have Properties."
+            if !h.properties_permitted() {
+                return Err(ConnectionError::PropertiesOnNonNormalStatus {
+                    object_id: h.object_id.into_inner(),
+                    properties_len: h.properties.len(),
+                    status: h.status(),
+                });
+            }
             if !h.permits_payload() && !payload.is_empty() {
                 return Err(ConnectionError::PayloadOnStatusDatagram {
                     object_id: h.object_id.into_inner(),
@@ -3285,17 +3355,23 @@ impl Connection {
                     status: h.object_status,
                 });
             }
-        }
-        // Refutable only in a build with more than one draft enabled;
-        // in a single-draft build `AnyDatagramHeader` has one variant.
-        #[allow(irrefutable_let_patterns)]
-        if let AnyDatagramHeader::Draft22(h) = &header {
-            if !h.properties_permitted() {
-                return Err(ConnectionError::PropertiesOnNonNormalStatus {
-                    object_id: h.object_id.into_inner(),
-                    properties_len: h.properties.len(),
-                    status: h.status(),
-                });
+            // The codec's whole-datagram read, for the rules a header alone
+            // does not show. A gap fault is returned with the datagram's alias,
+            // for `requests_to_cancel`.
+            let whole =
+                moqtap_codec::draft22::data_stream::DatagramHeader::decode_object(&mut &data[..]);
+            match whole {
+                Ok(_) => {}
+                Err(
+                    error @ (CodecError::MalformedTrack { .. }
+                    | CodecError::MalformedObjectProperties { .. }),
+                ) => {
+                    return Err(ConnectionError::MalformedTrackDatagram {
+                        track_alias: h.track_alias.into_inner(),
+                        error,
+                    });
+                }
+                Err(error) => return Err(ConnectionError::Codec(error)),
             }
         }
         // A datagram is a whole object, so the connection can measure it
@@ -3439,6 +3515,22 @@ impl Connection {
                 Some(DraftSpecificCause::PeerViolation {
                     rule: AboveCodecRule::PropertiesOnNonNormalStatus,
                     close: Some(SessionErrorCode::ProtocolViolation.as_u64()),
+                })
+            }
+            // draft-22 Section 11.2.1 answers it with a close, which this variant
+            // names. See the variant's own doc.
+            ConnectionError::EmptyDatagramProperties { .. } => Some(DraftSpecificCause::Codec {
+                error: CodecError::InvalidField,
+                close: Some(SessionErrorCode::ProtocolViolation.as_u64()),
+            }),
+            // The codec's refusal, carried with the alias its error does
+            // not name. draft-22 Section 12.1 answers a Malformed Track by
+            // cancelling requests, and `codec_session_error_code` names no
+            // close for it.
+            ConnectionError::MalformedTrackDatagram { error, .. } => {
+                Some(DraftSpecificCause::Codec {
+                    close: Self::codec_session_error_code(error).map(|code| code.as_u64()),
+                    error: error.clone(),
                 })
             }
             // Section 11.1.1 states this one as a property of a conforming
@@ -3789,12 +3881,74 @@ impl Connection {
     /// binding names gives, and what a track this endpoint only publishes
     /// gives.
     pub fn requests_to_cancel(&self, err: &ConnectionError) -> Vec<VarInt> {
-        let ConnectionError::Endpoint(EndpointError::ObjectPastFinalObject { alias, .. }) = err
-        else {
-            return Vec::new();
-        };
-        self.endpoint
-            .requests_for_malformed_track(*alias, MalformedTrackCondition::ObjectPastFinalObject)
+        match err {
+            ConnectionError::Endpoint(EndpointError::ObjectPastFinalObject { alias, .. }) => {
+                self.endpoint.requests_for_malformed_track(
+                    *alias,
+                    MalformedTrackCondition::ObjectPastFinalObject,
+                )
+            }
+            ConnectionError::MalformedTrackDatagram { track_alias, error } => {
+                malformed_track_condition(error).map_or_else(Vec::new, |condition| {
+                    self.endpoint.requests_for_malformed_track(*track_alias, condition)
+                })
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// [`Connection::requests_to_cancel`] for an error read from the subgroup
+    /// stream `header` opened, which also names the requests to cancel over
+    /// the [`CodecError::MalformedTrack`] that
+    /// [`FramedRecvStream::read_subgroup_object`] returns for a Prior Group ID
+    /// Gap or Prior Object ID Gap fault (draft-22 Section 10.8,
+    /// draft-22 Section 10.9), and over the
+    /// [`CodecError::MalformedObjectProperties`] it returns for a property block
+    /// that does not parse (draft-22 Section 10.7). Those errors name no track, so
+    /// the header supplies its alias.
+    ///
+    /// draft-22 Section 12.1: "When a subscriber detects a Malformed Track, it
+    /// MUST cancel any corresponding subscription or fetches for that Track
+    /// from that publisher (see Section 6.4.2.3)". The session stays open.
+    pub fn requests_to_cancel_for_subgroup_stream(
+        &self,
+        header: &AnySubgroupHeader,
+        err: &ConnectionError,
+    ) -> Vec<VarInt> {
+        if let ConnectionError::Codec(codec) = err {
+            if let Some(condition) = malformed_track_condition(codec) {
+                return self.endpoint.requests_for_malformed_track(header.track_alias(), condition);
+            }
+        }
+        self.requests_to_cancel(err)
+    }
+
+    /// [`Connection::requests_to_cancel`] for an error read from the fetch stream
+    /// `header` opened, which also names the requests to cancel over the
+    /// [`CodecError::MalformedTrack`] that
+    /// [`FramedRecvStream::read_fetch_object`] returns for a Prior Group ID
+    /// Gap or Prior Object ID Gap fault (draft-22 Section 10.8,
+    /// draft-22 Section 10.9), and over the
+    /// [`CodecError::MalformedObjectProperties`] it returns for a property block
+    /// that does not parse (draft-22 Section 10.7). Those errors name no track, so
+    /// the track the FETCH under the header's Request ID asked for is the one.
+    ///
+    /// draft-22 Section 12.1: "When a subscriber detects a Malformed Track, it
+    /// MUST cancel any corresponding subscription or fetches for that Track
+    /// from that publisher (see Section 6.4.2.3)". The session stays open.
+    pub fn requests_to_cancel_for_fetch_stream(
+        &self,
+        header: &AnyFetchHeader,
+        err: &ConnectionError,
+    ) -> Vec<VarInt> {
+        if let ConnectionError::Codec(codec) = err {
+            if let Some(condition) = malformed_track_condition(codec) {
+                return self
+                    .endpoint
+                    .requests_for_malformed_fetch_track(header.request_id(), condition);
+            }
+        }
+        self.requests_to_cancel(err)
     }
 
     /// Close the session when a failure raised while reading a *data* stream is
@@ -3858,6 +4012,18 @@ impl Connection {
                 self.close(u32::try_from(code).unwrap_or(u32::MAX), err.to_string().as_bytes());
                 true
             }
+            // Not a `Codec` failure: the codec refuses the datagram as a bare
+            // `InvalidField`, which `recv_datagram` names, so the code comes
+            // from `draft_specific_cause`.
+            ConnectionError::EmptyDatagramProperties { .. } => {
+                let Some(DraftSpecificCause::Codec { close: Some(code), .. }) =
+                    Self::draft_specific_cause(err)
+                else {
+                    return false;
+                };
+                self.close(u32::try_from(code).unwrap_or(u32::MAX), err.to_string().as_bytes());
+                true
+            }
             _ => false,
         }
     }
@@ -3866,6 +4032,19 @@ impl Connection {
     pub fn close(&self, code: u32, reason: &[u8]) {
         self.emit(ClientEvent::Closed { code, reason: reason.to_vec() });
         self.transport.close(code, reason);
+    }
+}
+
+/// The Malformed Track condition a codec refusal on a data path is, on this
+/// draft, or `None` for a refusal that is not one.
+fn malformed_track_condition(err: &CodecError) -> Option<MalformedTrackCondition> {
+    match err {
+        CodecError::MalformedTrack { .. } => Some(MalformedTrackCondition::PriorGap),
+        // draft-22 Section 10.7: "A Key-Value-Pair cannot be parsed."
+        CodecError::MalformedObjectProperties { .. } => {
+            Some(MalformedTrackCondition::MalformedPropertyBlock)
+        }
+        _ => None,
     }
 }
 
