@@ -90,7 +90,9 @@ included. A reconnect is a new `connection()`.
 Reports are sealed every 15 seconds (`MonitorBuilder::seal_interval`, 5 to
 60 seconds) into one upload for all of the source's relay connections, and
 sooner when an upload reaches its size limit. While someone watches a session
-this source feeds, ingest can ask for shorter intervals for a while.
+this source feeds, ingest can ask for shorter intervals for a while. An upload
+is sealed at every interval, empty when there is nothing to report, and each
+one but the last states when the next is due.
 
 Every group of every track is reported. To report less on fast tracks, set
 a target with `MonitorBuilder::sample_target(groups_per_sec)` (1 to

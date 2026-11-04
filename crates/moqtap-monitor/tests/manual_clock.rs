@@ -153,3 +153,91 @@ async fn a_wall_step_is_a_clock_break() {
     let last = mock.uploads().last().map(|c| read_body(&c.body, SOURCE)).expect("final");
     assert_eq!(last.batch["clk"]["epoch"], 1);
 }
+
+/// `(seq, through_us, ms, next_us)` of each body received, once per seq.
+fn seals(mock: &Mock) -> Vec<(u64, i64, u64, Option<i64>)> {
+    let mut out: Vec<(u64, i64, u64, Option<i64>)> = Vec::new();
+    for c in mock.uploads() {
+        let s = read_body(&c.body, SOURCE).preamble["seal"].clone();
+        let seq = s["seq"].as_u64().unwrap();
+        if out.iter().any(|x| x.0 == seq) {
+            continue;
+        }
+        out.push((
+            seq,
+            s["through_us"].as_i64().unwrap(),
+            s["ms"].as_u64().unwrap(),
+            s.get("next_us").and_then(|v| v.as_i64()),
+        ));
+    }
+    out.sort_by_key(|x| x.0);
+    out
+}
+
+/// Advance one second at a time, letting each upload's reply land.
+async fn run_to(clock: &TestClock, from_s: u64, to_s: u64) {
+    for _ in from_s..to_s {
+        clock.advance(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+}
+
+#[tokio::test]
+async fn each_body_states_its_next_seal_and_a_lapsing_directive_shows_in_it() {
+    let mock = Mock::start().await;
+    let mut d = Reply::status(202);
+    d.body = r#"{"ok":true,"seal_ms":5000,"ttl_ms":7000}"#.into();
+    mock.script([d]);
+    let clock = TestClock::new(WALL_US);
+    let m = start(&mock, &clock);
+    let relay = m.connection("https://relay.example.net/moq").expect("conn");
+    relay.object_sent(&["live"], "video", obj(0, 0), None).expect("report");
+    run_to(&clock, 0, 41).await;
+    let s = seals(&mock);
+    // Sealed before any reply: the configured 15 s. The directive holds to
+    // 22 s, so the body at 20 s states 25 s; the one at 25 s is sealed past
+    // its lapse and states the configured interval again, though its own
+    // interval was 5 s.
+    assert_eq!(s[0], (0, 15_000_000, 15_000, Some(30_000_000)));
+    assert_eq!(s[1], (1, 20_000_000, 5_000, Some(25_000_000)));
+    assert_eq!(s[2], (2, 25_000_000, 5_000, Some(40_000_000)));
+    assert_eq!(s[3], (3, 40_000_000, 15_000, Some(55_000_000)));
+    m.shutdown(Duration::from_secs(5)).await;
+    let last = mock.uploads().last().map(|c| read_body(&c.body, SOURCE)).expect("final");
+    assert_eq!(last.batch["final"], true);
+    assert!(last.preamble["seal"].get("next_us").is_none(), "a final body states no next seal");
+}
+
+#[tokio::test]
+async fn a_longer_directive_never_moves_a_stated_seal_later() {
+    let mock = Mock::start().await;
+    let mut short = Reply::status(202);
+    short.body = r#"{"ok":true,"seal_ms":5000,"ttl_ms":60000}"#.into();
+    let mut longer = Reply::status(202);
+    longer.body = r#"{"ok":true,"seal_ms":10000,"ttl_ms":60000}"#.into();
+    mock.script([short, longer]);
+    let clock = TestClock::new(WALL_US);
+    let m = start(&mock, &clock);
+    let relay = m.connection("https://relay.example.net/moq").expect("conn");
+    relay.object_sent(&["live"], "video", obj(0, 0), None).expect("report");
+    run_to(&clock, 0, 36).await;
+    let s = seals(&mock);
+    assert_eq!(s[1], (1, 20_000_000, 5_000, Some(25_000_000)));
+    // The 10 s reply to the body at 20 s would seal at 30 s: the stated 25 s holds.
+    assert_eq!(s[2].1, 25_000_000);
+    assert_eq!(s[2].3, Some(35_000_000));
+    assert_eq!(s[3].1, 35_000_000);
+    m.shutdown(Duration::from_secs(5)).await;
+}
+
+#[tokio::test]
+async fn a_due_seal_with_nothing_to_report_still_makes_a_body() {
+    let mock = Mock::start().await;
+    let clock = TestClock::new(WALL_US);
+    let m = start(&mock, &clock);
+    run_to(&clock, 0, 31).await;
+    let s = seals(&mock);
+    assert_eq!(s[0], (0, 15_000_000, 15_000, Some(30_000_000)));
+    assert_eq!(s[1], (1, 30_000_000, 15_000, Some(45_000_000)));
+    m.shutdown(Duration::from_secs(5)).await;
+}

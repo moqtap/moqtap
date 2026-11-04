@@ -128,11 +128,13 @@ impl Spec {
             smp: self.smp,
             timing: self.timing,
         };
+        let through_us = BASE + (self.seq as i64 + 1) * SEAL_MS as i64 * 1000;
         let seal = self.seal.unwrap_or(Seal {
             seq: self.seq,
             from_us: BASE + self.seq as i64 * SEAL_MS as i64 * 1000,
-            through_us: BASE + (self.seq as i64 + 1) * SEAL_MS as i64 * 1000,
+            through_us,
             ms: SEAL_MS,
+            next_us: (!self.is_final).then_some(through_us + SEAL_MS as i64 * 1000),
         });
         let em = if n > 0 { vec![(self.first, n)] } else { Vec::new() };
         let records = record_frames(&self.records, BASE, self.first, self.timing);
@@ -411,7 +413,13 @@ fn high_rate(target: Option<u32>) -> (Vec<u8>, u8, usize) {
         .collect();
     let mut s = Spec::new(vec![conn(0, 14, RELAY)], vec![v], vec![Record::Runs(runs)]);
     s.smp = target;
-    s.seal = Some(Seal { seq: 0, from_us: BASE, through_us: HIGH_RATE_THROUGH, ms: 5_000 });
+    s.seal = Some(Seal {
+        seq: 0,
+        from_us: BASE,
+        through_us: HIGH_RATE_THROUGH,
+        ms: 5_000,
+        next_us: Some(HIGH_RATE_THROUGH + 5_000_000),
+    });
     (s.build(), k, excluded)
 }
 

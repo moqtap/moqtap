@@ -375,6 +375,16 @@ impl Collector {
         if !is_final && !self.cur.has_facts() && self.cur.tracks.is_empty() {
             return false;
         }
+        self.cut_due_or_final(through_us, is_final)
+    }
+
+    /// Seal the open interval at `through_us`, empty or not: the seal its
+    /// last body said was due.
+    pub(crate) fn cut_due(&mut self, through_us: i64) {
+        self.cut_due_or_final(through_us, false);
+    }
+
+    fn cut_due_or_final(&mut self, through_us: i64, is_final: bool) -> bool {
         let active: Vec<TrackRef> = self.active_tracks();
         let named: Vec<bool> = active.iter().map(|t| t.names_needed()).collect();
         let same = named == self.list_gz.1

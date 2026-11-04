@@ -388,6 +388,8 @@ pub(crate) struct Seal {
     pub from_us: i64,
     pub through_us: i64,
     pub ms: u64,
+    /// Mono µs the next seal is due; none in a final body.
+    pub next_us: Option<i64>,
 }
 
 /// `sha256("source:" + source + ":" + instanceId + ":" + seq)`, lowercase hex.
@@ -423,6 +425,9 @@ pub(crate) fn preamble_json(instance_id: &str, em: &[(u64, u64)], seal: &Seal) -
     s.int("from_us", seal.from_us.into());
     s.int("through_us", seal.through_us.into());
     s.int("ms", seal.ms.into());
+    if let Some(next) = seal.next_us {
+        s.int("next_us", next.into());
+    }
     j.raw("seal", &s.finish());
     j.finish()
 }

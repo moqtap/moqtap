@@ -3,7 +3,7 @@
     {
       "name": "basic",
       "file": "basic.bin",
-      "bodyBytes": 1353,
+      "bodyBytes": 1374,
       "expect": {
         "ok": true
       },
@@ -24,7 +24,8 @@
               "seq": 0,
               "fromUs": 7200000000,
               "throughUs": 7215000000,
-              "ms": 15000
+              "ms": 15000,
+              "nextUs": 7230000000
             }
           },
           "batch": {
@@ -345,7 +346,7 @@
     {
       "name": "names-as-bytes",
       "file": "names-as-bytes.bin",
-      "bodyBytes": 1063,
+      "bodyBytes": 1084,
       "expect": {
         "ok": true
       },
@@ -366,7 +367,8 @@
               "seq": 0,
               "fromUs": 7200000000,
               "throughUs": 7215000000,
-              "ms": 15000
+              "ms": 15000,
+              "nextUs": 7230000000
             }
           },
           "batch": {
@@ -603,7 +605,7 @@
     {
       "name": "zero-length-normal",
       "file": "zero-length-normal.bin",
-      "bodyBytes": 1008,
+      "bodyBytes": 1029,
       "expect": {
         "ok": true
       },
@@ -624,7 +626,8 @@
               "seq": 0,
               "fromUs": 7200000000,
               "throughUs": 7215000000,
-              "ms": 15000
+              "ms": 15000,
+              "nextUs": 7230000000
             }
           },
           "batch": {
@@ -915,7 +918,7 @@
     {
       "name": "negative-dt",
       "file": "negative-dt.bin",
-      "bodyBytes": 926,
+      "bodyBytes": 947,
       "expect": {
         "ok": true
       },
@@ -936,7 +939,8 @@
               "seq": 0,
               "fromUs": 7200000000,
               "throughUs": 7215000000,
-              "ms": 15000
+              "ms": 15000,
+              "nextUs": 7230000000
             }
           },
           "batch": {
@@ -1094,7 +1098,7 @@
     {
       "name": "u64-ids",
       "file": "u64-ids.bin",
-      "bodyBytes": 922,
+      "bodyBytes": 943,
       "expect": {
         "ok": true
       },
@@ -1115,7 +1119,8 @@
               "seq": 0,
               "fromUs": 7200000000,
               "throughUs": 7215000000,
-              "ms": 15000
+              "ms": 15000,
+              "nextUs": 7230000000
             }
           },
           "batch": {
@@ -1388,7 +1393,7 @@
     {
       "name": "sampled-cont",
       "file": "sampled-cont.bin",
-      "bodyBytes": 933,
+      "bodyBytes": 954,
       "expect": {
         "ok": true
       },
@@ -1409,7 +1414,8 @@
               "seq": 4,
               "fromUs": 7260000000,
               "throughUs": 7275000000,
-              "ms": 15000
+              "ms": 15000,
+              "nextUs": 7290000000
             }
           },
           "batch": {
@@ -1564,7 +1570,7 @@
     {
       "name": "unsampled-high-rate",
       "file": "unsampled-high-rate.bin",
-      "bodyBytes": 4220,
+      "bodyBytes": 4241,
       "expect": {
         "ok": true
       },
@@ -1585,7 +1591,8 @@
               "seq": 0,
               "fromUs": 7200000000,
               "throughUs": 7202000000,
-              "ms": 5000
+              "ms": 5000,
+              "nextUs": 7207000000
             }
           },
           "batch": {
@@ -8868,7 +8875,7 @@
     {
       "name": "sampled-target",
       "file": "sampled-target.bin",
-      "bodyBytes": 2714,
+      "bodyBytes": 2735,
       "expect": {
         "ok": true
       },
@@ -8889,7 +8896,8 @@
               "seq": 0,
               "fromUs": 7200000000,
               "throughUs": 7202000000,
-              "ms": 5000
+              "ms": 5000,
+              "nextUs": 7207000000
             }
           },
           "batch": {
@@ -12664,7 +12672,7 @@
     {
       "name": "names-elided",
       "file": "names-elided.bin",
-      "bodyBytes": 957,
+      "bodyBytes": 978,
       "expect": {
         "ok": true
       },
@@ -12685,7 +12693,8 @@
               "seq": 3,
               "fromUs": 7245000000,
               "throughUs": 7260000000,
-              "ms": 15000
+              "ms": 15000,
+              "nextUs": 7275000000
             }
           },
           "batch": {
@@ -12953,7 +12962,7 @@
     {
       "name": "group-timing",
       "file": "group-timing.bin",
-      "bodyBytes": 1268,
+      "bodyBytes": 1289,
       "expect": {
         "ok": true
       },
@@ -12974,7 +12983,8 @@
               "seq": 0,
               "fromUs": 7200000000,
               "throughUs": 7215000000,
-              "ms": 15000
+              "ms": 15000,
+              "nextUs": 7230000000
             }
           },
           "batch": {
@@ -13220,7 +13230,7 @@
     {
       "name": "refuse-bw-in-source",
       "file": "refuse-bw-in-source.bin",
-      "bodyBytes": 882,
+      "bodyBytes": 903,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13233,7 +13243,7 @@
     {
       "name": "refuse-bad-timing",
       "file": "refuse-bad-timing.bin",
-      "bodyBytes": 855,
+      "bodyBytes": 876,
       "expect": {
         "ok": false,
         "reason": "no-batch-record"
@@ -13246,7 +13256,7 @@
     {
       "name": "refuse-instance-mismatch",
       "file": "refuse-instance-mismatch.bin",
-      "bodyBytes": 838,
+      "bodyBytes": 859,
       "expect": {
         "ok": false,
         "reason": "bad-instance-id"
@@ -13259,6 +13269,19 @@
     {
       "name": "refuse-seal-mismatch",
       "file": "refuse-seal-mismatch.bin",
+      "bodyBytes": 859,
+      "expect": {
+        "ok": false,
+        "reason": "seal-mismatch"
+      },
+      "read": {
+        "ok": false,
+        "reason": "seal-mismatch"
+      }
+    },
+    {
+      "name": "refuse-no-next-seal",
+      "file": "refuse-no-next-seal.bin",
       "bodyBytes": 838,
       "expect": {
         "ok": false,
@@ -13272,7 +13295,7 @@
     {
       "name": "refuse-rseq-gap",
       "file": "refuse-rseq-gap.bin",
-      "bodyBytes": 838,
+      "bodyBytes": 859,
       "expect": {
         "ok": false,
         "reason": "rseq-mismatch"
@@ -13285,7 +13308,7 @@
     {
       "name": "refuse-rseq-twice",
       "file": "refuse-rseq-twice.bin",
-      "bodyBytes": 927,
+      "bodyBytes": 948,
       "expect": {
         "ok": false,
         "reason": "rseq-mismatch"
@@ -13298,7 +13321,7 @@
     {
       "name": "refuse-undeclared-conn",
       "file": "refuse-undeclared-conn.bin",
-      "bodyBytes": 835,
+      "bodyBytes": 856,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13311,7 +13334,7 @@
     {
       "name": "refuse-undeclared-track",
       "file": "refuse-undeclared-track.bin",
-      "bodyBytes": 835,
+      "bodyBytes": 856,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13324,7 +13347,7 @@
     {
       "name": "refuse-non-minimal-leb",
       "file": "refuse-non-minimal-leb.bin",
-      "bodyBytes": 834,
+      "bodyBytes": 855,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13337,7 +13360,7 @@
     {
       "name": "refuse-trailing-bytes",
       "file": "refuse-trailing-bytes.bin",
-      "bodyBytes": 836,
+      "bodyBytes": 857,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13350,7 +13373,7 @@
     {
       "name": "refuse-xid-consecutive",
       "file": "refuse-xid-consecutive.bin",
-      "bodyBytes": 836,
+      "bodyBytes": 857,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13363,7 +13386,7 @@
     {
       "name": "refuse-no-raw-frame",
       "file": "refuse-no-raw-frame.bin",
-      "bodyBytes": 820,
+      "bodyBytes": 841,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13376,7 +13399,7 @@
     {
       "name": "refuse-stream-end",
       "file": "refuse-stream-end.bin",
-      "bodyBytes": 835,
+      "bodyBytes": 856,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13389,7 +13412,7 @@
     {
       "name": "refuse-mark-not-in-draft",
       "file": "refuse-mark-not-in-draft.bin",
-      "bodyBytes": 831,
+      "bodyBytes": 852,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13402,7 +13425,7 @@
     {
       "name": "refuse-k-without-smp",
       "file": "refuse-k-without-smp.bin",
-      "bodyBytes": 838,
+      "bodyBytes": 859,
       "expect": {
         "ok": false,
         "reason": "no-batch-record"
@@ -13415,7 +13438,7 @@
     {
       "name": "refuse-names-half",
       "file": "refuse-names-half.bin",
-      "bodyBytes": 820,
+      "bodyBytes": 841,
       "expect": {
         "ok": false,
         "reason": "no-batch-record"
@@ -13428,7 +13451,7 @@
     {
       "name": "refuse-ident-in-source",
       "file": "refuse-ident-in-source.bin",
-      "bodyBytes": 847,
+      "bodyBytes": 868,
       "expect": {
         "ok": false,
         "reason": "bad-record"
@@ -13441,7 +13464,7 @@
     {
       "name": "refuse-tk-unknown",
       "file": "refuse-tk-unknown.bin",
-      "bodyBytes": 826,
+      "bodyBytes": 847,
       "expect": {
         "ok": false,
         "reason": "no-batch-record"
@@ -13454,7 +13477,7 @@
     {
       "name": "refuse-source-mismatch",
       "file": "refuse-source-mismatch.bin",
-      "bodyBytes": 838,
+      "bodyBytes": 859,
       "expect": {
         "ok": false,
         "reason": "source-mismatch"
@@ -13467,7 +13490,7 @@
     {
       "name": "refuse-bad-idempotency-key",
       "file": "refuse-bad-idempotency-key.bin",
-      "bodyBytes": 838,
+      "bodyBytes": 859,
       "expect": {
         "ok": false,
         "reason": "bad-idempotency-key"
@@ -13480,7 +13503,7 @@
     {
       "name": "refuse-viewer-body",
       "file": "refuse-viewer-body.bin",
-      "bodyBytes": 984,
+      "bodyBytes": 1005,
       "expect": {
         "ok": false,
         "reason": "wrong-path"
@@ -13493,7 +13516,7 @@
     {
       "name": "refuse-em-adjacent",
       "file": "refuse-em-adjacent.bin",
-      "bodyBytes": 791,
+      "bodyBytes": 812,
       "expect": {
         "ok": false,
         "preamble": "bad-preamble"
@@ -13506,7 +13529,7 @@
     {
       "name": "refuse-bad-preamble",
       "file": "refuse-bad-preamble.bin",
-      "bodyBytes": 791,
+      "bodyBytes": 812,
       "expect": {
         "ok": false,
         "preamble": "bad-preamble"

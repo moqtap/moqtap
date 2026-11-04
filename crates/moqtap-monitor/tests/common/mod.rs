@@ -327,10 +327,13 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
     }
     let seal = obj(&preamble["seal"])?;
     let seq = count(&seal["seq"], "seal.seq")?;
-    if int(&seal["through_us"], "through")? < int(&seal["from_us"], "from")?
-        || count(&seal["ms"], "ms")? < 1
-    {
+    let through = int(&seal["through_us"], "through")?;
+    if through < int(&seal["from_us"], "from")? || count(&seal["ms"], "ms")? < 1 {
         fail!("bad preamble: seal");
+    }
+    let next = seal.get("next_us").cloned().unwrap_or(Value::Null);
+    if !next.is_null() && int(&next, "next_us")? < through {
+        fail!("bad preamble: seal.next_us");
     }
 
     let rest = &body[12 + plen..];
@@ -374,6 +377,9 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
     }
     if !batch["final"].is_boolean() || !batch["monitor"]["name"].is_string() {
         fail!("batch fields");
+    }
+    if (batch["final"] == true) != next.is_null() {
+        fail!("seal mismatch: next_us");
     }
     let clk = obj(&batch["clk"])?;
     int(&clk["base_us"], "base_us")?;

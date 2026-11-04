@@ -221,6 +221,9 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
     );
     let mut timer_from = shared.clock.now();
     let mut seen = shared.clock.seal_requests();
+    // When the last body said the next seal is due: a later, longer
+    // directive never moves it past that.
+    let mut promised: Option<Instant> = None;
     loop {
         let interval = shared.interval();
         let from = {
@@ -229,7 +232,8 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
             c.open_from_us()
         };
         let opened = shared.start + Duration::from_micros(from.max(0) as u64);
-        let deadline = opened.max(timer_from) + interval;
+        let due = opened.max(timer_from) + interval;
+        let deadline = promised.map_or(due, |p| due.min(p));
         shared.clock.sealer_parked(deadline, seen);
         let is_final = tokio::select! {
             _ = shared.clock.sleep_until(deadline) => {
@@ -237,7 +241,9 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
                 let mono = shared.mono_us();
                 let mut c = shared.collector();
                 c.observe(mono, shared.wall_us());
-                c.cut(mono, false);
+                // A due seal makes a body even with nothing in it, so the
+                // time the last body stated holds.
+                c.cut_due(mono);
                 false
             }
             _ = shared.seal_now.notified() => false,
@@ -253,7 +259,9 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
             c.cut(mono, true);
             c.stopped = true;
         }
-        drain(&shared, &mut packer);
+        if let Some(next) = drain(&shared, &mut packer) {
+            promised = Some(next);
+        }
         if is_final {
             break;
         }
@@ -263,8 +271,10 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
     shared.send_now.notify_one();
 }
 
-/// Pack every interval the collector has sealed.
-fn drain(shared: &Shared, packer: &mut Packer) {
+/// Pack every interval the collector has sealed. Returns when the last
+/// body packed says the next seal is due.
+fn drain(shared: &Shared, packer: &mut Packer) -> Option<Instant> {
+    let mut promised = None;
     loop {
         let (iv, probe) = {
             let mut c = shared.collector();
@@ -273,7 +283,7 @@ fn drain(shared: &Shared, packer: &mut Packer) {
         if probe {
             shared.kick.notify_one();
         }
-        let Some(iv) = iv else { return };
+        let Some(iv) = iv else { return promised };
         let own = shared.cfg.timing;
         let timing = shared.outbox().timing.map_or(own, |t| t.min(own));
         let app = shared.cfg.app_clock.as_ref().and_then(|f| {
@@ -281,7 +291,9 @@ fn drain(shared: &Shared, packer: &mut Packer) {
             let at_us = shared.mono_us();
             Some(AppOffset { o_us: utc_us.checked_sub(at_us)?, e_us, at_us })
         });
-        let sealed = packer.pack(iv, app, timing);
+        let next_ms = shared.interval().as_millis() as u64;
+        let sealed = packer.pack_due(iv, app, timing, next_ms);
+        promised = sealed.next_us.map(|us| shared.start + Duration::from_micros(us.max(0) as u64));
         let mut o = shared.outbox();
         o.dropped = packer.dropped();
         o.bytes += sealed.raw_len;

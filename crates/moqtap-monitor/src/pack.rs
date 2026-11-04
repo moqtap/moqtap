@@ -33,6 +33,8 @@ pub(crate) struct Sealed {
     /// The fact records' frames.
     pub records: Vec<u8>,
     pub preamble: String,
+    /// Mono µs its next seal is due; none in a final body.
+    pub next_us: Option<i64>,
     /// Its size before compression.
     pub raw_len: usize,
 }
@@ -143,8 +145,21 @@ impl Packer {
         self.pre_drop_records
     }
 
-    /// Pack `iv`, its runs at `timing`.
+    /// Pack `iv`, its runs at `timing`, its next seal due one `iv.seal_ms` on.
+    #[cfg(test)]
     pub(crate) fn pack(&mut self, iv: Interval, app: Option<AppOffset>, timing: Timing) -> Sealed {
+        let next = iv.seal_ms;
+        self.pack_due(iv, app, timing, next)
+    }
+
+    /// Pack `iv`, its runs at `timing`, its next seal due `next_ms` after it.
+    pub(crate) fn pack_due(
+        &mut self,
+        iv: Interval,
+        app: Option<AppOffset>,
+        timing: Timing,
+        next_ms: u64,
+    ) -> Sealed {
         let Interval {
             from_us,
             through_us,
@@ -329,12 +344,27 @@ impl Packer {
             smp: self.target,
             timing,
         };
-        let seal = Seal { seq, from_us, through_us, ms: seal_ms };
+        let next_us = (!is_final).then(|| {
+            through_us
+                .saturating_add(i64::try_from(next_ms.saturating_mul(1000)).unwrap_or(i64::MAX))
+        });
+        let seal = Seal { seq, from_us, through_us, ms: seal_ms, next_us };
         let preamble = preamble_json(&self.head.instance_id, &em, &seal);
         let records = record_frames(&records, from_us, first_rseq, timing);
         let probe = crate::wire::Clk { base_us: from_us, epoch, res_us: 1, sample: None, app };
         let raw_len = preamble.len() + crate::wire::frames(&batch, &probe, &records).len() + 200;
-        Sealed { seq, epoch, base_us: from_us, app, batch, tracks, records, preamble, raw_len }
+        Sealed {
+            seq,
+            epoch,
+            base_us: from_us,
+            app,
+            batch,
+            tracks,
+            records,
+            preamble,
+            next_us,
+            raw_len,
+        }
     }
 }
 
