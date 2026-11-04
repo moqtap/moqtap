@@ -1002,7 +1002,7 @@ dependencies = [
 
 [[package]]
 name = "moqtap-client"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "bytes",
  "moqtap-codec",
@@ -1017,7 +1017,7 @@ dependencies = [
 
 [[package]]
 name = "moqtap-codec"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "bytes",
  "criterion",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "moqtap-trace"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ciborium",
  "serde",

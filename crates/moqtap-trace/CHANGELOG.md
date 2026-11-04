@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-04
+
 ### Changed
 
 - Documentation only: `stream_id` on Events 1-4 documents SPEC.md's datagram IDs, each its own at or above 2^62, and IDs a recorder assigns below 2^62. No API or behaviour change.

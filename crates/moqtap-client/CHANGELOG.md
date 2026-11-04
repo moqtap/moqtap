@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-04
+
 ### Fixed
 
 - Drafts 12-13: an empty extension block on datagram Types 0x03 and 0x05 now closes the session with PROTOCOL_VIOLATION, as it already did on Type 0x01.

@@ -1,7 +1,7 @@
 [package]
 name = "moqtap-trace"
 description = "MoQT session tracing — .moqtrace file format, event capture, and session metrics"
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

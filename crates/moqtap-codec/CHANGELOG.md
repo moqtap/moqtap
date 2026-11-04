@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-04
+
 ### Fixed
 
 - Drafts 20-22: `FetchObjectReader` and `FetchObjectWriter` read and write an End of Range marker's Group ID and Object ID as absolute, as on drafts 18-19. They treated them as deltas.
