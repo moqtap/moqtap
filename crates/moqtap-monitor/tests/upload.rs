@@ -140,6 +140,7 @@ async fn the_key_rides_only_in_the_header_and_every_body_reads_back() {
     }
     let all: Vec<_> = bodies.iter().flat_map(|b| b.runs.clone()).collect();
     assert!(all.iter().all(|r| r.gs && r.fo && r.b == 510 && r.q == [0, 100, 200, 300, 400]));
+    assert!(all.iter().all(|r| r.os == [100, 101, 102, 103, 104] && r.de == [0; 5]));
     let events: Vec<_> = bodies.iter().flat_map(|b| b.events.clone()).collect();
     let kinds: Vec<_> = events.iter().map(|e| e["e"].as_str().unwrap().to_string()).collect();
     assert_eq!(kinds, ["conn_open", "conn_close"]);
@@ -600,6 +601,25 @@ async fn every_relay_is_reported_whatever_their_number() {
     assert_eq!(sent, want);
     assert!(bodies.iter().all(|b| b.conns.len() <= 32));
     assert_eq!(stats.dropped, 0);
+}
+
+#[tokio::test]
+async fn an_object_handed_over_in_pieces_states_its_end() {
+    let mock = Mock::start().await;
+    let m = monitor(&mock);
+    let relay = m.connection("https://relay-a.example.net").unwrap();
+    let t0 = Instant::now();
+    let end = t0 + Duration::from_micros(2_550);
+    relay.object_sent_span(&NS, "video", obj(0, 0, 9_000), t0, end).unwrap();
+    relay.object_sent(&NS, "video", obj(0, 1, 40), Some(t0 + Duration::from_millis(3))).unwrap();
+    let back = relay.object_sent_span(&NS, "video", obj(0, 2, 1), end, t0);
+    assert!(matches!(back, Err(Rejected::InvalidInput)), "{back:?}");
+    drop(relay);
+    m.shutdown(Duration::from_secs(5)).await;
+    let runs: Vec<_> = bodies(&mock).into_iter().flat_map(|b| b.runs).collect();
+    assert_eq!(runs.len(), 1);
+    assert_eq!((runs[0].q.clone(), runs[0].de.clone()), (vec![0, 30], vec![25, 0]));
+    assert_eq!((runs[0].os.clone(), runs[0].b), (vec![9_000, 40], 9_040));
 }
 
 fn timing_of(b: &Body) -> &str {

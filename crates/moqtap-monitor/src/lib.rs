@@ -117,6 +117,21 @@ pub struct Sent {
     pub ends_group: bool,
 }
 
+fn handoff(sent: Sent) -> Handoff {
+    Handoff {
+        g: sent.group,
+        sub: match sent.delivery {
+            Delivery::Subgroup(s) => Some(s),
+            Delivery::Datagram => None,
+        },
+        o: sent.object,
+        size: sent.size,
+        starts_group: sent.starts_group,
+        opens_subgroup: sent.opens_subgroup,
+        ends_group: sent.ends_group,
+    }
+}
+
 /// An object status the producer sent in place of an object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -195,9 +210,9 @@ pub enum Error {
 #[non_exhaustive]
 pub enum Rejected {
     /// An id past 2^62 - 1 on a connection whose draft is 16 or earlier, a
-    /// size or code past 2^53 - 1, a status or gap the connection's draft
-    /// does not have, a draft outside 1 to 65535, a track name past MoQT's
-    /// limits, or too many tracks.
+    /// size or code past 2^53 - 1, an object that ends before it starts, a
+    /// status or gap the connection's draft does not have, a draft outside 1
+    /// to 65535, a track name past MoQT's limits, or too many tracks.
     #[error("invalid report")]
     InvalidInput,
     /// The connection is closed, or the monitor has shut down.
@@ -225,9 +240,10 @@ pub enum State {
 /// How an upload times its objects.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Timing {
-    /// A time per run of objects: the run's first object.
+    /// A time and a byte count per run of objects: the run's first object
+    /// and its payload bytes.
     Group,
-    /// A time per object.
+    /// Each object's start, end and size.
     #[default]
     Object,
 }
@@ -595,7 +611,7 @@ impl Connection {
 
     /// Report one object, once per connection, as it is handed to the MoQ
     /// library; each call is one publication, even with the same ids. `at`
-    /// is the handoff time, now when `None`.
+    /// is the handoff time, now when `None`; the object starts and ends there.
     pub fn object_sent<N: AsRef<[u8]>>(
         &self,
         namespace: &[N],
@@ -603,19 +619,26 @@ impl Connection {
         sent: Sent,
         at: Option<Instant>,
     ) -> Result<(), Rejected> {
-        let h = Handoff {
-            g: sent.group,
-            sub: match sent.delivery {
-                Delivery::Subgroup(s) => Some(s),
-                Delivery::Datagram => None,
-            },
-            o: sent.object,
-            size: sent.size,
-            starts_group: sent.starts_group,
-            opens_subgroup: sent.opens_subgroup,
-            ends_group: sent.ends_group,
-        };
-        self.call(at, |c, at_us| c.object_sent(self.id, namespace, track.as_ref(), h, at_us))
+        let h = handoff(sent);
+        self.call(at, |c, at_us| c.object_sent(self.id, namespace, track.as_ref(), h, at_us, at_us))
+    }
+
+    /// Report one object whose payload the application handed to the MoQ
+    /// library from `start` to `end`, as [`Connection::object_sent`] does
+    /// for one handed over at once. An `end` before `start` is refused.
+    pub fn object_sent_span<N: AsRef<[u8]>>(
+        &self,
+        namespace: &[N],
+        track: impl AsRef<[u8]>,
+        sent: Sent,
+        start: Instant,
+        end: Instant,
+    ) -> Result<(), Rejected> {
+        let h = handoff(sent);
+        let end_us = self.shared.mono_of(end);
+        self.call(Some(start), |c, at_us| {
+            c.object_sent(self.id, namespace, track.as_ref(), h, at_us, end_us)
+        })
     }
 
     /// Report an object status sent in place of object `object` of `group`.

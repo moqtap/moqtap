@@ -249,6 +249,8 @@ impl Packer {
                 sub: f.sub,
                 ids: run.ids,
                 times: run.times,
+                ends: run.ends,
+                sizes: run.sizes,
                 b: run.b,
             });
         }

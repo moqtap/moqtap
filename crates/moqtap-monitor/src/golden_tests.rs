@@ -158,8 +158,28 @@ fn run(
     times: Vec<i64>,
     b: u64,
 ) -> RunIn {
-    RunIn { cont: false, fo: false, eog: false, gs: false, c, ti, g, sub, ids, times, b }
+    let n = ids.len() as u64;
+    let sizes = (0..n).map(|i| if i < n - 1 { b / n } else { b - (n - 1) * (b / n) }).collect();
+    let ends = times.clone();
+    RunIn {
+        cont: false,
+        fo: false,
+        eog: false,
+        gs: false,
+        c,
+        ti,
+        g,
+        sub,
+        ids,
+        times,
+        ends,
+        sizes,
+        b,
+    }
 }
+
+/// The payload bytes of the `basic` video run's eight objects, 41,210 in all.
+const VIDEO_SIZES: [u64; 8] = [12_000, 4_100, 4_000, 4_100, 4_300, 4_210, 4_300, 4_200];
 
 fn base(off: f64) -> f64 {
     BASE as f64 + off
@@ -211,6 +231,8 @@ fn basic_spec(timing: Timing) -> Spec {
                     gs: true,
                     fo: true,
                     eog: true,
+                    ends: times(base(2_500.4), 33_333.3, 8),
+                    sizes: VIDEO_SIZES.to_vec(),
                     ..run(0, 0, 100, Some(0), ids(0, 8), times(base(1_000.4), 33_333.3, 8), 41_210)
                 },
                 RunIn {

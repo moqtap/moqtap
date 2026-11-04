@@ -25,7 +25,7 @@ fn collector() -> (Collector, u64) {
 
 fn send(c: &mut Collector, conn: u64, track: &str, h: Handoff, at: i64) -> Wake {
     c.observe(at, None);
-    c.object_sent(conn, &NS, track.as_bytes(), h, at).expect("taken")
+    c.object_sent(conn, &NS, track.as_bytes(), h, at, at).expect("taken")
 }
 
 fn cut(c: &mut Collector, at: i64) -> Interval {
@@ -112,13 +112,13 @@ fn ids_past_two_to_the_62_need_draft_17() {
     let (mut c, id) = collector();
     let big = sent(1 << 62, 0);
     c.observe(1, None);
-    assert!(c.object_sent(id, &NS, b"v", big, 1).is_ok(), "no draft known");
+    assert!(c.object_sent(id, &NS, b"v", big, 1, 1).is_ok(), "no draft known");
     c.set_draft(id, 16).unwrap();
-    assert_eq!(c.object_sent(id, &NS, b"v", big, 2), Err(Refused::Input));
+    assert_eq!(c.object_sent(id, &NS, b"v", big, 2, 2), Err(Refused::Input));
     let big_sub = Handoff { sub: Some(u64::MAX), ..sent(1, 0) };
-    assert_eq!(c.object_sent(id, &NS, b"v", big_sub, 2), Err(Refused::Input));
+    assert_eq!(c.object_sent(id, &NS, b"v", big_sub, 2, 2), Err(Refused::Input));
     c.set_draft(id, 17).unwrap();
-    assert!(c.object_sent(id, &NS, b"v", sent(u64::MAX, u64::MAX), 3).is_ok());
+    assert!(c.object_sent(id, &NS, b"v", sent(u64::MAX, u64::MAX), 3, 3).is_ok());
     assert_eq!(c.set_draft(id, 0), Err(Refused::Input));
     assert_eq!(c.set_draft(id, 65_536), Err(Refused::Input));
 }
@@ -226,7 +226,7 @@ fn a_long_track_list_leaves_room_for_many_objects() {
         for n in &names {
             at += 1_000;
             c.observe(at, None);
-            c.object_sent(id, &ns, n.as_bytes(), sent(0, 0), at).expect("taken");
+            c.object_sent(id, &ns, n.as_bytes(), sent(0, 0), at, at).expect("taken");
         }
         c.cut(at, false);
         let mut packer = Packer::new(head(), None);
@@ -236,7 +236,7 @@ fn a_long_track_list_leaves_room_for_many_objects() {
         for o in 1..=3000u64 {
             at += 1_000;
             c.observe(at, None);
-            c.object_sent(id, &ns, names[0].as_bytes(), sent(0, o), at).expect("taken");
+            c.object_sent(id, &ns, names[0].as_bytes(), sent(0, o), at, at).expect("taken");
         }
         c.cut(at, false);
         let bodies: Vec<_> =
@@ -275,7 +275,7 @@ fn a_track_list_past_the_seal_is_listed_by_key_once_its_names_are_accepted() {
     for n in &names {
         at += 1_000;
         c.observe(at, None);
-        c.object_sent(id, &NS, n, sent(0, 0), at).expect("taken");
+        c.object_sent(id, &NS, n, sent(0, 0), at, at).expect("taken");
     }
     c.cut(at, false);
     let mut packer = Packer::new(head(), None);
@@ -287,7 +287,7 @@ fn a_track_list_past_the_seal_is_listed_by_key_once_its_names_are_accepted() {
     for o in 1..=3000u64 {
         at += 1_000;
         c.observe(at, None);
-        c.object_sent(id, &NS, &names[0], sent(0, o), at).expect("taken");
+        c.object_sent(id, &NS, &names[0], sent(0, o), at, at).expect("taken");
     }
     c.cut(at, false);
     let bodies: Vec<_> = c.cuts.drain(..).map(|iv| packer.pack(iv, None, Timing::Object)).collect();
@@ -330,7 +330,7 @@ fn bodies_after_a_given_up_name_list_stay_under_the_ingest_cap() {
     for n in &names {
         at += 1_000;
         c.observe(at, None);
-        c.object_sent(id, &NS, n, sent(0, 0), at).expect("taken");
+        c.object_sent(id, &NS, n, sent(0, 0), at, at).expect("taken");
     }
     c.cut(at, false);
     let mut packer = Packer::new(head(), None);
@@ -349,7 +349,7 @@ fn bodies_after_a_given_up_name_list_stay_under_the_ingest_cap() {
         assert!(o < 50_000, "no seal");
         at += 1_000;
         c.observe(at, None);
-        c.object_sent(id, &NS, &names[0], sent(0, o), at).expect("taken");
+        c.object_sent(id, &NS, &names[0], sent(0, o), at, at).expect("taken");
     }
     let mut sent_now: Vec<_> = Vec::new();
     for iv in c.cuts.drain(..) {
@@ -367,7 +367,7 @@ fn bodies_after_a_given_up_name_list_stay_under_the_ingest_cap() {
         o += 1;
         at += 1_000;
         c.observe(at, None);
-        c.object_sent(id, &NS, &names[0], sent(0, o), at).expect("taken");
+        c.object_sent(id, &NS, &names[0], sent(0, o), at, at).expect("taken");
     }
     c.cut(at, false);
     let bodies: Vec<_> = c.cuts.drain(..).map(|iv| packer.pack(iv, None, Timing::Object)).collect();
@@ -453,11 +453,11 @@ fn a_cleared_flow_ends_its_open_run() {
 fn names_past_moqt_limits_are_refused() {
     let (mut c, id) = collector();
     let ns: Vec<&[u8]> = vec![b"x"; MAX_NAMESPACE_FIELDS + 1];
-    assert_eq!(c.object_sent(id, &ns, b"v", sent(1, 0), 1), Err(Refused::Input));
+    assert_eq!(c.object_sent(id, &ns, b"v", sent(1, 0), 1, 1), Err(Refused::Input));
     let long = vec![b'a'; MAX_FULL_NAME_BYTES + 1];
-    assert_eq!(c.object_sent(id, &NS, &long, sent(1, 0), 1), Err(Refused::Input));
+    assert_eq!(c.object_sent(id, &NS, &long, sent(1, 0), 1, 1), Err(Refused::Input));
     let empty: &[&[u8]] = &[];
-    assert!(c.object_sent(id, empty, b"", sent(1, 0), 1).is_ok());
+    assert!(c.object_sent(id, empty, b"", sent(1, 0), 1, 1).is_ok());
     assert_eq!(c.rejected, 2);
 }
 
@@ -608,7 +608,7 @@ fn rseq_and_seq_run_on_across_bodies() {
 }
 
 #[test]
-fn group_timing_writes_no_dt() {
+fn group_timing_writes_no_object_times_or_sizes() {
     let body = |timing: Timing| {
         let (mut c, id) = collector();
         for o in 0..3 {
@@ -619,5 +619,6 @@ fn group_timing_writes_no_dt() {
     let (object, group) = (body(Timing::Object), body(Timing::Group));
     assert_eq!(object.batch.timing, Timing::Object);
     assert_eq!(group.batch.timing, Timing::Group);
-    assert_eq!(object.records.len(), group.records.len() + 2, "two one-byte dt fewer");
+    // Two `dt`, three `de` and three `os` against one `b`, each one byte.
+    assert_eq!(object.records.len(), group.records.len() + 7);
 }

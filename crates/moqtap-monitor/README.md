@@ -59,6 +59,9 @@ The monitor runs on Tokio; `start()` spawns its tasks on the current runtime.
   publication, even when it repeats ids, so report a re-publication again
   and a library's own re-sends (per subscription, FETCH answers) not at all.
   `at` is when it was handed over (`None` means now).
+  - **`object_sent_span(namespace, track, sent, start, end)`** reports an
+    object whose payload you hand over in pieces, from `start` to `end`. An
+    `end` before `start` is refused.
   - `starts_group`: the first object your application publishes in the
     group. `opens_subgroup`: the first object of its subgroup.
     `ends_group`: the group's last object. Set them from your library's
@@ -96,9 +99,10 @@ still more than the target each second, and states which groups it left
 out. The viewer side reports every group, and those left out are shown as
 sampled.
 
-Each reported object carries its own time. `MonitorBuilder::timing(Timing::Group)`
-reports one time per run of objects instead, which uploads less. Ingest can
-also ask for that; if either asks for group timing, the monitor uses it.
+Each reported object carries its own start, end and size.
+`MonitorBuilder::timing(Timing::Group)` reports one time and one byte count per
+run of objects instead, which uploads less. Ingest can also ask for that; if
+either asks for group timing, the monitor uses it.
 
 At most 256 tracks may be published at once, and 1024 over the life of one
 connection.

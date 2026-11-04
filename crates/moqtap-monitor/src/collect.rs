@@ -56,6 +56,10 @@ pub(crate) struct Run {
     pub flow: Flow,
     pub ids: Vec<u64>,
     pub times: Vec<i64>,
+    /// Each object's end, device mono µs.
+    pub ends: Vec<i64>,
+    /// Each object's payload bytes.
+    pub sizes: Vec<u64>,
     pub b: u64,
     pub gs: bool,
     pub fo: bool,
@@ -526,6 +530,7 @@ impl Collector {
         name: &[u8],
         h: Handoff,
         at_us: i64,
+        end_us: i64,
     ) -> Result<Wake, Refused> {
         if self.stopped {
             return self.refuse(Refused::Closed);
@@ -535,7 +540,7 @@ impl Collector {
         }
         let ids_ok =
             self.id_ok(c, h.g) && self.id_ok(c, h.o) && h.sub.is_none_or(|s| self.id_ok(c, s));
-        if !ids_ok || h.size > MAX_SAFE_INTEGER {
+        if !ids_ok || h.size > MAX_SAFE_INTEGER || end_us < at_us {
             return self.refuse(Refused::Input);
         }
         let Some(track) = self.track(ns, name) else { return self.refuse(Refused::Input) };
@@ -550,7 +555,7 @@ impl Collector {
             }
         }
         let flow = Flow { c, track: Arc::clone(&track), g: h.g, sub: h.sub };
-        let cost = self.run_cost(&flow, &h, at_us);
+        let cost = self.run_cost(&flow, &h, at_us, end_us);
         let mut wake = self.room(c, Some(&track), cost);
         if self.cur.open.len() >= MAX_FLOWS && !self.cur.open.contains_key(&flow) {
             if self.cut(self.last_mono, false) {
@@ -602,7 +607,7 @@ impl Collector {
             None => false,
             Some(run) => {
                 let last = *run.ids.last().expect("a run has an object");
-                let q = (at_us - run.times[0]).div_euclid(DT_QUANTUM_US);
+                let q = (end_us - run.times[0]).div_euclid(DT_QUANTUM_US);
                 h.o <= last
                     || h.starts_group
                     || h.opens_subgroup
@@ -619,6 +624,8 @@ impl Collector {
             Some(run) => {
                 run.ids.push(h.o);
                 run.times.push(at_us);
+                run.ends.push(end_us);
+                run.sizes.push(h.size);
                 run.b += h.size;
             }
             None => {
@@ -630,6 +637,8 @@ impl Collector {
                         flow: flow.clone(),
                         ids: vec![h.o],
                         times: vec![at_us],
+                        ends: vec![end_us],
+                        sizes: vec![h.size],
                         b: h.size,
                         gs: h.starts_group,
                         fo: h.opens_subgroup,
@@ -648,14 +657,17 @@ impl Collector {
     }
 
     /// What one more object adds to the body, about.
-    fn run_cost(&self, flow: &Flow, h: &Handoff, at_us: i64) -> usize {
+    fn run_cost(&self, flow: &Flow, h: &Handoff, at_us: i64, end_us: i64) -> usize {
         match self.cur.open.get(flow) {
             Some(run) if h.o > *run.ids.last().unwrap_or(&0) => {
-                let q = (at_us - run.times[0]).div_euclid(DT_QUANTUM_US);
-                let prev =
-                    (run.times.last().unwrap_or(&at_us) - run.times[0]).div_euclid(DT_QUANTUM_US);
+                let t0 = run.times[0];
+                let q = (at_us - t0).div_euclid(DT_QUANTUM_US);
+                let prev = (run.times.last().unwrap_or(&at_us) - t0).div_euclid(DT_QUANTUM_US);
                 let gap = h.o - run.ids.last().unwrap_or(&0);
-                zigzag_len(q - prev) + if gap == 1 { 0 } else { leb_len(gap) + 1 }
+                zigzag_len(q - prev)
+                    + zigzag_len((end_us - t0).div_euclid(DT_QUANTUM_US) - q)
+                    + leb_len(h.size)
+                    + if gap == 1 { 0 } else { leb_len(gap) + 1 }
             }
             _ => {
                 3 + leb_len(flow.c)
@@ -663,6 +675,7 @@ impl Collector {
                     + h.sub.map_or(0, leb_len)
                     + leb_len(h.o)
                     + 9
+                    + zigzag_len((end_us - at_us).div_euclid(DT_QUANTUM_US))
                     + leb_len(h.size)
             }
         }

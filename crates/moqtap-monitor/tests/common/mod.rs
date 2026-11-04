@@ -53,6 +53,10 @@ pub struct Run {
     pub t0: i64,
     /// Offsets from `t0`, in 100 µs.
     pub q: Vec<i64>,
+    /// Each object's end from its start, in 100 µs; none at group timing.
+    pub de: Vec<i64>,
+    /// Each object's payload bytes; none at group timing.
+    pub os: Vec<u64>,
     pub b: u64,
 }
 
@@ -642,7 +646,7 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
     Ok(out)
 }
 
-/// At group timing, `q` holds only the first object's 0.
+/// At group timing, `q` holds only the first object's 0, and `de` and `os` are empty.
 fn read_run(rd: &mut Leb<'_>, base_us: i64, prev: &[Run], group: bool) -> R<Run> {
     let fl = rd.byte()?;
     let (cont, xid, fo, fo_known, eog, end, gs) = (
@@ -704,8 +708,24 @@ fn read_run(rd: &mut Leb<'_>, base_us: i64, prev: &[Run], group: bool) -> R<Run>
         }
         q.push(next);
     }
-    let b = rd.u()?;
-    Ok(Run { cont, fo, eog, gs, c, ti, g, sub, ids, t0, q, b })
+    let (mut de, mut os, mut b) = (Vec::new(), Vec::new(), 0u64);
+    if group {
+        b = rd.u()?;
+    } else {
+        for &qi in &q {
+            let d = rd.t()?;
+            if i32::try_from(qi + d).is_err() {
+                fail!("end past Int32");
+            }
+            de.push(d);
+        }
+        for _ in 0..n {
+            let s = rd.u()?;
+            b = b.checked_add(s).ok_or("bytes past u64")?;
+            os.push(s);
+        }
+    }
+    Ok(Run { cont, fo, eog, gs, c, ti, g, sub, ids, t0, q, de, os, b })
 }
 
 fn read_mark(rd: &mut Leb<'_>, base_us: i64, prev: Option<&Mark>) -> R<Mark> {

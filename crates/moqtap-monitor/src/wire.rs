@@ -38,7 +38,7 @@ pub(crate) const MAX_FULL_NAME_BYTES: usize = 4096;
 pub(crate) const MAX_VARINT_ID: u64 = (1 << 62) - 1;
 /// The largest integer a JSON number carries exactly.
 pub(crate) const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
-/// Time quantum of `dt`, µs.
+/// Time quantum of `dt` and `de`, µs.
 pub(crate) const DT_QUANTUM_US: i64 = 100;
 
 const BODY_MAGIC: [u8; 4] = *b"MQTC";
@@ -254,6 +254,10 @@ pub(crate) struct RunIn {
     pub sub: Option<u64>,
     pub ids: Vec<u64>,
     pub times: Vec<i64>,
+    /// Each object's end, device mono µs.
+    pub ends: Vec<i64>,
+    /// Each object's payload bytes, summing to `b`.
+    pub sizes: Vec<u64>,
     pub b: u64,
 }
 
@@ -640,8 +644,9 @@ fn track_json(id: usize, t: &TrackRec) -> String {
     j.finish()
 }
 
-/// The `run` columns: `fl c ti g sk [sub] o0 n [oid…] t0 [dt…] b`, with no
-/// `dt` at [`Timing::Group`].
+/// The `run` columns: `fl c ti g sk [sub] o0 n [oid…] t0 [dt…] (de… os… | b)`:
+/// each object's start, end and size at [`Timing::Object`], the run's first
+/// start and its bytes at [`Timing::Group`].
 pub(crate) fn encode_runs(base_us: i64, runs: &[RunIn], timing: Timing) -> Vec<u8> {
     let mut w = Leb::default();
     let mut last_g: Vec<(usize, u64)> = Vec::new();
@@ -689,14 +694,19 @@ pub(crate) fn encode_runs(base_us: i64, runs: &[RunIn], timing: Timing) -> Vec<u
         w.t(t0 - last_t0);
         last_t0 = t0;
         if timing == Timing::Object {
-            let mut q = 0;
-            for &t in &r.times[1..] {
-                let qi = (t - t0).div_euclid(DT_QUANTUM_US);
-                w.t(qi - q);
-                q = qi;
+            let q = |t: i64| (t - t0).div_euclid(DT_QUANTUM_US);
+            for p in r.times.windows(2) {
+                w.t(q(p[1]) - q(p[0]));
             }
+            for (&t, &e) in r.times.iter().zip(&r.ends) {
+                w.t(q(e) - q(t));
+            }
+            for &s in &r.sizes {
+                w.u(s);
+            }
+        } else {
+            w.u(r.b);
         }
-        w.u(r.b);
     }
     w.0
 }
