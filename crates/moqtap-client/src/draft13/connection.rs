@@ -112,8 +112,8 @@ pub enum ConnectionError {
     ///     names 0x05.
     ///   - draft-13 Section 9.3.1: "If an endpoint receives a datagram with Type
     ///     0x01 and Extension Headers Length is 0, it MUST close the session with
-    ///     Protocol Violation." In draft-11 Section 9.2, 0x01 is the only
-    ///     OBJECT_DATAGRAM Type with extensions. draft-13 Section 9.3.1 Table 12
+    ///     Protocol Violation." 0x01 is the only OBJECT_DATAGRAM Type with
+    ///     extensions in draft-11 Section 9.2. draft-13 Section 9.3.1 Table 12
     ///     adds 0x03, End Of Group with Extensions Present "Yes", and the
     ///     sentence was not updated. draft-14 Section 10.3.1 states the rule for
     ///     every such Type: "If an endpoint receives a datagram with Extensions
