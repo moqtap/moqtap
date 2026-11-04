@@ -384,7 +384,7 @@ pub enum EventData {
         /// Raw wire bytes (only at `full` detail level).
         raw: Option<Vec<u8>>,
     },
-    /// A QUIC stream was opened (event type 1).
+    /// A stream was opened, or a datagram arrived (event type 1).
     ///
     /// The four optional identifiers are what the recorder read from the
     /// stream's header, and [`header_raw`](EventData::StreamOpened::header_raw)
@@ -396,7 +396,11 @@ pub enum EventData {
     /// entry is kept verbatim in [`TraceEvent::extra`] instead of being read
     /// here. A reader must not refuse a stream for lacking one.
     StreamOpened {
-        /// QUIC stream ID.
+        /// The QUIC stream ID, or, where the recorder sees none, one it
+        /// assigned below 2^62. A datagram's is its own: at least 2^62 and unique
+        /// within the trace, and older traces put every datagram on 0. Tell a
+        /// datagram by `stream_type`, never by this value. SPEC.md
+        /// "`"sid"` — the stream ID".
         stream_id: u64,
         /// Outgoing or incoming.
         direction: Direction,
@@ -434,14 +438,16 @@ pub enum EventData {
     },
     /// A QUIC stream was closed (event type 2).
     StreamClosed {
-        /// QUIC stream ID.
+        /// Stream ID, as on [`StreamOpened`](EventData::StreamOpened::stream_id).
         stream_id: u64,
         /// Error code (0 = clean close).
         error_code: u64,
     },
     /// An object header was parsed from a data stream (event type 3).
     ObjectHeader {
-        /// Stream ID this object arrived on.
+        /// Stream ID this object arrived on, as on
+        /// [`StreamOpened`](EventData::StreamOpened::stream_id). A datagram's
+        /// object carries its datagram's ID.
         stream_id: u64,
         /// Group ID.
         group: u64,
@@ -454,7 +460,7 @@ pub enum EventData {
     },
     /// Object payload bytes were received or sent (event type 4).
     ObjectPayload {
-        /// Stream ID.
+        /// Stream ID, as on [`ObjectHeader`](EventData::ObjectHeader::stream_id).
         stream_id: u64,
         /// Group ID.
         group: u64,

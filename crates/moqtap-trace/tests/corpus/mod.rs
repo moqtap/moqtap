@@ -611,8 +611,9 @@ pub fn v2_headers_level_flow() -> Case {
                 },
             ),
             // A datagram carries its group on the stream-opened event, because
-            // there is no subgroup stream to hang it off. Note that `"sid"`
-            // here names a stream a datagram never opened.
+            // there is no subgroup stream to hang it off. Its `"sid"` of 12 is
+            // below 2^62, which SPEC.md "`"sid"` — the stream ID" forbids a
+            // writer for a datagram; readers must still accept it.
             TraceEvent::new(
                 3,
                 300,
@@ -904,7 +905,9 @@ pub fn v2_stream_header_bytes() -> Case {
                 opened(11, StreamType::Fetch, None, None, Some(42), None, &[0x05, 0x2a]),
             ),
             // Datagram type 0x00, alias 9, group 2^32 (draft-18's five-byte
-            // varint), object 3, priority 0x80. Stream 0 by convention.
+            // varint), object 3, priority 0x80. On stream 0, as writers put
+            // datagrams before SPEC.md "`"sid"` — the stream ID"; kept as a
+            // case readers must still accept.
             TraceEvent::new(
                 3,
                 300,
@@ -937,6 +940,76 @@ pub fn v2_stream_header_bytes() -> Case {
     }
 }
 
+/// Datagrams as SPEC.md "`"sid"` — the stream ID" has a writer record them:
+/// each on a `"sid"` of its own from 2^62, shared by its Event 1, Event 3 and
+/// Event 4, beside a subgroup stream on a real stream ID.
+///
+/// Key order matches the JS case, so the two encodings differ only where the
+/// encoders do.
+pub fn v2_datagram_sids() -> Case {
+    const BASE: u64 = 1 << 62;
+    let mut header = TraceHeader::new(
+        "moq-transport-18",
+        Perspective::Observer,
+        DetailLevel::HeadersSizes,
+        START_TIME,
+    );
+    header.session_id = Some("v2-datagram-sids".into());
+    let datagram = |stream_id, hdr: &[u8]| EventData::StreamOpened {
+        stream_id,
+        direction: Direction::Receive,
+        stream_type: StreamType::Datagram,
+        track_alias: Some(9),
+        subgroup_id: None,
+        fetch_request_id: None,
+        group_id: Some(8),
+        header_raw: Some(hdr.to_vec()),
+    };
+    let object = |stream_id, group, object| EventData::ObjectHeader {
+        stream_id,
+        group,
+        object,
+        publisher_priority: 128,
+        object_status: 0,
+    };
+    let payload = |stream_id, group, object| EventData::ObjectPayload {
+        stream_id,
+        group,
+        object,
+        size: 4,
+        payload: None,
+    };
+    Case {
+        header,
+        events: vec![
+            TraceEvent::new(
+                0,
+                100,
+                EventData::StreamOpened {
+                    stream_id: 7,
+                    direction: Direction::Receive,
+                    stream_type: StreamType::Subgroup,
+                    track_alias: Some(9),
+                    subgroup_id: Some(2),
+                    fetch_request_id: None,
+                    group_id: None,
+                    header_raw: None,
+                },
+            ),
+            TraceEvent::new(1, 150, object(7, 7, 0)),
+            TraceEvent::new(2, 150, payload(7, 7, 0)),
+            // Datagram type 0x00, alias 9, group 8, object 0, priority 0x80.
+            TraceEvent::new(3, 200, datagram(BASE, &[0x00, 0x09, 0x08, 0x00, 0x80])),
+            TraceEvent::new(4, 200, object(BASE, 8, 0)),
+            TraceEvent::new(5, 200, payload(BASE, 8, 0)),
+            // The next datagram of the same group takes the next ID.
+            TraceEvent::new(6, 300, datagram(BASE + 1, &[0x00, 0x09, 0x08, 0x01, 0x80])),
+            TraceEvent::new(7, 300, object(BASE + 1, 8, 1)),
+            TraceEvent::new(8, 300, payload(BASE + 1, 8, 1)),
+        ],
+    }
+}
+
 /// Every single-segment case both implementations author, by directory name.
 pub fn authored_cases() -> Vec<(&'static str, Case)> {
     vec![
@@ -950,6 +1023,7 @@ pub fn authored_cases() -> Vec<(&'static str, Case)> {
         ("v2-header-extra", v2_header_extra()),
         ("v2-error-with-raw", v2_error_with_raw()),
         ("v2-stream-header-bytes", v2_stream_header_bytes()),
+        ("v2-datagram-sids", v2_datagram_sids()),
     ]
 }
 
