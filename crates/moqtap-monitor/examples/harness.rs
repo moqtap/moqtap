@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use moqtap_monitor::{
     Connection, Delivery, Error, Gap, Monitor, MonitorBuilder, Proxy, Rejected, Sent, State, Stats,
-    Status, TestClock,
+    Status, TestClock, Timing,
 };
 use serde_json::{json, Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -218,6 +218,11 @@ impl Harness {
         if let Some(t) = opt_uint(cmd, "sample_target")? {
             b = b.sample_target(u32::try_from(t).unwrap_or(u32::MAX));
         }
+        match opt_text(cmd, "timing")? {
+            None | Some("object") => {}
+            Some("group") => b = b.timing(Timing::Group),
+            Some(_) => return Err(bad()),
+        }
         match opt_text(cmd, "proxy")? {
             None | Some("env") => {}
             Some("direct") => b = b.proxy(Proxy::Direct),
@@ -290,7 +295,6 @@ fn stats_json(s: &Stats) -> Map<String, Value> {
         "bytes_queued": s.bytes_queued.to_string(),
         "bodies_lost": s.bodies_lost.to_string(),
         "dropped": s.dropped.to_string(),
-        "over_relay_cap": s.over_relay_cap.to_string(),
         "rejected": s.rejected.to_string(),
     }));
     let state = match s.state {

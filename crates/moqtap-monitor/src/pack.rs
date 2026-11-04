@@ -17,6 +17,7 @@ use crate::wire::{
     preamble_json, record_frames, AppOffset, Batch, ConnRec, Hist, MarkIn, PaceIn, PevIn, Record,
     RunIn, Seal, Tail, TrackRec, MAX_RECORD_ENTRIES,
 };
+use crate::Timing;
 
 /// A body sealed but not yet sent: its batch record gets its clock when it
 /// is first sent, and from then on its bytes are fixed.
@@ -32,8 +33,6 @@ pub(crate) struct Sealed {
     /// The fact records' frames.
     pub records: Vec<u8>,
     pub preamble: String,
-    /// The relay origins the body names.
-    pub origins: Vec<String>,
     /// Its size before compression.
     pub raw_len: usize,
 }
@@ -123,13 +122,6 @@ pub(crate) struct Packer {
     pre_drop_objects: u64,
 }
 
-/// One packed body, and what was left out of it for the relay cap.
-#[derive(Debug)]
-pub(crate) struct Packed {
-    pub sealed: Sealed,
-    pub over_relay_cap: u64,
-}
-
 impl Packer {
     pub(crate) fn new(head: Head, target: Option<u32>) -> Self {
         Packer {
@@ -151,13 +143,8 @@ impl Packer {
         self.pre_drop_records
     }
 
-    /// Pack `iv`, leaving out the records of the `denied` connections.
-    pub(crate) fn pack(
-        &mut self,
-        iv: Interval,
-        denied: &HashSet<u64>,
-        app: Option<AppOffset>,
-    ) -> Packed {
+    /// Pack `iv`, its runs at `timing`.
+    pub(crate) fn pack(&mut self, iv: Interval, app: Option<AppOffset>, timing: Timing) -> Sealed {
         let Interval {
             from_us,
             through_us,
@@ -176,7 +163,6 @@ impl Packer {
             dropped_records,
         } = iv;
         self.pre_drop_records += dropped_records;
-        let mut capped = 0u64;
         let ti: HashMap<&TrackRef, usize> =
             tracks.iter().enumerate().map(|(i, t)| (t, i)).collect();
 
@@ -223,11 +209,6 @@ impl Packer {
 
         let mut records = Vec::new();
         for e in events {
-            if denied.contains(&e.c) {
-                capped += 1;
-                self.pre_drop_records += 1;
-                continue;
-            }
             records.push(Record::Pev(PevIn {
                 c: e.c,
                 ti: e.track.as_ref().map(|t| ti[t]),
@@ -245,12 +226,6 @@ impl Packer {
                 self.emitted.clear(&c);
             }
             let f = &run.flow;
-            if denied.contains(&f.c) {
-                capped += 1;
-                self.pre_drop_records += 1;
-                self.pre_drop_objects += run.ids.len() as u64;
-                continue;
-            }
             if excluded.get(&f.track).is_some_and(|x| x.contains(&f.g)) {
                 continue;
             }
@@ -286,11 +261,6 @@ impl Packer {
 
         let mut mark_ins = Vec::new();
         for m in marks {
-            if denied.contains(&m.c) {
-                capped += 1;
-                self.pre_drop_records += 1;
-                continue;
-            }
             mark_ins.push(MarkIn {
                 kind: m.kind,
                 c: m.c,
@@ -305,11 +275,8 @@ impl Packer {
             records.push(Record::Marks(chunk));
         }
 
-        let mut paces: Vec<PaceIn> = pace
-            .into_iter()
-            .filter(|((c, _), _)| !denied.contains(c))
-            .map(|((c, t), p)| pace_in(c, ti[&t], p))
-            .collect();
+        let mut paces: Vec<PaceIn> =
+            pace.into_iter().map(|((c, t), p)| pace_in(c, ti[&t], p)).collect();
         paces.sort_by_key(|p| (p.c, p.ti));
         for chunk in chunks(paces) {
             records.push(Record::Paces(chunk));
@@ -318,24 +285,14 @@ impl Packer {
             records.push(Record::End("shutdown"));
         }
 
-        let mut gdec: Vec<(u64, usize, u64)> = gdec
-            .into_iter()
-            .filter(|((c, _), _)| !denied.contains(c))
-            .map(|((c, t), n)| (c, ti[&t], n))
-            .collect();
+        let mut gdec: Vec<(u64, usize, u64)> =
+            gdec.into_iter().map(|((c, t), n)| (c, ti[&t], n)).collect();
         gdec.sort_unstable();
 
         let conns: Vec<ConnRec> = conns
             .into_iter()
-            .filter(|(c, _)| !denied.contains(c))
             .map(|(c, i)| ConnRec { c, draft: i.draft, relay: i.origin })
             .collect();
-        let mut origins: Vec<String> = Vec::new();
-        for c in &conns {
-            if !origins.contains(&c.relay) {
-                origins.push(c.relay.clone());
-            }
-        }
 
         let first_rseq = self.next_rseq;
         let n = records.len() as u64;
@@ -368,27 +325,14 @@ impl Packer {
             gdec,
             start: (seq == 0).then_some(self.head.start),
             smp: self.target,
+            timing,
         };
         let seal = Seal { seq, from_us, through_us, ms: seal_ms };
         let preamble = preamble_json(&self.head.instance_id, &em, &seal);
-        let records = record_frames(&records, from_us, first_rseq);
+        let records = record_frames(&records, from_us, first_rseq, timing);
         let probe = crate::wire::Clk { base_us: from_us, epoch, res_us: 1, sample: None, app };
         let raw_len = preamble.len() + crate::wire::frames(&batch, &probe, &records).len() + 200;
-        Packed {
-            sealed: Sealed {
-                seq,
-                epoch,
-                base_us: from_us,
-                app,
-                batch,
-                tracks,
-                records,
-                preamble,
-                origins,
-                raw_len,
-            },
-            over_relay_cap: capped,
-        }
+        Sealed { seq, epoch, base_us: from_us, app, batch, tracks, records, preamble, raw_len }
     }
 }
 

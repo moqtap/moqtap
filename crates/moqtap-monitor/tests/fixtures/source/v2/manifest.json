@@ -60,6 +60,7 @@
                 "relay": "https://relay-a.example.net/moq"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -343,6 +344,7 @@
                 "relay": "https://relay-a.example.net/moq"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -586,6 +588,7 @@
                 "relay": "moqt://relay-c.example.net:4443"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -843,6 +846,7 @@
                 "relay": "https://relay-a.example.net/moq"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -997,6 +1001,7 @@
                 "relay": "https://relay-a.example.net"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -1246,6 +1251,7 @@
                 "relay": "https://relay-a.example.net/moq"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -1409,6 +1415,7 @@
                 "relay": "https://relay-a.example.net/moq"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -7272,6 +7279,7 @@
                 "relay": "https://relay-a.example.net/moq"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -10353,6 +10361,7 @@
                 "relay": "https://relay-a.example.net/moq"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -10523,6 +10532,7 @@
                 "relay": "https://relay-a.example.net/moq"
               }
             ],
+            "timing": "object",
             "t": "source-batch",
             "source": "enc-fra-1",
             "monitor": {
@@ -10566,6 +10576,280 @@
             }
           ]
         }
+      }
+    },
+    {
+      "name": "group-timing",
+      "file": "group-timing.bin",
+      "bodyBytes": 1268,
+      "expect": {
+        "ok": true
+      },
+      "read": {
+        "ok": true,
+        "body": {
+          "side": "source",
+          "preamble": {
+            "v": 2,
+            "i": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "em": [
+              {
+                "first": 0,
+                "n": 4
+              }
+            ],
+            "seal": {
+              "seq": 0,
+              "fromUs": 7200000000,
+              "throughUs": 7215000000,
+              "ms": 15000
+            }
+          },
+          "batch": {
+            "v": 2,
+            "instanceId": "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1",
+            "seq": 0,
+            "idempotencyKey": "998ec06a866c2ca9ec2eefc4e0fdf3ae739d146543a23665b5909ee5eafc2209",
+            "final": false,
+            "clk": {
+              "baseUs": 7200000000,
+              "epoch": 0,
+              "resUs": 1,
+              "sample": {
+                "oUs": 1761688800041500,
+                "rUs": 18250,
+                "atUs": 7198000000,
+                "pop": "FRA"
+              },
+              "app": null
+            },
+            "tail": {
+              "lastRseq": 3,
+              "preDrop": {
+                "records": 0,
+                "objects": 0
+              },
+              "conn": []
+            },
+            "conns": [
+              {
+                "c": 0,
+                "draft": 14,
+                "relay": "https://relay-a.example.net/moq"
+              }
+            ],
+            "timing": "group",
+            "t": "source-batch",
+            "source": "enc-fra-1",
+            "monitor": {
+              "name": "moqtap-reference",
+              "version": "2.0.0"
+            },
+            "tracks": [
+              {
+                "id": 0,
+                "named": true,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "766964656f",
+                "trackKey": "7973027728501289496",
+                "tkMatches": true,
+                "k": 0,
+                "span": [
+                  7200001000,
+                  7200300000
+                ],
+                "xg": []
+              },
+              {
+                "id": 1,
+                "named": true,
+                "ns": [
+                  "6578616d706c652e636f6d",
+                  "6c697665"
+                ],
+                "name": "617564696f",
+                "trackKey": "13261813283898417230",
+                "tkMatches": true,
+                "k": 0,
+                "span": [
+                  7200002000,
+                  7200242000
+                ],
+                "xg": []
+              }
+            ],
+            "gdec": [],
+            "start": {
+              "monoUs": 7195000000,
+              "wallMs": 1761696055000
+            },
+            "sampleTarget": null
+          },
+          "runs": [
+            {
+              "rseq": 1,
+              "entries": [
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": true,
+                  "foKnown": true,
+                  "eog": true,
+                  "end": "na",
+                  "gs": true,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "100",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 8,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200001000,
+                  "dt": [],
+                  "b": 41210,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": false,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": true,
+                  "c": 0,
+                  "ti": 1,
+                  "g": "100",
+                  "path": null,
+                  "sub": null,
+                  "sid": null,
+                  "o0": "0",
+                  "n": 13,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200002000,
+                  "dt": [],
+                  "b": 2080,
+                  "rc": null,
+                  "tl": null
+                },
+                {
+                  "cont": false,
+                  "xid": false,
+                  "fo": true,
+                  "foKnown": true,
+                  "eog": false,
+                  "end": "na",
+                  "gs": true,
+                  "c": 0,
+                  "ti": 0,
+                  "g": "101",
+                  "path": null,
+                  "sub": "0",
+                  "sid": null,
+                  "o0": "0",
+                  "n": 2,
+                  "oid": null,
+                  "osub": null,
+                  "t0Us": 7200267667,
+                  "dt": [],
+                  "b": 9870,
+                  "rc": null,
+                  "tl": null
+                }
+              ]
+            }
+          ],
+          "marks": [
+            {
+              "rseq": 2,
+              "entries": [
+                {
+                  "kind": "eot",
+                  "c": 0,
+                  "ti": 0,
+                  "g": "101",
+                  "o": "2",
+                  "g2": null,
+                  "o2": null,
+                  "n": null,
+                  "tUs": 7200301000,
+                  "path": null,
+                  "sid": null
+                }
+              ]
+            }
+          ],
+          "paces": [
+            {
+              "rseq": 3,
+              "entries": [
+                {
+                  "c": 0,
+                  "ti": 0,
+                  "first": [
+                    [
+                      69,
+                      1
+                    ]
+                  ],
+                  "later": [
+                    [
+                      71,
+                      7
+                    ],
+                    [
+                      72,
+                      1
+                    ]
+                  ]
+                },
+                {
+                  "c": 0,
+                  "ti": 1,
+                  "first": [],
+                  "later": [
+                    [
+                      62,
+                      12
+                    ]
+                  ]
+                }
+              ]
+            }
+          ],
+          "events": [
+            {
+              "rseq": 0,
+              "c": 0,
+              "ti": null,
+              "e": "conn_open",
+              "code": null,
+              "atUs": 7197000000
+            }
+          ],
+          "records": []
+        }
+      }
+    },
+    {
+      "name": "refuse-bad-timing",
+      "file": "refuse-bad-timing.bin",
+      "bodyBytes": 852,
+      "expect": {
+        "ok": false,
+        "reason": "no-batch-record"
+      },
+      "read": {
+        "ok": false,
+        "reason": "no-batch-record"
       }
     },
     {

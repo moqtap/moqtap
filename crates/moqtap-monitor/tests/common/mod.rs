@@ -524,6 +524,11 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
         int(&s["mono_us"], "start")?;
         int(&s["wall_ms"], "start")?;
     }
+    let group = match batch.get("timing").map(Value::as_str) {
+        None | Some(Some("object")) => false,
+        Some(Some("group")) => true,
+        _ => fail!("timing"),
+    };
 
     let mut out = Body {
         preamble: preamble.clone(),
@@ -559,7 +564,7 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
                 let (mut runs, mut marks) = (Vec::new(), Vec::new());
                 for _ in 0..n {
                     match t {
-                        "run" => runs.push(read_run(&mut rd, base_us, &runs)?),
+                        "run" => runs.push(read_run(&mut rd, base_us, &runs, group)?),
                         "mark" => marks.push(read_mark(&mut rd, base_us, marks.last())?),
                         _ => out.paces.push(read_pace(&mut rd)?),
                     }
@@ -635,7 +640,8 @@ pub fn try_read_body(body: &[u8], source: &str) -> R<Body> {
     Ok(out)
 }
 
-fn read_run(rd: &mut Leb<'_>, base_us: i64, prev: &[Run]) -> R<Run> {
+/// At group timing, `q` holds only the first object's 0.
+fn read_run(rd: &mut Leb<'_>, base_us: i64, prev: &[Run], group: bool) -> R<Run> {
     let fl = rd.byte()?;
     let (cont, xid, fo, fo_known, eog, end, gs) = (
         fl & 1 != 0,
@@ -688,7 +694,7 @@ fn read_run(rd: &mut Leb<'_>, base_us: i64, prev: &[Run]) -> R<Run> {
     let last_t0 = prev.last().map_or(base_us, |r| r.t0);
     let t0 = last_t0 + rd.t()?;
     let mut q = vec![0i64];
-    for _ in 1..n {
+    for _ in 1..if group { 1 } else { n } {
         let d = rd.t()?;
         let next = q.last().unwrap() + d;
         if i32::try_from(next).is_err() {
@@ -785,6 +791,8 @@ struct MockState {
     pop: Option<String>,
     /// Never answer the next upload.
     hold: bool,
+    /// The clock exchange's reply body, with a 200; none: an empty 204.
+    clock_body: Option<String>,
 }
 
 #[derive(Clone)]
@@ -827,6 +835,10 @@ impl Mock {
     /// Take the next upload and never answer it.
     pub fn hold_next(&self) {
         self.state.lock().unwrap().hold = true;
+    }
+
+    pub fn set_clock_body(&self, body: &str) {
+        self.state.lock().unwrap().clock_body = Some(body.to_string());
     }
 
     pub fn set_clock_offset_ms(&self, ms: f64) {
@@ -887,7 +899,10 @@ async fn handle(
         if !clock && std::mem::take(&mut s.hold) {
             None
         } else if clock {
-            Some(Reply { status: 204, headers: vec![], body: String::new() })
+            Some(match &s.clock_body {
+                Some(body) => Reply { status: 200, headers: vec![], body: body.clone() },
+                None => Reply { status: 204, headers: vec![], body: String::new() },
+            })
         } else {
             Some(s.script.pop_front().unwrap_or(Reply::status(202)))
         }

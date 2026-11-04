@@ -86,16 +86,6 @@ pub(crate) fn relay_endpoint(url: &str) -> Option<String> {
     (out.len() <= MAX_RELAY_URL).then_some(out)
 }
 
-/// The host of an endpoint [`relay_endpoint`] wrote: no scheme, port or path.
-pub(crate) fn relay_host(endpoint: &str) -> &str {
-    let rest = endpoint.split_once("://").map_or(endpoint, |(_, r)| r);
-    let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
-    if authority.starts_with('[') {
-        return &authority[..authority.find(']').map_or(authority.len(), |i| i + 1)];
-    }
-    &authority[..authority.rfind(':').unwrap_or(authority.len())]
-}
-
 fn is_unreserved(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~')
 }
@@ -192,7 +182,7 @@ fn remove_dot_segments(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{relay_endpoint, relay_host};
+    use super::relay_endpoint;
 
     /// The endpoint's origin: scheme, host and port.
     fn o(s: &str) -> Option<String> {
@@ -252,14 +242,6 @@ mod tests {
         }
         let long = format!("https://relay.example/{}", "\u{fc}".repeat(400));
         assert_eq!(relay_endpoint(&long), None);
-    }
-
-    #[test]
-    fn hosts() {
-        assert_eq!(relay_host("https://relay.example/moq"), "relay.example");
-        assert_eq!(relay_host("moqt://relay.example:4443/a"), "relay.example");
-        assert_eq!(relay_host("https://[::1]:8443/x"), "[::1]");
-        assert_eq!(relay_host("https://127.0.0.1:4433"), "127.0.0.1");
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::wire::{
     Batch, Clk, ClockSample, ConnRec, EventKind, MarkIn, MarkKind, PaceIn, PevIn, Record, RunIn,
     Seal, Tail, TrackRec,
 };
+use crate::Timing;
 
 const SOURCE: &str = "enc-fra-1";
 const INSTANCE: &str = "5f0c2a9e7b1d4e3fa6c8b0d2e4f6a8c1";
@@ -80,6 +81,7 @@ struct Spec {
     start: Option<(i64, i64)>,
     smp: Option<u32>,
     seal: Option<Seal>,
+    timing: Timing,
 }
 
 impl Spec {
@@ -97,6 +99,7 @@ impl Spec {
             start: None,
             smp: None,
             seal: None,
+            timing: Timing::Object,
         }
     }
 
@@ -118,6 +121,7 @@ impl Spec {
             gdec: self.gdec,
             start: self.start,
             smp: self.smp,
+            timing: self.timing,
         };
         let seal = self.seal.unwrap_or(Seal {
             seq: self.seq,
@@ -126,7 +130,7 @@ impl Spec {
             ms: SEAL_MS,
         });
         let em = if n > 0 { vec![(self.first, n)] } else { Vec::new() };
-        let records = record_frames(&self.records, BASE, self.first);
+        let records = record_frames(&self.records, BASE, self.first, self.timing);
         body(&preamble_json(INSTANCE, &em, &seal), &frames(&batch, &self.clk, &records), false)
     }
 }
@@ -173,6 +177,15 @@ fn check(name: &str, built: Vec<u8>) {
 
 #[test]
 fn basic() {
+    check("basic", basic_spec(Timing::Object).build());
+}
+
+#[test]
+fn group_timing() {
+    check("group-timing", basic_spec(Timing::Group).build());
+}
+
+fn basic_spec(timing: Timing) -> Spec {
     let mut v = video();
     v.span = Some((BASE + 1_000, BASE + 300_000));
     let mut a = audio();
@@ -221,7 +234,8 @@ fn basic() {
         ],
     );
     s.start = Some((BASE - 5_000_000, 1_761_696_055_000));
-    check("basic", s.build());
+    s.timing = timing;
+    s
 }
 
 #[test]
@@ -489,7 +503,8 @@ fn every_accepted_golden_is_rebuilt() {
             "unsampled-high-rate",
             "sampled-target",
             "names-elided",
-            "final-unmapped"
+            "final-unmapped",
+            "group-timing"
         ]
     );
 }

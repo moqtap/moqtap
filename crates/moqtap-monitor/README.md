@@ -96,12 +96,12 @@ still more than the target each second, and states which groups it left
 out. The viewer side reports every group, and those left out are shown as
 sampled.
 
-A source reports at most 64 relays in a calendar month (UTC;
-`moqtap_monitor::MAX_RELAYS_PER_MONTH`). A relay is its host: URLs that differ
-only in scheme, port or path are one relay. Reports for a further relay are not
-sent and are counted in `stats().over_relay_cap`; they are sent again from the
-next month. At most 256 tracks may be published at once, and 1024 over the
-life of one connection.
+Each reported object carries its own time. `MonitorBuilder::timing(Timing::Group)`
+reports one time per run of objects instead, which uploads less. Ingest can
+also ask for that; if either asks for group timing, the monitor uses it.
+
+At most 256 tracks may be published at once, and 1024 over the life of one
+connection.
 
 Reporting never blocks on the network and never panics. Invalid input is
 refused with `Rejected` and counted in `stats().rejected`.

@@ -5,7 +5,7 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::{published, read_body, try_read_body, unique, Body, Mock, Reply};
-use moqtap_monitor::{Delivery, Gap, Monitor, Rejected, Sent, State, Status, MAX_RELAYS_PER_MONTH};
+use moqtap_monitor::{Delivery, Gap, Monitor, Rejected, Sent, State, Status, Timing};
 
 const SOURCE: &str = "enc-test-1";
 const KEY: &str = "mqt_sk_AAAAtestkeybody_testmac";
@@ -580,70 +580,86 @@ async fn until_sent(m: &Monitor, n: u64) {
 }
 
 #[tokio::test]
-async fn no_body_names_a_relay_past_the_monthly_cap() {
+async fn every_relay_is_reported_whatever_their_number() {
     let mock = Mock::start().await;
     let m = monitor(&mock);
-    let mut conns: Vec<_> = (0..70)
+    let conns: Vec<_> = (0..70)
         .map(|i| m.connection(&format!("https://relay-{i:02}.example.net/moq")).unwrap())
         .collect();
-    // Another port and path on a counted host: the same relay.
-    conns.push(m.connection("https://relay-00.example.net:4443/other").unwrap());
     for c in &conns {
         c.object_sent(&NS, "video", obj(0, 0, 10), None).unwrap();
-        c.request_error(3).unwrap();
     }
     drop(conns);
     let stats = m.shutdown(Duration::from_secs(5)).await;
 
-    let mut want: std::collections::BTreeSet<String> =
-        (0..64).map(|i| format!("https://relay-{i:02}.example.net/moq")).collect();
-    want.insert("https://relay-00.example.net:4443/other".into());
+    let want: std::collections::BTreeSet<String> =
+        (0..70).map(|i| format!("https://relay-{i:02}.example.net/moq")).collect();
     let bodies = bodies(&mock);
     let sent: std::collections::BTreeSet<String> =
         published(&bodies).into_iter().map(|(r, ..)| r).collect();
     assert_eq!(sent, want);
-    for b in &bodies {
-        assert!(b.conns.len() <= 32);
-        assert!(b.conns.iter().all(|c| want.contains(&c.relay)), "{:?}", b.conns);
-    }
-    // Each origin past the cap: its conn_open, its run, its error, its conn_close.
-    assert_eq!(stats.over_relay_cap, 6 * 4);
-    assert!(stats.dropped >= stats.over_relay_cap);
-    assert_eq!(MAX_RELAYS_PER_MONTH, 64);
+    assert!(bodies.iter().all(|b| b.conns.len() <= 32));
+    assert_eq!(stats.dropped, 0);
+}
+
+fn timing_of(b: &Body) -> &str {
+    b.batch.get("timing").and_then(|t| t.as_str()).unwrap_or("object")
 }
 
 #[tokio::test]
-async fn the_cap_restarts_when_ingest_answers_from_a_later_month() {
+async fn the_clock_reply_lowers_timing_to_group() {
     let mock = Mock::start().await;
+    mock.set_clock_body(r#"{"ok":true,"timing":"group"}"#);
     let m = monitor(&mock);
-    let conns: Vec<_> = (0..64)
-        .map(|i| m.connection(&format!("https://relay-{i:02}.example.net")).unwrap())
-        .collect();
-    for c in &conns {
-        c.object_sent(&NS, "video", obj(0, 0, 10), None).unwrap();
+    let relay = m.connection("https://relay-a.example.net").unwrap();
+    // The sender probes before its first upload: once a body is sent, the
+    // clock reply is taken, and every later seal is at its timing.
+    relay.object_sent(&NS, "video", obj(0, 9, 10), None).unwrap();
+    until_sent(&m, 1).await;
+    for o in 0..4 {
+        relay.object_sent(&NS, "video", obj(1, o, 10), None).unwrap();
     }
-    until_sent(&m, 2).await;
-    let late = m.connection("https://relay-late.example.net").unwrap();
-    late.object_sent(&NS, "video", obj(0, 0, 10), None).unwrap();
-    let sent = m.stats().bodies_sent;
-    conns[0].object_sent(&NS, "video", obj(1, 0, 10), None).unwrap();
-    until_sent(&m, sent + 1).await;
-    assert_eq!(m.stats().over_relay_cap, 2, "the 65th origin waits for a new month");
-
-    // Ingest's clock in a later month: the next accepted body restarts the count.
-    mock.set_clock_offset_ms(32.0 * 86_400_000.0);
-    let sent = m.stats().bodies_sent;
-    conns[0].object_sent(&NS, "video", obj(2, 0, 10), None).unwrap();
-    until_sent(&m, sent + 1).await;
-    late.object_sent(&NS, "video", obj(1, 0, 10), None).unwrap();
-    drop(conns);
-    drop(late);
+    drop(relay);
     m.shutdown(Duration::from_secs(5)).await;
+    assert!(!mock.clocks().is_empty());
+    let later: Vec<_> =
+        bodies(&mock).into_iter().filter(|b| b.runs.iter().any(|r| r.ids != [9])).collect();
+    assert!(!later.is_empty());
+    for b in &later {
+        assert_eq!(timing_of(b), "group");
+        assert!(b.runs.iter().all(|r| r.q == [0]), "{:?}", b.runs);
+    }
+    let ids = later.iter().flat_map(|b| &b.runs).filter(|r| r.ids != [9]);
+    assert_eq!(ids.map(|r| r.ids.len()).sum::<usize>(), 4);
+}
 
-    let bodies = bodies(&mock);
-    let runs = published(&bodies);
-    assert!(runs.iter().any(|(r, _, g, _)| r == "https://relay-late.example.net" && *g == 1));
-    assert!(!runs.iter().any(|(r, _, g, _)| r == "https://relay-late.example.net" && *g == 0));
+#[tokio::test]
+async fn an_upload_reply_lowers_timing_and_never_raises_the_integrators() {
+    let mock = Mock::start().await;
+    mock.script([Reply { body: r#"{"ok":true,"timing":"group"}"#.into(), ..Reply::status(202) }]);
+    let m = monitor(&mock);
+    let relay = m.connection("https://relay-a.example.net").unwrap();
+    relay.object_sent(&NS, "video", obj(1, 0, 10), None).unwrap();
+    relay.object_sent(&NS, "video", obj(1, 1, 10), None).unwrap();
+    until_sent(&m, 1).await;
+    relay.object_sent(&NS, "video", obj(2, 0, 10), None).unwrap();
+    relay.object_sent(&NS, "video", obj(2, 1, 10), None).unwrap();
+    drop(relay);
+    m.shutdown(Duration::from_secs(5)).await;
+    let first = bodies(&mock);
+    assert_eq!(timing_of(&first[0]), "object");
+    assert!(first[1..].iter().all(|b| timing_of(b) == "group"));
+
+    let mock = Mock::start().await;
+    mock.script([Reply { body: r#"{"ok":true,"timing":"object"}"#.into(), ..Reply::status(202) }]);
+    let m = builder(&mock).timing(Timing::Group).start().expect("start");
+    let relay = m.connection("https://relay-a.example.net").unwrap();
+    relay.object_sent(&NS, "video", obj(1, 0, 10), None).unwrap();
+    until_sent(&m, 1).await;
+    relay.object_sent(&NS, "video", obj(2, 0, 10), None).unwrap();
+    drop(relay);
+    m.shutdown(Duration::from_secs(5)).await;
+    assert!(bodies(&mock).iter().all(|b| timing_of(b) == "group"));
 }
 
 /// The vendored goldens through this file's reader: it takes what ingest
@@ -683,6 +699,6 @@ fn the_test_reader_agrees_with_the_goldens() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 31);
+    assert_eq!(checked, 33);
     let _ = unique(&[1]);
 }

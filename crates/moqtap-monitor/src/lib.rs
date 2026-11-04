@@ -47,7 +47,6 @@ mod golden_tests;
 mod hist;
 mod pack;
 mod relay;
-mod relay_cap;
 mod sampling;
 mod time;
 mod upload;
@@ -63,7 +62,6 @@ use tokio::task::JoinHandle;
 
 pub use clock::DRIFT;
 pub use egress::Proxy;
-pub use relay_cap::MAX_RELAYS_PER_MONTH;
 pub use sampling::MAX_SAMPLE_TARGET;
 #[doc(hidden)]
 pub use time::TestClock;
@@ -224,6 +222,16 @@ pub enum State {
     ShutDown,
 }
 
+/// How an upload times its objects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Timing {
+    /// A time per run of objects: the run's first object.
+    Group,
+    /// A time per object.
+    #[default]
+    Object,
+}
+
 /// Counters, for logs and health checks.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -239,12 +247,8 @@ pub struct Stats {
     /// Bodies given up: past the buffer, refused for good by ingest, or not
     /// accepted at once with buffering off.
     pub bodies_lost: u64,
-    /// Reports not sent: past a memory bound, or for a relay past the cap
-    /// ([`Stats::over_relay_cap`]).
+    /// Reports not sent because they were past a memory bound.
     pub dropped: u64,
-    /// Of [`Stats::dropped`], reports not sent because their relay would
-    /// have taken the source past [`MAX_RELAYS_PER_MONTH`] relay hosts this month.
-    pub over_relay_cap: u64,
     /// Reports refused as invalid or for a closed connection.
     pub rejected: u64,
 }
@@ -261,6 +265,7 @@ pub struct MonitorBuilder {
     retry_unit: Duration,
     app_clock: Option<AppClock>,
     sample_target: Option<u32>,
+    timing: Timing,
     clock: Option<TestClock>,
     roots: Option<Vec<Vec<u8>>>,
 }
@@ -275,6 +280,7 @@ impl std::fmt::Debug for MonitorBuilder {
             .field("seal_interval", &self.interval)
             .field("buffer_bytes", &self.buffer_bytes)
             .field("sample_target", &self.sample_target)
+            .field("timing", &self.timing)
             .finish_non_exhaustive()
     }
 }
@@ -332,6 +338,14 @@ impl MonitorBuilder {
     /// every group is reported.
     pub fn sample_target(mut self, groups_per_sec: u32) -> Self {
         self.sample_target = Some(groups_per_sec);
+        self
+    }
+
+    /// How objects are timed in uploads. [`Timing::Object`] by default;
+    /// [`Timing::Group`] uploads less. Ingest may ask for `Group`; it never
+    /// raises `Group` to `Object`.
+    pub fn timing(mut self, timing: Timing) -> Self {
+        self.timing = timing;
         self
     }
 
@@ -410,6 +424,7 @@ impl MonitorBuilder {
                 retry_unit: self.retry_unit,
                 app_clock: self.app_clock,
                 sample_target: self.sample_target,
+                timing: self.timing,
                 res_us,
                 start_wall_ms: wall.unwrap_or(0).div_euclid(1000),
             },
@@ -469,6 +484,7 @@ impl Monitor {
             retry_unit: Duration::from_secs(1),
             app_clock: None,
             sample_target: None,
+            timing: Timing::Object,
             clock: None,
             roots: None,
         }
@@ -548,7 +564,6 @@ fn stats(shared: &Shared) -> Stats {
         bytes_queued: o.bytes,
         bodies_lost: o.lost,
         dropped: o.dropped,
-        over_relay_cap: o.over_relay_cap,
         rejected,
     }
 }

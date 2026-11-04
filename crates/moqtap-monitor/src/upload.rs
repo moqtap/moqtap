@@ -2,7 +2,7 @@
 //! seal interval (sooner when the collector cuts one), and the sender posts
 //! them in order, one at a time, keeping each until ingest accepts it.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -17,10 +17,9 @@ use crate::clock::exchange;
 use crate::collect::Collector;
 use crate::egress::HttpClient;
 use crate::pack::{Head, Packer, Sealed};
-use crate::relay_cap::RelayLedger;
 use crate::time::Clock;
 use crate::wire::{body, frames, AppOffset, Clk, ClockSample};
-use crate::State;
+use crate::{State, Timing};
 
 /// The seal interval unless the builder names another.
 pub(crate) const DEFAULT_SEAL: Duration = Duration::from_secs(15);
@@ -67,6 +66,8 @@ pub(crate) struct Config {
     pub app_clock: Option<AppClock>,
     /// The integrator's sampling target, groups/s.
     pub sample_target: Option<u32>,
+    /// The integrator's timing, the most a body is sealed at.
+    pub timing: Timing,
     pub res_us: u64,
     pub start_wall_ms: i64,
 }
@@ -93,13 +94,13 @@ pub(crate) struct Outbox {
     pub sent: u64,
     pub lost: u64,
     pub dropped: u64,
-    pub over_relay_cap: u64,
     pub state: State,
-    pub relays: RelayLedger,
     /// The latest exchange of each recent clock epoch.
     pub samples: BTreeMap<u64, ClockSample>,
     /// Ingest's seal interval, ms, and when it lapses.
     pub directive: Option<(u64, Instant)>,
+    /// The timing ingest last stated.
+    pub timing: Option<Timing>,
 }
 
 impl Default for Outbox {
@@ -111,11 +112,10 @@ impl Default for Outbox {
             sent: 0,
             lost: 0,
             dropped: 0,
-            over_relay_cap: 0,
             state: State::Running,
-            relays: RelayLedger::default(),
             samples: BTreeMap::new(),
             directive: None,
+            timing: None,
         }
     }
 }
@@ -137,7 +137,6 @@ impl Outbox {
     fn give_up(&mut self, gone: Entry) {
         gone.sealed.answered(false);
         self.bytes = self.bytes.saturating_sub(gone.size());
-        self.relays.given_up(&gone.sealed.origins);
         self.lost += 1;
     }
 
@@ -275,28 +274,18 @@ fn drain(shared: &Shared, packer: &mut Packer) {
             shared.kick.notify_one();
         }
         let Some(iv) = iv else { return };
-        let mono = shared.mono_us();
-        let denied: HashSet<u64> = {
-            let mut o = shared.outbox();
-            let o = &mut *o;
-            o.relays
-                .advance(mono as f64 / 1000.0, o.queue.iter().map(|e| e.sealed.origins.as_slice()));
-            let conns: Vec<(u64, &str)> =
-                iv.conns.iter().map(|(c, i)| (*c, i.origin.as_str())).collect();
-            o.relays.denied(&conns)
-        };
+        let own = shared.cfg.timing;
+        let timing = shared.outbox().timing.map_or(own, |t| t.min(own));
         let app = shared.cfg.app_clock.as_ref().and_then(|f| {
             let (utc_us, e_us) = f()?;
             let at_us = shared.mono_us();
             Some(AppOffset { o_us: utc_us.checked_sub(at_us)?, e_us, at_us })
         });
-        let packed = packer.pack(iv, &denied, app);
+        let sealed = packer.pack(iv, app, timing);
         let mut o = shared.outbox();
-        o.over_relay_cap += packed.over_relay_cap;
         o.dropped = packer.dropped();
-        o.relays.sealed(&packed.sealed.origins);
-        o.bytes += packed.sealed.raw_len;
-        o.queue.push_back(Entry { sealed: packed.sealed, frozen: None });
+        o.bytes += sealed.raw_len;
+        o.queue.push_back(Entry { sealed, frozen: None });
         if shared.cfg.buffer_bytes > 0 {
             o.enforce(shared.cfg.buffer_bytes);
         }
@@ -306,8 +295,7 @@ fn drain(shared: &Shared, packer: &mut Packer) {
 }
 
 enum Outcome {
-    /// With ingest's receive time, when it stated one.
-    Accepted(Option<f64>),
+    Accepted,
     Retry(Option<Duration>),
     Refused(u16),
     GiveUp,
@@ -347,20 +335,12 @@ pub(crate) async fn sender(shared: Arc<Shared>, client: HttpClient) {
             let mut o = shared.outbox();
             o.in_flight = None;
             match outcome {
-                Outcome::Accepted(recv_ms) => {
+                Outcome::Accepted => {
                     attempt = 0;
                     if let Some(e) = o.take(seq) {
                         e.sealed.answered(true);
                         o.sent += 1;
                         o.state = State::Running;
-                        let o = &mut *o;
-                        let queued = o.queue.iter().map(|e| e.sealed.origins.as_slice());
-                        o.relays.accepted(
-                            recv_ms,
-                            shared.mono_us() as f64 / 1000.0,
-                            &e.sealed.origins,
-                            queued,
-                        );
                     }
                     None
                 }
@@ -456,7 +436,27 @@ async fn probe(shared: &Shared, client: &HttpClient) {
         .header(USER_AGENT, USER_AGENT_VALUE)
         .body(Full::new(Bytes::new()));
     let Ok(req) = req else { return };
-    let _ = exchange_with(shared, client, req).await;
+    if let Some((status, _, reply)) = exchange_with(shared, client, req).await {
+        if status.is_success() {
+            take_timing(shared, &reply);
+        }
+    }
+}
+
+/// Keep the `timing` a reply states, `object` or `group`.
+fn take_timing(shared: &Shared, reply: &[u8]) {
+    if let Some(t) = timing(reply) {
+        shared.outbox().timing = Some(t);
+    }
+}
+
+fn timing(reply: &[u8]) -> Option<Timing> {
+    let v: serde_json::Value = serde_json::from_slice(reply).ok()?;
+    match v.get("timing")?.as_str()? {
+        "object" => Some(Timing::Object),
+        "group" => Some(Timing::Group),
+        _ => None,
+    }
 }
 
 /// Send `req`, take the reply's clock sample, and return the status,
@@ -525,19 +525,14 @@ async fn post(shared: &Shared, client: &HttpClient, seq: u64, bytes: Arc<Vec<u8>
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(|s| cfg.retry_unit.saturating_mul(u32::try_from(s).unwrap_or(u32::MAX)));
     let outcome = classify(status, retry_after);
-    if let Outcome::Accepted(_) = outcome {
+    if let Outcome::Accepted = outcome {
+        take_timing(shared, &reply);
         if let Some((ms, ttl)) = directive(&reply) {
             let until = shared.clock.now() + Duration::from_millis(ttl);
             shared.outbox().directive = Some((ms, until));
             shared.clock.seal_asked();
             shared.directive_changed.notify_one();
         }
-        let recv_ms = headers
-            .get(RECV_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse::<f64>().ok())
-            .filter(|v| v.is_finite());
-        return Outcome::Accepted(recv_ms);
     }
     outcome
 }
@@ -556,7 +551,7 @@ fn directive(reply: &[u8]) -> Option<(u64, u64)> {
 /// body.
 fn classify(status: StatusCode, retry_after: Option<Duration>) -> Outcome {
     match status.as_u16() {
-        200..=299 => Outcome::Accepted(None),
+        200..=299 => Outcome::Accepted,
         401 | 403 | 404 => Outcome::Refused(status.as_u16()),
         408 | 425 | 429 => Outcome::Retry(retry_after),
         400..=499 => Outcome::GiveUp,
@@ -571,7 +566,7 @@ mod tests {
     #[test]
     fn status_codes_follow_the_ingest_contract() {
         let kind = |s: u16| match classify(StatusCode::from_u16(s).unwrap(), None) {
-            Outcome::Accepted(_) => "ok",
+            Outcome::Accepted => "ok",
             Outcome::Retry(_) => "retry",
             Outcome::Refused(_) => "refused",
             Outcome::GiveUp => "give up",
@@ -615,5 +610,17 @@ mod tests {
         assert_eq!(directive(br#"{"seal_ms":5000}"#), None);
         assert_eq!(directive(br#"{"seal_ms":0,"ttl_ms":1}"#), None);
         assert_eq!(directive(b"not json"), None);
+    }
+
+    #[test]
+    fn a_reply_states_object_or_group_timing() {
+        assert_eq!(timing(br#"{"ok":true,"timing":"group"}"#), Some(Timing::Group));
+        assert_eq!(
+            timing(br#"{"ok":true,"timing":"object","seal_ms":5000}"#),
+            Some(Timing::Object)
+        );
+        assert_eq!(timing(br#"{"ok":true}"#), None);
+        assert_eq!(timing(br#"{"timing":"frame"}"#), None);
+        assert_eq!(timing(b""), None);
     }
 }

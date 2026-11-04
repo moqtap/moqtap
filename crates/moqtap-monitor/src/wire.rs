@@ -18,6 +18,8 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use ring::digest;
 
+use crate::Timing;
+
 /// Tracks one body may declare.
 pub(crate) const MAX_BODY_TRACKS: usize = 256;
 /// Connections one body may declare.
@@ -372,6 +374,8 @@ pub(crate) struct Batch {
     pub start: Option<(i64, i64)>,
     /// The integrator's sampling target, groups/s.
     pub smp: Option<u32>,
+    /// [`Timing::Group`]: the runs carry no `dt`.
+    pub timing: Timing,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -420,7 +424,12 @@ pub(crate) fn preamble_json(instance_id: &str, em: &[(u64, u64)], seal: &Seal) -
 }
 
 /// The frames of the fact records, each numbered from `first_rseq`.
-pub(crate) fn record_frames(records: &[Record], base_us: i64, first_rseq: u64) -> Vec<u8> {
+pub(crate) fn record_frames(
+    records: &[Record],
+    base_us: i64,
+    first_rseq: u64,
+    timing: Timing,
+) -> Vec<u8> {
     let mut out = Vec::new();
     for (i, r) in records.iter().enumerate() {
         let rseq = first_rseq + i as u64;
@@ -428,7 +437,7 @@ pub(crate) fn record_frames(records: &[Record], base_us: i64, first_rseq: u64) -
             Record::Pev(e) => push_frame(&mut out, pev_json(e, rseq).as_bytes(), false),
             Record::Runs(runs) => {
                 push_frame(&mut out, descriptor("run", 2, runs.len(), rseq).as_bytes(), false);
-                push_frame(&mut out, &encode_runs(base_us, runs), true);
+                push_frame(&mut out, &encode_runs(base_us, runs, timing), true);
             }
             Record::Marks(marks) => {
                 push_frame(&mut out, descriptor("mark", 1, marks.len(), rseq).as_bytes(), false);
@@ -534,6 +543,9 @@ fn batch_json(b: &Batch, clk: &Clk) -> String {
     if let Some(t) = b.smp {
         j.raw("smp", &format!("{{\"t\":{t}}}"));
     }
+    if b.timing == Timing::Group {
+        j.str("timing", "group");
+    }
     j.finish()
 }
 
@@ -628,8 +640,9 @@ fn track_json(id: usize, t: &TrackRec) -> String {
     j.finish()
 }
 
-/// The `run` columns: `fl c ti g sk [sub] o0 n [oid…] t0 dt… b`.
-pub(crate) fn encode_runs(base_us: i64, runs: &[RunIn]) -> Vec<u8> {
+/// The `run` columns: `fl c ti g sk [sub] o0 n [oid…] t0 [dt…] b`, with no
+/// `dt` at [`Timing::Group`].
+pub(crate) fn encode_runs(base_us: i64, runs: &[RunIn], timing: Timing) -> Vec<u8> {
     let mut w = Leb::default();
     let mut last_g: Vec<(usize, u64)> = Vec::new();
     let mut last_t0 = base_us;
@@ -675,11 +688,13 @@ pub(crate) fn encode_runs(base_us: i64, runs: &[RunIn]) -> Vec<u8> {
         let t0 = r.times[0];
         w.t(t0 - last_t0);
         last_t0 = t0;
-        let mut q = 0;
-        for &t in &r.times[1..] {
-            let qi = (t - t0).div_euclid(DT_QUANTUM_US);
-            w.t(qi - q);
-            q = qi;
+        if timing == Timing::Object {
+            let mut q = 0;
+            for &t in &r.times[1..] {
+                let qi = (t - t0).div_euclid(DT_QUANTUM_US);
+                w.t(qi - q);
+                q = qi;
+            }
         }
         w.u(r.b);
     }

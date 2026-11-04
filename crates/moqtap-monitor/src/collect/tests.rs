@@ -1,8 +1,7 @@
-use std::collections::HashSet;
-
 use super::*;
 use crate::pack::{Head, Packer};
 use crate::sampling::level;
+use crate::Timing;
 
 const NS: [&str; 2] = ["live", "ch"];
 
@@ -232,7 +231,7 @@ fn a_long_track_list_leaves_room_for_many_objects() {
         c.cut(at, false);
         let mut packer = Packer::new(head(), None);
         for iv in c.cuts.drain(..) {
-            sent_and_answered(&mut packer.pack(iv, &HashSet::new(), None).sealed, true);
+            sent_and_answered(&mut packer.pack(iv, None, Timing::Object), true);
         }
         for o in 1..=3000u64 {
             at += 1_000;
@@ -241,12 +240,12 @@ fn a_long_track_list_leaves_room_for_many_objects() {
         }
         c.cut(at, false);
         let bodies: Vec<_> =
-            c.cuts.drain(..).map(|iv| packer.pack(iv, &HashSet::new(), None)).collect();
+            c.cuts.drain(..).map(|iv| packer.pack(iv, None, Timing::Object)).collect();
         assert!(bodies.len() <= 3, "{} bodies for {tracks} tracks", bodies.len());
         for mut b in bodies {
-            sent_and_answered(&mut b.sealed, true);
-            assert_eq!(b.sealed.batch.tracks.len(), tracks);
-            assert!(gz_len(&b.sealed) <= SEAL_BYTES, "{}", gz_len(&b.sealed));
+            sent_and_answered(&mut b, true);
+            assert_eq!(b.batch.tracks.len(), tracks);
+            assert!(gz_len(&b) <= SEAL_BYTES, "{}", gz_len(&b));
         }
     }
 }
@@ -281,7 +280,7 @@ fn a_track_list_past_the_seal_is_listed_by_key_once_its_names_are_accepted() {
     c.cut(at, false);
     let mut packer = Packer::new(head(), None);
     for iv in c.cuts.drain(..) {
-        let mut s = packer.pack(iv, &HashSet::new(), None).sealed;
+        let mut s = packer.pack(iv, None, Timing::Object);
         sent_and_answered(&mut s, true);
         assert!(s.batch.tracks.iter().all(|t| t.named == (t.span.is_some())), "named once");
     }
@@ -291,14 +290,13 @@ fn a_track_list_past_the_seal_is_listed_by_key_once_its_names_are_accepted() {
         c.object_sent(id, &NS, &names[0], sent(0, o), at).expect("taken");
     }
     c.cut(at, false);
-    let bodies: Vec<_> =
-        c.cuts.drain(..).map(|iv| packer.pack(iv, &HashSet::new(), None)).collect();
+    let bodies: Vec<_> = c.cuts.drain(..).map(|iv| packer.pack(iv, None, Timing::Object)).collect();
     assert_eq!(bodies.len(), 1, "3000 objects fit one body");
     for mut b in bodies {
-        sent_and_answered(&mut b.sealed, true);
-        assert_eq!(b.sealed.batch.tracks.len(), 256);
-        assert!(b.sealed.batch.tracks.iter().all(|t| !t.named));
-        assert!(gz_len(&b.sealed) <= SEAL_BYTES, "{}", gz_len(&b.sealed));
+        sent_and_answered(&mut b, true);
+        assert_eq!(b.batch.tracks.len(), 256);
+        assert!(b.batch.tracks.iter().all(|t| !t.named));
+        assert!(gz_len(&b) <= SEAL_BYTES, "{}", gz_len(&b));
     }
 }
 
@@ -309,7 +307,7 @@ fn names_stay_in_every_body_until_one_carrying_them_is_accepted() {
     let mut bodies = Vec::new();
     for b in 0..4u64 {
         send(&mut c, id, "v", sent(b, 0), b as i64 * 100);
-        bodies.push(packer.pack(cut(&mut c, b as i64 * 100 + 50), &HashSet::new(), None).sealed);
+        bodies.push(packer.pack(cut(&mut c, b as i64 * 100 + 50), None, Timing::Object));
     }
     let mut named = Vec::new();
     // Ingest is down: the first body is sent, then given up.
@@ -338,7 +336,7 @@ fn bodies_after_a_given_up_name_list_stay_under_the_ingest_cap() {
     let mut packer = Packer::new(head(), None);
     let mut largest = 0;
     for iv in c.cuts.drain(..) {
-        let mut s = packer.pack(iv, &HashSet::new(), None).sealed;
+        let mut s = packer.pack(iv, None, Timing::Object);
         sent_and_answered(&mut s, false);
         largest = largest.max(gz_len(&s));
     }
@@ -355,7 +353,7 @@ fn bodies_after_a_given_up_name_list_stay_under_the_ingest_cap() {
     }
     let mut sent_now: Vec<_> = Vec::new();
     for iv in c.cuts.drain(..) {
-        let mut s = packer.pack(iv, &HashSet::new(), None).sealed;
+        let mut s = packer.pack(iv, None, Timing::Object);
         s.name_tracks();
         assert!(s.batch.tracks.iter().all(|t| t.named));
         assert!(gz_len(&s) <= INGEST_MAX_BODY, "{}", gz_len(&s));
@@ -372,13 +370,12 @@ fn bodies_after_a_given_up_name_list_stay_under_the_ingest_cap() {
         c.object_sent(id, &NS, &names[0], sent(0, o), at).expect("taken");
     }
     c.cut(at, false);
-    let bodies: Vec<_> =
-        c.cuts.drain(..).map(|iv| packer.pack(iv, &HashSet::new(), None)).collect();
+    let bodies: Vec<_> = c.cuts.drain(..).map(|iv| packer.pack(iv, None, Timing::Object)).collect();
     assert_eq!(bodies.len(), 1, "3000 objects fit one body");
     for mut b in bodies {
-        sent_and_answered(&mut b.sealed, true);
-        assert!(b.sealed.batch.tracks.iter().all(|t| !t.named));
-        assert!(gz_len(&b.sealed) <= SEAL_BYTES, "{}", gz_len(&b.sealed));
+        sent_and_answered(&mut b, true);
+        assert!(b.batch.tracks.iter().all(|t| !t.named));
+        assert!(gz_len(&b) <= SEAL_BYTES, "{}", gz_len(&b));
     }
 }
 
@@ -483,7 +480,7 @@ fn packed_bodies_stay_under_the_byte_seal() {
     assert!(c.cuts.len() >= 2);
     let mut packer = Packer::new(head(), None);
     while let Some(iv) = c.cuts.pop_front() {
-        let s = packer.pack(iv, &HashSet::new(), None).sealed;
+        let s = packer.pack(iv, None, Timing::Object);
         assert!(gz_len(&s) <= SEAL_BYTES, "{}", gz_len(&s));
         assert!(s.raw_len > SEAL_BYTES / 2, "{}", s.raw_len);
     }
@@ -510,7 +507,7 @@ fn without_a_target_every_group_is_reported() {
     let mut packer = Packer::new(head(), None);
     let mut kept = 0;
     while let Some(iv) = c.cuts.pop_front() {
-        let s = packer.pack(iv, &HashSet::new(), None).sealed;
+        let s = packer.pack(iv, None, Timing::Object);
         assert_eq!(s.batch.smp, None);
         assert!(s.batch.tracks.iter().all(|t| t.k == 0 && t.xg.is_empty()));
         kept = s.batch.tail.conn[0].1;
@@ -525,7 +522,7 @@ fn a_target_measures_from_the_first_handoff_or_the_body_start_to_the_seal() {
     // second over the body, k 1 under a target of 30.
     one_object_groups(&mut c, id, 5_000, 240, 120, 1_000);
     let mut packer = Packer::new(head(), Some(30));
-    let s = packer.pack(cut(&mut c, 2_000_000), &HashSet::new(), None).sealed;
+    let s = packer.pack(cut(&mut c, 2_000_000), None, Timing::Object);
     let t = &s.batch.tracks[0];
     let below: Vec<u64> = (5_000..5_240).filter(|&g| level(t.tk, g) < 1).collect();
     assert_eq!((s.batch.smp, t.k), (Some(30), 1));
@@ -534,7 +531,7 @@ fn a_target_measures_from_the_first_handoff_or_the_body_start_to_the_seal() {
     // track listed before: 30 a second over the whole body, under 9/8 of
     // the target, so k falls back to 0.
     one_object_groups(&mut c, id, 6_000, 60, 600, 3_900_000);
-    let s = packer.pack(cut(&mut c, 4_000_000), &HashSet::new(), None).sealed;
+    let s = packer.pack(cut(&mut c, 4_000_000), None, Timing::Object);
     assert_eq!(s.batch.tracks[0].k, 0);
 }
 
@@ -546,7 +543,7 @@ fn a_track_new_to_the_body_measures_from_its_first_handoff() {
     // its first handoff, 30 a second over the whole body.
     one_object_groups(&mut c, id, 6_000, 60, 600, 1_900_000);
     let mut packer = Packer::new(head(), Some(30));
-    let s = packer.pack(cut(&mut c, 2_000_000), &HashSet::new(), None).sealed;
+    let s = packer.pack(cut(&mut c, 2_000_000), None, Timing::Object);
     let t = &s.batch.tracks[0];
     let mut by_level = [0u32; LEVELS];
     for g in 6_000..6_060 {
@@ -569,7 +566,7 @@ fn a_target_excludes_whole_groups_and_states_them() {
     let mut packer = Packer::new(head(), Some(10));
     let (mut kept, mut excluded) = (0, 0);
     while let Some(iv) = c.cuts.pop_front() {
-        let s = packer.pack(iv, &HashSet::new(), None).sealed;
+        let s = packer.pack(iv, None, Timing::Object);
         let t = &s.batch.tracks[0];
         let body_kept = s.batch.tail.conn[0].1 - kept;
         kept = s.batch.tail.conn[0].1;
@@ -590,7 +587,7 @@ fn rseq_and_seq_run_on_across_bodies() {
     let mut next = 0;
     for b in 0..3u64 {
         send(&mut c, id, "v", sent(b, 0), b as i64 * 100);
-        let s = packer.pack(cut(&mut c, b as i64 * 100 + 50), &HashSet::new(), None).sealed;
+        let s = packer.pack(cut(&mut c, b as i64 * 100 + 50), None, Timing::Object);
         assert_eq!(s.seq, b);
         assert_eq!(s.batch.start.is_some(), b == 0, "start in the first body only");
         let first: u64 = s
@@ -611,16 +608,16 @@ fn rseq_and_seq_run_on_across_bodies() {
 }
 
 #[test]
-fn a_denied_connection_sends_nothing_and_is_counted() {
-    let (mut c, id) = collector();
-    send(&mut c, id, "v", sent(1, 0), 1);
-    send(&mut c, id, "v", sent(1, 1), 2);
-    let mut packer = Packer::new(head(), None);
-    let p = packer.pack(cut(&mut c, 10), &HashSet::from([id]), None);
-    assert!(p.sealed.batch.conns.is_empty());
-    assert_eq!(p.over_relay_cap, 2, "the conn_open event and the run");
-    assert_eq!(
-        (p.sealed.batch.tail.pre_drop_records, p.sealed.batch.tail.pre_drop_objects),
-        (2, 2)
-    );
+fn group_timing_writes_no_dt() {
+    let body = |timing: Timing| {
+        let (mut c, id) = collector();
+        for o in 0..3 {
+            send(&mut c, id, "v", sent(1, o), 1_000 * (o as i64 + 1));
+        }
+        Packer::new(head(), None).pack(cut(&mut c, 10_000), None, timing)
+    };
+    let (object, group) = (body(Timing::Object), body(Timing::Group));
+    assert_eq!(object.batch.timing, Timing::Object);
+    assert_eq!(group.batch.timing, Timing::Group);
+    assert_eq!(object.records.len(), group.records.len() + 2, "two one-byte dt fewer");
 }
