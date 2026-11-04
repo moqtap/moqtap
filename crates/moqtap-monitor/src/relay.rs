@@ -1,19 +1,21 @@
 //! Relay URLs reduced to `scheme://host[:port][path]` before they leave the
 //! process: query, fragment and userinfo are dropped, since they can carry a
-//! token; the path is kept, normalised, since relays scope auth and
-//! namespaces by path.
+//! token; the path is kept exactly as the connection sends it, since a track
+//! name is unique only within a scope, by default the authority and path
+//! (draft-23 Section 2.5).
 
 const RELAY_SCHEMES: [&str; 3] = ["https", "http", "moqt"];
 const MAX_RELAY_URL: usize = 2048;
 
 /// The relay's endpoint: lowercase scheme and host, punycode, no port when
-/// it is the scheme's default (`moqt` has none), then the path: escapes in
-/// uppercase hex, an escaped unreserved character decoded, any other
-/// character outside RFC 3986's path set escaped from its UTF-8 bytes (a `%`
-/// that starts no escape is `%25`), dot segments removed, and the root (an
-/// empty path or `/`) written as no path. `None` when `url` is not a relay
-/// URL, its path holds a space, a control character or `\`, or the endpoint
-/// is longer than 2048 bytes.
+/// it is the scheme's default (`moqt`: "If the port is omitted in the URI, a
+/// default port of 443 is used", draft-15 Section 3.1.2, draft-23 Section 6.1.2),
+/// then the path exactly as sent. An `https` or `http` path is the URL
+/// parser's, which is the WebTransport request's `:path` (an empty path is
+/// `/`). A `moqt` path is the URL's own path-abempty, which the native QUIC
+/// SETUP PATH option carries (draft-23 Section 9.1.2), so `moqt://h` and
+/// `moqt://h/` are two paths. `None` when `url` is not a relay URL, a `moqt`
+/// path is not path-abempty, or the endpoint is longer than 2048 bytes.
 pub(crate) fn relay_endpoint(url: &str) -> Option<String> {
     if url.is_empty() || url.len() > MAX_RELAY_URL {
         return None;
@@ -68,11 +70,10 @@ pub(crate) fn relay_endpoint(url: &str) -> Option<String> {
         return None;
     }
     let default_port = match scheme.as_str() {
-        "https" => Some("443"),
-        "http" => Some("80"),
-        _ => None,
+        "https" | "moqt" => "443",
+        _ => "80",
     };
-    if default_port == Some(port.as_str()) {
+    if port == default_port {
         port.clear();
     }
     let mut out = if port.is_empty() {
@@ -80,104 +81,63 @@ pub(crate) fn relay_endpoint(url: &str) -> Option<String> {
     } else {
         format!("{scheme}://{hostname}:{port}")
     };
-    let path = &rest[authority_len..];
-    let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
-    out.push_str(&normalise_path(path)?);
+    if scheme == "moqt" {
+        let path = &rest[authority_len..];
+        let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
+        if !is_path_abempty(path) {
+            return None;
+        }
+        out.push_str(path);
+    } else {
+        out.push_str(url::Url::parse(url).ok()?.path());
+    }
     (out.len() <= MAX_RELAY_URL).then_some(out)
 }
 
-fn is_unreserved(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~')
-}
-
-fn is_path_char(b: u8) -> bool {
-    is_unreserved(b)
-        || matches!(
-            b,
-            b'!' | b'$'
-                | b'&'
-                | b'\''
-                | b'('
-                | b')'
-                | b'*'
-                | b'+'
-                | b','
-                | b';'
-                | b'='
-                | b':'
-                | b'@'
-                | b'/'
-        )
-}
-
-fn normalise_path(raw: &str) -> Option<String> {
-    let b = raw.as_bytes();
-    if b.iter().any(|&c| c <= b' ' || c == 0x7f || c == b'\\') {
-        return None;
+/// RFC 3986 path-abempty: `/`-led segments of pchars and percent-escapes.
+fn is_path_abempty(path: &str) -> bool {
+    let b = path.as_bytes();
+    if !b.is_empty() && b[0] != b'/' {
+        return false;
     }
-    let hex = |c: u8| (c as char).to_digit(16);
-    let mut escaped = String::with_capacity(raw.len());
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
         if c == b'%' {
-            match (b.get(i + 1).copied().and_then(hex), b.get(i + 2).copied().and_then(hex)) {
-                (Some(h), Some(l)) => {
-                    let v = (h * 16 + l) as u8;
-                    if is_unreserved(v) {
-                        escaped.push(v as char);
-                    } else {
-                        escaped.push_str(&format!("%{v:02X}"));
-                    }
-                    i += 3;
-                }
-                _ => {
-                    escaped.push_str("%25");
-                    i += 1;
-                }
+            let hex = |j: usize| b.get(j).is_some_and(u8::is_ascii_hexdigit);
+            if !(hex(i + 1) && hex(i + 2)) {
+                return false;
             }
-        } else if is_path_char(c) {
-            escaped.push(c as char);
-            i += 1;
-        } else {
-            escaped.push_str(&format!("%{c:02X}"));
-            i += 1;
+            i += 3;
+            continue;
         }
-    }
-    let path = remove_dot_segments(&escaped);
-    Some(if path == "/" { String::new() } else { path })
-}
-
-/// RFC 3986 Section 5.2.4.
-fn remove_dot_segments(path: &str) -> String {
-    let mut input = path;
-    let mut out = String::with_capacity(path.len());
-    let pop = |out: &mut String| out.truncate(out.rfind('/').unwrap_or(0));
-    while !input.is_empty() {
-        if let Some(r) = input.strip_prefix("../") {
-            input = r;
-        } else if let Some(r) = input.strip_prefix("./") {
-            input = r;
-        } else if input.starts_with("/./") {
-            input = &input[2..];
-        } else if input == "/." {
-            input = "/";
-        } else if input.starts_with("/../") {
-            input = &input[3..];
-            pop(&mut out);
-        } else if input == "/.." {
-            input = "/";
-            pop(&mut out);
-        } else if input == "." || input == ".." {
-            input = "";
-        } else {
-            let from = usize::from(input.starts_with('/'));
-            let end = input[from..].find('/').map_or(input.len(), |i| i + from);
-            out.push_str(&input[..end]);
-            input = &input[end..];
+        let pchar = c.is_ascii_alphanumeric()
+            || matches!(
+                c,
+                b'-' | b'.'
+                    | b'_'
+                    | b'~'
+                    | b'!'
+                    | b'$'
+                    | b'&'
+                    | b'\''
+                    | b'('
+                    | b')'
+                    | b'*'
+                    | b'+'
+                    | b','
+                    | b';'
+                    | b'='
+                    | b':'
+                    | b'@'
+                    | b'/'
+            );
+        if !pchar {
+            return false;
         }
+        i += 1;
     }
-    out
+    true
 }
 
 #[cfg(test)]
@@ -193,47 +153,46 @@ mod tests {
         })
     }
 
-    /// The same table as monitor-browser's relay tests.
+    /// The same table as ingest's and monitor-browser's relay tests.
     const ENDPOINTS: &[(&str, Option<&str>)] = &[
-        ("https://relay.example", Some("https://relay.example")),
-        ("https://relay.example/", Some("https://relay.example")),
-        ("HTTPS://Relay.Example:443/", Some("https://relay.example")),
+        ("https://relay.example", Some("https://relay.example/")),
+        ("https://relay.example/", Some("https://relay.example/")),
+        ("HTTPS://Relay.Example:443/", Some("https://relay.example/")),
+        ("https://relay.example?jwt=secret", Some("https://relay.example/")),
+        ("moqt://relay.example", Some("moqt://relay.example")),
+        ("moqt://relay.example/", Some("moqt://relay.example/")),
+        ("moqt://relay.example:443/moq", Some("moqt://relay.example/moq")),
         ("moqt://relay.example:4443", Some("moqt://relay.example:4443")),
-        ("moqt://relay.example/", Some("moqt://relay.example")),
         ("https://B\u{fc}cher.Example/moq", Some("https://xn--bcher-kva.example/moq")),
         ("moqt://B\u{fc}cher.Example:4443/moq", Some("moqt://xn--bcher-kva.example:4443/moq")),
         ("https://relay.example/moq", Some("https://relay.example/moq")),
         ("https://relay.example/moq/", Some("https://relay.example/moq/")),
         ("https://relay.example/Moq/A", Some("https://relay.example/Moq/A")),
         ("https://user:pw@relay.example/moq?jwt=secret#f", Some("https://relay.example/moq")),
-        ("https://relay.example?jwt=secret", Some("https://relay.example")),
         ("https://relay.example/a//b", Some("https://relay.example/a//b")),
-        ("https://relay.example/%7euser/%41", Some("https://relay.example/~user/A")),
-        ("https://relay.example/a%2fb%3f", Some("https://relay.example/a%2Fb%3F")),
-        ("https://relay.example/100%", Some("https://relay.example/100%25")),
-        ("https://relay.example/%zz", Some("https://relay.example/%25zz")),
+        ("https://relay.example/%7euser/%41", Some("https://relay.example/%7euser/%41")),
+        ("https://relay.example/a%2fb", Some("https://relay.example/a%2fb")),
+        ("https://relay.example/100%", Some("https://relay.example/100%")),
         ("https://relay.example/b\u{fc}cher", Some("https://relay.example/b%C3%BCcher")),
-        (
-            "https://relay.example/a|b[c]^{d}\"e",
-            Some("https://relay.example/a%7Cb%5Bc%5D%5E%7Bd%7D%22e"),
-        ),
-        (
-            "https://relay.example/a;v=1/!$&'()*+,=:@",
-            Some("https://relay.example/a;v=1/!$&'()*+,=:@"),
-        ),
+        ("https://relay.example/a|b", Some("https://relay.example/a|b")),
+        ("https://relay.example/a b", Some("https://relay.example/a%20b")),
+        ("https://relay.example/a\tb", Some("https://relay.example/ab")),
         ("https://relay.example/a/./b/../c", Some("https://relay.example/a/c")),
-        ("https://relay.example/a/%2E%2e/b", Some("https://relay.example/b")),
-        ("https://relay.example/..", Some("https://relay.example")),
-        ("https://relay.example/a/..", Some("https://relay.example")),
-        ("https://relay.example/a/b/..", Some("https://relay.example/a/")),
-        ("https://relay.example/a b", None),
-        ("https://relay.example/a\tb", None),
-        ("https://relay.example/a\\b", None),
+        ("moqt://relay.example/a/./b/../c", Some("moqt://relay.example/a/./b/../c")),
+        ("moqt://relay.example/%7e?jwt=secret", Some("moqt://relay.example/%7e")),
+        (
+            "moqt://relay.example/a;v=1/!$&'()*+,=:@",
+            Some("moqt://relay.example/a;v=1/!$&'()*+,=:@"),
+        ),
+        ("moqt://relay.example/a b", None),
+        ("moqt://relay.example/a|b", None),
+        ("moqt://relay.example/b\u{fc}cher", None),
+        ("moqt://relay.example/100%", None),
         ("wss://relay.example/moq", None),
     ];
 
     #[test]
-    fn keeps_the_normalised_path() {
+    fn keeps_the_path_exactly() {
         for &(url, want) in ENDPOINTS {
             assert_eq!(relay_endpoint(url).as_deref(), want, "{url}");
             if let Some(w) = want {
@@ -242,6 +201,12 @@ mod tests {
         }
         let long = format!("https://relay.example/{}", "\u{fc}".repeat(400));
         assert_eq!(relay_endpoint(&long), None);
+    }
+
+    #[test]
+    fn tells_moqt_h_from_moqt_h_slash() {
+        assert_ne!(relay_endpoint("moqt://h"), relay_endpoint("moqt://h/"));
+        assert_ne!(relay_endpoint("https://h/moq"), relay_endpoint("https://h/moq/"));
     }
 
     #[test]
@@ -261,7 +226,8 @@ mod tests {
             ("https://relay.example:4443", "https://relay.example:4443"),
             ("https://relay.example:0443", "https://relay.example"),
             ("http://relay.example:443", "http://relay.example:443"),
-            ("moqt://Relay.Example:443/ns", "moqt://relay.example:443"),
+            ("moqt://Relay.Example:443/ns", "moqt://relay.example"),
+            ("moqt://relay.example:4443", "moqt://relay.example:4443"),
             ("moqt://relay.example", "moqt://relay.example"),
         ] {
             assert_eq!(o(url).as_deref(), Some(want), "{url}");

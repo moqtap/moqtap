@@ -188,7 +188,7 @@ async fn one_body_carries_every_relay_connection() {
     let bodies = bodies(&mock);
     assert_eq!(bodies.len(), 1);
     let origins: Vec<_> = bodies[0].conns.iter().map(|c| c.relay.as_str()).collect();
-    assert_eq!(origins, ["https://relay-a.example.net", "moqt://relay-b.example.net:4443"]);
+    assert_eq!(origins, ["https://relay-a.example.net/", "moqt://relay-b.example.net:4443"]);
     assert_eq!(bodies[0].runs.len(), 12);
     assert_eq!(bodies[0].tracks.len(), 2);
     let paces = &bodies[0].paces;

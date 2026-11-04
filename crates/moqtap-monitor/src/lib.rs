@@ -172,8 +172,8 @@ pub enum Error {
     /// The sampling target is outside 1 to [`MAX_SAMPLE_TARGET`] groups a second.
     #[error("the sampling target must be 1 to 1000000 groups a second")]
     InvalidSampleTarget,
-    /// The relay URL is not an `https`, `http` or `moqt` URL, or its path
-    /// holds a space, a control character or a backslash.
+    /// The relay URL is not an `https`, `http` or `moqt` URL, or a `moqt`
+    /// URL's path is not an RFC 3986 path-abempty.
     #[error("not a relay URL")]
     InvalidRelayUrl,
     /// Too many relay connections are open.
@@ -490,9 +490,10 @@ impl Monitor {
         }
     }
 
-    /// A new relay connection. The URL's scheme, host, port and path are
-    /// kept, normalised; its query, fragment and userinfo never leave the
-    /// process. A reconnect is a new connection.
+    /// A new relay connection. The URL's scheme, host and port are kept,
+    /// normalised, and its path exactly as the connection sends it; its
+    /// query, fragment and userinfo never leave the process. A reconnect is
+    /// a new connection.
     pub fn connection(&self, relay_url: &str) -> Result<Connection, Error> {
         let origin = relay::relay_endpoint(relay_url).ok_or(Error::InvalidRelayUrl)?;
         if self.shared.shutting_down.load(Ordering::SeqCst) {

@@ -575,12 +575,12 @@
               {
                 "c": 0,
                 "draft": 10,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/"
               },
               {
                 "c": 1,
                 "draft": 14,
-                "relay": "https://relay-b.example.net"
+                "relay": "https://relay-b.example.net/"
               },
               {
                 "c": 2,
@@ -998,7 +998,7 @@
               {
                 "c": 7,
                 "draft": 22,
-                "relay": "https://relay-a.example.net"
+                "relay": "https://relay-a.example.net/"
               }
             ],
             "timing": "object",
