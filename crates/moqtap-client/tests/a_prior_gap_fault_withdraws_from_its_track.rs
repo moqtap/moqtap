@@ -477,6 +477,20 @@ macro_rules! message_gates {
 /// with Type 0x3C, and `flags` the Serialization Flags layout of drafts 15-23:
 /// 0x3C states the Group ID, Object ID, Priority and the block, 0x20 the block
 /// alone, the rest taken from the Object before.
+#[cfg(any(
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22",
+    feature = "draft23"
+))]
 fn fetch_stream_bytes(layout: &str, request: u64) -> Vec<u8> {
     assert!(request < 64, "a one-byte Request ID on every draft");
     let objects = match layout {
