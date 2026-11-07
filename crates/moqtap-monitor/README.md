@@ -62,6 +62,8 @@ The monitor runs on Tokio; `start()` spawns its tasks on the current runtime.
   - **`object_sent_span(namespace, track, sent, start, end)`** reports an
     object whose payload you hand over in pieces, from `start` to `end`. An
     `end` before `start` is refused.
+  - `delivery`: `Delivery::Subgroup(id)` with the subgroup id your library
+    writes, or `Delivery::Datagram`.
   - `starts_group`: the first object your application publishes in the
     group. `opens_subgroup`: the first object of its subgroup.
     `ends_group`: the group's last object. Set them from your library's
