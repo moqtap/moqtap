@@ -128,6 +128,19 @@ macro_rules! dispatch_all {
                 }
             }
 
+            /// How the QUIC connection was closed, once it has been. See
+            /// [`TransportClose`](crate::transport::TransportClose).
+            pub fn transport_close(&self) -> Option<crate::transport::TransportClose> {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(c) => c.transport_close(),
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => None,
+                }
+            }
+
             /// Close the connection with the given application error code
             /// and reason.
             #[allow(unused_variables)]
@@ -205,6 +218,25 @@ macro_rules! dispatch_all {
                             raw: raw.as_deref(),
                         }),
                     )+
+                    _ => None,
+                }
+            }
+
+            /// This event as a [`RefusedFrame`], or `None` if it is not a
+            /// refused control frame.
+            ///
+            /// A frame the connection refused: the decoder refused it, or it
+            /// decoded and broke a rule this endpoint holds the peer to. The
+            /// call that read it returns its error after the event.
+            pub fn refused_frame(&self) -> Option<RefusedFrame<'_>> {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(event) => event.refused().map(|(stream_id, raw)| {
+                            RefusedFrame { draft: DraftVersion::$variant, stream_id, raw }
+                        }),
+                    )+
+                    #[allow(unreachable_patterns)]
                     _ => None,
                 }
             }
@@ -303,7 +335,7 @@ macro_rules! dispatch_all {
                             None => ErrorCause::Unclassified,
                         },
                     };
-                    AnyConnectionError { message, cause }
+                    AnyConnectionError { message, cause, transport_close: None }
                 }
             }
         )+
@@ -591,13 +623,14 @@ pub enum ErrorCause {
 pub struct AnyConnectionError {
     message: String,
     cause: ErrorCause,
+    transport_close: Option<crate::transport::TransportClose>,
 }
 
 impl AnyConnectionError {
     /// A refusal by this facade itself: nothing was written, nothing reached
     /// the wire. [`ErrorCause::Facade`].
     pub fn facade(message: impl Into<String>) -> Self {
-        Self { message: message.into(), cause: ErrorCause::Facade }
+        Self { message: message.into(), cause: ErrorCause::Facade, transport_close: None }
     }
 
     /// The draft-specific error's own words, unedited.
@@ -608,6 +641,16 @@ impl AnyConnectionError {
     /// What stopped the call, as a value.
     pub fn cause(&self) -> &ErrorCause {
         &self.cause
+    }
+
+    /// How the QUIC connection was closed, for a handshake that failed over a
+    /// connection that had closed.
+    ///
+    /// Set by [`AnyConnection::adopt`] and the other `adopt` calls, which
+    /// consume the transport and leave the caller nothing else to ask. On a
+    /// live connection, ask [`AnyConnection::transport_close`] instead.
+    pub fn transport_close(&self) -> Option<&crate::transport::TransportClose> {
+        self.transport_close.as_ref()
     }
 
     /// Whether the failure was on **this** side rather than the peer's.
@@ -3137,18 +3180,52 @@ impl AnyConnection {
     /// `Some` on one of them is refused rather than quietly ignored: silently
     /// sending the ordinary handshake would answer a question that was never
     /// asked.
-    // Both `transport` and `versions` are read only by the per-draft arms, so
-    // the `<zero drafts>` build reaches none of them. Allowed rather than
-    // underscore-prefixed because the names are part of the public signature
-    // and appear in the docs above; renaming them to satisfy a build that
-    // enables no draft would make the documentation wrong for every build that
-    // enables one.
-    #[allow(unused_variables)]
     pub async fn adopt_offering(
         transport: crate::transport::Transport,
         config: AnyClientConfig,
         versions: Option<Vec<moqtap_codec::varint::VarInt>>,
     ) -> Result<Self, AnyConnectionError> {
+        Self::adopt_with(transport, config, versions, None).await
+    }
+
+    /// [`Self::adopt`] with `observer` attached before the handshake, so it
+    /// sees the SETUP this side sends as it is sent, and a SETUP from the peer
+    /// that this side refuses as a
+    /// [`refused_frame`](AnyClientEvent::refused_frame).
+    ///
+    /// [`Self::set_observer`] after `adopt` sees the same handshake events
+    /// replayed, but only once the handshake has succeeded.
+    pub async fn adopt_observed(
+        transport: crate::transport::Transport,
+        config: AnyClientConfig,
+        observer: Arc<dyn AnyConnectionObserver>,
+    ) -> Result<Self, AnyConnectionError> {
+        Self::adopt_with(transport, config, None, Some(observer)).await
+    }
+
+    /// [`Self::adopt_offering`] with `observer` attached before the handshake,
+    /// as [`Self::adopt_observed`].
+    pub async fn adopt_offering_observed(
+        transport: crate::transport::Transport,
+        config: AnyClientConfig,
+        versions: Option<Vec<moqtap_codec::varint::VarInt>>,
+        observer: Arc<dyn AnyConnectionObserver>,
+    ) -> Result<Self, AnyConnectionError> {
+        Self::adopt_with(transport, config, versions, Some(observer)).await
+    }
+
+    // `versions`, `observer` and `quic` are read only by the per-draft arms,
+    // which the `<zero drafts>` build has none of.
+    #[allow(unused_variables)]
+    async fn adopt_with(
+        transport: crate::transport::Transport,
+        config: AnyClientConfig,
+        versions: Option<Vec<moqtap_codec::varint::VarInt>>,
+        observer: Option<Arc<dyn AnyConnectionObserver>>,
+    ) -> Result<Self, AnyConnectionError> {
+        // Kept beside the transport the handshake consumes, so a failure over
+        // a connection that closed can still say how it closed.
+        let quic = transport.quinn_connection();
         // Three shapes, not one, because `ClientConfig` is not the same struct
         // in every era and a single arm cannot spell all three:
         //
@@ -3180,9 +3257,16 @@ impl AnyConnection {
                                 ca_certs: config.ca_certs,
                                 setup_parameters: config.setup_parameters,
                             };
-                            let c = Connection::adopt_offering(transport, inner, versions)
+                            let observer = observer.map(|o| {
+                                Box::new($lv::Adapter(o))
+                                    as Box<dyn crate::$lm::observer::ConnectionObserver>
+                            });
+                            let c = Connection::adopt_with(transport, inner, versions, observer)
                                 .await
-                                .map_err(AnyConnectionError::from)?;
+                                .map_err(|e| AnyConnectionError {
+                                    transport_close: crate::transport::TransportClose::read(&quic),
+                                    ..AnyConnectionError::from(e)
+                                })?;
                             Ok(AnyConnection::$lv(c))
                         }
                     )*
@@ -3203,9 +3287,16 @@ impl AnyConnection {
                                 ca_certs: config.ca_certs,
                                 setup_parameters: config.setup_parameters,
                             };
-                            let c = Connection::adopt_offering(transport, inner, versions)
+                            let observer = observer.map(|o| {
+                                Box::new($vv::Adapter(o))
+                                    as Box<dyn crate::$vm::observer::ConnectionObserver>
+                            });
+                            let c = Connection::adopt_with(transport, inner, versions, observer)
                                 .await
-                                .map_err(AnyConnectionError::from)?;
+                                .map_err(|e| AnyConnectionError {
+                                    transport_close: crate::transport::TransportClose::read(&quic),
+                                    ..AnyConnectionError::from(e)
+                                })?;
                             Ok(AnyConnection::$vv(c))
                         }
                     )*
@@ -3232,9 +3323,16 @@ impl AnyConnection {
                                 ca_certs: config.ca_certs,
                                 setup_parameters: config.setup_parameters,
                             };
-                            let c = Connection::adopt(transport, inner)
+                            let observer = observer.map(|o| {
+                                Box::new($sv::Adapter(o))
+                                    as Box<dyn crate::$sm::observer::ConnectionObserver>
+                            });
+                            let c = Connection::adopt_with(transport, inner, observer)
                                 .await
-                                .map_err(AnyConnectionError::from)?;
+                                .map_err(|e| AnyConnectionError {
+                                    transport_close: crate::transport::TransportClose::read(&quic),
+                                    ..AnyConnectionError::from(e)
+                                })?;
                             Ok(AnyConnection::$sv(c))
                         }
                     )*
@@ -6707,4 +6805,19 @@ pub struct ControlFrame<'a> {
     /// sending the same field can still disagree on how wide a varint they
     /// wrote it in, and the decoded form answers the same either way.
     pub raw: Option<&'a [u8]>,
+}
+
+/// A received control frame the connection refused, lifted out of whichever
+/// draft's `ControlMessageRefused` event carried it. See
+/// [`AnyClientEvent::refused_frame`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefusedFrame<'a> {
+    /// The draft whose rules refused it.
+    pub draft: DraftVersion,
+    /// The stream it arrived on, or `None` for the control stream. Always
+    /// `None` on drafts 07 through 15, which have no other stream for it.
+    pub stream_id: Option<u64>,
+    /// The framed wire bytes the refusal is about.
+    pub raw: &'a [u8],
 }

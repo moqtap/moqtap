@@ -115,6 +115,61 @@ impl std::fmt::Display for HandshakeFailure {
     }
 }
 
+/// How the QUIC connection under a session was closed, as quinn recorded it.
+///
+/// The same over QUIC and WebTransport: both read the close off the
+/// `quinn::Connection`, so a transport-space code that `wtransport` keeps
+/// private is still read here. A `CLOSE_WEBTRANSPORT_SESSION` capsule is not a
+/// QUIC close; it reaches callers as [`TransportError::SessionClosed`].
+///
+/// There is none for a connection that is still open, nor for a close with no
+/// code: a timeout, a stateless reset, this endpoint's own application close.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransportClose {
+    /// The close code.
+    pub code: u64,
+    /// Which space [`code`](Self::code) is a number in.
+    pub space: CodeSpace,
+    /// `true` when the peer sent the close, `false` when this endpoint's QUIC
+    /// stack detected a transport error and closed with it.
+    pub by_peer: bool,
+    /// The reason phrase, as sent.
+    pub reason: Vec<u8>,
+}
+
+impl TransportClose {
+    /// The close a quinn connection error records, if it carries a code.
+    pub(crate) fn of(e: &quinn::ConnectionError) -> Option<Self> {
+        match e {
+            quinn::ConnectionError::ConnectionClosed(close) => Some(Self {
+                code: u64::from(close.error_code),
+                space: CodeSpace::Transport,
+                by_peer: true,
+                reason: close.reason.to_vec(),
+            }),
+            quinn::ConnectionError::ApplicationClosed(close) => Some(Self {
+                code: close.error_code.into_inner(),
+                space: CodeSpace::Application,
+                by_peer: true,
+                reason: close.reason.to_vec(),
+            }),
+            quinn::ConnectionError::TransportError(error) => Some(Self {
+                code: u64::from(error.code),
+                space: CodeSpace::Transport,
+                by_peer: false,
+                reason: error.reason.clone().into_bytes(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// The close `conn` has recorded so far.
+    pub(crate) fn read(conn: &quinn::Connection) -> Option<Self> {
+        conn.close_reason().as_ref().and_then(Self::of)
+    }
+}
+
 /// Errors from the transport layer.
 ///
 /// `#[non_exhaustive]` so that a new failure mode is an additive change. The
@@ -267,6 +322,7 @@ impl Transport {
     /// `Some` on every transport this crate dials. Over WebTransport only an
     /// application or session close carries a code; a QUIC transport close
     /// arrives as text, because `wtransport` keeps that code private.
+    /// [`transport_closed`](Self::transport_closed) reads it typed.
     pub fn closed(&self) -> Option<impl Future<Output = TransportError> + Send + 'static> {
         let closed: std::pin::Pin<Box<dyn Future<Output = TransportError> + Send>> = match self {
             Transport::Quic(t) => Box::pin(t.closed()),
@@ -274,6 +330,34 @@ impl Transport {
             Transport::WebTransport(t) => Box::pin(t.closed()),
         };
         Some(closed)
+    }
+
+    /// How the QUIC connection was closed, once it has been. See
+    /// [`TransportClose`].
+    pub fn transport_close(&self) -> Option<TransportClose> {
+        TransportClose::read(&self.quinn_connection())
+    }
+
+    /// A future resolving when the QUIC connection closes, with its
+    /// [`TransportClose`].
+    ///
+    /// The typed counterpart to [`closed`](Self::closed), and taken for the
+    /// same reason: before the transport is handed to a handshake. Holding the
+    /// future keeps the connection alive.
+    pub fn transport_closed(
+        &self,
+    ) -> impl Future<Output = Option<TransportClose>> + Send + 'static {
+        let conn = self.quinn_connection();
+        async move { TransportClose::of(&conn.closed().await) }
+    }
+
+    /// A handle on the quinn connection under either transport.
+    pub(crate) fn quinn_connection(&self) -> quinn::Connection {
+        match self {
+            Transport::Quic(t) => t.quinn_connection().clone(),
+            #[cfg(feature = "webtransport")]
+            Transport::WebTransport(t) => t.quinn_connection().clone(),
+        }
     }
 
     /// The certificate chain the peer presented, DER-encoded, leaf first.

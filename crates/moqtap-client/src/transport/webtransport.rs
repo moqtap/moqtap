@@ -176,6 +176,9 @@ fn write_err(e: wtransport::error::StreamWriteError) -> TransportError {
 /// place, pinned by a test, against a dependency whose version this crate
 /// chooses. If a `wtransport` upgrade changes the format the test fails rather
 /// than the field silently going quiet.
+///
+/// With `wt-protocol` the vendored `wtransport` exposes both codes, so neither
+/// arm parses: `QuicProto` is read typed and `ConnectionClosed` keeps its code.
 fn handshake_failure(e: &wtransport::error::ConnectingError) -> super::HandshakeFailure {
     use wtransport::error::{ConnectingError, ConnectionError};
 
@@ -184,14 +187,23 @@ fn handshake_failure(e: &wtransport::error::ConnectingError) -> super::Handshake
         ConnectingError::ConnectionError(ConnectionError::ApplicationClosed(close)) => {
             super::HandshakeFailure::application(close.code().into_inner(), reason)
         }
+        // `QuicProto` is where quinn's *transport* errors land, so the code
+        // recovered here is transport-space and a TLS alert may be read from it.
+        #[cfg(feature = "wt-protocol")]
+        ConnectingError::ConnectionError(ConnectionError::QuicProto(inner)) => match inner.code() {
+            Some(code) => super::HandshakeFailure::transport(code.into_inner(), reason),
+            None => super::HandshakeFailure::bare(reason),
+        },
+        #[cfg(not(feature = "wt-protocol"))]
         ConnectingError::ConnectionError(inner @ ConnectionError::QuicProto(_)) => {
-            // `QuicProto` is where quinn's *transport* errors land, so the code
-            // recovered here is transport-space and a TLS alert may be read
-            // from it.
             match code_in_display(&inner.to_string()) {
                 Some(code) => super::HandshakeFailure::transport(code, reason),
                 None => super::HandshakeFailure::bare(reason),
             }
+        }
+        #[cfg(feature = "wt-protocol")]
+        ConnectingError::ConnectionError(ConnectionError::ConnectionClosed(close)) => {
+            super::HandshakeFailure::transport(close.error_code(), reason)
         }
         _ => super::HandshakeFailure::bare(reason),
     }
@@ -211,6 +223,7 @@ fn session_lost(e: wtransport::error::ConnectionError) -> TransportError {
 }
 
 /// The number in `wtransport::error::QuicProtoError`'s `" (code: {code})"`.
+#[cfg(not(feature = "wt-protocol"))]
 fn code_in_display(rendered: &str) -> Option<u64> {
     let rest = rendered.rsplit_once("(code: ")?.1;
     rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()
@@ -294,6 +307,11 @@ impl WebTransportTransport {
     /// Get the remote address of the peer.
     pub fn remote_address(&self) -> std::net::SocketAddr {
         self.0.remote_address()
+    }
+
+    /// The quinn connection under this session.
+    pub(crate) fn quinn_connection(&self) -> &quinn::Connection {
+        self.0.quic_connection()
     }
 
     /// The certificate chain the peer presented, DER-encoded, leaf first.
@@ -634,6 +652,25 @@ mod tests {
 
         assert_eq!(failure.code, Some(271));
         assert_eq!(failure.tls_alert, None);
+    }
+
+    /// A peer's transport `CONNECTION_CLOSE` keeps its code through the
+    /// vendored accessor.
+    #[cfg(feature = "wt-protocol")]
+    #[test]
+    fn a_transport_close_keeps_its_code() {
+        let quic = quinn::ConnectionError::ConnectionClosed(quinn::ConnectionClose {
+            error_code: quinn::TransportErrorCode::crypto(120),
+            frame_type: None,
+            reason: (&b"no application protocol"[..]).into(),
+        });
+        let converted = wtransport::error::ConnectionError::from(quic);
+        let failure =
+            handshake_failure(&wtransport::error::ConnectingError::ConnectionError(converted));
+
+        assert_eq!(failure.code, Some(0x178));
+        assert_eq!(failure.code_space, Some(super::super::CodeSpace::Transport));
+        assert_eq!(failure.tls_alert, Some(120));
     }
 
     /// A failure that never reached the peer has nothing numeric to report.

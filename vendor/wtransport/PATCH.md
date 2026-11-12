@@ -44,6 +44,11 @@ The patch keeps it, in three places:
   Its `Display` still begins `server rejected WebTransport session request`, so
   anything matching on that text keeps matching.
 
+The same patch also exposes three accessors upstream keeps private, in
+**`error.rs`**: `ConnectionClose::error_code()` and `reason()`, and
+`QuicProtoError::code()`. The close codes let a handshake that a peer's
+`CONNECTION_CLOSE` ended report that code.
+
 ## Why moqtap needs it
 
 MOQT negotiates its version through three channels, and which one is available
@@ -53,17 +58,9 @@ identifiers it will accept, and the server names its choice in a `WT-Protocol`
 response header. That header is in the CONNECT response and nowhere else.
 
 Without it, an accepted WebTransport session says only that *something* in the
-offer was agreeable. Reading it back turns drafts 15–20 over WebTransport into
+offer was agreeable. Reading it back turns drafts 15 on over WebTransport into
 the same exclusion loop the ALPN already gets over QUIC: offer everything
-remaining, remove what came back, repeat until the server refuses. `testlab` is
-the caller that wanted this — a relay conformance probe whose whole output is
-"which drafts, learned how".
-
-Live, on the first sweep that could read it: imquic answers `"moqt-19"`,
-`"moqt-18"`, `"moqt-17"`, `"moqt-16"` and then refuses what is left by name;
-moq.dev walks 19 down to 15; moqtail answers `"moqt-18"` and refuses the rest;
-Cloudflare's draft-14 endpoint sends no `WT-Protocol` at all, which is correct
-for a draft that has no identifier to name.
+remaining, remove what came back, repeat until the server refuses.
 
 The rejection status is the same fact from the other side. A server that reads
 an offer and refuses it answers about a *draft*; one that 404s answers about a
@@ -79,22 +76,8 @@ Local, deliberately, and intended for upstream. Until it is upstream:
   into a published crate, so unconditional use here would compile locally and
   break for every consumer of `moqtap-client` on crates.io.
 - Every top-level manifest that wants the patch needs its own
-  `[patch.crates-io]` pointing here — a `[patch]` section is not inherited
-  through a path dependency. `moqtap/Cargo.toml` and
-  `testlab/container_src/Cargo.toml` carry one; both repositories already
-  depend on a sibling checkout by path, so the relative path costs them
-  nothing new.
-
-  The `cli` repository is the exception and must stay one. Its manifest names
-  *published* versions on purpose — that is what makes it a real test of the
-  published surface — and patches them locally through a gitignored
-  `.cargo/config.toml`. A `wtransport` line belongs in that file beside the
-  five already there, never in `cli/Cargo.toml`, which would break a checkout
-  of that repository on its own.
-
-  Verified rather than assumed: the `cli` builds today against the registry
-  copy of `wtransport` 0.7.2 with `webtransport` on and `wt-protocol` off,
-  which is the whole claim the feature gate makes.
+  `[patch.crates-io]` pointing here, since a `[patch]` section is not inherited
+  through a path dependency. This workspace's `Cargo.toml` carries one.
 
 If upstream takes it, all of that goes away and the `wt-protocol` feature
 becomes a version bump.

@@ -167,4 +167,26 @@ pub enum ClientEvent {
         /// Error description.
         error: String,
     },
+
+    /// A received control frame this endpoint refused.
+    ///
+    /// Emitted when the decoder refuses the frame, or when the frame decoded
+    /// and broke a rule this endpoint holds the peer to. A frame that decoded
+    /// is reported as [`ClientEvent::ControlMessage`] first. The call that read
+    /// the frame returns its error after this event.
+    ControlMessageRefused {
+        /// The framed wire bytes the refusal is about: the whole frame, or as
+        /// much of it as had been read when the framing itself was refused.
+        raw: Vec<u8>,
+    },
+}
+
+impl ClientEvent {
+    /// The stream and bytes of a [`ClientEvent::ControlMessageRefused`].
+    pub(crate) fn refused(&self) -> Option<(Option<u64>, &[u8])> {
+        match self {
+            ClientEvent::ControlMessageRefused { raw } => Some((None, raw)),
+            _ => None,
+        }
+    }
 }

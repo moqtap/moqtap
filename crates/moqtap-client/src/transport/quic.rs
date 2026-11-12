@@ -57,6 +57,11 @@ impl QuicTransport {
         self.conn.close(quinn::VarInt::from_u32(code), reason);
     }
 
+    /// The quinn connection this transport wraps.
+    pub(crate) fn quinn_connection(&self) -> &quinn::Connection {
+        &self.conn
+    }
+
     /// A future resolving when the session ends, carrying the peer's close.
     ///
     /// Borrows nothing and outlives this transport, for the same reason
@@ -1335,6 +1340,41 @@ mod tests {
             matches!(lost, TransportError::Connection(_)),
             "a timeout carries no application code, got {lost}"
         );
+    }
+
+    /// Each close quinn records with a code comes back in its own space, and
+    /// one with no code comes back as none.
+    #[test]
+    fn a_transport_close_is_read_in_its_own_space() {
+        use super::super::{CodeSpace, TransportClose};
+
+        let peer =
+            TransportClose::of(&quinn::ConnectionError::ConnectionClosed(quinn::ConnectionClose {
+                error_code: quinn::TransportErrorCode::crypto(120),
+                frame_type: None,
+                reason: (&b"no application protocol"[..]).into(),
+            }))
+            .expect("a transport close carries a code");
+        assert_eq!((peer.code, peer.space, peer.by_peer), (0x178, CodeSpace::Transport, true));
+        assert_eq!(peer.reason, b"no application protocol");
+
+        let app = TransportClose::of(&quinn::ConnectionError::ApplicationClosed(
+            quinn::ApplicationClose {
+                error_code: quinn::VarInt::from_u32(0x3),
+                reason: (&b"protocol violation"[..]).into(),
+            },
+        ))
+        .expect("an application close carries a code");
+        assert_eq!((app.code, app.space, app.by_peer), (0x3, CodeSpace::Application, true));
+
+        let local = TransportClose::of(&quinn::ConnectionError::TransportError(
+            quinn::TransportErrorCode::crypto(45).into(),
+        ))
+        .expect("a local transport error carries a code");
+        assert_eq!((local.code, local.space, local.by_peer), (0x12d, CodeSpace::Transport, false));
+
+        assert_eq!(TransportClose::of(&quinn::ConnectionError::TimedOut), None);
+        assert_eq!(TransportClose::of(&quinn::ConnectionError::LocallyClosed), None);
     }
 
     fn measuring(suites: Vec<u16>) -> QuicDialOptions {

@@ -1,7 +1,7 @@
 [package]
 name = "moqtap-client"
 description = "MoQT client library — QUIC transport, endpoint state machine, subscribe/fetch/namespace flows"
-version = "0.11.1"
+version = "0.11.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -21,7 +21,8 @@ default = ["all-drafts"]
 webtransport = ["wtransport"]
 
 # Read back the CONNECT response — `Transport::wt_protocol`, the server's half
-# of WebTransport version negotiation from draft-15 on.
+# of WebTransport version negotiation from draft-15 on — and the transport code
+# of a WebTransport handshake the peer closed.
 #
 # **Requires a patched `wtransport`** and does not build without one: upstream
 # 0.7 parses the CONNECT response and drops it, so there is no API to call. The

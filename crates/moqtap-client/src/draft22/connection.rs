@@ -559,6 +559,8 @@ pub struct FramedRecvStream {
     /// a stream for an alias no live binding names, and every stream built
     /// outside [`Connection::accept_subgroup_stream`].
     tracking: Option<(TrackObjects, u64)>,
+    /// The bytes of the last control frame a capturing read refused.
+    refused: Option<Vec<u8>>,
 }
 
 impl FramedRecvStream {
@@ -571,7 +573,22 @@ impl FramedRecvStream {
             subgroup_io: None,
             fetch_io: None,
             tracking: None,
+            refused: None,
         }
+    }
+
+    /// The bytes of the control frame the last capturing read refused.
+    pub(crate) fn take_refused(&mut self) -> Option<Vec<u8>> {
+        self.refused.take()
+    }
+
+    /// Keep the first `len` buffered bytes as a refused frame when the read is
+    /// capturing, and hand `err` back.
+    fn refuse(&mut self, capture_raw: bool, len: usize, err: ConnectionError) -> ConnectionError {
+        if capture_raw {
+            self.refused = Some(self.buf[..len].to_vec());
+        }
+        err
     }
 
     /// Get the transport-level stream ID.
@@ -674,13 +691,16 @@ impl FramedRecvStream {
         &mut self,
         capture_raw: bool,
     ) -> Result<(AnyControlMessage, Option<Vec<u8>>), ConnectionError> {
+        self.refused = None;
         // Read type ID varint
         self.ensure(1).await?;
         let type_len = self.draft.varint_len(self.buf[0]);
         self.ensure(type_len).await?;
 
         let mut cursor = &self.buf[..type_len];
-        let _type_id = self.draft.decode_varint(&mut cursor)?;
+        if let Err(e) = self.draft.decode_varint(&mut cursor) {
+            return Err(self.refuse(capture_raw, type_len, e.into()));
+        }
 
         // Draft-22: 16-bit BE payload length
         let (payload_len, len_field_size) = if self.draft.uses_fixed_length_framing() {
@@ -693,8 +713,12 @@ impl FramedRecvStream {
             let payload_len_start = type_len;
             let payload_len_varint_len = self.draft.varint_len(self.buf[payload_len_start]);
             self.ensure(type_len + payload_len_varint_len).await?;
-            let mut cursor = &self.buf[payload_len_start..type_len + payload_len_varint_len];
-            let payload_len = self.draft.decode_varint(&mut cursor)?.into_inner() as usize;
+            let header_len = type_len + payload_len_varint_len;
+            let mut cursor = &self.buf[payload_len_start..header_len];
+            let payload_len = match self.draft.decode_varint(&mut cursor) {
+                Ok(length) => length.into_inner() as usize,
+                Err(e) => return Err(self.refuse(capture_raw, header_len, e.into())),
+            };
             (payload_len, payload_len_varint_len)
         };
 
@@ -707,7 +731,10 @@ impl FramedRecvStream {
 
         // Now decode the whole message
         let mut frame = &self.buf[..total];
-        let msg = AnyControlMessage::decode(self.draft, &mut frame)?;
+        let msg = match AnyControlMessage::decode(self.draft, &mut frame) {
+            Ok(msg) => msg,
+            Err(e) => return Err(self.refuse(capture_raw, total, e.into())),
+        };
         self.buf.advance(total);
         Ok((msg, raw))
     }
@@ -1691,6 +1718,29 @@ impl Connection {
         transport: Transport,
         config: ClientConfig,
     ) -> Result<Self, ConnectionError> {
+        Self::adopt_with(transport, config, None).await
+    }
+
+    /// [`Self::adopt`] with `observer` attached before the handshake.
+    ///
+    /// The SETUP this side sends is reported as it is written, and a SETUP from
+    /// the peer that this side refuses as [`ClientEvent::ControlMessageRefused`].
+    /// [`Self::set_observer`] after `adopt` sees the same handshake events, but
+    /// only once the handshake has succeeded.
+    pub async fn adopt_observed(
+        transport: Transport,
+        config: ClientConfig,
+        observer: Box<dyn ConnectionObserver>,
+    ) -> Result<Self, ConnectionError> {
+        Self::adopt_with(transport, config, Some(observer)).await
+    }
+
+    /// [`Self::adopt`], reporting to `observer` from the first byte written.
+    pub(crate) async fn adopt_with(
+        transport: Transport,
+        config: ClientConfig,
+        observer: Option<Box<dyn ConnectionObserver>>,
+    ) -> Result<Self, ConnectionError> {
         let draft = config.draft;
         // PATH is for native QUIC only, and the transport is known here and
         // nowhere further in. Refusing before dialling means a session that
@@ -1712,6 +1762,16 @@ impl Connection {
         let setup_msg = endpoint.send_setup(config.setup_parameters.clone())?;
         let any_setup = AnyControlMessage::Draft22(setup_msg);
         let raw_setup = control_send.write_control(&any_setup).await?;
+        // Reported as written, so a peer that never answers still leaves it
+        // observed.
+        if let Some(obs) = &observer {
+            obs.on_event_owned(ClientEvent::ControlMessage {
+                direction: Direction::Send,
+                message: any_setup.clone(),
+                stream_id: None,
+                raw: Some(raw_setup.clone()),
+            });
+        }
 
         // Receive half: the peer's control stream is whichever unidirectional
         // stream leads with CONTROL_STREAM_TYPE.
@@ -1734,18 +1794,33 @@ impl Connection {
             }
         };
 
-        let (server_setup, raw_server_setup) = control_recv.read_control(true).await?;
+        let (server_setup, raw_server_setup) = match control_recv.read_control(true).await {
+            Ok(read) => read,
+            Err(e) => {
+                if let Some(obs) = &observer {
+                    if let Some(event) = Self::refused_event(&e, None, control_recv.take_refused())
+                    {
+                        obs.on_event_owned(event);
+                    }
+                }
+                return Err(e);
+            }
+        };
         // Unified SETUP in draft-22: server responds with the same message type.
         match &server_setup {
             AnyControlMessage::Draft22(ControlMessage::Setup(ref s)) => {
-                endpoint.receive_setup(s)?;
+                if let Err(e) = endpoint.receive_setup(s) {
+                    let err = ConnectionError::from(e);
+                    Self::refuse_setup(observer.as_deref(), &err, &server_setup, &raw_server_setup);
+                    return Err(err);
+                }
             }
             _ => {
                 return Err(ConnectionError::Endpoint(EndpointError::NotActive));
             }
         }
 
-        let pending_events = vec![
+        let mut pending_events = vec![
             ClientEvent::ControlMessage {
                 direction: Direction::Send,
                 message: any_setup,
@@ -1761,13 +1836,20 @@ impl Connection {
             ClientEvent::SetupComplete { negotiated_version: 0xff000000 + 22 },
         ];
 
+        if let Some(obs) = &observer {
+            // The SETUP this side sent was reported as it was written.
+            for event in pending_events.drain(..).skip(1) {
+                obs.on_event_owned(event);
+            }
+        }
+
         Ok(Self {
             transport,
             endpoint,
             draft,
             control_send: Some(control_send),
             control_recv: Some(control_recv),
-            observer: None,
+            observer,
             pending_events,
             server_setup,
             server_setup_raw: raw_server_setup,
@@ -1856,9 +1938,67 @@ impl Connection {
         self.observer = None;
     }
 
+    /// How the QUIC connection was closed, once it has been. See
+    /// [`TransportClose`](crate::transport::TransportClose).
+    pub fn transport_close(&self) -> Option<crate::transport::TransportClose> {
+        self.transport.transport_close()
+    }
+
     /// Emit an event to the observer, if one is attached.
     fn emit(&self, event: ClientEvent) {
         if let Some(ref obs) = self.observer {
+            obs.on_event_owned(event);
+        }
+    }
+
+    /// Report a received frame this endpoint refused, when an observer is
+    /// attached and the refusal is the peer's: see [`Self::refused_event`].
+    fn emit_refused(&self, err: &ConnectionError, stream_id: Option<u64>, raw: Option<Vec<u8>>) {
+        if self.observer.is_some() {
+            if let Some(event) = Self::refused_event(err, stream_id, raw) {
+                self.emit(event);
+            }
+        }
+    }
+
+    /// The [`ClientEvent::ControlMessageRefused`] for `raw`, when `err` refuses
+    /// what the peer sent: the decoder refused it, or it broke a rule
+    /// [`EndpointError::fault`] or [`Self::draft_specific_cause`] lays on the
+    /// peer.
+    fn refused_event(
+        err: &ConnectionError,
+        stream_id: Option<u64>,
+        raw: Option<Vec<u8>>,
+    ) -> Option<ClientEvent> {
+        use crate::above_codec_rules::{DraftSpecificCause, EndpointFault};
+        let peers = match err {
+            ConnectionError::Codec(_) | ConnectionError::VarInt(_) => true,
+            ConnectionError::Endpoint(e) => matches!(e.fault(), EndpointFault::Peer(_)),
+            other => matches!(
+                Self::draft_specific_cause(other),
+                Some(DraftSpecificCause::PeerViolation { .. } | DraftSpecificCause::Codec { .. })
+            ),
+        };
+        let raw = raw.filter(|_| peers)?;
+        Some(ClientEvent::ControlMessageRefused { stream_id, raw })
+    }
+
+    /// Report a peer's SETUP the handshake refused to an observer attached
+    /// before it: the message as received, then the refusal.
+    fn refuse_setup(
+        observer: Option<&dyn ConnectionObserver>,
+        err: &ConnectionError,
+        setup: &AnyControlMessage,
+        raw: &Option<Vec<u8>>,
+    ) {
+        let Some(obs) = observer else { return };
+        obs.on_event_owned(ClientEvent::ControlMessage {
+            direction: Direction::Receive,
+            message: setup.clone(),
+            stream_id: None,
+            raw: raw.clone(),
+        });
+        if let Some(event) = Self::refused_event(err, None, raw.clone()) {
             obs.on_event_owned(event);
         }
     }
@@ -1962,24 +2102,37 @@ impl Connection {
     /// Returns the `AnyControlMessage` and also extracts the draft-22
     /// `ControlMessage` for internal endpoint dispatch.
     pub async fn recv_control(&mut self) -> Result<ControlMessage, ConnectionError> {
+        self.recv_control_raw().await.map(|(msg, _)| msg)
+    }
+
+    /// [`Self::recv_control`], keeping the frame's wire bytes when an observer
+    /// is attached.
+    async fn recv_control_raw(
+        &mut self,
+    ) -> Result<(ControlMessage, Option<Vec<u8>>), ConnectionError> {
         let recv = self.control_recv.as_mut().ok_or(ConnectionError::NoControlStream)?;
         let capture_raw = self.observer.is_some();
         let read = recv.read_control(capture_raw).await;
         let (any, raw) = match read {
             Ok(v) => v,
-            Err(e) => return Err(self.close_for_codec(e)),
+            Err(e) => {
+                let raw = recv.take_refused();
+                let err = self.close_for_codec(e);
+                self.emit_refused(&err, None, raw);
+                return Err(err);
+            }
         };
         if capture_raw {
             self.emit(ClientEvent::ControlMessage {
                 direction: Direction::Receive,
                 message: any.clone(),
                 stream_id: None,
-                raw,
+                raw: raw.clone(),
             });
         }
         // Unwrap to draft-22 for the endpoint
         match any {
-            AnyControlMessage::Draft22(msg) => Ok(msg),
+            AnyControlMessage::Draft22(msg) => Ok((msg, raw)),
             // `AnyControlMessage` carries one variant per enabled draft feature. With draft 22 the
             // only one enabled the arm above is exhaustive and this rejection arm unreachable.
             // Compiled in every configuration with the lint allowed, rather than gated on a `cfg`
@@ -2004,8 +2157,12 @@ impl Connection {
     /// with the code [`EndpointError::session_error_code`] names, so the peer
     /// that broke the rule learns of it rather than only the local endpoint.
     pub async fn recv_and_dispatch(&mut self) -> Result<ControlMessage, ConnectionError> {
-        let msg = self.recv_control().await?;
-        self.endpoint.receive_message(msg.clone()).map_err(|e| self.close_if_session_fatal(e))?;
+        let (msg, raw) = self.recv_control_raw().await?;
+        if let Err(e) = self.endpoint.receive_message(msg.clone()) {
+            let err = self.close_if_session_fatal(e);
+            self.emit_refused(&err, None, raw);
+            return Err(err);
+        }
 
         // Emit draining event if this was a GoAway
         if let ControlMessage::GoAway(ref ga) = msg {
@@ -2143,6 +2300,10 @@ impl Connection {
     /// draft's response types, or if it does not fit the request's state.
     /// The message has already been emitted to the observer by then — what
     /// arrived is reported whether or not the endpoint accepts it.
+    ///
+    /// [`ConnectionError::Codec`] if the decoder refused the frame. The session is
+    /// closed with the code [`Self::codec_session_error_code`] names, where it
+    /// names one, as on the control stream.
     pub async fn recv_on_request_stream(
         &mut self,
         stream: &mut RequestStream,
@@ -2159,7 +2320,10 @@ impl Connection {
                 if matches!(e, ConnectionError::Transport(TransportError::StreamReset(_))) {
                     let _ = self.endpoint.cancel_request(stream.request_id);
                 }
-                return Err(e);
+                let raw = stream.recv.take_refused();
+                let err = self.close_for_codec(e);
+                self.emit_refused(&err, Some(stream.stream_id()), raw);
+                return Err(err);
             }
         };
         if capture_raw {
@@ -2167,7 +2331,7 @@ impl Connection {
                 direction: Direction::Receive,
                 message: any.clone(),
                 stream_id: Some(stream.stream_id()),
-                raw,
+                raw: raw.clone(),
             });
         }
         let msg = match any {
@@ -2195,7 +2359,11 @@ impl Connection {
                 self.endpoint.receive_on_peer_request_stream(stream.request_id, msg.clone())
             }
         };
-        dispatched.map_err(|e| self.close_if_session_fatal(e))?;
+        if let Err(e) = dispatched {
+            let err = self.close_if_session_fatal(e);
+            self.emit_refused(&err, Some(stream.stream_id()), raw);
+            return Err(err);
+        }
         // Emitted after the dispatch rather than before it, so an observer sees
         // only a notify the endpoint accepted: one from the subscriber, or for
         // a request that is not a subscription, ends the session instead
@@ -2376,8 +2544,12 @@ impl Connection {
     ///   INVALID_REQUEST_ID and the stream reset.
     /// - [`ConnectionError::Endpoint`] carrying `NotActive` or `Draining` —
     ///   the stream is reset, the session is left alone.
-    /// - [`ConnectionError::Transport`] or [`ConnectionError::Codec`] — the
-    ///   stream is reset, the session is left alone.
+    /// - [`ConnectionError::Transport`] — the stream is reset, the session is
+    ///   left alone.
+    /// - [`ConnectionError::Codec`] — the stream is reset, and the session is
+    ///   closed with the code [`Self::codec_session_error_code`] names, where it
+    ///   names one. Section 9: "Every message on a control or request stream is
+    ///   formatted as follows", so the control message rules hold here too.
     pub async fn accept_request_stream(
         &mut self,
     ) -> Result<(ControlMessage, RequestStream), ConnectionError> {
@@ -2407,7 +2579,10 @@ impl Connection {
                     // same way. Reset rather than FIN — nothing was served.
                     let _ = send.reset(REQUEST_UNANSWERED);
                     let _ = recv.stop(REQUEST_UNANSWERED);
-                    return Err(e);
+                    let raw = recv.take_refused();
+                    let err = self.close_for_codec(e);
+                    self.emit_refused(&err, Some(send.stream_id()), raw);
+                    return Err(err);
                 }
             }
         };
@@ -2426,7 +2601,7 @@ impl Connection {
                 direction: Direction::Receive,
                 message: any.clone(),
                 stream_id: Some(stream_id),
-                raw,
+                raw: raw.clone(),
             });
         }
 
@@ -2452,7 +2627,9 @@ impl Connection {
             self.close_for(&err);
             let _ = send.reset(REQUEST_UNANSWERED);
             let _ = recv.stop(REQUEST_UNANSWERED);
-            return Err(ConnectionError::NonRequestOnRequestStream(ty));
+            let refused = ConnectionError::NonRequestOnRequestStream(ty);
+            self.emit_refused(&refused, Some(stream_id), raw);
+            return Err(refused);
         };
 
         let request_id = match self.endpoint.receive_request_on_stream(&msg) {
@@ -2460,7 +2637,9 @@ impl Connection {
             Err(e) => {
                 let _ = send.reset(REQUEST_UNANSWERED);
                 let _ = recv.stop(REQUEST_UNANSWERED);
-                return Err(self.close_if_session_fatal(e));
+                let err = self.close_if_session_fatal(e);
+                self.emit_refused(&err, Some(stream_id), raw);
+                return Err(err);
             }
         };
 
@@ -4051,6 +4230,18 @@ fn malformed_track_condition(err: &CodecError) -> Option<MalformedTrackCondition
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only a refusal of what the peer sent is reported as a refused frame,
+    /// and only with the bytes it was about.
+    #[test]
+    fn only_a_refusal_of_the_peers_frame_is_reported() {
+        let raw = Some(vec![0x01]);
+        let decoder = ConnectionError::Codec(CodecError::UnexpectedEnd);
+        assert!(Connection::refused_event(&decoder, None, raw.clone()).is_some());
+        assert!(Connection::refused_event(&decoder, None, None).is_none());
+        let local = ConnectionError::Endpoint(EndpointError::NotActive);
+        assert!(Connection::refused_event(&local, None, raw).is_none());
+    }
 
     /// This build failing to narrow a message it decoded is never a finding
     /// about the peer.

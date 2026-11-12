@@ -92,7 +92,13 @@ need to hold a MoQT connection without compile-time coupling to one draft:
 - `AnyClientEvent` — enum wrapping each draft's `ClientEvent`.
 - `AnyConnectionObserver` — trait receiving `AnyClientEvent`.
   `AnyConnection::set_observer` installs a per-draft adapter on the inner
-  connection.
+  connection; `AnyConnection::adopt_observed` installs it before the
+  handshake, so the SETUP sent and a SETUP refused reach it too.
+  `AnyClientEvent::refused_frame` gives the bytes of a received control frame
+  the connection refused.
+- `AnyConnection::transport_close` — the code the QUIC connection closed with,
+  and whether the peer sent it. `AnyConnectionError::transport_close` gives the
+  same for a failed `adopt`.
 
 ## Architecture
 

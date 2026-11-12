@@ -294,6 +294,19 @@ impl Display for ConnectionClose {
     }
 }
 
+/// PATCH: the transport close's numbers, which upstream keeps private.
+impl ConnectionClose {
+    /// The QUIC transport error code the peer closed with.
+    pub fn error_code(&self) -> u64 {
+        self.0.error_code.into()
+    }
+
+    /// The reason phrase the peer sent.
+    pub fn reason(&self) -> &[u8] {
+        &self.0.reason
+    }
+}
+
 /// A struct representing an error in the HTTP3 layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct H3Error {
@@ -344,6 +357,14 @@ impl From<quinn::ConnectionError> for ConnectionError {
 pub struct QuicProtoError {
     code: Option<VarInt>,
     reason: Cow<'static, str>,
+}
+
+/// PATCH: the code upstream prints but does not expose.
+impl QuicProtoError {
+    /// The QUIC transport error code, where the error carried one.
+    pub fn code(&self) -> Option<VarInt> {
+        self.code
+    }
 }
 
 impl Display for QuicProtoError {

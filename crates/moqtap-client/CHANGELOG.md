@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-11-12
+
+### Added
+
+- Refused frames reach the observer: `ClientEvent::ControlMessageRefused`, read through `AnyClientEvent::refused_frame`, carries the bytes of a received frame the client refused, and `adopt_observed` attaches the observer before the handshake. `TransportClose` reports the code a QUIC connection closed with, through `transport_close` on `Transport`, `Connection`, `AnyConnection` and `AnyConnectionError`.
+
+### Fixed
+
+- A frame the decoder refuses on a request stream (drafts 17-23) or a namespace subscription stream (draft-16) now closes the session as on the control stream, with the code the draft names for it.
+- `wt-protocol`: a WebTransport handshake ended by a peer's transport `CONNECTION_CLOSE` now keeps the close code in `HandshakeFailure`.
+
 ## [0.11.1] - 2026-11-04
 
 ### Fixed
