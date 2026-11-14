@@ -44,12 +44,17 @@
 //!
 //! # What is deliberately carried
 //!
-//! DEFAULT_PUBLISHER_PRIORITY (0x0E) says "Priorities above 255 are invalid" and
-//! names no consequence, two subsections away from two entries that each name
-//! one in the next clause. A table assembled from "which entries mention a
-//! range" rather than "which entries state a consequence" closes sessions over
-//! it, and `a_priority_the_draft_calls_invalid_without_saying_more_is_carried`
-//! is what fails when one does.
+//! Through draft-22, DEFAULT_PUBLISHER_PRIORITY (0x0E) says "Priorities above
+//! 255 are invalid" and names no consequence, two subsections away from two
+//! entries that each name one in the next clause. A table assembled from "which
+//! entries mention a range" rather than "which entries state a consequence"
+//! closes sessions over it, and
+//! `a_priority_the_draft_calls_invalid_without_saying_more_is_carried` is what
+//! fails when one does. draft-23 Section 10.4 states one ("If an endpoint
+//! receives a value above 255, it MUST close the session with
+//! MALFORMED_KEY_VALUE."), and its module refuses the value.
+//!
+//! Every refusal names SUBSCRIBE_OK, the message whose tail carried the entry.
 
 #![cfg(any(
     feature = "draft16",
@@ -187,7 +192,11 @@ macro_rules! track_property_range_gate {
                     {
                         assert_eq!(
                             tail_of(&subscribe_ok(&run)),
-                            Err(CodecError::TrackPropertyValueOutOfRange { key, value }),
+                            Err(CodecError::TrackPropertyValueOutOfRange {
+                                key,
+                                value,
+                                message_type: MessageType::SubscribeOk.id(),
+                            }),
                             "type {key:#x} value {value} {where_} the immutable block must be refused",
                         );
                     }
@@ -253,7 +262,11 @@ macro_rules! track_property_range_gate {
                     let result = message.encode(&mut wire);
                     assert_eq!(
                         result,
-                        Err(CodecError::TrackPropertyValueOutOfRange { key, value }),
+                        Err(CodecError::TrackPropertyValueOutOfRange {
+                            key,
+                            value,
+                            message_type: MessageType::SubscribeOk.id(),
+                        }),
                         "type {key:#x} value {value} must not be written",
                     );
                     assert!(wire.is_empty(), "a refused message writes no bytes");
@@ -325,7 +338,11 @@ macro_rules! track_property_range_gate {
 
                     assert_eq!(
                         tail_of(&subscribe_ok(&run)),
-                        Err(CodecError::TrackPropertyValueOutOfRange { key, value }),
+                        Err(CodecError::TrackPropertyValueOutOfRange {
+                            key,
+                            value,
+                            message_type: MessageType::SubscribeOk.id(),
+                        }),
                         "type {key:#x} value {value} behind an unreadable block \
                          must still be refused",
                     );
@@ -571,7 +588,11 @@ mod draft23 {
             for (where_, run) in [("beside", beside(key, value)), ("inside", inside(key, value))] {
                 assert_eq!(
                     tail_of(&subscribe_ok(&run)),
-                    Err(CodecError::TrackPropertyValueOutOfRange { key, value }),
+                    Err(CodecError::TrackPropertyValueOutOfRange {
+                        key,
+                        value,
+                        message_type: MessageType::SubscribeOk.id(),
+                    }),
                     "type {key:#x} value {value} {where_} the immutable block must be refused",
                 );
             }
@@ -604,7 +625,11 @@ mod draft23 {
             let mut wire = Vec::new();
             assert_eq!(
                 message.encode(&mut wire),
-                Err(CodecError::TrackPropertyValueOutOfRange { key, value }),
+                Err(CodecError::TrackPropertyValueOutOfRange {
+                    key,
+                    value,
+                    message_type: MessageType::SubscribeOk.id(),
+                }),
                 "type {key:#x} value {value} must not be written",
             );
             assert!(wire.is_empty());
@@ -624,7 +649,11 @@ mod draft23 {
         put_varint(0, &mut run);
         assert_eq!(
             tail_of(&subscribe_ok(&run)),
-            Err(CodecError::TrackPropertyValueOutOfRange { key: 0x22, value: 0 })
+            Err(CodecError::TrackPropertyValueOutOfRange {
+                key: 0x22,
+                value: 0,
+                message_type: MessageType::SubscribeOk.id(),
+            })
         );
     }
 }

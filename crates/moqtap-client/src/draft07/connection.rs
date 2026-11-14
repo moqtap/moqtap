@@ -1601,7 +1601,7 @@ impl Connection {
             // terminate the session with a Protocol Violation". Drafts 08
             // through 14 carry the field and the same sentence; draft-15 is
             // where it goes.
-            CodecError::InvalidContentExists(_) => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::InvalidContentExists { .. } => Some(SessionErrorCode::ProtocolViolation),
             CodecError::DuplicateParameter(_) | CodecError::UnknownMessageType(_) => {
                 Some(SessionErrorCode::ProtocolViolation)
             }
@@ -1633,7 +1633,7 @@ impl Connection {
             // Not `InvalidForward`: draft-07 has no Forward field. Not
             // `ParameterValueOutOfRange`: no parameter this draft defines
             // restricts its value's range. Both arrive with drafts above.
-            CodecError::InvalidForward(_)
+            CodecError::InvalidForward { .. }
             | CodecError::ParameterValueOutOfRange { .. }
             | CodecError::UnexpectedEnd
             | CodecError::MessageTooLong(_)

@@ -282,7 +282,10 @@ fn check_subscription_filters(parameters: &[KeyValuePair]) -> Result<(), CodecEr
 }
 
 /// Decode a count-prefixed list of parameters with delta-encoded types.
-fn decode_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError> {
+fn decode_parameters(
+    buf: &mut impl Buf,
+    message: MessageType,
+) -> Result<Vec<KeyValuePair>, CodecError> {
     let count = VarInt::decode_moqt::<Wire>(buf)?.into_inner() as usize;
     let mut params = crate::types::reserve_bounded(count, buf);
     let mut prev_key: u64 = 0;
@@ -321,6 +324,16 @@ fn decode_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError
         let encoding =
             param_encoding(abs_key).ok_or(CodecError::UnknownMessageParameter(abs_key))?;
 
+        // Section 10.2.1, scope before value: a parameter in a message its
+        // definition does not name is refused for where it is, whatever its
+        // value.
+        if !parameter_in_scope(abs_key, message) {
+            return Err(CodecError::ParameterOutOfScope {
+                key: abs_key,
+                message_type: message.id(),
+            });
+        }
+
         let value = match encoding {
             ParamEncoding::Varint => {
                 let v = VarInt::decode_moqt::<Wire>(buf)?;
@@ -335,6 +348,7 @@ fn decode_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError
                     return Err(CodecError::ParameterValueOutOfRange {
                         key: abs_key,
                         value: byte as u64,
+                        message_type: message.id(),
                     });
                 }
                 KvpValue::Varint(VarInt::from_u64_moqt(byte as u64))
@@ -411,7 +425,11 @@ fn is_track_namespace_value(bytes: &[u8]) -> bool {
 /// that defines a structure and is not that structure — a Token, a filter — is
 /// one the receiver must close the session over, so writing it is not a way to
 /// send it; the sender's first sign of trouble would be the session going.
-fn encode_parameters(params: &[KeyValuePair], buf: &mut impl BufMut) -> Result<(), CodecError> {
+fn encode_parameters(
+    params: &[KeyValuePair],
+    buf: &mut impl BufMut,
+    message: MessageType,
+) -> Result<(), CodecError> {
     check_authorization_tokens(params)?;
     check_subscription_filters(params)?;
     VarInt::from_usize(params.len()).encode_moqt::<Wire>(buf);
@@ -459,6 +477,7 @@ fn encode_parameters(params: &[KeyValuePair], buf: &mut impl BufMut) -> Result<(
                     return Err(CodecError::ParameterValueOutOfRange {
                         key: abs_key,
                         value: byte as u64,
+                        message_type: message.id(),
                     });
                 }
                 buf.put_u8(byte);
@@ -623,14 +642,21 @@ fn track_property_value_in_range(key: u64, value: u64) -> bool {
 /// Properties in the Key-Value-Pairs", which is a permission and not a
 /// requirement, so a block this codec cannot read is carried to the caller
 /// intact instead of ending the session.
-fn check_track_property_values(properties: &[KeyValuePair]) -> Result<(), CodecError> {
+fn check_track_property_values(
+    properties: &[KeyValuePair],
+    message: MessageType,
+) -> Result<(), CodecError> {
     for property in properties {
         let key = property.key.into_inner();
         match &property.value {
             KvpValue::Varint(value) => {
                 let value = value.into_inner();
                 if !track_property_value_in_range(key, value) {
-                    return Err(CodecError::TrackPropertyValueOutOfRange { key, value });
+                    return Err(CodecError::TrackPropertyValueOutOfRange {
+                        key,
+                        value,
+                        message_type: message.id(),
+                    });
                 }
             }
             KvpValue::Bytes(bytes) if key == IMMUTABLE_PROPERTIES => {
@@ -646,7 +672,7 @@ fn check_track_property_values(properties: &[KeyValuePair]) -> Result<(), CodecE
                 // from being looked at by putting an unparseable block in
                 // front of it.
                 if let Ok(nested) = decode_kvp_delta(&mut inner) {
-                    check_track_property_values(&nested)?;
+                    check_track_property_values(&nested, message)?;
                 }
             }
             KvpValue::Bytes(_) => {}
@@ -660,9 +686,12 @@ fn check_track_property_values(properties: &[KeyValuePair]) -> Result<(), CodecE
 /// [`decode_kvp_delta`] with the Property registry's value rules applied. The
 /// two are separate because that function also reads Setup Options, which are a
 /// third namespace numbering its entries independently of this one.
-fn decode_track_properties(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError> {
+fn decode_track_properties(
+    buf: &mut impl Buf,
+    message: MessageType,
+) -> Result<Vec<KeyValuePair>, CodecError> {
     let properties = decode_kvp_delta(buf)?;
-    check_track_property_values(&properties)?;
+    check_track_property_values(&properties, message)?;
     Ok(properties)
 }
 
@@ -675,8 +704,9 @@ fn decode_track_properties(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, Code
 fn encode_track_properties(
     properties: &[KeyValuePair],
     buf: &mut impl BufMut,
+    message: MessageType,
 ) -> Result<(), CodecError> {
-    check_track_property_values(properties)?;
+    check_track_property_values(properties, message)?;
     encode_kvp_delta(properties, buf)
 }
 
@@ -1340,9 +1370,12 @@ fn parameter_in_scope(key: u64, message: MessageType) -> bool {
 /// Version Specific Parameters, end the same sentence "it MUST be ignored" —
 /// so this check belongs to drafts 17 and later and to no draft before them.
 ///
-/// Applied on both sides. A parameter outside its scope is one the peer must
-/// close the session over, so writing one is a way to end a session rather than
-/// a way to ask for anything.
+/// Applied on encode, before any value is written. The decoder checks each
+/// key as [`decode_parameters`] reads it, before its value.
+///
+/// A parameter outside its scope is one the peer must close the session over,
+/// so writing one is a way to end a session rather than a way to ask for
+/// anything.
 fn check_parameter_scope(message: &ControlMessage) -> Result<(), CodecError> {
     let parameters = match message {
         ControlMessage::RequestOk(m) => &m.parameters,
@@ -1437,7 +1470,6 @@ impl ControlMessage {
             Err(e) => return Err(e),
         };
         check_ranges(&msg)?;
-        check_parameter_scope(&msg)?;
         // Draft-19 Section 10: "If the length does not match the length of the
         // Message Body, the receiver MUST close the session with a
         // PROTOCOL_VIOLATION." A body parser that stops short leaves bytes
@@ -1453,6 +1485,7 @@ impl ControlMessage {
     }
 
     fn encode_body(&self, buf: &mut impl BufMut) -> Result<(), CodecError> {
+        let message_type = self.message_type();
         match self {
             ControlMessage::Setup(m) => {
                 encode_setup_options(&m.options, buf)?;
@@ -1466,8 +1499,8 @@ impl ControlMessage {
                 m.timeout.encode_moqt::<Wire>(buf);
             }
             ControlMessage::RequestOk(m) => {
-                encode_parameters(&m.parameters, buf)?;
-                encode_track_properties(&m.track_properties, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
+                encode_track_properties(&m.track_properties, buf, message_type)?;
             }
             ControlMessage::RequestError(m) => {
                 if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
@@ -1494,16 +1527,16 @@ impl ControlMessage {
                 m.track_namespace.encode_moqt::<Wire>(buf);
                 VarInt::from_usize(m.track_name.len()).encode_moqt::<Wire>(buf);
                 buf.put_slice(&m.track_name);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::SubscribeOk(m) => {
                 m.track_alias.encode_moqt::<Wire>(buf);
-                encode_parameters(&m.parameters, buf)?;
-                encode_track_properties(&m.track_properties, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
+                encode_track_properties(&m.track_properties, buf, message_type)?;
             }
             ControlMessage::RequestUpdate(m) => {
                 m.request_id.encode_moqt::<Wire>(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::Publish(m) => {
                 m.track_namespace.validate_moqt()?;
@@ -1513,8 +1546,8 @@ impl ControlMessage {
                 VarInt::from_usize(m.track_name.len()).encode_moqt::<Wire>(buf);
                 buf.put_slice(&m.track_name);
                 m.track_alias.encode_moqt::<Wire>(buf);
-                encode_parameters(&m.parameters, buf)?;
-                encode_track_properties(&m.track_properties, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
+                encode_track_properties(&m.track_properties, buf, message_type)?;
             }
             ControlMessage::PublishDone(m) => {
                 if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
@@ -1529,7 +1562,7 @@ impl ControlMessage {
                 m.track_namespace.validate_moqt()?;
                 m.request_id.encode_moqt::<Wire>(buf);
                 m.track_namespace.encode_moqt::<Wire>(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::Namespace(m) => {
                 m.namespace_suffix.validate_moqt()?;
@@ -1543,13 +1576,13 @@ impl ControlMessage {
                 m.namespace_prefix.validate_moqt()?;
                 m.request_id.encode_moqt::<Wire>(buf);
                 m.namespace_prefix.encode_moqt::<Wire>(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::SubscribeTracks(m) => {
                 m.namespace_prefix.validate_moqt()?;
                 m.request_id.encode_moqt::<Wire>(buf);
                 m.namespace_prefix.encode_moqt::<Wire>(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::TrackStatus(m) => {
                 m.track_namespace.validate_moqt()?;
@@ -1558,7 +1591,7 @@ impl ControlMessage {
                 m.track_namespace.encode_moqt::<Wire>(buf);
                 VarInt::from_usize(m.track_name.len()).encode_moqt::<Wire>(buf);
                 buf.put_slice(&m.track_name);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::Fetch(m) => {
                 m.request_id.encode_moqt::<Wire>(buf);
@@ -1587,14 +1620,14 @@ impl ControlMessage {
                         joining_start.encode_moqt::<Wire>(buf);
                     }
                 }
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::FetchOk(m) => {
                 buf.put_u8(m.end_of_track);
                 m.end_group.encode_moqt::<Wire>(buf);
                 m.end_object.encode_moqt::<Wire>(buf);
-                encode_parameters(&m.parameters, buf)?;
-                encode_track_properties(&m.track_properties, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
+                encode_track_properties(&m.track_properties, buf, message_type)?;
             }
             ControlMessage::PublishSkipped(m) => {
                 m.namespace_suffix.validate_moqt()?;
@@ -1627,8 +1660,8 @@ impl ControlMessage {
                 Ok(ControlMessage::GoAway(GoAway { new_session_uri: uri, timeout }))
             }
             MessageType::RequestOk => {
-                let parameters = decode_parameters(buf)?;
-                let track_properties = decode_track_properties(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
+                let track_properties = decode_track_properties(buf, msg_type)?;
                 Ok(ControlMessage::RequestOk(RequestOk { parameters, track_properties }))
             }
             MessageType::RequestError => {
@@ -1665,7 +1698,7 @@ impl ControlMessage {
                 let tn_len = VarInt::decode_moqt::<Wire>(buf)?.into_inner() as usize;
                 let track_name = read_bytes(buf, tn_len)?;
                 check_full_track_name(&track_namespace, &track_name)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::Subscribe(Subscribe {
                     request_id,
                     track_namespace,
@@ -1675,8 +1708,8 @@ impl ControlMessage {
             }
             MessageType::SubscribeOk => {
                 let track_alias = VarInt::decode_moqt::<Wire>(buf)?;
-                let parameters = decode_parameters(buf)?;
-                let track_properties = decode_track_properties(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
+                let track_properties = decode_track_properties(buf, msg_type)?;
                 Ok(ControlMessage::SubscribeOk(SubscribeOk {
                     track_alias,
                     parameters,
@@ -1685,7 +1718,7 @@ impl ControlMessage {
             }
             MessageType::RequestUpdate => {
                 let request_id = VarInt::decode_moqt::<Wire>(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::RequestUpdate(RequestUpdate { request_id, parameters }))
             }
             MessageType::Publish => {
@@ -1695,8 +1728,8 @@ impl ControlMessage {
                 let track_name = read_bytes(buf, tn_len)?;
                 let track_alias = VarInt::decode_moqt::<Wire>(buf)?;
                 check_full_track_name(&track_namespace, &track_name)?;
-                let parameters = decode_parameters(buf)?;
-                let track_properties = decode_track_properties(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
+                let track_properties = decode_track_properties(buf, msg_type)?;
                 Ok(ControlMessage::Publish(Publish {
                     request_id,
                     track_namespace,
@@ -1724,7 +1757,7 @@ impl ControlMessage {
             MessageType::PublishNamespace => {
                 let request_id = VarInt::decode_moqt::<Wire>(buf)?;
                 let track_namespace = TrackNamespace::decode_moqt::<Wire>(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::PublishNamespace(PublishNamespace {
                     request_id,
                     track_namespace,
@@ -1742,7 +1775,7 @@ impl ControlMessage {
             MessageType::SubscribeNamespace => {
                 let request_id = VarInt::decode_moqt::<Wire>(buf)?;
                 let namespace_prefix = TrackNamespace::decode_allow_empty_moqt::<Wire>(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::SubscribeNamespace(SubscribeNamespace {
                     request_id,
                     namespace_prefix,
@@ -1752,7 +1785,7 @@ impl ControlMessage {
             MessageType::SubscribeTracks => {
                 let request_id = VarInt::decode_moqt::<Wire>(buf)?;
                 let namespace_prefix = TrackNamespace::decode_allow_empty_moqt::<Wire>(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::SubscribeTracks(SubscribeTracks {
                     request_id,
                     namespace_prefix,
@@ -1765,7 +1798,7 @@ impl ControlMessage {
                 let tn_len = VarInt::decode_moqt::<Wire>(buf)?.into_inner() as usize;
                 let track_name = read_bytes(buf, tn_len)?;
                 check_full_track_name(&track_namespace, &track_name)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::TrackStatus(TrackStatus {
                     request_id,
                     track_namespace,
@@ -1803,7 +1836,7 @@ impl ControlMessage {
                         FetchPayload::Joining { joining_request_id, joining_start }
                     }
                 };
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::Fetch(Fetch {
                     request_id,
                     fetch_type,
@@ -1818,8 +1851,8 @@ impl ControlMessage {
                 let end_of_track = buf.get_u8();
                 let end_group = VarInt::decode_moqt::<Wire>(buf)?;
                 let end_object = VarInt::decode_moqt::<Wire>(buf)?;
-                let parameters = decode_parameters(buf)?;
-                let track_properties = decode_track_properties(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
+                let track_properties = decode_track_properties(buf, msg_type)?;
                 Ok(ControlMessage::FetchOk(FetchOk {
                     end_of_track,
                     end_group,
@@ -2011,7 +2044,11 @@ mod tests {
             let mut buf = &bytes[..];
             assert_eq!(
                 ControlMessage::decode(&mut buf),
-                Err(CodecError::ParameterValueOutOfRange { key: key as u64, value: bad as u64 }),
+                Err(CodecError::ParameterValueOutOfRange {
+                    key: key as u64,
+                    value: bad as u64,
+                    message_type: MessageType::Subscribe.id(),
+                }),
                 "parameter 0x{key:x} value {bad}"
             );
 

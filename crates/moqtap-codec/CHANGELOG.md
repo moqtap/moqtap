@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-14
+
+### Changed
+
+- **Breaking.** `CodecError::InvalidForward(u8)` and `InvalidContentExists(u8)` are now `{ value, message_type }`, and `ParameterValueOutOfRange` and `TrackPropertyValueOutOfRange` gain `message_type`: the id of the control message the value arrived in. For a parameter inside FILL_PARAMETERS it is the message that carries it, and `ParameterOutOfScope` there names that message instead of 0x23. On drafts 20-23, `decode_fill_parameters` takes that message type, as do draft-23 `encode_fill_parameters` and `decode_location_filter`. The Display text of the four variants names the message type; the values reported are unchanged.
+
+### Fixed
+
+- Drafts 15-16: a Message Parameter's range was checked in every message. It is now checked only in the messages its section names and carried unchecked elsewhere, on decode and encode. On draft-15, GROUP_ORDER in a REQUEST_OK is carried unchecked, since which request it answers is not in the frame.
+- Drafts 17-23: a parameter outside its scope whose value was out of range, or whose Location Filter Type is unassigned, was refused for its value. The decoder now returns `ParameterOutOfScope`, as the encoder does, and also reports it ahead of a malformed token or filter later in the same parameters. On draft-23, an error later in the same message that closes with DELTA_ENCODING_OVERFLOW or FIELD_LENGTH_EXCEEDED still takes precedence, on decode and now on encode.
+
 ## [0.12.0] - 2026-11-14
 
 ### Changed

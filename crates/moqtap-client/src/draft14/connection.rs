@@ -2100,16 +2100,15 @@ impl Connection {
             // A Content Exists field that is neither zero nor one, Section 9.8
             // and Section 9.13: "Any other value is a protocol error and MUST
             // terminate the session with a PROTOCOL_VIOLATION".
-            CodecError::InvalidContentExists(_) => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::InvalidContentExists { .. } => Some(SessionErrorCode::ProtocolViolation),
             // A Forward field that is neither zero nor one. Section 9.7 and
             // Section 9.10 use the sentence above; Section 9.13 says "Any value
-            // other than 0 or 1 is a PROTOCOL_VIOLATION". Section 9.14 names
-            // the two legal values without a consequence and is answered the
-            // same way, for the reason given on the variant. Draft-15 replaces
-            // the field with the FORWARD parameter, which carries the same rule
-            // in a different shape and reports it as
-            // `ParameterValueOutOfRange`.
-            CodecError::InvalidForward(_) => Some(SessionErrorCode::ProtocolViolation),
+            // other than 0 or 1 is a PROTOCOL_VIOLATION". Section 9.14 gives
+            // PUBLISH_OK's field the two values and no consequence; it closes
+            // the same way, since the refused PUBLISH_OK leaves the PUBLISH
+            // unanswered. Draft-15 replaces the field with the FORWARD
+            // parameter, which reports the rule as `ParameterValueOutOfRange`.
+            CodecError::InvalidForward { .. } => Some(SessionErrorCode::ProtocolViolation),
             CodecError::UnknownStreamType(_) | CodecError::UnknownDatagramType(_) => {
                 Some(SessionErrorCode::ProtocolViolation)
             }

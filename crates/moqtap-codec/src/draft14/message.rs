@@ -1450,7 +1450,12 @@ impl ControlMessage {
                 let forward = match forward_val {
                     0 => Forward::DontForward,
                     1 => Forward::Forward,
-                    other => return Err(CodecError::InvalidForward(other)),
+                    other => {
+                        return Err(CodecError::InvalidForward {
+                            value: other,
+                            message_type: MessageType::Subscribe.id(),
+                        })
+                    }
                 };
                 // Filter Type is (i) in every figure that carries it, not a
                 // fixed byte: the values 1 through 4 happen to share their
@@ -1496,7 +1501,12 @@ impl ControlMessage {
                 let content_exists = match content_exists_val {
                     0 => ContentExists::NoLargestLocation,
                     1 => ContentExists::HasLargestLocation,
-                    other => return Err(CodecError::InvalidContentExists(other)),
+                    other => {
+                        return Err(CodecError::InvalidContentExists {
+                            value: other,
+                            message_type: MessageType::SubscribeOk.id(),
+                        })
+                    }
                 };
                 let largest_location = if content_exists == ContentExists::HasLargestLocation {
                     Some(Location::decode(buf)?)
@@ -1537,7 +1547,12 @@ impl ControlMessage {
                 let forward = match forward_val {
                     0 => Forward::DontForward,
                     1 => Forward::Forward,
-                    other => return Err(CodecError::InvalidForward(other)),
+                    other => {
+                        return Err(CodecError::InvalidForward {
+                            value: other,
+                            message_type: MessageType::SubscribeUpdate.id(),
+                        })
+                    }
                 };
                 let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::SubscribeUpdate(SubscribeUpdate {
@@ -1569,7 +1584,12 @@ impl ControlMessage {
                 let content_exists = match content_exists_val {
                     0 => ContentExists::NoLargestLocation,
                     1 => ContentExists::HasLargestLocation,
-                    other => return Err(CodecError::InvalidContentExists(other)),
+                    other => {
+                        return Err(CodecError::InvalidContentExists {
+                            value: other,
+                            message_type: MessageType::Publish.id(),
+                        })
+                    }
                 };
                 let largest_location = if content_exists == ContentExists::HasLargestLocation {
                     Some(Location::decode(buf)?)
@@ -1583,7 +1603,12 @@ impl ControlMessage {
                 let forward = match forward_val {
                     0 => Forward::DontForward,
                     1 => Forward::Forward,
-                    other => return Err(CodecError::InvalidForward(other)),
+                    other => {
+                        return Err(CodecError::InvalidForward {
+                            value: other,
+                            message_type: MessageType::Publish.id(),
+                        })
+                    }
                 };
                 let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::Publish(Publish {
@@ -1607,7 +1632,12 @@ impl ControlMessage {
                 let forward = match forward_val {
                     0 => Forward::DontForward,
                     1 => Forward::Forward,
-                    other => return Err(CodecError::InvalidForward(other)),
+                    other => {
+                        return Err(CodecError::InvalidForward {
+                            value: other,
+                            message_type: MessageType::PublishOk.id(),
+                        })
+                    }
                 };
                 let subscriber_priority = buf.get_u8();
                 let group_order = read_group_order_response(buf)?;
@@ -1818,7 +1848,12 @@ impl ControlMessage {
                 let forward = match forward_val {
                     0 => Forward::DontForward,
                     1 => Forward::Forward,
-                    other => return Err(CodecError::InvalidForward(other)),
+                    other => {
+                        return Err(CodecError::InvalidForward {
+                            value: other,
+                            message_type: MessageType::TrackStatus.id(),
+                        })
+                    }
                 };
                 // Filter Type is (i) in every figure that carries it, not a
                 // fixed byte: the values 1 through 4 happen to share their
@@ -1864,7 +1899,12 @@ impl ControlMessage {
                 let content_exists = match content_exists_val {
                     0 => ContentExists::NoLargestLocation,
                     1 => ContentExists::HasLargestLocation,
-                    other => return Err(CodecError::InvalidContentExists(other)),
+                    other => {
+                        return Err(CodecError::InvalidContentExists {
+                            value: other,
+                            message_type: MessageType::TrackStatusOk.id(),
+                        })
+                    }
                 };
                 let largest_location = if content_exists == ContentExists::HasLargestLocation {
                     Some(Location::decode(buf)?)

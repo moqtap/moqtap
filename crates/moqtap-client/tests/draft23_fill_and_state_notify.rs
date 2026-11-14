@@ -56,8 +56,8 @@ use moqtap_client::draft23::observer::ConnectionObserver;
 use moqtap_codec::dispatch::{AnyControlMessage, AnyFetchHeader};
 use moqtap_codec::draft23::data_stream::FetchHeader;
 use moqtap_codec::draft23::message::{
-    decode_fill_parameters, decode_location_filter, ControlMessage, PublishStateNotify, Setup,
-    SubscribeOk, FILL_PARAMETERS, LOCATION_FILTER,
+    decode_fill_parameters, decode_location_filter, ControlMessage, MessageType,
+    PublishStateNotify, Setup, SubscribeOk, FILL_PARAMETERS, LOCATION_FILTER,
 };
 use moqtap_codec::kvp::KvpValue;
 use moqtap_codec::types::TrackNamespace;
@@ -259,7 +259,8 @@ async fn serve(server: quinn::Endpoint) -> WhatThePeerSaw {
     let KvpValue::Bytes(fill_value) = &fill.value else {
         panic!("FILL_PARAMETERS uses length-prefixed encoding")
     };
-    let nested = decode_fill_parameters(fill_value).expect("the nested block decodes");
+    let nested = decode_fill_parameters(fill_value, MessageType::Subscribe)
+        .expect("the nested block decodes");
     let inner_filter = nested
         .iter()
         .find(|p| p.key.into_inner() == LOCATION_FILTER)
@@ -267,7 +268,8 @@ async fn serve(server: quinn::Endpoint) -> WhatThePeerSaw {
     let KvpValue::Bytes(filter_value) = &inner_filter.value else {
         panic!("LOCATION_FILTER holds a Location Filter value")
     };
-    let fill_range_fields = decode_location_filter(filter_value).expect("the filter decodes");
+    let fill_range_fields =
+        decode_location_filter(filter_value, MessageType::Subscribe).expect("the filter decodes");
 
     answer.write_all(&subscribe_ok_bytes()).await.expect("write SUBSCRIBE_OK");
 

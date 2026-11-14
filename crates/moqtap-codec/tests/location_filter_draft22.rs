@@ -310,7 +310,8 @@ fn a_filter_nested_in_fill_parameters_is_type_led_too() {
     let fill = &subscribe_parameters(&message)[0];
     assert_eq!(fill.key.into_inner(), FILL_PARAMETERS);
     let KvpValue::Bytes(nested) = &fill.value else { panic!("FILL_PARAMETERS is bytes") };
-    let nested = decode_fill_parameters(nested).expect("the nested block reads");
+    let nested =
+        decode_fill_parameters(nested, MessageType::Subscribe).expect("the nested block reads");
     assert_eq!(nested.len(), 1);
     assert_eq!(nested[0].key.into_inner(), LOCATION_FILTER);
     assert_eq!(nested[0].value, KvpValue::Bytes(vec![0x05]));
@@ -329,7 +330,8 @@ fn a_filter_nested_in_fill_parameters_is_type_led_too() {
     let KvpValue::Bytes(nested) = &subscribe_parameters(&message)[0].value else {
         panic!("FILL_PARAMETERS is bytes")
     };
-    let nested = decode_fill_parameters(nested).expect("the nested block reads");
+    let nested =
+        decode_fill_parameters(nested, MessageType::Subscribe).expect("the nested block reads");
     let KvpValue::Bytes(filter) = &nested[0].value else { panic!("a filter is bytes") };
     assert_eq!(decode_location_filter(filter), Ok((T::ABSOLUTE_START, vec![100, 0])));
 

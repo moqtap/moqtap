@@ -24,6 +24,13 @@
 //! preference" on draft-14 ends the session here, and an implementation that
 //! carried the field's asymmetry into the parameter would send this frame
 //! believing it legal.
+//!
+//! # Why a SUBSCRIBE
+//!
+//! draft-16 Section 9.2.2.4: "The GROUP_ORDER parameter (Parameter Type 0x22)
+//! MAY appear in a SUBSCRIBE, PUBLISH_OK, or FETCH." Anywhere else,
+//! draft-16 Section 9.2.2 says it "MUST be ignored", so the frame is a
+//! SUBSCRIBE the peer sends.
 
 mod common;
 
@@ -31,8 +38,9 @@ use std::time::Duration;
 
 use moqtap_client::draft16::connection::{ClientConfig, Connection, TransportType};
 use moqtap_codec::dispatch::AnyControlMessage;
-use moqtap_codec::draft16::message::{ControlMessage, ServerSetup, SubscribeOk};
+use moqtap_codec::draft16::message::{ControlMessage, ServerSetup, Subscribe};
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
+use moqtap_codec::types::TrackNamespace;
 use moqtap_codec::varint::VarInt;
 use moqtap_codec::version::DraftVersion;
 
@@ -62,7 +70,7 @@ fn server_setup() -> AnyControlMessage {
     AnyControlMessage::Draft16(ControlMessage::ServerSetup(ServerSetup { parameters: Vec::new() }))
 }
 
-/// A SUBSCRIBE_OK carrying GROUP_ORDER with the value 0x0.
+/// A SUBSCRIBE carrying GROUP_ORDER with the value 0x0.
 ///
 /// Built by this codec's own encoder, so the framing, the declared Length, the
 /// parameter count and the delta-encoded type are all exactly what it writes.
@@ -74,18 +82,18 @@ fn server_setup() -> AnyControlMessage {
 /// because that is a message the receiver must close the session over. So the
 /// message is built around Ascending and the byte is replaced by 0x0. Both are
 /// one-byte varints, so nothing else in the frame moves.
-fn subscribe_ok_with_group_order_zero() -> Vec<u8> {
+fn subscribe_with_group_order_zero() -> Vec<u8> {
     const ASCENDING: u64 = 0x1;
     const PUBLISHERS_CHOICE: u64 = 0x0;
 
-    let message = ControlMessage::SubscribeOk(SubscribeOk {
-        request_id: varint(0),
-        track_alias: varint(4),
+    let message = ControlMessage::Subscribe(Subscribe {
+        request_id: varint(1),
+        track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+        track_name: b"t".to_vec(),
         parameters: vec![KeyValuePair {
             key: varint(GROUP_ORDER),
             value: KvpValue::Varint(varint(ASCENDING)),
         }],
-        track_extensions: Vec::new(),
     });
     let mut out = Vec::new();
     message.encode(&mut out).expect("the encoder writes a value inside the range");
@@ -110,9 +118,9 @@ async fn a_group_order_outside_its_range_closes_the_quic_connection() {
         server_setup().encode(&mut setup).expect("encode SERVER_SETUP");
         send.write_all(&setup).await.expect("write SERVER_SETUP");
 
-        send.write_all(&subscribe_ok_with_group_order_zero())
+        send.write_all(&subscribe_with_group_order_zero())
             .await
-            .expect("write the offending SUBSCRIBE_OK");
+            .expect("write the offending SUBSCRIBE");
 
         let reason = tokio::time::timeout(PATIENCE, conn.closed())
             .await

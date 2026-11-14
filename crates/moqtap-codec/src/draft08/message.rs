@@ -1225,7 +1225,12 @@ impl ControlMessage {
                 let content_exists = match content_exists_val {
                     0 => ContentExists::NoLargestLocation,
                     1 => ContentExists::HasLargestLocation,
-                    other => return Err(CodecError::InvalidContentExists(other)),
+                    other => {
+                        return Err(CodecError::InvalidContentExists {
+                            value: other,
+                            message_type: MessageType::SubscribeOk.id(),
+                        })
+                    }
                 };
                 let (largest_group_id, largest_object_id) =
                     if content_exists == ContentExists::HasLargestLocation {

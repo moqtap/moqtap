@@ -42,7 +42,7 @@
 //! that leaving it out asks for and nothing is lost.
 
 use moqtap_codec::draft23::data_stream::DatagramHeader;
-use moqtap_codec::draft23::message::{ControlMessage, Subscribe};
+use moqtap_codec::draft23::message::{ControlMessage, MessageType, Subscribe};
 use moqtap_codec::draft23::types::ObjectStatus;
 use moqtap_codec::error::CodecError;
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
@@ -296,10 +296,12 @@ fn include_properties_is_held_to_its_range_in_both_directions() {
              closes the session over a frame this codec produced"
         );
         assert!(
-            matches!(
-                result,
-                Err(CodecError::ParameterValueOutOfRange { key: INCLUDE_PROPERTIES, .. })
-            ),
+            result
+                == Err(CodecError::ParameterValueOutOfRange {
+                    key: INCLUDE_PROPERTIES,
+                    value,
+                    message_type: MessageType::Subscribe.id(),
+                }),
             "INCLUDE_PROPERTIES {value} was refused as something other than an out-of-range \
              value: {result:?}"
         );

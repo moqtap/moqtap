@@ -660,8 +660,9 @@ fn check_authorization_tokens(parameters: &[KeyValuePair]) -> Result<(), CodecEr
 /// Group Order is the one to read twice. Where drafts 07 through 14 carried it
 /// as a message field and let a request send 0x0 to mean "no preference", the
 /// parameter form has no such value: a subscriber with no preference omits the
-/// parameter, and 0x0 closes the session in every message that carries it. The
-/// asymmetry that governs the field form does not survive into this one.
+/// parameter, and 0x0 closes the session in every message the parameter's
+/// section names. The asymmetry that governs the field form does not survive
+/// into this one.
 ///
 /// PUBLISHER_PRIORITY (0x0E) is deliberately absent. Section 9.2.1.4 says "The
 /// value is from 0 to 255 and lower numbers get higher priority", points at
@@ -681,19 +682,72 @@ fn parameter_value_in_range(key: u64, value: u64) -> bool {
     }
 }
 
-/// Refuse a parameter whose value falls outside the range its type allows.
+/// Whether draft-15 holds parameter `key` to its range in `message`.
+///
+/// Section 9.2.1: "Each version-specific parameter definition indicates the
+/// message types in which it can appear. If it appears in some other type of
+/// message, it MUST be ignored." A parameter outside the messages its own
+/// section names is carried unchecked.
+fn range_applies_in(key: u64, message: MessageType) -> bool {
+    use MessageType as M;
+    match key {
+        // Section 9.2.1.10: "The FORWARD parameter (Parameter Type 0x10) MAY
+        // appear in SUBSCRIBE, SUBSCRIBE_UPDATE, PUBLISH, PUBLISH_OK,
+        // TRACK_STATUS, TRACK_STATUS_OK, and SUBSCRIBE_NAMESPACE." Draft-15
+        // defines no TRACK_STATUS_OK message, so no REQUEST_OK is named.
+        0x10 => matches!(
+            message,
+            M::Subscribe
+                | M::SubscribeUpdate
+                | M::Publish
+                | M::PublishOk
+                | M::TrackStatus
+                | M::SubscribeNamespace
+        ),
+        // Section 9.2.1.5: "The SUBSCRIBER_PRIORITY parameter (Parameter Type
+        // 0x20) MAY appear in a SUBSCRIBE, SUBSCRIBE_UPDATE, TRACK_STATUS,
+        // PUBLISH_OK or FETCH message."
+        0x20 => matches!(
+            message,
+            M::Subscribe | M::SubscribeUpdate | M::TrackStatus | M::PublishOk | M::Fetch
+        ),
+        // Section 9.2.1.6: "The GROUP_ORDER parameter (Parameter Type 0x22) MAY
+        // appear in a SUBSCRIBE, SUBSCRIBE_OK, TRACK_STATUS, REQUEST_OK (in
+        // response to TRACK_STATUS), PUBLISH, PUBLISH_OK or FETCH." Which
+        // request a REQUEST_OK answers is session state, not in the frame, so
+        // a REQUEST_OK is left to the session.
+        0x22 => matches!(
+            message,
+            M::Subscribe | M::SubscribeOk | M::TrackStatus | M::Publish | M::PublishOk | M::Fetch
+        ),
+        // Section 9.2.1.11: "The DYNAMIC_GROUPS parameter (parameter type 0x30)
+        // MAY appear in PUBLISH or SUBSCRIBE_OK."
+        0x30 => matches!(message, M::Publish | M::SubscribeOk),
+        _ => false,
+    }
+}
+
+/// Refuse a parameter whose value falls outside the range its type allows, in
+/// a message its section names.
 ///
 /// Only the varint-valued shape is examined. Every type with a range is an even
 /// number, and draft-15 gives an even type a bare varint value, so a
 /// length-prefixed value under one of these keys is already a
 /// [`CodecError::KeyValueFormatting`] before it reaches here.
-fn check_parameter_value_ranges(parameters: &[KeyValuePair]) -> Result<(), CodecError> {
+fn check_parameter_value_ranges(
+    parameters: &[KeyValuePair],
+    message: MessageType,
+) -> Result<(), CodecError> {
     for parameter in parameters {
         if let KvpValue::Varint(value) = &parameter.value {
             let key = parameter.key.into_inner();
             let value = value.into_inner();
-            if !parameter_value_in_range(key, value) {
-                return Err(CodecError::ParameterValueOutOfRange { key, value });
+            if range_applies_in(key, message) && !parameter_value_in_range(key, value) {
+                return Err(CodecError::ParameterValueOutOfRange {
+                    key,
+                    value,
+                    message_type: message.id(),
+                });
             }
         }
     }
@@ -744,11 +798,14 @@ fn check_subscription_filters(parameters: &[KeyValuePair]) -> Result<(), CodecEr
 }
 
 /// Decode a version-specific parameter list, refusing a repeated known type.
-fn decode_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecError> {
+fn decode_parameters(
+    buf: &mut impl Buf,
+    message: MessageType,
+) -> Result<Vec<KeyValuePair>, CodecError> {
     let parameters = KeyValuePair::decode_list(buf)?;
     check_no_duplicate_parameters_received(&parameters, KNOWN_VERSION_SPECIFIC_PARAMETERS)?;
     check_authorization_tokens(&parameters)?;
-    check_parameter_value_ranges(&parameters)?;
+    check_parameter_value_ranges(&parameters, message)?;
     check_subscription_filters(&parameters)?;
     Ok(parameters)
 }
@@ -774,10 +831,14 @@ fn decode_setup_parameters(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, Code
 /// that is not what its Type defines is one the receiver must close the session
 /// over, so writing it is not a way to send it. The sender's first sign of
 /// trouble would be the session going.
-fn encode_parameters(parameters: &[KeyValuePair], buf: &mut impl BufMut) -> Result<(), CodecError> {
+fn encode_parameters(
+    parameters: &[KeyValuePair],
+    buf: &mut impl BufMut,
+    message: MessageType,
+) -> Result<(), CodecError> {
     check_no_duplicate_parameters_sent(parameters)?;
     check_authorization_tokens(parameters)?;
-    check_parameter_value_ranges(parameters)?;
+    check_parameter_value_ranges(parameters, message)?;
     check_subscription_filters(parameters)?;
     KeyValuePair::encode_list_checked(parameters, buf)?;
     Ok(())
@@ -875,6 +936,7 @@ impl ControlMessage {
     }
 
     fn encode_payload(&self, buf: &mut impl BufMut) -> Result<(), CodecError> {
+        let message_type = self.message_type();
         match self {
             ControlMessage::ClientSetup(m) => {
                 encode_setup_parameters(&m.parameters, buf)?;
@@ -897,7 +959,7 @@ impl ControlMessage {
             }
             ControlMessage::RequestOk(m) => {
                 m.request_id.encode(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::RequestError(m) => {
                 if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
@@ -915,17 +977,17 @@ impl ControlMessage {
                 check_full_track_name(&m.track_namespace, &m.track_name)?;
                 VarInt::from_usize(m.track_name.len()).encode(buf);
                 buf.put_slice(&m.track_name);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::SubscribeOk(m) => {
                 m.request_id.encode(buf);
                 m.track_alias.encode(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::SubscribeUpdate(m) => {
                 m.request_id.encode(buf);
                 m.subscription_request_id.encode(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::Unsubscribe(m) => {
                 m.request_id.encode(buf);
@@ -938,11 +1000,11 @@ impl ControlMessage {
                 VarInt::from_usize(m.track_name.len()).encode(buf);
                 buf.put_slice(&m.track_name);
                 m.track_alias.encode(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::PublishOk(m) => {
                 m.request_id.encode(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::PublishDone(m) => {
                 if m.reason_phrase.len() > MAX_REASON_PHRASE_LENGTH {
@@ -958,7 +1020,7 @@ impl ControlMessage {
                 m.request_id.encode(buf);
                 m.track_namespace.validate(TrackNamespaceRules::for_draft(15))?;
                 m.track_namespace.encode(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::PublishNamespaceDone(m) => {
                 m.track_namespace.validate(TrackNamespaceRules::for_draft(15))?;
@@ -978,7 +1040,7 @@ impl ControlMessage {
                 m.request_id.encode(buf);
                 m.namespace_prefix.validate(TrackNamespaceRules::for_draft(15))?;
                 m.namespace_prefix.encode(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::UnsubscribeNamespace(m) => {
                 m.request_id.encode(buf);
@@ -990,7 +1052,7 @@ impl ControlMessage {
                 check_full_track_name(&m.track_namespace, &m.track_name)?;
                 VarInt::from_usize(m.track_name.len()).encode(buf);
                 buf.put_slice(&m.track_name);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::Fetch(m) => {
                 m.request_id.encode(buf);
@@ -1019,14 +1081,14 @@ impl ControlMessage {
                         joining_start.encode(buf);
                     }
                 }
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::FetchOk(m) => {
                 m.request_id.encode(buf);
                 buf.put_u8(m.end_of_track);
                 m.end_group.encode(buf);
                 m.end_object.encode(buf);
-                encode_parameters(&m.parameters, buf)?;
+                encode_parameters(&m.parameters, buf, message_type)?;
             }
             ControlMessage::FetchCancel(m) => {
                 m.request_id.encode(buf);
@@ -1063,7 +1125,7 @@ impl ControlMessage {
             }
             MessageType::RequestOk => {
                 let request_id = VarInt::decode(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::RequestOk(RequestOk { request_id, parameters }))
             }
             MessageType::RequestError => {
@@ -1082,7 +1144,7 @@ impl ControlMessage {
                 let track_name_len = VarInt::decode(buf)?.into_inner() as usize;
                 let track_name = read_bytes(buf, track_name_len)?;
                 check_full_track_name(&track_namespace, &track_name)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::Subscribe(Subscribe {
                     request_id,
                     track_namespace,
@@ -1093,13 +1155,13 @@ impl ControlMessage {
             MessageType::SubscribeOk => {
                 let request_id = VarInt::decode(buf)?;
                 let track_alias = VarInt::decode(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::SubscribeOk(SubscribeOk { request_id, track_alias, parameters }))
             }
             MessageType::SubscribeUpdate => {
                 let request_id = VarInt::decode(buf)?;
                 let subscription_request_id = VarInt::decode(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::SubscribeUpdate(SubscribeUpdate {
                     request_id,
                     subscription_request_id,
@@ -1117,7 +1179,7 @@ impl ControlMessage {
                 let track_name = read_bytes(buf, track_name_len)?;
                 check_full_track_name(&track_namespace, &track_name)?;
                 let track_alias = VarInt::decode(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::Publish(Publish {
                     request_id,
                     track_namespace,
@@ -1128,7 +1190,7 @@ impl ControlMessage {
             }
             MessageType::PublishOk => {
                 let request_id = VarInt::decode(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::PublishOk(PublishOk { request_id, parameters }))
             }
             MessageType::PublishDone => {
@@ -1146,7 +1208,7 @@ impl ControlMessage {
             MessageType::PublishNamespace => {
                 let request_id = VarInt::decode(buf)?;
                 let track_namespace = TrackNamespace::decode(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::PublishNamespace(PublishNamespace {
                     request_id,
                     track_namespace,
@@ -1170,7 +1232,7 @@ impl ControlMessage {
             MessageType::SubscribeNamespace => {
                 let request_id = VarInt::decode(buf)?;
                 let namespace_prefix = TrackNamespace::decode(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::SubscribeNamespace(SubscribeNamespace {
                     request_id,
                     namespace_prefix,
@@ -1187,7 +1249,7 @@ impl ControlMessage {
                 let track_name_len = VarInt::decode(buf)?.into_inner() as usize;
                 let track_name = read_bytes(buf, track_name_len)?;
                 check_full_track_name(&track_namespace, &track_name)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::TrackStatus(TrackStatus {
                     request_id,
                     track_namespace,
@@ -1225,7 +1287,7 @@ impl ControlMessage {
                         FetchPayload::Joining { joining_request_id, joining_start }
                     }
                 };
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::Fetch(Fetch {
                     request_id,
                     fetch_type,
@@ -1238,7 +1300,7 @@ impl ControlMessage {
                 let end_of_track = read_u8(buf)?;
                 let end_group = VarInt::decode(buf)?;
                 let end_object = VarInt::decode(buf)?;
-                let parameters = decode_parameters(buf)?;
+                let parameters = decode_parameters(buf, msg_type)?;
                 Ok(ControlMessage::FetchOk(FetchOk {
                     request_id,
                     end_of_track,

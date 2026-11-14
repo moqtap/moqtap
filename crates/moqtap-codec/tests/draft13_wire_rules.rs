@@ -38,7 +38,7 @@
 //! drive the two directions separately.
 
 use moqtap_codec::draft13::message::{
-    Announce, ControlMessage, Fetch, FetchOk, FetchPayload, FetchType, Subscribe,
+    Announce, ControlMessage, Fetch, FetchOk, FetchPayload, FetchType, MessageType, Subscribe,
     SubscribeNamespace, SubscribeOk, TrackStatus,
 };
 use moqtap_codec::error::CodecError;
@@ -193,7 +193,10 @@ fn draft13_reads_its_single_byte_fields_as_single_bytes() {
     let payload = subscribe_payload(&[0x01], &[0x40, 0x01], FILTER_LARGEST_OBJECT);
     let got = ControlMessage::decode(&mut &framed(0x03, &payload)[..]);
     assert!(
-        matches!(got, Err(CodecError::InvalidForward(0x40))),
+        got == Err(CodecError::InvalidForward {
+            value: 0x40,
+            message_type: MessageType::Subscribe.id(),
+        }),
         "Forward is one byte: a two-byte varint must not pass, got {got:?}"
     );
 
@@ -278,13 +281,19 @@ fn draft13_refuses_values_the_draft_calls_protocol_errors() {
     let payload = subscribe_payload(&[0x01], &[0x07], FILTER_LARGEST_OBJECT);
     let got = ControlMessage::decode(&mut &framed(0x03, &payload)[..]);
     assert!(
-        matches!(got, Err(CodecError::InvalidForward(7))),
+        got == Err(CodecError::InvalidForward {
+            value: 7,
+            message_type: MessageType::Subscribe.id(),
+        }),
         "Forward 7 must be refused, got {got:?}"
     );
 
     let got = ControlMessage::decode(&mut &framed(0x04, &subscribe_ok_payload(0x01, 0x07))[..]);
     assert!(
-        matches!(got, Err(CodecError::InvalidContentExists(7))),
+        got == Err(CodecError::InvalidContentExists {
+            value: 7,
+            message_type: MessageType::SubscribeOk.id(),
+        }),
         "Content Exists 7 must be refused, got {got:?}"
     );
 }

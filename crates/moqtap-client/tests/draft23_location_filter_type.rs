@@ -15,7 +15,9 @@ use moqtap_client::above_codec_rules::CodecRule;
 use moqtap_client::draft23::connection::Connection;
 use moqtap_client::draft23::fill::LocationFilter;
 use moqtap_codec::draft23::error_codes::SessionErrorCode;
-use moqtap_codec::draft23::message::{ControlMessage, PublishStateNotify, LOCATION_FILTER};
+use moqtap_codec::draft23::message::{
+    ControlMessage, MessageType, PublishStateNotify, LOCATION_FILTER,
+};
 use moqtap_codec::error::CodecError;
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 use moqtap_codec::varint::VarInt;
@@ -71,9 +73,10 @@ fn the_fixture_is_a_frame_the_codec_reads() {
 fn an_unassigned_filter_type_is_refused_as_a_filter_type() {
     for filter_type in [0x06u8, 0x07, 0x3F] {
         match decode(&notify_with_filter_type(filter_type)) {
-            Err(CodecError::ParameterValueOutOfRange { key, value }) => {
+            Err(CodecError::ParameterValueOutOfRange { key, value, message_type }) => {
                 assert_eq!(key, LOCATION_FILTER);
                 assert_eq!(value, u64::from(filter_type));
+                assert_eq!(message_type, MessageType::PublishStateNotify.id());
             }
             other => panic!("Location Filter Type {filter_type:#x} must be refused: {other:?}"),
         }
@@ -107,7 +110,11 @@ fn an_assigned_filter_type_is_not_refused_as_a_filter_type() {
 /// sentence names.
 #[test]
 fn an_unassigned_filter_type_is_an_invalid_parameter() {
-    let refusal = CodecError::ParameterValueOutOfRange { key: LOCATION_FILTER, value: 0x06 };
+    let refusal = CodecError::ParameterValueOutOfRange {
+        key: LOCATION_FILTER,
+        value: 0x06,
+        message_type: MessageType::PublishStateNotify.id(),
+    };
     assert_eq!(
         Connection::codec_session_error_code(&refusal),
         Some(SessionErrorCode::InvalidParameter)

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-14
+
+### Changed
+
+- **Breaking.** Requires `moqtap-codec` 0.13.0 (was 0.12.0). `CodecRule` gains 17 variants, one per value range the decoder enforces (Forward and Content Exists fields, Message Parameters and Track Properties), each with its quoted sentences. The existing variants and their citations are unchanged.
+
+### Fixed
+
+- Drafts 15-16: a Message Parameter value outside its range closed the session in any message. It now does so only in the messages the parameter's section names. On draft-15, a GROUP_ORDER other than 1 or 2 in a REQUEST_OK closes the session with PROTOCOL_VIOLATION only when the REQUEST_OK answers this endpoint's TRACK_STATUS.
+
 ## [0.12.0] - 2026-11-14
 
 ### Changed

@@ -4037,8 +4037,8 @@ impl Connection {
             // Section 11.1.1 states the payload rule as a MUST on the sender and
             // names no receiver action.
             | CodecError::PayloadNotPermitted { .. }
-            | CodecError::InvalidForward(_)
-            | CodecError::InvalidContentExists(_)
+            | CodecError::InvalidForward { .. }
+            | CodecError::InvalidContentExists { .. }
             | CodecError::UnexpectedEnd
             | CodecError::MessageTooLong(_)
             | CodecError::VarInt(_)

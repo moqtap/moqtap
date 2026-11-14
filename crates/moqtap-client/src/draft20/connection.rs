@@ -3960,8 +3960,8 @@ impl Connection {
             // FORWARD parameter, which carries the same rule in a different
             // shape and is answered above under its own variant; Content Exists
             // became the presence or absence of a LARGEST_OBJECT parameter.
-            CodecError::InvalidForward(_)
-            | CodecError::InvalidContentExists(_)
+            CodecError::InvalidForward { .. }
+            | CodecError::InvalidContentExists { .. }
             | CodecError::UnexpectedEnd
             | CodecError::MessageTooLong(_)
             | CodecError::VarInt(_)

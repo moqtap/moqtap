@@ -34,9 +34,12 @@ mod common;
 
 use std::time::Duration;
 
-use moqtap_client::draft14::connection::{ClientConfig, Connection, TransportType};
+use moqtap_client::draft14::connection::{
+    ClientConfig, Connection, ConnectionError, TransportType,
+};
 use moqtap_codec::dispatch::AnyControlMessage;
-use moqtap_codec::draft14::message::{ControlMessage, ServerSetup};
+use moqtap_codec::draft14::message::{ControlMessage, MessageType, ServerSetup};
+use moqtap_codec::error::CodecError;
 use moqtap_codec::varint::VarInt;
 use moqtap_codec::version::DraftVersion;
 
@@ -148,6 +151,14 @@ async fn an_unassigned_content_exists_closes_the_quic_connection() {
         .expect_err("a Content Exists that is neither zero nor one must be refused");
     let text = err.to_string();
     assert!(text.contains("content exists"), "the error should name the field; got {text:?}");
+    assert!(
+        matches!(
+            err,
+            ConnectionError::Codec(CodecError::InvalidContentExists { value, message_type })
+                if value == NEITHER_ZERO_NOR_ONE && message_type == MessageType::SubscribeOk.id()
+        ),
+        "the error should name SUBSCRIBE_OK as the message; got {err:?}"
+    );
 
     tokio::time::timeout(PATIENCE * 3, peer)
         .await

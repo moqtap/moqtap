@@ -184,9 +184,10 @@ pub fn error_category(err: &CodecError) -> &'static str {
 
         // Its own category rather than a shade of `invalid_parameter`: the
         // parameter is well formed, and what is wrong is the message around
-        // it. Drafts 17, 18 and 19 are the only ones that answer it with a
-        // close, so it is also the one category whose absence from a draft is
-        // a fact about the draft rather than about the corpus.
+        // it. Drafts 17 through 23 are the only ones that answer it with a
+        // close (draft-23 Section 9.19.1, INVALID_PARAMETER), so it is also the
+        // one category whose absence from a draft is a fact about the draft
+        // rather than about the corpus.
         CodecError::ParameterOutOfScope { .. } => "parameter_out_of_scope",
 
         CodecError::InvalidStreamTypeValue { .. }

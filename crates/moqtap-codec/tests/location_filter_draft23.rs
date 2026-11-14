@@ -69,7 +69,9 @@ fn filter_of(message: &ControlMessage) -> (u64, Vec<u64>) {
         .find(|p| p.key.into_inner() == LOCATION_FILTER)
         .expect("a LOCATION_FILTER parameter");
     match &parameter.value {
-        KvpValue::Bytes(b) => decode_location_filter(b).expect("a stored filter reads back"),
+        KvpValue::Bytes(b) => {
+            decode_location_filter(b, MessageType::Subscribe).expect("a stored filter reads back")
+        }
         KvpValue::Varint(v) => panic!("LOCATION_FILTER stored as a bare varint {v:?}"),
     }
 }
@@ -193,7 +195,11 @@ fn discriminator_an_unassigned_type_is_refused() {
     {
         assert_eq!(
             decode(&subscribe_frame(1, &wire)),
-            Err(CodecError::ParameterValueOutOfRange { key: LOCATION_FILTER, value: filter_type }),
+            Err(CodecError::ParameterValueOutOfRange {
+                key: LOCATION_FILTER,
+                value: filter_type,
+                message_type: MessageType::Subscribe.id(),
+            }),
             "type {filter_type:#x}"
         );
     }
@@ -283,7 +289,11 @@ fn the_encoder_refuses_a_value_that_is_not_its_own_type() {
 
     assert_eq!(
         encode(&subscribe_with(vec![filter_parameter(&[0x06])])),
-        Err(CodecError::ParameterValueOutOfRange { key: LOCATION_FILTER, value: 0x06 })
+        Err(CodecError::ParameterValueOutOfRange {
+            key: LOCATION_FILTER,
+            value: 0x06,
+            message_type: MessageType::Subscribe.id(),
+        })
     );
     assert!(matches!(
         encode(&subscribe_with(vec![KeyValuePair {
@@ -306,7 +316,8 @@ fn a_filter_nested_in_fill_parameters_is_type_led_too() {
     let fill = &subscribe_parameters(&message)[0];
     assert_eq!(fill.key.into_inner(), FILL_PARAMETERS);
     let KvpValue::Bytes(nested) = &fill.value else { panic!("FILL_PARAMETERS is bytes") };
-    let nested = decode_fill_parameters(nested).expect("the nested block reads");
+    let nested =
+        decode_fill_parameters(nested, MessageType::Subscribe).expect("the nested block reads");
     assert_eq!(nested.len(), 1);
     assert_eq!(nested[0].key.into_inner(), LOCATION_FILTER);
     assert_eq!(nested[0].value, KvpValue::Bytes(vec![0x05]));
@@ -318,9 +329,13 @@ fn a_filter_nested_in_fill_parameters_is_type_led_too() {
     let KvpValue::Bytes(nested) = &subscribe_parameters(&message)[0].value else {
         panic!("FILL_PARAMETERS is bytes")
     };
-    let nested = decode_fill_parameters(nested).expect("the nested block reads");
+    let nested =
+        decode_fill_parameters(nested, MessageType::Subscribe).expect("the nested block reads");
     let KvpValue::Bytes(filter) = &nested[0].value else { panic!("a filter is bytes") };
-    assert_eq!(decode_location_filter(filter), Ok((T::ABSOLUTE_START, vec![100, 0])));
+    assert_eq!(
+        decode_location_filter(filter, MessageType::Subscribe),
+        Ok((T::ABSOLUTE_START, vec![100, 0]))
+    );
 
     // A field that runs past the message is a malformed filter, not a short
     // block.
@@ -331,7 +346,11 @@ fn a_filter_nested_in_fill_parameters_is_type_led_too() {
     let frame = subscribe_frame(1, &[0x23, 0x01, 0x21, 0x06]);
     assert_eq!(
         decode(&frame),
-        Err(CodecError::ParameterValueOutOfRange { key: LOCATION_FILTER, value: 0x06 })
+        Err(CodecError::ParameterValueOutOfRange {
+            key: LOCATION_FILTER,
+            value: 0x06,
+            message_type: MessageType::Subscribe.id(),
+        })
     );
 }
 

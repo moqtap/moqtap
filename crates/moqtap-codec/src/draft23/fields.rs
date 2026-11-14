@@ -1,4 +1,4 @@
-use crate::draft23::message::ControlMessage;
+use crate::draft23::message::{ControlMessage, MessageType};
 use crate::fields::{FieldMap as Map, FieldValue as Value};
 use crate::kvp::{KeyValuePair, KvpValue};
 use crate::range_filter::RangeFilter;
@@ -148,9 +148,9 @@ fn decode_range_filter(bytes: &[u8], parameter_type: u64) -> Value {
 ///
 /// The fields are decoded through the codec rather than restated here, so this
 /// reports what the codec read.
-fn decode_location_filter(bytes: &[u8]) -> Value {
+fn decode_location_filter(bytes: &[u8], message: MessageType) -> Value {
     const NAMES: [&str; 4] = ["start_group", "start_object", "end_group_delta", "end_object"];
-    let (filter_type, fields) = crate::draft23::message::decode_location_filter(bytes)
+    let (filter_type, fields) = crate::draft23::message::decode_location_filter(bytes, message)
         .expect("the decoder accepted this parameter, so its value parses");
     let mut obj = Map::new();
     obj.insert("filter_type".into(), vi(filter_type));
@@ -166,10 +166,10 @@ fn decode_location_filter(bytes: &[u8]) -> Value {
 /// The nesting is what makes this recursive with [`params_to_json`] — a fill's
 /// LOCATION_FILTER is rendered exactly as the subscription's is — and it
 /// bottoms out because Table 7 does not list FILL_PARAMETERS inside itself.
-fn decode_fill_parameters(bytes: &[u8]) -> Value {
-    let nested = crate::draft23::message::decode_fill_parameters(bytes)
+fn decode_fill_parameters(bytes: &[u8], message: MessageType) -> Value {
+    let nested = crate::draft23::message::decode_fill_parameters(bytes, message)
         .expect("the decoder accepted this parameter, so its value parses");
-    params_to_json(&nested)
+    params_to_json(&nested, message)
 }
 
 fn auth_token_to_json_d20(bytes: &[u8]) -> Value {
@@ -242,14 +242,14 @@ fn decode_track_namespace_prefix(bytes: &[u8]) -> Value {
     }
 }
 
-fn params_to_json(params: &[KeyValuePair]) -> Value {
+fn params_to_json(params: &[KeyValuePair], message: MessageType) -> Value {
     crate::fields::kvp_entries(params, |key, value| {
         let Some(name) = d20_param_name(key) else {
             return (None, None);
         };
         let rendered = match (value, key) {
-            (KvpValue::Bytes(b), 0x21) => decode_location_filter(b),
-            (KvpValue::Bytes(b), 0x23) => decode_fill_parameters(b),
+            (KvpValue::Bytes(b), 0x21) => decode_location_filter(b, message),
+            (KvpValue::Bytes(b), 0x23) => decode_fill_parameters(b, message),
             // One arm for all five: which of them carries a Property Type
             // is a property of the type, and `range_filter` is the one
             // place that decides it. Two arms passing a bool were two
@@ -354,6 +354,7 @@ fn track_props_to_json(props: &[KeyValuePair]) -> Value {
 /// them. An optional field the message did not carry is absent rather than
 /// zero.
 pub fn message_fields(msg: &ControlMessage) -> Map {
+    let message = msg.message_type();
     let obj = match msg {
         ControlMessage::Setup(m) => {
             let mut o = Map::new();
@@ -371,7 +372,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
         }
         ControlMessage::RequestOk(m) => {
             let mut o = Map::new();
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o.insert("track_properties".into(), track_props_to_json(&m.track_properties));
             o
         }
@@ -394,20 +395,20 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
                 "track_name".into(),
                 Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::SubscribeOk(m) => {
             let mut o = Map::new();
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o.insert("track_properties".into(), track_props_to_json(&m.track_properties));
             o
         }
         ControlMessage::RequestUpdate(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::Publish(m) => {
@@ -419,13 +420,13 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
                 Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o.insert("track_properties".into(), track_props_to_json(&m.track_properties));
             o
         }
         ControlMessage::PublishStateNotify(m) => {
             let mut o = Map::new();
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::PublishDone(m) => {
@@ -442,13 +443,13 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::Namespace(m) => {
             let mut o = Map::new();
             o.insert("namespace_suffix".into(), ns_to_json(&m.namespace_suffix));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::NamespaceDone(m) => {
@@ -460,14 +461,14 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("namespace_prefix".into(), ns_to_json(&m.namespace_prefix));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::SubscribeTracks(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("namespace_prefix".into(), ns_to_json(&m.namespace_prefix));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::TrackStatus(m) => {
@@ -478,7 +479,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
                 "track_name".into(),
                 Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::Fetch(m) => {
@@ -489,7 +490,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
                 "track_name".into(),
                 Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
             );
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, message));
             o
         }
         ControlMessage::PublishSkipped(m) => {

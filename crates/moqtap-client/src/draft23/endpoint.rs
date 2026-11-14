@@ -395,7 +395,7 @@ fn fetch_location_is_relative(parameters: &[KeyValuePair]) -> bool {
     parameters.iter().any(|p| {
         p.key.into_inner() == message::LOCATION_FILTER
             && matches!(&p.value, KvpValue::Bytes(value)
-                if message::decode_location_filter(value)
+                if message::decode_location_filter(value, message::MessageType::Fetch)
                     .is_ok_and(|(ty, _)| ty == message::location_filter_types::RELATIVE_START))
     })
 }

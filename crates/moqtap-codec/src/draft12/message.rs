@@ -478,21 +478,24 @@ fn read_group_order_response(buf: &mut impl Buf) -> Result<GroupOrder, CodecErro
 
 /// Read a Forward flag: "Any other value is a protocol error and MUST terminate
 /// the session with a Protocol Violation"
-fn read_forward(buf: &mut impl Buf) -> Result<Forward, CodecError> {
+fn read_forward(buf: &mut impl Buf, message: MessageType) -> Result<Forward, CodecError> {
     match read_u8(buf)? {
         0 => Ok(Forward::DontForward),
         1 => Ok(Forward::Forward),
-        other => Err(CodecError::InvalidForward(other)),
+        other => Err(CodecError::InvalidForward { value: other, message_type: message.id() }),
     }
 }
 
 /// Read a Content Exists flag, which carries the same sentence as Forward and
 /// also decides whether a Largest Location follows.
-fn read_content_exists(buf: &mut impl Buf) -> Result<ContentExists, CodecError> {
+fn read_content_exists(
+    buf: &mut impl Buf,
+    message: MessageType,
+) -> Result<ContentExists, CodecError> {
     match read_u8(buf)? {
         0 => Ok(ContentExists::NoLargestLocation),
         1 => Ok(ContentExists::HasLargestLocation),
-        other => Err(CodecError::InvalidContentExists(other)),
+        other => Err(CodecError::InvalidContentExists { value: other, message_type: message.id() }),
     }
 }
 
@@ -1280,7 +1283,7 @@ impl ControlMessage {
                 }
                 let subscriber_priority = buf.get_u8();
                 let group_order = read_group_order(buf)?;
-                let forward = read_forward(buf)?;
+                let forward = read_forward(buf, MessageType::Subscribe)?;
                 let filter_type = VarInt::decode(buf)?;
                 let ft_val = filter_type.into_inner();
                 if ft_val == 0 || ft_val > 4 {
@@ -1312,7 +1315,7 @@ impl ControlMessage {
                 let track_alias = VarInt::decode(buf)?;
                 let expires = VarInt::decode(buf)?;
                 let group_order = read_group_order_response(buf)?;
-                let content_exists = read_content_exists(buf)?;
+                let content_exists = read_content_exists(buf, MessageType::SubscribeOk)?;
                 let largest_location = if content_exists == ContentExists::HasLargestLocation {
                     Some(Location::decode(buf)?)
                 } else {
@@ -1348,7 +1351,7 @@ impl ControlMessage {
                     return Err(CodecError::UnexpectedEnd);
                 }
                 let subscriber_priority = buf.get_u8();
-                let forward = read_forward(buf)?;
+                let forward = read_forward(buf, MessageType::SubscribeUpdate)?;
                 let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::SubscribeUpdate(SubscribeUpdate {
                     request_id,
@@ -1544,13 +1547,13 @@ impl ControlMessage {
                 check_full_track_name(&track_namespace, &track_name)?;
                 let track_alias = VarInt::decode(buf)?;
                 let group_order = read_group_order_response(buf)?;
-                let content_exists = read_content_exists(buf)?;
+                let content_exists = read_content_exists(buf, MessageType::Publish)?;
                 let largest_location = if content_exists == ContentExists::HasLargestLocation {
                     Some(Location::decode(buf)?)
                 } else {
                     None
                 };
-                let forward = read_forward(buf)?;
+                let forward = read_forward(buf, MessageType::Publish)?;
                 let parameters = decode_parameters(buf)?;
                 Ok(ControlMessage::Publish(Publish {
                     request_id,
@@ -1566,7 +1569,7 @@ impl ControlMessage {
             }
             MessageType::PublishOk => {
                 let request_id = VarInt::decode(buf)?;
-                let forward = read_forward(buf)?;
+                let forward = read_forward(buf, MessageType::PublishOk)?;
                 if buf.remaining() < 1 {
                     return Err(CodecError::UnexpectedEnd);
                 }

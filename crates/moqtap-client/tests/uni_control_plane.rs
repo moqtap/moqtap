@@ -811,7 +811,7 @@ fn draft22_range_text(parameters: &[KeyValuePair]) -> String {
 /// function.
 #[cfg(feature = "draft23")]
 fn draft23_range_text(parameters: &[KeyValuePair]) -> String {
-    use moqtap_codec::draft23::message::{decode_location_filter, LOCATION_FILTER};
+    use moqtap_codec::draft23::message::{decode_location_filter, MessageType, LOCATION_FILTER};
 
     let Some(filter) = parameters.iter().find(|p| p.key.into_inner() == LOCATION_FILTER) else {
         return "none".to_string();
@@ -819,7 +819,7 @@ fn draft23_range_text(parameters: &[KeyValuePair]) -> String {
     let KvpValue::Bytes(value) = &filter.value else {
         return "not a Location Filter value".to_string();
     };
-    match decode_location_filter(value) {
+    match decode_location_filter(value, MessageType::Fetch) {
         Ok((filter_type, fields)) => format!(
             "type {filter_type}: {}",
             fields.iter().map(u64::to_string).collect::<Vec<_>>().join(",")

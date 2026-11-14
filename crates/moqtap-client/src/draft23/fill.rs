@@ -35,11 +35,31 @@
 
 use moqtap_codec::draft23::data_stream::GroupOrder;
 use moqtap_codec::draft23::message::{
-    decode_fill_parameters, decode_location_filter, location_filter_types, FILL_PARAMETERS,
-    LOCATION_FILTER,
+    decode_fill_parameters, decode_location_filter, location_filter_types, MessageType,
+    FILL_PARAMETERS, LOCATION_FILTER,
 };
+use moqtap_codec::error::CodecError;
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 use moqtap_codec::varint::{Moqt18 as Wire, VarInt};
+
+/// The message type the codec is given when a value is checked outside any
+/// message. [`unnamed`] removes it from a refusal, since the value may go into
+/// any message that carries it.
+const CHECKED_ALONE: MessageType = MessageType::Subscribe;
+
+/// The codec's refusal of a value checked on its own, without the message
+/// type [`CHECKED_ALONE`] gave it.
+fn unnamed(error: CodecError) -> FillError {
+    FillError::NotRoundTrippable(match error {
+        CodecError::ParameterOutOfScope { key, .. } => {
+            format!("parameter type {key:#x} may not appear inside FILL_PARAMETERS")
+        }
+        CodecError::ParameterValueOutOfRange { key, value, .. } => {
+            format!("parameter type {key:#x} carries value {value}, which is outside the range it allows")
+        }
+        other => other.to_string(),
+    })
+}
 
 /// `GROUP_ORDER`, Parameter Type 0x22 (Section 9.19.8).
 ///
@@ -310,8 +330,8 @@ impl LocationFilter {
     /// went in.
     pub fn parameter(&self) -> Result<KeyValuePair, FillError> {
         let value = self.encode_value();
-        let (filter_type, fields) = decode_location_filter(&value)
-            .map_err(|e| FillError::NotRoundTrippable(e.to_string()))?;
+        let (filter_type, fields) =
+            decode_location_filter(&value, CHECKED_ALONE).map_err(unnamed)?;
         if filter_type != self.filter_type || fields != self.fields {
             return Err(FillError::NotRoundTrippable(
                 "the codec read back a different Location Filter Type or field list".to_string(),
@@ -476,8 +496,7 @@ impl FillParameters {
             encode_nested_value(key, &pair.value, &mut value)?;
         }
 
-        let read = decode_fill_parameters(&value)
-            .map_err(|e| FillError::NotRoundTrippable(e.to_string()))?;
+        let read = decode_fill_parameters(&value, CHECKED_ALONE).map_err(unnamed)?;
         if read.len() != sorted.len() {
             return Err(FillError::NotRoundTrippable(
                 "the codec read back a different number of parameters".to_string(),
@@ -519,9 +538,11 @@ fn encode_nested_value(key: u64, value: &KvpValue, out: &mut Vec<u8>) -> Result<
         // reading the type, so a value whose fields disagree with its type is
         // refused here rather than shifting every nested parameter after it.
         KvpValue::Bytes(bytes) if key == LOCATION_FILTER => {
-            decode_location_filter(bytes).map_err(|_| FillError::MalformedValue {
-                key,
-                detail: "bytes that are not a Location Filter Type and the fields it names",
+            decode_location_filter(bytes, CHECKED_ALONE).map_err(|_| {
+                FillError::MalformedValue {
+                    key,
+                    detail: "bytes that are not a Location Filter Type and the fields it names",
+                }
             })?;
             out.extend_from_slice(bytes);
             Ok(())
@@ -628,8 +649,7 @@ pub fn group_order(parameters: &[KeyValuePair]) -> Result<GroupOrder, FillError>
                 detail: "a bare varint where Section 9.19.15 defines a parameter block",
             });
         };
-        let nested = decode_fill_parameters(value)
-            .map_err(|e| FillError::NotRoundTrippable(e.to_string()))?;
+        let nested = decode_fill_parameters(value, CHECKED_ALONE).map_err(unnamed)?;
         if let Some(order) = read_group_order(&nested)? {
             return Ok(order);
         }
@@ -707,7 +727,7 @@ mod tests {
         };
         // count = 2; Type Delta 0x21, type 0x05; Type Delta 1 to 0x22, value 2.
         assert_eq!(bytes, vec![0x02, 0x21, 0x05, 0x01, 0x02]);
-        let nested = decode_fill_parameters(&bytes).unwrap();
+        let nested = decode_fill_parameters(&bytes, CHECKED_ALONE).unwrap();
         assert_eq!(nested.len(), 2);
     }
 
@@ -754,7 +774,7 @@ mod tests {
         let value = filter.encode_value();
         assert_eq!(value[0], 0x02);
         assert_eq!(value.len(), 4);
-        assert_eq!(decode_location_filter(&value).unwrap(), (0x02, vec![1000, 3]));
+        assert_eq!(decode_location_filter(&value, CHECKED_ALONE).unwrap(), (0x02, vec![1000, 3]));
     }
 
     /// None and Next Object both carry no fields and mean opposite things, so
@@ -978,5 +998,24 @@ mod tests {
         insert_parameter(&mut params, LocationFilter::relative(0).parameter().unwrap());
         let keys: Vec<u64> = params.iter().map(|p| p.key.into_inner()).collect();
         assert_eq!(keys, vec![0x03, 0x21, 0x35]);
+    }
+
+    /// A block the codec refuses is reported without the message type the
+    /// check had to name.
+    #[test]
+    fn a_refused_block_names_no_message() {
+        let fill = FillParameters::inherited()
+            .with(KeyValuePair {
+                key: VarInt::from_u64_moqt(GROUP_ORDER),
+                value: KvpValue::Varint(VarInt::from_u64_moqt(7)),
+            })
+            .unwrap();
+        assert_eq!(
+            fill.parameter(),
+            Err(FillError::NotRoundTrippable(
+                "parameter type 0x22 carries value 7, which is outside the range it allows"
+                    .to_string()
+            ))
+        );
     }
 }

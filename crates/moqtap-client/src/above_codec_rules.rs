@@ -2033,14 +2033,112 @@ pub enum CodecRule {
     /// state neither form.
     ExtensionsOnNonExistentObject,
 
+    // ── Values outside the range their field allows ────────────
+    /// A SUBSCRIBE whose Forward field is neither 0 nor 1.
+    ///
+    /// Drafts 11 through 14: draft-11 Section 8.7 to draft-13 Section 8.7, and
+    /// draft-14 Section 9.7. A TRACK_STATUS on drafts 13 and 14 is this rule
+    /// too. draft-13 Section 8.20: "The TRACK_STATUS message format is
+    /// identical to the SUBSCRIBE message (Section 8.7)", and
+    /// draft-14 Section 9.20 points at draft-14 Section 9.7 the same way.
+    ForwardFieldSubscribe,
+    /// A SUBSCRIBE_UPDATE whose Forward field is neither 0 nor 1.
+    ///
+    /// Drafts 11 through 14: draft-11 Section 8.10 to draft-13 Section 8.10,
+    /// and draft-14 Section 9.10.
+    ForwardFieldSubscribeUpdate,
+    /// A PUBLISH whose Forward field is neither 0 nor 1.
+    ///
+    /// Drafts 12 through 14: draft-12 Section 8.13, draft-13 Section 8.13 and
+    /// draft-14 Section 9.13. The same field in PUBLISH_OK is not this rule:
+    /// draft-12 Section 8.14, draft-13 Section 8.14 and draft-14 Section 9.14
+    /// state no consequence for it.
+    ForwardFieldPublish,
+    /// A SUBSCRIBE_OK whose Content Exists field is neither 0 nor 1.
+    ///
+    /// Drafts 07 through 14, five runs: draft-07 Section 6.15,
+    /// draft-08 Section 7.15, draft-09 Section 7.15, draft-10 Section 8.7,
+    /// draft-11 Section 8.8 to draft-13 Section 8.8, and draft-14 Section 9.8. A
+    /// TRACK_STATUS_OK on drafts 13 and 14 is this rule too:
+    /// draft-13 Section 8.21 and draft-14 Section 9.21 give it the SUBSCRIBE_OK format.
+    ContentExistsSubscribeOk,
+    /// A SUBSCRIBE_DONE whose Content Exists field is neither 0 nor 1.
+    ///
+    /// Draft-07 alone, draft-07 Section 6.19. Draft-08 removed the field from
+    /// SUBSCRIBE_DONE.
+    ContentExistsSubscribeDone,
+    /// A PUBLISH whose Content Exists field is neither 0 nor 1.
+    ///
+    /// Drafts 12 through 14: draft-12 Section 8.13, draft-13 Section 8.13 and
+    /// draft-14 Section 9.13.
+    ContentExistsPublish,
+    /// A FORWARD parameter (0x10) outside 0 and 1.
+    ///
+    /// Drafts 15 through 22, one sentence in eight sections.
+    /// Draft-23 Section 9.19 defines no FORWARD parameter.
+    ForwardParameterValue,
+    /// A GROUP_ORDER parameter (0x22) outside Ascending (0x1) and Descending
+    /// (0x2).
+    ///
+    /// Drafts 15 through 23. draft-23 Section 9.19.8 answers with
+    /// INVALID_PARAMETER where the earlier drafts say PROTOCOL_VIOLATION.
+    GroupOrderParameterValue,
+    /// A SUBSCRIBER_PRIORITY parameter (0x20) above 255.
+    ///
+    /// Drafts 15 and 16: draft-15 Section 9.2.1.5 and draft-16 Section 9.2.2.3.
+    /// From draft-17 the value is a uint8, which cannot exceed 255.
+    SubscriberPriorityParameterValue,
+    /// A DYNAMIC_GROUPS parameter (0x30) above 1.
+    ///
+    /// Draft-15 alone, draft-15 Section 9.2.1.11. From draft-16 it is a Track
+    /// Extension, [`Self::DynamicGroupsPropertyValue`].
+    DynamicGroupsParameterValue,
+    /// A DELIVERY_TIMEOUT parameter (0x02) of 0.
+    ///
+    /// Draft-16 alone, draft-16 Section 9.2.2.2.
+    DeliveryTimeoutParameterValue,
+    /// An INCLUDE_PROPERTIES parameter (0x35) outside 0 and 1.
+    ///
+    /// Drafts 20 through 23. draft-23 Section 9.19.22 answers with
+    /// INVALID_PARAMETER.
+    IncludePropertiesParameterValue,
+    /// A PAUSED parameter (0x11) outside 0 and 1.
+    ///
+    /// Draft-23 alone, draft-23 Section 9.19.18.
+    PausedParameterValue,
+    /// A DELIVERY_TIMEOUT Track Extension (0x02) of 0.
+    ///
+    /// Draft-16 alone, draft-16 Section 11.1, in the sentence that
+    /// [`Self::DeliveryTimeoutParameterValue`] quotes from
+    /// draft-16 Section 9.2.2.2.
+    DeliveryTimeoutPropertyValue,
+    /// A DEFAULT_PUBLISHER_GROUP_ORDER Track Extension or Track Property (0x22)
+    /// outside Ascending (0x1) and Descending (0x2).
+    ///
+    /// Drafts 16 through 23, in the sentence the GROUP_ORDER parameter uses.
+    /// draft-23 Section 10.5 answers with MALFORMED_KEY_VALUE.
+    DefaultPublisherGroupOrderPropertyValue,
+    /// A DYNAMIC_GROUPS Track Extension or Track Property (0x30) above 1.
+    ///
+    /// Drafts 16 through 23. draft-23 Section 10.6 answers with
+    /// MALFORMED_KEY_VALUE.
+    DynamicGroupsPropertyValue,
+    /// A DEFAULT_PUBLISHER_PRIORITY Track Property (0x0E) above 255.
+    ///
+    /// Draft-23 alone, draft-23 Section 10.4. Drafts 16 through 22 say
+    /// "Priorities above 255 are invalid" and state no consequence.
+    DefaultPublisherPriorityPropertyValue,
+
     // ── Authorization tokens ───────────────────────────────────
     /// A SETUP whose AUTHORIZATION TOKEN option references, with DELETE or
     /// USE_ALIAS, an Alias that no earlier REGISTER in the same SETUP carries.
     ///
-    /// Draft-23 alone, draft-23 Section 8.9. Drafts 11 through 22 state the
-    /// rule too, but their decoders do not check SETUP Aliases. A reference to
-    /// an Alias a REGISTER did carry is not this rule: whether it took effect
-    /// rests on the receiver's MAX_AUTH_TOKEN_CACHE_SIZE.
+    /// Draft-23 alone, draft-23 Section 8.9. Drafts 12 through 22 state the
+    /// rule too, but their decoders do not check SETUP Aliases. Draft-11
+    /// allows no token in SETUP: draft-11 Section 8.2.1, "it is impossible for
+    /// these parameters to appear in Setup messages." A reference to an Alias a
+    /// REGISTER did carry is not this rule: whether it took effect rests on the
+    /// receiver's MAX_AUTH_TOKEN_CACHE_SIZE.
     UnregisteredTokenAlias,
 
     // ── And one that lived for exactly one draft ───────────────
@@ -2223,6 +2321,71 @@ const UNKNOWN_TOKEN_ALIAS_23: &str = "The receiver of a message referencing an A
 const REQUIRED_REQUEST_ID_DELTA: &str = "An endpoint MUST close the session with \
                                          INVALID_REQUIRED_REQUEST_ID if it receives a delta where \
                                          2 × Required Request ID Delta exceeds the Request ID.";
+// The value-range rules. The GROUP_ORDER sentence is also the
+// DEFAULT_PUBLISHER_GROUP_ORDER one, and the DELIVERY_TIMEOUT sentence is
+// draft-16's for both the parameter and the extension.
+const FORWARD_FIELD_11: &str = "Forward: If 1, Objects matching the subscription are forwarded \
+    to the subscriber. If 0, Objects are not forwarded to the subscriber. Any other value is a \
+    protocol error and MUST terminate the session with a Protocol Violation (Section 3.4).";
+const FORWARD_FIELD_14: &str = "Forward: If 1, Objects matching the subscription are forwarded \
+    to the subscriber. If 0, Objects are not forwarded to the subscriber. Any other value is a \
+    protocol error and MUST terminate the session with a PROTOCOL_VIOLATION (Section 3.4).";
+const PUBLISH_FORWARD_12: &str = "Forward: The forward mode for this subscription. Any value \
+    other than 0 or 1 is a Protocol Violation.";
+const PUBLISH_FORWARD_14: &str = "Forward: The forward mode for this subscription. Any value \
+    other than 0 or 1 is a PROTOCOL_VIOLATION.";
+const CONTENT_EXISTS_07: &str = "ContentExists: 1 if an object has been published on this \
+    track, 0 if not. If 0, then the Largest Group ID and Largest Object ID fields will not be \
+    present. Any other value is a protocol error and MUST terminate the session with a Protocol \
+    Violation (Section 3.5).";
+const CONTENT_EXISTS_10: &str = "ContentExists: 1 if an object has been published on this \
+    track, 0 if not. If 0, then the Largest Group ID and Largest Object ID fields will not be \
+    present. Any other value is a protocol error and MUST terminate the session with a Protocol \
+    Violation (Section 3.4).";
+const CONTENT_EXISTS_11: &str = "Content Exists: 1 if an object has been published on this \
+    track, 0 if not. If 0, then the Largest Group ID and Largest Object ID fields will not be \
+    present. Any other value is a protocol error and MUST terminate the session with a Protocol \
+    Violation (Section 3.4).";
+const CONTENT_EXISTS_14: &str = "Content Exists: 1 if an object has been published on this \
+    track, 0 if not. If 0, then the Largest Group ID and Largest Object ID fields will not be \
+    present. Any other value is a protocol error and MUST terminate the session with a \
+    PROTOCOL_VIOLATION (Section 3.4).";
+const SUBSCRIBE_DONE_CONTENT_EXISTS_07: &str = "ContentExists: 1 if an object has been \
+    published for this subscription, 0 if not. If 0, then the Final Group and Final Object \
+    fields will not be present. Any other value is a protocol error and MUST terminate the \
+    session with a Protocol Violation (Section 3.5).";
+const FORWARD_PARAMETER_15: &str = "The allowed values are 0 (don't forward) or 1 (forward). If \
+    an endpoint receives a value outside this range, it MUST close the session with \
+    PROTOCOL_VIOLATION.";
+const GROUP_ORDER_VALUE_15: &str = "The allowed values are Ascending (0x1) or Descending (0x2). \
+    If an endpoint receives a value outside this range, it MUST close the session with \
+    PROTOCOL_VIOLATION.";
+const GROUP_ORDER_PARAMETER_23: &str = "The allowed values are Ascending (0x1) or Descending \
+    (0x2). If an endpoint receives a value outside this range, it MUST close the session with \
+    INVALID_PARAMETER.";
+const GROUP_ORDER_PROPERTY_23: &str = "The allowed values are Ascending (0x1) or Descending \
+    (0x2). If an endpoint receives a value outside this range, it MUST close the session with \
+    MALFORMED_KEY_VALUE.";
+const SUBSCRIBER_PRIORITY_15: &str = "The range is restricted to 0-255. If a publisher receives \
+    a value outside this range, it MUST close the session with PROTOCOL_VIOLATION.";
+const DYNAMIC_GROUPS_15: &str = "Values larger than 1 are a Protocol Violation.";
+const DYNAMIC_GROUPS_16: &str = "If an endpoint receives a value larger than 1, it MUST close \
+    the session with PROTOCOL_VIOLATION.";
+const DYNAMIC_GROUPS_23: &str = "If an endpoint receives a value larger than 1, it MUST close \
+    the session with MALFORMED_KEY_VALUE.";
+const DELIVERY_TIMEOUT_16: &str = "DELIVERY_TIMEOUT, if present, MUST contain a value greater \
+    than 0. If an endpoint receives a DELIVERY_TIMEOUT equal to 0 it MUST close the session \
+    with PROTOCOL_VIOLATION.";
+const INCLUDE_PROPERTIES_20: &str = "The allowed values are 0 (do not send Properties) or 1 \
+    (send Properties), and the default is 1. If an endpoint receives a value outside this range, \
+    it MUST close the session with PROTOCOL_VIOLATION.";
+const INCLUDE_PROPERTIES_23: &str = "The allowed values are 0 (do not send Properties) or 1 \
+    (send Properties), and the default is 1. If an endpoint receives a value outside this range, \
+    it MUST close the session with INVALID_PARAMETER.";
+const PAUSED_23: &str = "The allowed values are 0 (unpaused) or 1 (paused). If an endpoint \
+    receives a value outside this range, it MUST close the session with INVALID_PARAMETER.";
+const DEFAULT_PUBLISHER_PRIORITY_23: &str = "If an endpoint receives a value above 255, it MUST \
+    close the session with MALFORMED_KEY_VALUE.";
 
 impl CodecRule {
     /// Every draft run this rule has a checked citation for, oldest first.
@@ -2757,6 +2920,328 @@ impl CodecRule {
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
             ],
+            Self::ForwardFieldSubscribe => &[
+                RuleCitation {
+                    drafts: (11, 13),
+                    section: "8.7",
+                    sentence: FORWARD_FIELD_11,
+                    code_name: Some("Protocol Violation"),
+                },
+                RuleCitation {
+                    drafts: (14, 14),
+                    section: "9.7",
+                    sentence: FORWARD_FIELD_14,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::ForwardFieldSubscribeUpdate => &[
+                RuleCitation {
+                    drafts: (11, 13),
+                    section: "8.10",
+                    sentence: FORWARD_FIELD_11,
+                    code_name: Some("Protocol Violation"),
+                },
+                RuleCitation {
+                    drafts: (14, 14),
+                    section: "9.10",
+                    sentence: FORWARD_FIELD_14,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::ForwardFieldPublish => &[
+                RuleCitation {
+                    drafts: (12, 13),
+                    section: "8.13",
+                    sentence: PUBLISH_FORWARD_12,
+                    code_name: Some("Protocol Violation"),
+                },
+                RuleCitation {
+                    drafts: (14, 14),
+                    section: "9.13",
+                    sentence: PUBLISH_FORWARD_14,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::ContentExistsSubscribeOk => &[
+                RuleCitation {
+                    drafts: (7, 7),
+                    section: "6.15",
+                    sentence: CONTENT_EXISTS_07,
+                    code_name: Some("Protocol Violation"),
+                },
+                RuleCitation {
+                    drafts: (8, 9),
+                    section: "7.15",
+                    sentence: CONTENT_EXISTS_07,
+                    code_name: Some("Protocol Violation"),
+                },
+                RuleCitation {
+                    drafts: (10, 10),
+                    section: "8.7",
+                    sentence: CONTENT_EXISTS_10,
+                    code_name: Some("Protocol Violation"),
+                },
+                RuleCitation {
+                    drafts: (11, 13),
+                    section: "8.8",
+                    sentence: CONTENT_EXISTS_11,
+                    code_name: Some("Protocol Violation"),
+                },
+                RuleCitation {
+                    drafts: (14, 14),
+                    section: "9.8",
+                    sentence: CONTENT_EXISTS_14,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::ContentExistsSubscribeDone => &[RuleCitation {
+                drafts: (7, 7),
+                section: "6.19",
+                sentence: SUBSCRIBE_DONE_CONTENT_EXISTS_07,
+                code_name: Some("Protocol Violation"),
+            }],
+            Self::ContentExistsPublish => &[
+                RuleCitation {
+                    drafts: (12, 13),
+                    section: "8.13",
+                    sentence: CONTENT_EXISTS_10,
+                    code_name: Some("Protocol Violation"),
+                },
+                RuleCitation {
+                    drafts: (14, 14),
+                    section: "9.13",
+                    sentence: CONTENT_EXISTS_14,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::ForwardParameterValue => &[
+                RuleCitation {
+                    drafts: (15, 15),
+                    section: "9.2.1.10",
+                    sentence: FORWARD_PARAMETER_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (16, 16),
+                    section: "9.2.2.8",
+                    sentence: FORWARD_PARAMETER_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (17, 17),
+                    section: "9.3.10",
+                    sentence: FORWARD_PARAMETER_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (18, 18),
+                    section: "10.2.12",
+                    sentence: FORWARD_PARAMETER_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (19, 19),
+                    section: "10.2.17",
+                    sentence: FORWARD_PARAMETER_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (20, 20),
+                    section: "10.2.18",
+                    sentence: FORWARD_PARAMETER_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.20.19",
+                    sentence: FORWARD_PARAMETER_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (22, 22),
+                    section: "9.20.18",
+                    sentence: FORWARD_PARAMETER_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::GroupOrderParameterValue => &[
+                RuleCitation {
+                    drafts: (15, 15),
+                    section: "9.2.1.6",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (16, 16),
+                    section: "9.2.2.4",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (17, 17),
+                    section: "9.3.6",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (18, 20),
+                    section: "10.2.8",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.20.9",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (22, 22),
+                    section: "9.20.8",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.19.8",
+                    sentence: GROUP_ORDER_PARAMETER_23,
+                    code_name: Some("INVALID_PARAMETER"),
+                },
+            ],
+            Self::SubscriberPriorityParameterValue => &[
+                RuleCitation {
+                    drafts: (15, 15),
+                    section: "9.2.1.5",
+                    sentence: SUBSCRIBER_PRIORITY_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (16, 16),
+                    section: "9.2.2.3",
+                    sentence: SUBSCRIBER_PRIORITY_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+            ],
+            Self::DynamicGroupsParameterValue => &[RuleCitation {
+                drafts: (15, 15),
+                section: "9.2.1.11",
+                sentence: DYNAMIC_GROUPS_15,
+                code_name: Some("Protocol Violation"),
+            }],
+            Self::DeliveryTimeoutParameterValue => &[RuleCitation {
+                drafts: (16, 16),
+                section: "9.2.2.2",
+                sentence: DELIVERY_TIMEOUT_16,
+                code_name: Some("PROTOCOL_VIOLATION"),
+            }],
+            Self::IncludePropertiesParameterValue => &[
+                RuleCitation {
+                    drafts: (20, 20),
+                    section: "10.2.21",
+                    sentence: INCLUDE_PROPERTIES_20,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 21),
+                    section: "9.20.22",
+                    sentence: INCLUDE_PROPERTIES_20,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (22, 22),
+                    section: "9.20.21",
+                    sentence: INCLUDE_PROPERTIES_20,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "9.19.22",
+                    sentence: INCLUDE_PROPERTIES_23,
+                    code_name: Some("INVALID_PARAMETER"),
+                },
+            ],
+            Self::PausedParameterValue => &[RuleCitation {
+                drafts: (23, 23),
+                section: "9.19.18",
+                sentence: PAUSED_23,
+                code_name: Some("INVALID_PARAMETER"),
+            }],
+            Self::DeliveryTimeoutPropertyValue => &[RuleCitation {
+                drafts: (16, 16),
+                section: "11.1",
+                sentence: DELIVERY_TIMEOUT_16,
+                code_name: Some("PROTOCOL_VIOLATION"),
+            }],
+            Self::DefaultPublisherGroupOrderPropertyValue => &[
+                RuleCitation {
+                    drafts: (16, 16),
+                    section: "11.1.1.2",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (17, 17),
+                    section: "11.4",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (18, 20),
+                    section: "12.5",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 22),
+                    section: "10.5",
+                    sentence: GROUP_ORDER_VALUE_15,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "10.5",
+                    sentence: GROUP_ORDER_PROPERTY_23,
+                    code_name: Some("MALFORMED_KEY_VALUE"),
+                },
+            ],
+            Self::DynamicGroupsPropertyValue => &[
+                RuleCitation {
+                    drafts: (16, 16),
+                    section: "11.1.1.3",
+                    sentence: DYNAMIC_GROUPS_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (17, 17),
+                    section: "11.5",
+                    sentence: DYNAMIC_GROUPS_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (18, 20),
+                    section: "12.6",
+                    sentence: DYNAMIC_GROUPS_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (21, 22),
+                    section: "10.6",
+                    sentence: DYNAMIC_GROUPS_16,
+                    code_name: Some("PROTOCOL_VIOLATION"),
+                },
+                RuleCitation {
+                    drafts: (23, 23),
+                    section: "10.6",
+                    sentence: DYNAMIC_GROUPS_23,
+                    code_name: Some("MALFORMED_KEY_VALUE"),
+                },
+            ],
+            Self::DefaultPublisherPriorityPropertyValue => &[RuleCitation {
+                drafts: (23, 23),
+                section: "10.4",
+                sentence: DEFAULT_PUBLISHER_PRIORITY_23,
+                code_name: Some("MALFORMED_KEY_VALUE"),
+            }],
             Self::UnregisteredTokenAlias => &[RuleCitation {
                 drafts: (23, 23),
                 section: "8.9",
@@ -2854,6 +3339,23 @@ mod tests {
         CodecRule::InvalidDatagramTypeValue,
         CodecRule::EndOfTrackObjectId,
         CodecRule::ExtensionsOnNonExistentObject,
+        CodecRule::ForwardFieldSubscribe,
+        CodecRule::ForwardFieldSubscribeUpdate,
+        CodecRule::ForwardFieldPublish,
+        CodecRule::ContentExistsSubscribeOk,
+        CodecRule::ContentExistsSubscribeDone,
+        CodecRule::ContentExistsPublish,
+        CodecRule::ForwardParameterValue,
+        CodecRule::GroupOrderParameterValue,
+        CodecRule::SubscriberPriorityParameterValue,
+        CodecRule::DynamicGroupsParameterValue,
+        CodecRule::DeliveryTimeoutParameterValue,
+        CodecRule::IncludePropertiesParameterValue,
+        CodecRule::PausedParameterValue,
+        CodecRule::DeliveryTimeoutPropertyValue,
+        CodecRule::DefaultPublisherGroupOrderPropertyValue,
+        CodecRule::DynamicGroupsPropertyValue,
+        CodecRule::DefaultPublisherPriorityPropertyValue,
         CodecRule::UnregisteredTokenAlias,
         CodecRule::InvalidRequiredRequestIdDelta,
     ];
@@ -2887,7 +3389,7 @@ mod tests {
     /// And the same for the decoder's half.
     #[test]
     fn every_codec_rule_is_swept() {
-        assert_eq!(ALL_CODEC.len(), 19, "a rule was added or removed without updating ALL_CODEC");
+        assert_eq!(ALL_CODEC.len(), 36, "a rule was added or removed without updating ALL_CODEC");
     }
 
     /// A cited rule is a rule this build can actually raise on that draft.
@@ -2975,7 +3477,7 @@ mod tests {
         }
         assert_eq!(
             seen.len(),
-            123,
+            145,
             "the sentence count moved; recount the cited sentences against the rendered drafts \
              and update this number"
         );
@@ -3042,14 +3544,16 @@ mod tests {
 
     /// Rules the newest draft genuinely stopped stating.
     ///
-    /// Empty is the normal state and the interesting one. A draft really can
-    /// drop a rule - `RequestUpdateForTheWrongRequest` above is the worked
+    /// A draft really can drop a rule - `RequestUpdateForTheWrongRequest` above is the worked
     /// case, deleted in drafts 17 and 18 along with the field it is about -
     /// so the sweep below cannot simply demand every rule on every draft. An
     /// entry here is the evidence for one of those, written down instead of
     /// absorbed; `RequestUpdateForTheWrongRequest` is not in it because
     /// draft-19 brought the rule back.
-    const DROPPED_BY_THE_NEWEST_DRAFT: &[&str] = &[];
+    const DROPPED_BY_THE_NEWEST_DRAFT: &[&str] = &[
+        // draft-23 Section 9.19 defines no FORWARD parameter.
+        "ForwardParameterValue",
+    ];
 
     /// The newest draft is not quietly the first one to stop citing a rule.
     ///

@@ -15,7 +15,7 @@
 //! Order SHOULD be used." Only the replies forbid it. From draft-15 the field
 //! becomes a parameter, and the parameter has no such value — a subscriber with
 //! no preference omits the parameter instead, and the range sentence admits
-//! nothing but 0x1 and 0x2 in any message that carries it.
+//! nothing but 0x1 and 0x2 in any message the parameter's section names.
 //!
 //! So the same intent, spelled the way each draft spells it, is ordinary traffic
 //! on draft-14 and a session close on draft-15. Both halves are driven below,
@@ -37,6 +37,15 @@
 //! Draft-17 drops the SUBSCRIBER_PRIORITY sentence for the opposite reason: it
 //! makes the parameter a uint8, so a value above 255 can no longer be spelled
 //! and the rule has nothing left to forbid.
+//!
+//! # Only where the parameter may appear
+//!
+//! draft-15 Section 9.2.1 and draft-16 Section 9.2.2: "Each version-specific
+//! parameter definition indicates the message types in which it can appear. If
+//! it appears in some other type of message, it MUST be ignored." (Draft-16
+//! says "message parameter".) A parameter is held to its range only in a
+//! message its own section names, and carried unchecked anywhere else. Each
+//! refusal names the message it was in.
 
 #![cfg(any(feature = "draft14", feature = "draft15", feature = "draft16"))]
 
@@ -70,6 +79,7 @@ mod draft15 {
     use super::{parameter, varint, FORWARD, GROUP_ORDER, SUBSCRIBER_PRIORITY};
     use moqtap_codec::draft15::message::*;
     use moqtap_codec::error::CodecError;
+    use moqtap_codec::kvp::KeyValuePair;
     use moqtap_codec::types::*;
 
     /// DYNAMIC_GROUPS, a Message Parameter on this draft alone. Draft-16 moves it
@@ -80,56 +90,96 @@ mod draft15 {
     const PUBLISHER_PRIORITY: u64 = 0x0E;
 
     /// Each of the four parameters this draft gives a range: the type, a value
-    /// inside the range, and one outside it.
+    /// inside the range, one outside it, and a message its section names.
     ///
     /// The legal value is there because it is what the frame is written around
     /// — the encoder will not write the illegal one. It is chosen to be a
     /// varint of the same length, so replacing one with the other moves nothing
     /// else in the frame.
-    const CASES: &[(u64, u64, u64)] = &[
+    const CASES: &[(u64, u64, u64, MessageType)] = &[
         // Group Order 0x0 is the reversal: a request may send it as a field
         // on draft-14 and may not send it as a parameter here.
-        (GROUP_ORDER, 1, 0),
-        (GROUP_ORDER, 1, 3),
-        (FORWARD, 1, 2),
-        (SUBSCRIBER_PRIORITY, 255, 256),
-        (DYNAMIC_GROUPS, 1, 2),
+        (GROUP_ORDER, 1, 0, MessageType::Subscribe),
+        (GROUP_ORDER, 1, 3, MessageType::Subscribe),
+        (FORWARD, 1, 2, MessageType::Subscribe),
+        (SUBSCRIBER_PRIORITY, 255, 256, MessageType::Subscribe),
+        // draft-15 Section 9.2.1.11: "The DYNAMIC_GROUPS parameter (parameter
+        // type 0x30) MAY appear in PUBLISH or SUBSCRIBE_OK."
+        (DYNAMIC_GROUPS, 1, 2, MessageType::SubscribeOk),
     ];
 
-    fn subscribe(parameters: Vec<moqtap_codec::kvp::KeyValuePair>) -> ControlMessage {
-        ControlMessage::Subscribe(Subscribe {
-            request_id: varint(1),
-            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
-            track_name: b"t".to_vec(),
-            parameters,
-        })
+    /// Each parameter with a value outside its range, in a message its section
+    /// does not name.
+    ///
+    /// draft-15 Section 9.2.1: "If it appears in some other type of message, it
+    /// MUST be ignored." FORWARD's draft-15 Section 9.2.1.10 names
+    /// "TRACK_STATUS_OK", a message draft-15 does not define, so a REQUEST_OK is
+    /// not in its scope. A REQUEST_OK is in GROUP_ORDER's scope only "in
+    /// response to TRACK_STATUS" (draft-15 Section 9.2.1.6), which the frame does
+    /// not say, so the codec carries it and leaves it to the session.
+    const OUT_OF_SCOPE: &[(u64, u64, MessageType)] = &[
+        (GROUP_ORDER, 0, MessageType::PublishNamespace),
+        (GROUP_ORDER, 3, MessageType::RequestOk),
+        (FORWARD, 2, MessageType::RequestOk),
+        (SUBSCRIBER_PRIORITY, 256, MessageType::SubscribeOk),
+        (DYNAMIC_GROUPS, 2, MessageType::Subscribe),
+        (DYNAMIC_GROUPS, 2, MessageType::RequestOk),
+    ];
+
+    /// A message of type `message` carrying `parameters` last.
+    fn carrier(message: MessageType, parameters: Vec<KeyValuePair>) -> ControlMessage {
+        match message {
+            MessageType::Subscribe => ControlMessage::Subscribe(Subscribe {
+                request_id: varint(1),
+                track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+                track_name: b"t".to_vec(),
+                parameters,
+            }),
+            MessageType::SubscribeOk => ControlMessage::SubscribeOk(SubscribeOk {
+                request_id: varint(1),
+                track_alias: varint(2),
+                parameters,
+            }),
+            MessageType::RequestOk => {
+                ControlMessage::RequestOk(RequestOk { request_id: varint(1), parameters })
+            }
+            MessageType::PublishNamespace => ControlMessage::PublishNamespace(PublishNamespace {
+                request_id: varint(1),
+                track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+                parameters,
+            }),
+            other => panic!("no fixture for {other:?}"),
+        }
     }
 
-    fn subscribe_with(parameters: Vec<moqtap_codec::kvp::KeyValuePair>) -> Vec<u8> {
+    fn encoded(message: &ControlMessage) -> Vec<u8> {
         let mut out = Vec::new();
-        subscribe(parameters).encode(&mut out).expect("the encoder writes a value in range");
+        message.encode(&mut out).expect("the encoder writes this message");
         out
     }
 
-    /// The frame this codec writes for `parameters`, with the last value
-    /// rewritten from `legal` to `illegal`.
+    /// The frame this codec writes for `parameters` in `message`, with the last
+    /// value rewritten from `legal` to `illegal`.
     ///
-    /// The encoder will not write `illegal`: a value outside the range its type
-    /// allows is one the receiver must close the session over, so writing it is
-    /// not a way to send it. That is the same rule these gates read from the
-    /// receiver's side, and it is gated from the sender's below.
+    /// The encoder will not write `illegal` where the range applies: a value
+    /// outside the range its type allows is one the receiver must close the
+    /// session over, so writing it is not a way to send it. That is the same
+    /// rule these gates read from the receiver's side, and it is gated from the
+    /// sender's below.
     ///
     /// Each pair of values is a varint of the same length, so the rewrite moves
     /// nothing — every length in the frame is still the encoder's.
     fn with_last_value(
-        parameters: Vec<moqtap_codec::kvp::KeyValuePair>,
+        message: MessageType,
+        parameters: Vec<KeyValuePair>,
         legal: u64,
         illegal: u64,
     ) -> Vec<u8> {
-        super::frames::with_varint_value(&subscribe_with(parameters), legal, illegal)
+        super::frames::with_varint_value(&encoded(&carrier(message, parameters)), legal, illegal)
     }
 
-    /// Each of the four parameters draft-15 gives a range, refused outside it.
+    /// Each of the four parameters draft-15 gives a range, refused outside it
+    /// in a message its section names. The refusal names that message.
     ///
     /// The frames are written by this codec's own encoder, so everything except
     /// the one value under test — the framing, the declared length, the
@@ -139,12 +189,16 @@ mod draft15 {
     /// ordinary parameter.
     #[test]
     fn a_parameter_outside_the_range_its_type_allows_is_refused() {
-        for &(key, legal, value) in CASES {
-            let bytes = with_last_value(vec![parameter(key, legal)], legal, value);
+        for &(key, legal, value, message) in CASES {
+            let bytes = with_last_value(message, vec![parameter(key, legal)], legal, value);
             assert_eq!(
                 ControlMessage::decode(&mut &bytes[..]),
-                Err(CodecError::ParameterValueOutOfRange { key, value }),
-                "parameter {key:#x} value {value} must be refused",
+                Err(CodecError::ParameterValueOutOfRange {
+                    key,
+                    value,
+                    message_type: message.id()
+                }),
+                "parameter {key:#x} value {value} in {message:?} must be refused",
             );
         }
     }
@@ -160,13 +214,17 @@ mod draft15 {
     /// `check_parameter_value_ranges`.
     #[test]
     fn a_value_the_reader_refuses_is_one_the_writer_will_not_write() {
-        for &(key, _, value) in CASES {
+        for &(key, _, value, message) in CASES {
             let mut buf = Vec::new();
-            let result = subscribe(vec![parameter(key, value)]).encode(&mut buf);
+            let result = carrier(message, vec![parameter(key, value)]).encode(&mut buf);
             assert_eq!(
                 result,
-                Err(CodecError::ParameterValueOutOfRange { key, value }),
-                "the writer produced parameter {key:#x} value {value}, \
+                Err(CodecError::ParameterValueOutOfRange {
+                    key,
+                    value,
+                    message_type: message.id()
+                }),
+                "the writer produced parameter {key:#x} value {value} in {message:?}, \
                  which the reader refuses",
             );
             assert!(
@@ -177,23 +235,41 @@ mod draft15 {
         }
     }
 
+    /// Out of its scope a parameter is ignored, so its value is carried
+    /// whatever it is, in both directions.
+    #[test]
+    fn a_parameter_outside_its_scope_is_carried_unchecked() {
+        for &(key, value, message) in OUT_OF_SCOPE {
+            let sent = carrier(message, vec![parameter(key, value)]);
+            let mut bytes = Vec::new();
+            sent.encode(&mut bytes).unwrap_or_else(|e| {
+                panic!("parameter {key:#x} value {value} in {message:?} is out of scope: {e}")
+            });
+            assert_eq!(
+                ControlMessage::decode(&mut &bytes[..]).as_ref(),
+                Ok(&sent),
+                "parameter {key:#x} value {value} in {message:?} is out of scope and carried",
+            );
+        }
+    }
+
     /// The values inside each range still decode, which is the half a table that
     /// over-reached would break.
     #[test]
     fn every_value_the_ranges_admit_is_carried() {
-        let cases: &[(u64, u64)] = &[
-            (GROUP_ORDER, 1),
-            (GROUP_ORDER, 2),
-            (FORWARD, 0),
-            (FORWARD, 1),
-            (SUBSCRIBER_PRIORITY, 0),
-            (SUBSCRIBER_PRIORITY, 128),
-            (SUBSCRIBER_PRIORITY, 255),
-            (DYNAMIC_GROUPS, 0),
-            (DYNAMIC_GROUPS, 1),
+        let cases: &[(u64, u64, MessageType)] = &[
+            (GROUP_ORDER, 1, MessageType::Subscribe),
+            (GROUP_ORDER, 2, MessageType::Subscribe),
+            (FORWARD, 0, MessageType::Subscribe),
+            (FORWARD, 1, MessageType::Subscribe),
+            (SUBSCRIBER_PRIORITY, 0, MessageType::Subscribe),
+            (SUBSCRIBER_PRIORITY, 128, MessageType::Subscribe),
+            (SUBSCRIBER_PRIORITY, 255, MessageType::Subscribe),
+            (DYNAMIC_GROUPS, 0, MessageType::SubscribeOk),
+            (DYNAMIC_GROUPS, 1, MessageType::SubscribeOk),
         ];
-        for &(key, value) in cases {
-            let bytes = subscribe_with(vec![parameter(key, value)]);
+        for &(key, value, message) in cases {
+            let bytes = encoded(&carrier(message, vec![parameter(key, value)]));
             assert!(
                 ControlMessage::decode(&mut &bytes[..]).is_ok(),
                 "parameter {key:#x} value {value} is inside the range and must decode",
@@ -210,7 +286,8 @@ mod draft15 {
     /// `0x0E => value <= 255`.
     #[test]
     fn a_priority_the_draft_calls_invalid_without_saying_more_is_carried() {
-        let bytes = subscribe_with(vec![parameter(PUBLISHER_PRIORITY, 300)]);
+        let bytes =
+            encoded(&carrier(MessageType::Subscribe, vec![parameter(PUBLISHER_PRIORITY, 300)]));
         let got = ControlMessage::decode(&mut &bytes[..]);
         assert!(
             got.is_ok(),
@@ -247,58 +324,100 @@ mod draft15 {
 #[cfg(feature = "draft16")]
 mod draft16 {
     use super::{parameter, varint, FORWARD, GROUP_ORDER, SUBSCRIBER_PRIORITY};
+    use moqtap_codec::draft16::message::*;
+    use moqtap_codec::error::CodecError;
+    use moqtap_codec::kvp::KeyValuePair;
+    use moqtap_codec::types::*;
 
     /// DELIVERY_TIMEOUT, ranged by draft-16 alone.
     const DELIVERY_TIMEOUT: u64 = 0x02;
 
-    /// This draft's ranged parameters: the type, a value inside the range, and
-    /// one outside it. See draft-15's `CASES` for why the legal value is here.
-    const CASES: &[(u64, u64, u64)] = &[
-        (GROUP_ORDER, 1, 0),
-        (GROUP_ORDER, 1, 3),
-        (FORWARD, 1, 2),
-        (SUBSCRIBER_PRIORITY, 255, 256),
-        (DELIVERY_TIMEOUT, 1, 0),
+    /// This draft's ranged parameters: the type, a value inside the range, one
+    /// outside it, and a message its section names. See draft-15's `CASES` for
+    /// why the legal value is here.
+    ///
+    /// REQUEST_UPDATE is in scope for every type that names it, whatever request
+    /// it modifies: draft-16 Section 9.11 closes the session with
+    /// PROTOCOL_VIOLATION over a parameter "invalid for the type of request being
+    /// modified".
+    const CASES: &[(u64, u64, u64, MessageType)] = &[
+        (GROUP_ORDER, 1, 0, MessageType::Subscribe),
+        (GROUP_ORDER, 1, 3, MessageType::Subscribe),
+        (GROUP_ORDER, 1, 3, MessageType::PublishOk),
+        (FORWARD, 1, 2, MessageType::Subscribe),
+        (FORWARD, 1, 2, MessageType::RequestUpdate),
+        (SUBSCRIBER_PRIORITY, 255, 256, MessageType::Subscribe),
+        (SUBSCRIBER_PRIORITY, 255, 256, MessageType::RequestUpdate),
+        (DELIVERY_TIMEOUT, 1, 0, MessageType::Subscribe),
+        (DELIVERY_TIMEOUT, 1, 0, MessageType::RequestUpdate),
     ];
 
-    use moqtap_codec::draft16::message::*;
-    use moqtap_codec::error::CodecError;
-    use moqtap_codec::types::*;
+    /// Each parameter with a value outside its range, in a message its section
+    /// does not name. draft-16 Section 9.2.2: "If it appears in some other type
+    /// of message, it MUST be ignored."
+    const OUT_OF_SCOPE: &[(u64, u64, MessageType)] = &[
+        (GROUP_ORDER, 0, MessageType::RequestUpdate),
+        (GROUP_ORDER, 3, MessageType::RequestOk),
+        (FORWARD, 2, MessageType::RequestOk),
+        (FORWARD, 2, MessageType::PublishNamespace),
+        (SUBSCRIBER_PRIORITY, 256, MessageType::RequestOk),
+        (DELIVERY_TIMEOUT, 0, MessageType::RequestOk),
+        (DELIVERY_TIMEOUT, 0, MessageType::PublishNamespace),
+    ];
 
-    fn subscribe(parameters: Vec<moqtap_codec::kvp::KeyValuePair>) -> ControlMessage {
-        ControlMessage::Subscribe(Subscribe {
-            request_id: varint(1),
-            track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
-            track_name: b"t".to_vec(),
-            parameters,
-        })
+    /// A message of type `message` carrying `parameters` last.
+    fn carrier(message: MessageType, parameters: Vec<KeyValuePair>) -> ControlMessage {
+        match message {
+            MessageType::Subscribe => ControlMessage::Subscribe(Subscribe {
+                request_id: varint(1),
+                track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+                track_name: b"t".to_vec(),
+                parameters,
+            }),
+            MessageType::RequestUpdate => ControlMessage::RequestUpdate(RequestUpdate {
+                request_id: varint(3),
+                existing_request_id: varint(1),
+                parameters,
+            }),
+            MessageType::PublishOk => {
+                ControlMessage::PublishOk(PublishOk { request_id: varint(1), parameters })
+            }
+            MessageType::RequestOk => {
+                ControlMessage::RequestOk(RequestOk { request_id: varint(1), parameters })
+            }
+            MessageType::PublishNamespace => ControlMessage::PublishNamespace(PublishNamespace {
+                request_id: varint(1),
+                track_namespace: TrackNamespace(vec![b"ns".to_vec()]),
+                parameters,
+            }),
+            other => panic!("no fixture for {other:?}"),
+        }
     }
 
-    fn subscribe_with(parameters: Vec<moqtap_codec::kvp::KeyValuePair>) -> Vec<u8> {
+    fn encoded(message: &ControlMessage) -> Vec<u8> {
         let mut out = Vec::new();
-        subscribe(parameters).encode(&mut out).expect("the encoder writes a value in range");
+        message.encode(&mut out).expect("the encoder writes this message");
         out
     }
 
-    /// The frame this codec writes for `parameters`, with the last value
-    /// rewritten from `legal` to `illegal`.
-    ///
-    /// The encoder will not write `illegal`: a value outside the range its type
-    /// allows is one the receiver must close the session over, so writing it is
-    /// not a way to send it. That is the same rule these gates read from the
-    /// receiver's side, and it is gated from the sender's below.
-    ///
-    /// Each pair of values is a varint of the same length, so the rewrite moves
-    /// nothing — every length in the frame is still the encoder's.
+    fn subscribe_with(parameters: Vec<KeyValuePair>) -> Vec<u8> {
+        encoded(&carrier(MessageType::Subscribe, parameters))
+    }
+
+    /// The frame this codec writes for `parameters` in `message`, with the last
+    /// value rewritten from `legal` to `illegal`. See draft-15's function of
+    /// the same name.
     fn with_last_value(
-        parameters: Vec<moqtap_codec::kvp::KeyValuePair>,
+        message: MessageType,
+        parameters: Vec<KeyValuePair>,
         legal: u64,
         illegal: u64,
     ) -> Vec<u8> {
-        super::frames::with_varint_value(&subscribe_with(parameters), legal, illegal)
+        super::frames::with_varint_value(&encoded(&carrier(message, parameters)), legal, illegal)
     }
 
-    /// Draft-16's three ranged parameters, refused outside their ranges.
+    /// Draft-16's four ranged parameters, refused outside their ranges in a
+    /// message their sections name. The refusal names that message.
     ///
     /// The key reported is the absolute type, after the delta encoding this
     /// draft applies to parameter types is resolved. A check that read the delta
@@ -307,12 +426,16 @@ mod draft16 {
     /// parameter before it.
     #[test]
     fn a_parameter_outside_the_range_its_type_allows_is_refused() {
-        for &(key, legal, value) in CASES {
-            let bytes = with_last_value(vec![parameter(key, legal)], legal, value);
+        for &(key, legal, value, message) in CASES {
+            let bytes = with_last_value(message, vec![parameter(key, legal)], legal, value);
             assert_eq!(
                 ControlMessage::decode(&mut &bytes[..]),
-                Err(CodecError::ParameterValueOutOfRange { key, value }),
-                "parameter {key:#x} value {value} must be refused",
+                Err(CodecError::ParameterValueOutOfRange {
+                    key,
+                    value,
+                    message_type: message.id()
+                }),
+                "parameter {key:#x} value {value} in {message:?} must be refused",
             );
         }
     }
@@ -326,19 +449,41 @@ mod draft16 {
     /// `check_parameter_value_ranges`.
     #[test]
     fn a_value_the_reader_refuses_is_one_the_writer_will_not_write() {
-        for &(key, _, value) in CASES {
+        for &(key, _, value, message) in CASES {
             let mut buf = Vec::new();
-            let result = subscribe(vec![parameter(key, value)]).encode(&mut buf);
+            let result = carrier(message, vec![parameter(key, value)]).encode(&mut buf);
             assert_eq!(
                 result,
-                Err(CodecError::ParameterValueOutOfRange { key, value }),
-                "the writer produced parameter {key:#x} value {value}, \
+                Err(CodecError::ParameterValueOutOfRange {
+                    key,
+                    value,
+                    message_type: message.id()
+                }),
+                "the writer produced parameter {key:#x} value {value} in {message:?}, \
                  which the reader refuses",
             );
             assert!(
                 buf.is_empty(),
                 "a refused message must leave the caller's buffer alone, and it wrote {} bytes",
                 buf.len(),
+            );
+        }
+    }
+
+    /// Out of its scope a parameter is ignored, so its value is carried
+    /// whatever it is, in both directions.
+    #[test]
+    fn a_parameter_outside_its_scope_is_carried_unchecked() {
+        for &(key, value, message) in OUT_OF_SCOPE {
+            let sent = carrier(message, vec![parameter(key, value)]);
+            let mut bytes = Vec::new();
+            sent.encode(&mut bytes).unwrap_or_else(|e| {
+                panic!("parameter {key:#x} value {value} in {message:?} is out of scope: {e}")
+            });
+            assert_eq!(
+                ControlMessage::decode(&mut &bytes[..]).as_ref(),
+                Ok(&sent),
+                "parameter {key:#x} value {value} in {message:?} is out of scope and carried",
             );
         }
     }
@@ -361,10 +506,15 @@ mod draft16 {
     /// Fails if `parameter_value_in_range` omits DELIVERY_TIMEOUT.
     #[test]
     fn a_delivery_timeout_of_zero_is_refused() {
-        let bytes = with_last_value(vec![parameter(DELIVERY_TIMEOUT, 1)], 1, 0);
+        let bytes =
+            with_last_value(MessageType::Subscribe, vec![parameter(DELIVERY_TIMEOUT, 1)], 1, 0);
         assert_eq!(
             ControlMessage::decode(&mut &bytes[..]),
-            Err(CodecError::ParameterValueOutOfRange { key: DELIVERY_TIMEOUT, value: 0 }),
+            Err(CodecError::ParameterValueOutOfRange {
+                key: DELIVERY_TIMEOUT,
+                value: 0,
+                message_type: MessageType::Subscribe.id()
+            }),
             "a DELIVERY_TIMEOUT of zero must be refused",
         );
 
@@ -386,10 +536,19 @@ mod draft16 {
     /// parameter. Reporting the delta would name type 18.
     #[test]
     fn the_refusal_names_the_type_and_not_the_delta() {
-        let bytes = with_last_value(vec![parameter(FORWARD, 1), parameter(GROUP_ORDER, 1)], 1, 9);
+        let bytes = with_last_value(
+            MessageType::Subscribe,
+            vec![parameter(FORWARD, 1), parameter(GROUP_ORDER, 1)],
+            1,
+            9,
+        );
         assert_eq!(
             ControlMessage::decode(&mut &bytes[..]),
-            Err(CodecError::ParameterValueOutOfRange { key: GROUP_ORDER, value: 9 }),
+            Err(CodecError::ParameterValueOutOfRange {
+                key: GROUP_ORDER,
+                value: 9,
+                message_type: MessageType::Subscribe.id()
+            }),
         );
     }
 

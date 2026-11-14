@@ -1257,6 +1257,16 @@ impl Endpoint {
         self.track_statuses.len()
     }
 
+    /// Whether `request_id` is a TRACK_STATUS this endpoint sent.
+    pub(crate) fn sent_track_status(&self, request_id: u64) -> bool {
+        self.track_statuses.contains_key(&request_id)
+    }
+
+    /// Whether `request_id` is a TRACK_STATUS the peer sent.
+    pub(crate) fn answers_track_status(&self, request_id: u64) -> bool {
+        self.inbound_track_statuses.contains_key(&request_id)
+    }
+
     /// Returns the number of active publish state machines.
     pub fn active_publish_count(&self) -> usize {
         self.publishes.len()

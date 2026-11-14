@@ -38,10 +38,30 @@
 
 use moqtap_codec::draft20::data_stream::GroupOrder;
 use moqtap_codec::draft20::message::{
-    decode_fill_parameters, decode_location_filter, FILL_PARAMETERS, LOCATION_FILTER,
+    decode_fill_parameters, decode_location_filter, MessageType, FILL_PARAMETERS, LOCATION_FILTER,
 };
+use moqtap_codec::error::CodecError;
 use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 use moqtap_codec::varint::{Moqt18 as Wire, VarInt};
+
+/// The message type the codec is given when a value is checked outside any
+/// message. [`unnamed`] removes it from a refusal, since the value may go into
+/// any message that carries it.
+const CHECKED_ALONE: MessageType = MessageType::Subscribe;
+
+/// The codec's refusal of a value checked on its own, without the message
+/// type [`CHECKED_ALONE`] gave it.
+fn unnamed(error: CodecError) -> FillError {
+    FillError::NotRoundTrippable(match error {
+        CodecError::ParameterOutOfScope { key, .. } => {
+            format!("parameter type {key:#x} may not appear inside FILL_PARAMETERS")
+        }
+        CodecError::ParameterValueOutOfRange { key, value, .. } => {
+            format!("parameter type {key:#x} carries value {value}, which is outside the range it allows")
+        }
+        other => other.to_string(),
+    })
+}
 
 /// `GROUP_ORDER`, Parameter Type 0x22 (Section 10.2.8).
 ///
@@ -469,8 +489,7 @@ impl FillParameters {
             encode_nested_value(key, &pair.value, &mut value)?;
         }
 
-        let read = decode_fill_parameters(&value)
-            .map_err(|e| FillError::NotRoundTrippable(e.to_string()))?;
+        let read = decode_fill_parameters(&value, CHECKED_ALONE).map_err(unnamed)?;
         if read.len() != sorted.len() {
             return Err(FillError::NotRoundTrippable(
                 "the codec read back a different number of parameters".to_string(),
@@ -610,8 +629,7 @@ pub fn group_order(parameters: &[KeyValuePair]) -> Result<GroupOrder, FillError>
                 detail: "a bare varint where Section 10.2.15 defines a parameter block",
             });
         };
-        let nested = decode_fill_parameters(value)
-            .map_err(|e| FillError::NotRoundTrippable(e.to_string()))?;
+        let nested = decode_fill_parameters(value, CHECKED_ALONE).map_err(unnamed)?;
         if let Some(order) = read_group_order(&nested)? {
             return Ok(order);
         }

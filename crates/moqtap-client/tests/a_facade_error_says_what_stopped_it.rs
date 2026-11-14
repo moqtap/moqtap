@@ -189,12 +189,19 @@ fn the_same_decode_failure_is_read_against_each_drafts_own_text() {
     assert_eq!(close_on_16(empty.clone()), Some(0x3));
     assert_eq!(close_on_20(empty), Some(0x3));
 
-    // A Content Exists field that is neither 0 nor 1, which drafts 08 through
+    // A Content Exists field that is neither 0 nor 1, which drafts 07 through
     // 14 answer with a close. Draft-15 deleted the field.
-    let content = CodecError::InvalidContentExists(2);
+    let content = CodecError::InvalidContentExists { value: 2, message_type: 0x04 };
     assert_eq!(close_on_07(content.clone()), Some(0x3));
     assert_eq!(close_on_14(content.clone()), Some(0x3));
     assert_eq!(close_on_16(content), None, "draft-15 took the field away");
+
+    // A Forward field that is neither 0 nor 1 closes, in PUBLISH_OK too.
+    use moqtap_codec::draft14::message::MessageType;
+    let forward =
+        |message: MessageType| CodecError::InvalidForward { value: 2, message_type: message.id() };
+    assert_eq!(close_on_14(forward(MessageType::Subscribe)), Some(0x3));
+    assert_eq!(close_on_14(forward(MessageType::PublishOk)), Some(0x3));
 
     // And a code that is not PROTOCOL_VIOLATION at all: drafts 07 through 10
     // give the Parameter Length Mismatch rule its own session error code, and

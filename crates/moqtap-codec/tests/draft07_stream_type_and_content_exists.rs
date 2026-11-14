@@ -25,7 +25,7 @@
 //! permits.
 
 use moqtap_codec::draft07::data_stream::{FetchHeader, SubgroupHeader};
-use moqtap_codec::draft07::message::ControlMessage;
+use moqtap_codec::draft07::message::{ControlMessage, MessageType};
 use moqtap_codec::error::CodecError;
 use moqtap_codec::varint::VarInt;
 
@@ -149,8 +149,11 @@ fn a_content_exists_that_is_neither_zero_nor_one_is_named() {
     let bytes = subscribe_ok_with_content_exists(2);
     let got = ControlMessage::decode(&mut &bytes[..]);
     assert!(
-        matches!(got, Err(CodecError::InvalidContentExists(2))),
-        "the refusal should name the value it saw, not merely that one was wrong, got {got:?}"
+        got == Err(CodecError::InvalidContentExists {
+            value: 2,
+            message_type: MessageType::SubscribeOk.id(),
+        }),
+        "the refusal should name the value it saw and the message it was in, got {got:?}"
     );
 
     // Both legal values decode, each with the fields its own value promises.

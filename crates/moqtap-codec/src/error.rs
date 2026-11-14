@@ -163,13 +163,17 @@ pub enum CodecError {
     /// A Message Parameter appeared in a message type its own definition does
     /// not name.
     ///
-    /// Drafts 17, 18 and 19 only, and the split is the whole reason this is a
-    /// variant rather than a shared rule. All the drafts state the first
-    /// half the same way and ten of them state the opposite consequence.
-    /// Draft-19 Section 10.2.1, draft-18 Section 10.2.1 and draft-17 Section
-    /// 9.3.1: "Each Message Parameter definition indicates the message types in
-    /// which it can appear. If it appears in some other type of message, the
-    /// receiving endpoint MUST close the connection with a PROTOCOL_VIOLATION."
+    /// Drafts 17 through 23 only, and the split is the whole reason this is a
+    /// variant rather than a shared rule. All the drafts state the first half,
+    /// and ten of them state the opposite consequence.
+    /// draft-17 Section 9.3.1, draft-18 Section 10.2.1, draft-19 Section 10.2.1,
+    /// draft-20 Section 10.2.1 and draft-21 Section 9.20.1: "Each Message
+    /// Parameter definition indicates the message types in which it can appear.
+    /// If it appears in some other type of message, the receiving endpoint MUST
+    /// close the connection with a PROTOCOL_VIOLATION." draft-22 Section 9.20.1
+    /// adds "and each control message definition lists the parameters it
+    /// allows", says "If a parameter appears" and keeps the code, and
+    /// draft-23 Section 9.19.1 closes "with INVALID_PARAMETER".
     /// Draft-16 Section 9.2.2 and, under the older name Version Specific
     /// Parameters, drafts 07 through 15, end the same sentence "it MUST be
     /// ignored". Raising this on any of those ten would close a session over
@@ -197,9 +201,13 @@ pub enum CodecError {
     /// Both readings err toward carrying the parameter, which is the direction
     /// a rule that ends sessions should be wrong in.
     ///
+    /// The scope is checked when the parameter's type is read, before its
+    /// value, so a misplaced parameter is reported as this whatever its value.
+    ///
     /// `key` is the absolute parameter type after any delta encoding is
     /// resolved, and `message_type` is the type id off the wire, so a log names
-    /// the pair the sender actually wrote.
+    /// the pair the sender actually wrote. For a parameter inside
+    /// FILL_PARAMETERS it is the message that carries FILL_PARAMETERS.
     #[error("message parameter type {key} may not appear in message type {message_type}")]
     ParameterOutOfScope {
         /// The parameter type that was out of scope, absolute.
@@ -209,17 +217,32 @@ pub enum CodecError {
     },
     /// A Message Parameter carried a value outside the range its type allows.
     ///
-    /// Drafts 15 through 19 give several parameters a range and answer anything
+    /// Drafts 15 through 23 give several parameters a range and answer anything
     /// outside it with a close. GROUP_ORDER: "The allowed values are Ascending
     /// (0x1) or Descending (0x2). If an endpoint receives a value outside this
     /// range, it MUST close the session with PROTOCOL_VIOLATION." FORWARD says
-    /// the same of 0 and 1. Drafts 15 and 16 add SUBSCRIBER_PRIORITY — "The
-    /// range is restricted to 0-255" — which drafts 17 and later do not need,
-    /// having made the parameter a uint8 so that nothing outside the range can
-    /// be spelled. Draft-15 alone carries DYNAMIC_GROUPS as a Message Parameter,
+    /// the same of 0 and 1 through draft-22; draft-23 defines no FORWARD
+    /// parameter. Drafts 15 and 16 add SUBSCRIBER_PRIORITY — "The range is
+    /// restricted to 0-255" — which drafts 17 and later do not need, having
+    /// made the parameter a uint8 so that nothing outside the range can be
+    /// spelled. Draft-15 alone carries DYNAMIC_GROUPS as a Message Parameter,
     /// where "Values larger than 1 are a Protocol Violation"; draft-16 moved it
-    /// into the extension header namespace, which this codec carries as opaque
-    /// bytes.
+    /// into the extension header namespace, where it is
+    /// [`CodecError::TrackPropertyValueOutOfRange`]. Draft-16 alone holds the
+    /// DELIVERY_TIMEOUT parameter above 0. Drafts 20 through 23 add
+    /// INCLUDE_PROPERTIES, 0 or 1. Draft-23 adds PAUSED, 0 or 1, and closes
+    /// with INVALID_PARAMETER where the earlier drafts say PROTOCOL_VIOLATION.
+    ///
+    /// Draft-23 also reports here a LOCATION_FILTER (0x21) whose Location
+    /// Filter Type it does not assign. draft-23 Section 9.19.9: "If an endpoint
+    /// receives any other Location Filter Type, it MUST close the session with
+    /// INVALID_PARAMETER."
+    ///
+    /// Drafts 15 and 16 check a parameter only in the messages its section
+    /// names. draft-15 Section 9.2.1 and draft-16 Section 9.2.2: "If it appears
+    /// in some other type of message, it MUST be ignored." Drafts 17 and later
+    /// refuse such a parameter as [`CodecError::ParameterOutOfScope`] before
+    /// its value is read.
     ///
     /// Not draft-15's PUBLISHER_PRIORITY. It says "Priorities above 255 are
     /// invalid" and stops there, naming no consequence, where every parameter
@@ -233,15 +256,19 @@ pub enum CodecError {
     ///
     /// `key` is the absolute parameter type, after any delta encoding is
     /// resolved, so a log names the type the sender meant rather than the
-    /// increment it wrote.
+    /// increment it wrote. `message_type` is the id of the control message the
+    /// parameter arrived in. For a parameter inside FILL_PARAMETERS it is the
+    /// message that carries FILL_PARAMETERS.
     #[error(
-        "message parameter type {key} carries value {value}, which is outside the range it allows"
+        "message parameter type {key} carries value {value} in message type {message_type}, which is outside the range it allows"
     )]
     ParameterValueOutOfRange {
         /// The parameter type whose value was out of range, absolute.
         key: u64,
         /// The value as it arrived.
         value: u64,
+        /// The control message it arrived in, as its id on the wire.
+        message_type: u64,
     },
     /// A Track Extension or Track Property carried a value outside the range its
     /// type allows.
@@ -256,9 +283,10 @@ pub enum CodecError {
     /// would name a type without saying which table to read it in.
     ///
     /// Draft-16 states the rules of the extension header namespace and drafts
-    /// 17, 18 and 19 restate them of the Track Property namespace that replaced
+    /// 17 through 23 restate them of the Track Property namespace that replaced
     /// it. Two types restrict their range and answer anything outside it with a
-    /// close. DEFAULT_PUBLISHER_GROUP_ORDER: "The allowed values are Ascending
+    /// close, PROTOCOL_VIOLATION through draft-22 and MALFORMED_KEY_VALUE on
+    /// draft-23. DEFAULT_PUBLISHER_GROUP_ORDER: "The allowed values are Ascending
     /// (0x1) or Descending (0x2). If an endpoint receives a value outside this
     /// range, it MUST close the session with PROTOCOL_VIOLATION." DYNAMIC_GROUPS:
     /// "The allowed values are 0 or 1... If an endpoint receives a value larger
@@ -271,15 +299,19 @@ pub enum CodecError {
     /// OBJECT_DELIVERY_TIMEOUT and states no range for it, so the rule ends
     /// where the name does.
     ///
-    /// Not DEFAULT_PUBLISHER_PRIORITY, on any of the four. "Priorities above 255
-    /// are invalid" names no consequence, in a section where its neighbours
-    /// name one in the next clause. The same contrast excludes draft-15's
-    /// PUBLISHER_PRIORITY from [`CodecError::ParameterValueOutOfRange`], and it
-    /// is the draft's distinction both times.
+    /// DEFAULT_PUBLISHER_PRIORITY (0x0E) on draft-23 only.
+    /// draft-23 Section 10.4: "If an endpoint receives a value above 255, it MUST close the
+    /// session with MALFORMED_KEY_VALUE." Drafts 16 through 22 say "Priorities
+    /// above 255 are invalid" and name no consequence, in a section where its
+    /// neighbours name one in the next clause. The same contrast excludes
+    /// draft-15's PUBLISHER_PRIORITY from
+    /// [`CodecError::ParameterValueOutOfRange`].
     ///
-    /// `key` is the absolute type, after any delta encoding is resolved.
+    /// `key` is the absolute type, after any delta encoding is resolved, and
+    /// `message_type` is the id of the control message whose Track Properties
+    /// or Track Extensions carried it.
     #[error(
-        "track property type {key} carries value {value}, which is outside the range it allows"
+        "track property type {key} carries value {value} in message type {message_type}, which is outside the range it allows"
     )]
     TrackPropertyValueOutOfRange {
         /// The extension or property type whose value was out of range,
@@ -287,6 +319,8 @@ pub enum CodecError {
         key: u64,
         /// The value as it arrived.
         value: u64,
+        /// The control message it arrived in, as its id on the wire.
+        message_type: u64,
     },
     /// A Forward field carried a value other than zero or one.
     ///
@@ -297,24 +331,30 @@ pub enum CodecError {
     /// and MUST terminate the session with a Protocol Violation". PUBLISH, added
     /// in draft-12: "Any value other than 0 or 1 is a Protocol Violation."
     /// Draft-14 spells both codes PROTOCOL_VIOLATION and is otherwise unchanged.
+    /// TRACK_STATUS on drafts 13 and 14 has the SUBSCRIBE format
+    /// (draft-13 Section 8.20, draft-14 Section 9.20).
     ///
-    /// PUBLISH_OK, also from draft-12, is the one site that names no
-    /// consequence: "Forward: The Forward State for this subscription, either 0
-    /// (don't forward) or 1 (forward)." It is reported here all the same. The
-    /// field carries the same two values in every message that has one, three of
-    /// the four sites state the close outright, and the sentence enumerates 0
-    /// and 1 without giving a third value any meaning — so this is the same rule
-    /// stated shorter, not a permission. Reading an omission the other way is
-    /// how a wrong claim gets in: on Group Order, drafts 12 through 14 do state
-    /// the 0x0 rule for SUBSCRIBE_OK, PUBLISH and FETCH_OK, so a reading that has
-    /// them silent about it is wrong about all three.
+    /// PUBLISH_OK, also from draft-12, names the values and no consequence.
+    /// draft-12 Section 8.14: "Forward: The Forward State for this subscription,
+    /// either 0 (don't forward) or 1 (forward)." draft-13 Section 8.14 and
+    /// draft-14 Section 9.14 say the same. Any other value is reported here,
+    /// since the field defines none.
     ///
     /// Drafts 07 through 10 have no such field. Drafts 15 and later carry
     /// forwarding as the FORWARD parameter instead, under the same rule but a
     /// different serialization; that form is
     /// [`CodecError::ParameterValueOutOfRange`].
-    #[error("forward field carries {0}, which is neither zero nor one")]
-    InvalidForward(u8),
+    ///
+    /// `message_type` is the id of the message whose field it is.
+    #[error(
+        "forward field carries {value} in message type {message_type}, which is neither zero nor one"
+    )]
+    InvalidForward {
+        /// The value as it arrived.
+        value: u8,
+        /// The message it arrived in, as its id on the wire.
+        message_type: u64,
+    },
     /// A subscription filter names a Filter Type no draft in its range assigns.
     ///
     /// Every draft with a Filter Type states the rule, and they do not state
@@ -533,9 +573,11 @@ pub enum CodecError {
     /// read as Key-Value-Pairs: a property runs past the end of the block, or
     /// Immutable Properties hold another Immutable Properties.
     ///
-    /// Either one makes the Track malformed: draft-14 and draft-16 Section
-    /// 11.2, draft-15 Section 11.1, draft-17 Section 11.6, drafts 18-20 Section
-    /// 12.7, drafts 21-23 Section 10.7. No draft closes the session over it.
+    /// Either one makes the Track malformed: draft-14 Section 11.2,
+    /// draft-15 Section 11.1, draft-16 Section 11.2, draft-17 Section 11.6,
+    /// draft-18 Section 12.7, draft-19 Section 12.7, draft-20 Section 12.7,
+    /// draft-21 Section 10.7, draft-22 Section 10.7, draft-23 Section 10.7.
+    /// No draft closes the session over it.
     ///
     /// Raised by the readers that hand back a whole object. The framing readers
     /// a relay uses delimit the block by its length and never read inside it.
@@ -549,13 +591,16 @@ pub enum CodecError {
     /// An object arrived carrying a payload the draft gives it no room for.
     ///
     /// All the drafts state the rule, in two phrasings. Drafts 07 through
-    /// 18 say it of the status code — draft-07 Section 7.1.1.1, drafts 08 and
-    /// 09 Section 8.1.1.1, drafts 10 and 11 Section 9.1.1.1, drafts 12 and 13
-    /// Section 9.2.1.1, drafts 14 through 17 Section 10.2.1.1, draft-18 Section
-    /// 11.2.1.1: "Any object with a status code other than zero MUST have an
-    /// empty payload." Drafts 19 and 20 state it of a registry instead, both in
-    /// their Section 11.2.1.1: "An Object MUST have an empty payload unless its
-    /// Object Status value is registered as permitting a payload in the Object
+    /// 18 say it of the status code: draft-07 Section 7.1.1.1,
+    /// draft-08 Section 8.1.1.1, draft-09 Section 8.1.1.1,
+    /// draft-10 Section 9.1.1.1, draft-11 Section 9.1.1.1,
+    /// draft-12 Section 9.2.1.1, draft-13 Section 9.2.1.1,
+    /// draft-14 Section 10.2.1.1, draft-15 Section 10.2.1.1,
+    /// draft-16 Section 10.2.1.1, draft-17 Section 10.2.1.1,
+    /// draft-18 Section 11.2.1.1: "Any object with a status code other than zero
+    /// MUST have an empty payload." draft-19 Section 11.2.1.1 and
+    /// draft-20 Section 11.2.1.1 state it of a registry instead: "An Object MUST
+    /// have an empty payload unless its Object Status value is registered as permitting a payload in the Object
     /// Status registry (Section 15.9). Of the values defined in this document,
     /// only Normal (0x0) permits a payload." The two agree on every status those
     /// documents define and differ in what a later one may add.
@@ -699,22 +744,34 @@ pub enum CodecError {
     },
     /// A ContentExists field carried a value other than zero or one.
     ///
-    /// Drafts 07 through 13 all state it in the same words: "Content Exists: 1
-    /// if an object has been published on this track, 0 if not. If 0, then the
+    /// Drafts 07 through 14 state it for SUBSCRIBE_OK in one sentence: "1 if an
+    /// object has been published on this track, 0 if not. If 0, then the
     /// Largest Group ID and Largest Object ID fields will not be present. Any
     /// other value is a protocol error and MUST terminate the session with a
-    /// Protocol Violation". Draft-14 states the same sentence with the code
-    /// spelled PROTOCOL_VIOLATION. Draft-07 states it for SUBSCRIBE_OK
-    /// in Section 6.15 and SUBSCRIBE_DONE in Section 6.19; drafts 08 through 11
-    /// keep the SUBSCRIBE_OK site alone; drafts 12, 13 and 14 add PUBLISH.
+    /// Protocol Violation". Drafts 12 through 14 state it for PUBLISH too. The
+    /// field is "ContentExists" on drafts 07 through 10 and in the draft-12 and
+    /// draft-13 PUBLISH, and "Content Exists" elsewhere; draft-14 spells the
+    /// code PROTOCOL_VIOLATION. TRACK_STATUS_OK on drafts 13 and 14 has the
+    /// SUBSCRIBE_OK format (draft-13 Section 8.21, draft-14 Section 9.21).
+    /// draft-07 Section 6.19 states it for SUBSCRIBE_DONE as well, of "the
+    /// Final Group and Final Object fields".
     /// Draft-15 removed the field, replacing it with the presence or absence of
     /// a LARGEST_OBJECT parameter, so no draft from 15 on has one.
     ///
     /// The field is a single byte and it decides whether two more follow, so a
     /// value that is neither leaves a reader with no way to know where the
     /// message ends.
-    #[error("content exists field carries {0}, which is neither zero nor one")]
-    InvalidContentExists(u8),
+    ///
+    /// `message_type` is the id of the message whose field it is.
+    #[error(
+        "content exists field carries {value} in message type {message_type}, which is neither zero nor one"
+    )]
+    InvalidContentExists {
+        /// The value as it arrived.
+        value: u8,
+        /// The message it arrived in, as its id on the wire.
+        message_type: u64,
+    },
     /// A control message's declared Length disagrees with the fields it
     /// carries.
     ///

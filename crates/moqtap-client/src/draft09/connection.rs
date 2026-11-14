@@ -1683,7 +1683,7 @@ impl Connection {
             // A Content Exists field that is neither zero nor one,
             // Section 7.15: "Any other value is a protocol error and
             // MUST terminate the session with a Protocol Violation".
-            CodecError::InvalidContentExists(_) => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::InvalidContentExists { .. } => Some(SessionErrorCode::ProtocolViolation),
             CodecError::ParameterLengthMismatch(_) => {
                 Some(SessionErrorCode::ParameterLengthMismatch)
             }
@@ -1711,7 +1711,7 @@ impl Connection {
             // Not `InvalidForward`: draft-09 has no Forward field. Not
             // `ParameterValueOutOfRange`: no parameter this draft defines
             // restricts its value's range. Both arrive with drafts above.
-            CodecError::InvalidForward(_)
+            CodecError::InvalidForward { .. }
             | CodecError::ParameterValueOutOfRange { .. }
             | CodecError::UnexpectedEnd
             | CodecError::MessageTooLong(_)

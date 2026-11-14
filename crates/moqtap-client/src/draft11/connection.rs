@@ -1883,13 +1883,13 @@ impl Connection {
             // A Content Exists field that is neither zero nor one,
             // Section 8.8: "Any other value is a protocol error and
             // MUST terminate the session with a Protocol Violation".
-            CodecError::InvalidContentExists(_) => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::InvalidContentExists { .. } => Some(SessionErrorCode::ProtocolViolation),
             // A Forward field that is neither zero nor one, Section 8.7 and
             // Section 8.10: "Any other value is a protocol error and MUST
             // terminate the session with a Protocol Violation". Draft-11 is
             // where the field arrives, and it carries only these two sites;
             // PUBLISH and PUBLISH_OK add two more from draft-12.
-            CodecError::InvalidForward(_) => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::InvalidForward { .. } => Some(SessionErrorCode::ProtocolViolation),
             CodecError::UnknownStreamType(_) | CodecError::UnknownDatagramType(_) => {
                 Some(SessionErrorCode::ProtocolViolation)
             }

@@ -15,9 +15,9 @@ use moqtap_codec::dispatch::{
 use moqtap_codec::draft15::data_stream::{
     FetchHeader, FetchObjectHeader, FetchObjectReader, SubgroupObject, SubgroupObjectReader,
 };
-use moqtap_codec::draft15::message::ControlMessage;
+use moqtap_codec::draft15::message::{ControlMessage, MessageType};
 use moqtap_codec::error::CodecError;
-use moqtap_codec::kvp::KeyValuePair;
+use moqtap_codec::kvp::{KeyValuePair, KvpValue};
 use moqtap_codec::types::*;
 use moqtap_codec::varint::VarInt;
 use moqtap_codec::version::DraftVersion;
@@ -1226,6 +1226,19 @@ impl Connection {
                 raw: raw.clone(),
             });
         }
+        let refusal = match &any {
+            AnyControlMessage::Draft15(ControlMessage::RequestOk(ok))
+                if self.endpoint.sent_track_status(ok.request_id.into_inner()) =>
+            {
+                group_order_refusal(&ok.parameters)
+            }
+            _ => None,
+        };
+        if let Some(refusal) = refusal {
+            let err = self.close_for_codec(ConnectionError::Codec(refusal));
+            self.emit_refused(&err, raw);
+            return Err(err);
+        }
         // Unwrap to draft-15 for the endpoint
         match any {
             AnyControlMessage::Draft15(msg) => Ok((msg, raw)),
@@ -1471,7 +1484,8 @@ impl Connection {
     /// Accept a request the peer opened, sending REQUEST_OK.
     ///
     /// The endpoint refuses a second answer to one request, so nothing is
-    /// written on the wire when it does. On this draft an announcement, a track
+    /// written on the wire when it does, and neither is an answer to a
+    /// TRACK_STATUS whose GROUP_ORDER is not 1 or 2. On this draft an announcement, a track
     /// status and a namespace subscription are the requests REQUEST_OK
     /// accepts; a subscription, a publication and a fetch each have an
     /// acceptance of their own that carries more than this one can.
@@ -1480,6 +1494,11 @@ impl Connection {
         request_id: VarInt,
         parameters: Vec<KeyValuePair>,
     ) -> Result<(), ConnectionError> {
+        if self.endpoint.answers_track_status(request_id.into_inner()) {
+            if let Some(refusal) = group_order_refusal(&parameters) {
+                return Err(ConnectionError::Codec(refusal));
+            }
+        }
         let msg = self.endpoint.send_request_ok(request_id, parameters)?;
         self.send_control(&msg).await
     }
@@ -2305,8 +2324,8 @@ impl Connection {
             // FORWARD parameter, which carries the same rule in a different
             // shape and is answered above under its own variant; Content Exists
             // became the presence or absence of a LARGEST_OBJECT parameter.
-            CodecError::InvalidForward(_)
-            | CodecError::InvalidContentExists(_)
+            CodecError::InvalidForward { .. }
+            | CodecError::InvalidContentExists { .. }
             | CodecError::UnexpectedEnd
             | CodecError::MessageTooLong(_)
             | CodecError::VarInt(_)
@@ -2422,6 +2441,30 @@ fn malformed_track_condition(err: &ConnectionError) -> Option<MalformedTrackCond
 /// Determine the encoded length of a varint from its first byte.
 fn varint_len(first_byte: u8) -> usize {
     1 << (first_byte >> 6)
+}
+
+/// The refusal a REQUEST_OK answering a TRACK_STATUS earns for its
+/// GROUP_ORDER (0x22).
+///
+/// Section 9.2.1.6 scopes the parameter to "REQUEST_OK (in response to
+/// TRACK_STATUS)" and states: "The allowed values are Ascending (0x1) or
+/// Descending (0x2). If an endpoint receives a value outside this range, it
+/// MUST close the session with PROTOCOL_VIOLATION." Which request a
+/// REQUEST_OK answers is session state, so the codec carries the parameter
+/// unchecked and the range is checked here, on receipt and before sending.
+fn group_order_refusal(parameters: &[KeyValuePair]) -> Option<CodecError> {
+    const GROUP_ORDER: u64 = 0x22;
+    parameters.iter().find_map(|p| match &p.value {
+        KvpValue::Varint(v) if p.key.into_inner() == GROUP_ORDER => {
+            let value = v.into_inner();
+            (value != 1 && value != 2).then_some(CodecError::ParameterValueOutOfRange {
+                key: GROUP_ORDER,
+                value,
+                message_type: MessageType::RequestOk.id(),
+            })
+        }
+        _ => None,
+    })
 }
 
 #[cfg(test)]

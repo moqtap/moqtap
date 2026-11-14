@@ -2119,14 +2119,15 @@ impl Connection {
             // A Content Exists field that is neither zero nor one,
             // Section 8.8 and Section 8.13: "Any other value is a protocol
             // error and MUST terminate the session with a Protocol Violation".
-            CodecError::InvalidContentExists(_) => Some(SessionErrorCode::ProtocolViolation),
+            CodecError::InvalidContentExists { .. } => Some(SessionErrorCode::ProtocolViolation),
             // A Forward field that is neither zero nor one. Section 8.7 and
             // Section 8.10: "Any other value is a protocol error and MUST
             // terminate the session with a Protocol Violation". Section 8.13
             // says "Any value other than 0 or 1 is a Protocol Violation".
-            // Section 8.14 names the two legal values without a consequence and
-            // is answered the same way, for the reason given on the variant.
-            CodecError::InvalidForward(_) => Some(SessionErrorCode::ProtocolViolation),
+            // Section 8.14 gives PUBLISH_OK's field the two values and no
+            // consequence; it closes the same way, since the refused
+            // PUBLISH_OK leaves the PUBLISH unanswered.
+            CodecError::InvalidForward { .. } => Some(SessionErrorCode::ProtocolViolation),
             CodecError::UnknownStreamType(_) | CodecError::UnknownDatagramType(_) => {
                 Some(SessionErrorCode::ProtocolViolation)
             }

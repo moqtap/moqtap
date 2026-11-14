@@ -7881,6 +7881,18 @@ impl AnyConnection {
                 typed_filter_range(filter_type, &fields)
             }};
         }
+        // A LOCATION_FILTER read here arrived in a FETCH, which a refusal names.
+        #[allow(unused_macros)]
+        macro_rules! by_type_in_fetch {
+            ($value:expr, $module:ident) => {{
+                let (filter_type, fields) = moqtap_codec::$module::message::decode_location_filter(
+                    $value,
+                    moqtap_codec::$module::message::MessageType::Fetch,
+                )
+                .map_err(|e| AnyConnectionError::facade(e.to_string()))?;
+                typed_filter_range(filter_type, &fields)
+            }};
+        }
 
         match self {
             #[cfg(feature = "draft07")]
@@ -7959,7 +7971,7 @@ impl AnyConnection {
             ), redirect: None),
             #[cfg(feature = "draft23")]
             Self::Draft23(c) => request_stream!(c, Draft23, draft23, |f| filter_kind!(
-                f, draft23, by_type
+                f, draft23, by_type_in_fetch
             ), error_details: Vec::new()),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
