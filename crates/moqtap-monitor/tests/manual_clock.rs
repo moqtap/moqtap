@@ -77,7 +77,7 @@ async fn seals_follow(threaded: bool) {
     bodies.dedup_by(|a, b| a.preamble["seal"]["seq"] == b.preamble["seal"]["seq"]);
     let throughs: Vec<_> =
         bodies.iter().map(|b| b.preamble["seal"]["through_us"].clone()).collect();
-    assert_eq!(throughs.len(), 5, "four timed bodies and the final one");
+    assert_eq!(throughs.len(), 5, "four timed bodies and the final one: {throughs:?}");
     assert_eq!(throughs[..4], [15_000_000, 30_000_000, 45_000_000, 60_000_000]);
     let last = bodies.last().expect("final body");
     assert_eq!(last.end.as_deref(), Some("shutdown"));

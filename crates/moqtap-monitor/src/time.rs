@@ -22,6 +22,18 @@ impl Clock {
         }
     }
 
+    /// The monotonic instant and the wall time, read together so that a
+    /// manual clock's advance cannot fall between them and read as a break.
+    pub(crate) fn now_and_wall(&self) -> (Instant, Option<i64>) {
+        match self {
+            Clock::System => (Instant::now(), self.wall_us()),
+            Clock::Manual(m) => {
+                let (mono, wall) = m.mono_and_wall_us();
+                (m.instant_at(mono), Some(wall))
+            }
+        }
+    }
+
     /// Wall time, µs since 1970.
     pub(crate) fn wall_us(&self) -> Option<i64> {
         match self {
@@ -166,8 +178,12 @@ impl TestClock {
 
     /// Wall µs since 1970.
     pub fn wall_us(&self) -> i64 {
+        self.mono_and_wall_us().1
+    }
+
+    fn mono_and_wall_us(&self) -> (i64, i64) {
         let s = self.state();
-        self.inner.wall0_us.saturating_add(s.mono_us).saturating_add(s.wall_step_us)
+        (s.mono_us, self.inner.wall0_us.saturating_add(s.mono_us).saturating_add(s.wall_step_us))
     }
 
     /// The instant at monotonic `mono_us`.

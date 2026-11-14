@@ -425,8 +425,7 @@ impl MonitorBuilder {
 
         let clock = self.clock.map_or(Clock::System, Clock::Manual);
         let res_us = clock.resolution_us();
-        let start = clock.now();
-        let wall = clock.wall_us();
+        let (start, wall) = clock.now_and_wall();
         let mut collector = Collector::new(self.interval.as_millis() as u64);
         collector.observe(0, wall);
         let shared = Arc::new(Shared {
@@ -515,8 +514,7 @@ impl Monitor {
         if self.shared.shutting_down.load(Ordering::SeqCst) {
             return Err(Error::Stopped);
         }
-        let mono = self.shared.mono_us();
-        let wall = self.shared.wall_us();
+        let (mono, wall) = self.shared.mono_and_wall_us();
         let mut c = self.shared.collector();
         if c.stopped {
             return Err(Error::Stopped);
@@ -737,9 +735,8 @@ impl Connection {
         at: Option<Instant>,
         f: impl FnOnce(&mut Collector, i64) -> Result<Wake, Refused>,
     ) -> Result<(), Rejected> {
-        let mono = self.shared.mono_us();
+        let (mono, wall) = self.shared.mono_and_wall_us();
         let at_us = at.map_or(mono, |a| self.shared.mono_of(a));
-        let wall = self.shared.wall_us();
         let (first, r) = {
             let mut c = self.shared.collector();
             let first = c.observe(mono, wall);

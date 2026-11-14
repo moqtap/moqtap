@@ -170,6 +170,13 @@ impl Shared {
         self.mono_of(self.clock.now())
     }
 
+    /// Monotonic µs since the monitor started, and wall µs since 1970, read
+    /// together.
+    pub(crate) fn mono_and_wall_us(&self) -> (i64, Option<i64>) {
+        let (at, wall) = self.clock.now_and_wall();
+        (self.mono_of(at), wall)
+    }
+
     pub(crate) fn mono_of(&self, at: Instant) -> i64 {
         match at.checked_duration_since(self.start) {
             Some(d) => i64::try_from(d.as_micros()).unwrap_or(i64::MAX),
@@ -183,10 +190,6 @@ impl Shared {
 
     pub(crate) fn outbox(&self) -> MutexGuard<'_, Outbox> {
         self.outbox.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    pub(crate) fn wall_us(&self) -> Option<i64> {
-        self.clock.wall_us()
     }
 
     /// Wake the sealer to pack what the collector has cut.
@@ -238,9 +241,9 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
         let is_final = tokio::select! {
             _ = shared.clock.sleep_until(deadline) => {
                 timer_from = shared.clock.now();
-                let mono = shared.mono_us();
+                let (mono, wall) = shared.mono_and_wall_us();
                 let mut c = shared.collector();
-                c.observe(mono, shared.wall_us());
+                c.observe(mono, wall);
                 // A due seal makes a body even with nothing in it, so the
                 // time the last body stated holds.
                 c.cut_due(mono);
@@ -253,9 +256,9 @@ pub(crate) async fn sealer(shared: Arc<Shared>) {
         seen = shared.clock.seal_requests();
         let is_final = is_final || shared.shutting_down.load(Ordering::SeqCst);
         if is_final {
-            let mono = shared.mono_us();
+            let (mono, wall) = shared.mono_and_wall_us();
             let mut c = shared.collector();
-            c.observe(mono, shared.wall_us());
+            c.observe(mono, wall);
             c.cut(mono, true);
             c.stopped = true;
         }
@@ -484,8 +487,7 @@ async fn exchange_with(
         Some(Ok(resp)) => resp,
         _ => return None,
     };
-    let t4 = shared.mono_us();
-    let wall = shared.wall_us();
+    let (t4, wall) = shared.mono_and_wall_us();
     let status = resp.status();
     let headers = resp.headers().clone();
     let int = |name: &str| -> Option<i64> { headers.get(name)?.to_str().ok()?.trim().parse().ok() };
