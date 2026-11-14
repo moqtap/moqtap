@@ -1207,3 +1207,28 @@ fn a_first_fetch_object_that_references_a_prior_object_is_refused_on_drafts_15_t
         );
     }
 }
+
+/// End of Group or End of Track as a draft-23 fetch stream's first entry has
+/// no prior Object to end (draft-23 Section 11.4.2.2); each of the three
+/// facade reads reports `FetchEndMarkerFirst`.
+#[test]
+fn a_draft23_fetch_stream_opening_with_an_end_marker_is_its_own_error() {
+    if !enabled_drafts().contains(&DraftVersion::Draft23) {
+        return;
+    }
+    let draft = DraftVersion::Draft23;
+    for flags in [0x80u64, 0x81] {
+        let mut stream = Wire::new(draft, false).fetch_header();
+        // A two-byte vi64: 0x80 and 0x81 need more than seven bits.
+        stream.extend_from_slice(&[0x80, flags as u8]);
+        let expected = CodecError::FetchEndMarkerFirst { serialization_flags: flags };
+
+        let mut cursor: &[u8] = &stream;
+        let header = AnyFetchHeader::decode_stream(draft, &mut cursor).unwrap();
+        let body = cursor;
+        let reader = || AnyFetchObjectReader::new(&header, AnyFetchGroupOrder::Ascending).unwrap();
+        assert_eq!(reader().read_object(&mut &body[..]).err(), Some(expected.clone()));
+        assert_eq!(reader().read_object_frame(&mut &body[..]).err(), Some(expected.clone()));
+        assert_eq!(reader().read_object_meta(&mut &body[..]).err(), Some(expected));
+    }
+}

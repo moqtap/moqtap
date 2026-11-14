@@ -2032,6 +2032,12 @@ impl Connection {
         self.transport.transport_close()
     }
 
+    /// The smallest round-trip time seen on this path, ignoring ack delay.
+    /// `None` until the peer has acknowledged a packet.
+    pub fn min_rtt(&self) -> Option<std::time::Duration> {
+        self.transport.min_rtt()
+    }
+
     /// Emit an event to the observer, if one is attached.
     fn emit(&self, event: ClientEvent) {
         if let Some(ref obs) = self.observer {
@@ -3976,10 +3982,20 @@ impl Connection {
             // A `Connection` is always the client, so the SETUP that carried
             // the token is the server's, and Section 9.1.4's ROLE_VIOLATION
             // ("If a server receives Alias Type DELETE (0x0) or USE_ALIAS (0x2)
-            // in a SETUP message") is not this endpoint's to send. No Alias is
-            // registered before SETUP, and Section 8.9: "The receiver of a
-            // message referencing an Alias that is not currently registered
-            // MUST reject the message with UNKNOWN_AUTH_TOKEN_ALIAS."
+            // in a SETUP message") is not this endpoint's to send. Section 8.9:
+            // "The receiver of a message referencing an Alias that is not
+            // currently registered MUST reject the message with
+            // UNKNOWN_AUTH_TOKEN_ALIAS."
+            CodecError::UnregisteredTokenAliasInSetup { .. } => {
+                Some(SessionErrorCode::UnknownAuthTokenAlias)
+            }
+            // An earlier REGISTER in the same SETUP carries the Alias, but the
+            // client keeps no Alias cache and acts on the default
+            // MAX_AUTH_TOKEN_CACHE_SIZE. Section 9.1.3: "The default value is 0
+            // which prohibits the use of token Aliases." For a REGISTER over
+            // it, Section 9.1.4: "it MUST treat the option as Alias Type
+            // USE_VALUE." The Alias is then not registered, and Section 8.9
+            // applies as above.
             CodecError::TokenAliasInSetup { .. } => Some(SessionErrorCode::UnknownAuthTokenAlias),
             // Section 9.3: "If an endpoint receives Track Properties in one of
             // these messages it MUST close the session with INVALID_FIELD."
@@ -3994,10 +4010,11 @@ impl Connection {
             | CodecError::InvalidDatagramTypeValue { .. } => {
                 Some(SessionErrorCode::InvalidStreamHeader)
             }
-            // Section 11.4.1, Section 11.4.1.1 and Section 11.4.2.2: an
-            // undefined Serialization Flags value above 127, and an entry that
-            // refers to a prior Object there is none of, each "MUST close the
-            // session with MALFORMED_OBJECT".
+            // Section 11.4.1, Section 11.4.1.1 and Section 11.4.2.2: an undefined
+            // Serialization Flags value above 127, a first Object whose flags
+            // reference fields in the prior Object, and a flag that references
+            // the prior Subgroup ID or Priority when there was no prior Object,
+            // each "MUST close the session with MALFORMED_OBJECT".
             CodecError::MalformedObject { .. } => Some(SessionErrorCode::MalformedObject),
             // Section 11.1.1: "If an endpoint receives any other value, it
             // SHOULD close the session with INVALID_OBJECT_STATUS (Section
@@ -4012,6 +4029,10 @@ impl Connection {
             // cancel any corresponding subscription or fetches for that Track
             // from that publisher".
             CodecError::MalformedTrack { .. }
+            // End of Group or End of Track first on a fetch stream:
+            // Section 11.4.2.2 defines both by a prior Object, and no sentence
+            // states what a receiver does when there is none.
+            | CodecError::FetchEndMarkerFirst { .. }
             | CodecError::MalformedObjectProperties { .. }
             // Section 11.1.1 states the payload rule as a MUST on the sender and
             // names no receiver action.
@@ -4838,11 +4859,14 @@ mod accept_on_the_wire {
         };
         let (client, (peer, _ours)) = tokio::join!(connect_client(addr), peer);
         match client {
-            Err(ConnectionError::Codec(CodecError::TokenAliasInSetup { alias_type: 0 })) => {}
-            Err(other) => panic!("expected TokenAliasInSetup, got {other}"),
+            Err(ConnectionError::Codec(CodecError::UnregisteredTokenAliasInSetup {
+                alias_type: 0,
+                alias: 0,
+            })) => {}
+            Err(other) => panic!("expected UnregisteredTokenAliasInSetup, got {other}"),
             Ok(_) => panic!("the client accepted a SETUP that names an Alias"),
         }
-        assert_closed_with(&peer, UNKNOWN_AUTH_TOKEN_ALIAS, "Alias Type").await;
+        assert_closed_with(&peer, UNKNOWN_AUTH_TOKEN_ALIAS, "not registered").await;
     }
 
     /// A peer's SUBSCRIBE is accepted, answered on the stream it arrived on,

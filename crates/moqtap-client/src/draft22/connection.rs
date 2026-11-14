@@ -1944,6 +1944,12 @@ impl Connection {
         self.transport.transport_close()
     }
 
+    /// The smallest round-trip time seen on this path, ignoring ack delay.
+    /// `None` until the peer has acknowledged a packet.
+    pub fn min_rtt(&self) -> Option<std::time::Duration> {
+        self.transport.min_rtt()
+    }
+
     /// Emit an event to the observer, if one is attached.
     fn emit(&self, event: ClientEvent) {
         if let Some(ref obs) = self.observer {
@@ -3979,11 +3985,13 @@ impl Connection {
             | CodecError::MissingErrorDetail { .. }
             | CodecError::MalformedErrorDetail { .. }
             | CodecError::TokenAliasInSetup { .. }
+            | CodecError::UnregisteredTokenAliasInSetup { .. }
             | CodecError::EmptyTrackName
             | CodecError::MalformedAuthToken { .. }
             | CodecError::TrackPropertiesNotPermitted
             | CodecError::DeltaDecodingOverflow { .. }
             | CodecError::MalformedObject { .. }
+            | CodecError::FetchEndMarkerFirst { .. }
             | CodecError::UnknownObjectStatus(_)
             | CodecError::UnsupportedDraft(_)
             | CodecError::Kvp(

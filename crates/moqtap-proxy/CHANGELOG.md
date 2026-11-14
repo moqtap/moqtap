@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-14
+
+### Changed
+
+- **Breaking.** Requires `moqtap-codec` and `moqtap-client` 0.12.0 (was 0.11.1 and 0.11.2), and `quinn` 0.11.12 (was 0.11). `ProxyError::Codec` carries the new `CodecError`.
+
 ## [0.13.0] - 2026-11-04
 
 ### Changed

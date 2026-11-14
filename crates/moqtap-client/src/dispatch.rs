@@ -141,6 +141,19 @@ macro_rules! dispatch_all {
                 }
             }
 
+            /// The smallest round-trip time seen on this path, ignoring ack
+            /// delay. `None` until the peer has acknowledged a packet.
+            pub fn min_rtt(&self) -> Option<std::time::Duration> {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(c) => c.min_rtt(),
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => None,
+                }
+            }
+
             /// Close the connection with the given application error code
             /// and reason.
             #[allow(unused_variables)]
@@ -1830,7 +1843,9 @@ pub enum AnyArrival {
     /// SUBSCRIBE: a response to one of this side's own requests, or something
     /// sent unprompted such as MAX_REQUEST_ID. It has already been dispatched
     /// into the endpoint by the time it arrives here, so the session's state is
-    /// correct whether the caller reads it or not.
+    /// correct whether the caller reads it or not. A FETCH on drafts 08-16 has
+    /// already been refused with NOT_SUPPORTED, as [`AnyConnection::recv_inbound`]
+    /// describes.
     ///
     /// From draft-17 it is a request of a kind this facade has no entry point
     /// for, and **it has already been refused**: REQUEST_ERROR with
@@ -1881,6 +1896,22 @@ pub struct AnyObject {
     /// and it is the answer the wire gives rather than the one a particular
     /// draft's struct happens to hold.
     pub status: Option<u64>,
+}
+
+/// Whether a stream [`AnyConnection::open_subgroup`] opens begins its subgroup.
+///
+/// draft-18 Section 2.2, unchanged through draft-23 Section 2.2: "When the
+/// Original Publisher opens a new subgroup, it MUST set the FIRST_OBJECT bit".
+/// Drafts 07-17 define no such bit, and the two values write the same header
+/// there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubgroupStart {
+    /// The stream opens a new subgroup: its first object is the first ever
+    /// published in that subgroup. Sets FIRST_OBJECT on drafts 18-23.
+    First,
+    /// The stream continues a subgroup an earlier stream began. Leaves
+    /// FIRST_OBJECT clear.
+    Later,
 }
 
 /// A subgroup stream this endpoint opened and is writing objects to.
@@ -2214,6 +2245,28 @@ impl AnySubgroupWriter {
             ] => |s, _draft| {
                 s.finish().await.map_err(AnyConnectionError::from)
             },
+        }
+    }
+
+    /// Abandon the stream, handing the peer `code` as the `RESET_STREAM`
+    /// application error code.
+    ///
+    /// [`Self::finish`] and dropping both end the stream cleanly; this is the
+    /// only way to tell the peer the subgroup was cut short.
+    // A build with no draft feature reads `code` nowhere.
+    #[allow(unused_variables)]
+    pub fn reset(&mut self, code: u64) -> Result<(), AnyConnectionError> {
+        data_stream_dispatch! {
+            AnySubgroupWriter, self,
+            [
+                Draft07 @ "draft07", Draft08 @ "draft08", Draft09 @ "draft09",
+                Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
+                Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
+                Draft16 @ "draft16", Draft17 @ "draft17", Draft18 @ "draft18",
+                Draft19 @ "draft19", Draft20 @ "draft20", Draft21 @ "draft21",
+                Draft22 @ "draft22",
+                Draft23 @ "draft23",
+            ] => |s, _draft| s.reset(code).map_err(AnyConnectionError::from),
         }
     }
 }
@@ -3952,7 +4005,7 @@ impl AnyConnection {
                 .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
-                "subscribe: not yet wired up for draft {:?} via AnyConnection",
+                "subscribe: draft {:?} is not served by AnyConnection",
                 other.draft()
             ))),
         }
@@ -4298,7 +4351,7 @@ impl AnyConnection {
             }
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
-                "subscribe_range: not yet wired up for draft {:?} via AnyConnection",
+                "subscribe_range: draft {:?} is not served by AnyConnection",
                 other.draft()
             ))),
         }
@@ -4647,7 +4700,7 @@ impl AnyConnection {
             }
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
-                "fetch: not yet wired up for draft {:?} via AnyConnection",
+                "fetch: draft {:?} is not served by AnyConnection",
                 other.draft()
             ))),
         }
@@ -4950,7 +5003,7 @@ impl AnyConnection {
             )),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
-                "fetch_joining: not yet wired up for draft {:?} via AnyConnection",
+                "fetch_joining: draft {:?} is not served by AnyConnection",
                 other.draft()
             ))),
         }
@@ -5102,7 +5155,7 @@ impl AnyConnection {
                 .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
-                "track_status: not yet wired up for draft {:?} via AnyConnection",
+                "track_status: draft {:?} is not served by AnyConnection",
                 other.draft()
             ))),
         }
@@ -5216,7 +5269,7 @@ impl AnyConnection {
                 .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
-                "subscribe_namespace: not yet wired up for draft {:?} via AnyConnection",
+                "subscribe_namespace: draft {:?} is not served by AnyConnection",
                 other.draft()
             ))),
         }
@@ -5352,7 +5405,7 @@ impl AnyConnection {
                 .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
-                "publish_namespace: not yet wired up for draft {:?} via AnyConnection",
+                "publish_namespace: draft {:?} is not served by AnyConnection",
                 other.draft()
             ))),
         }
@@ -5817,120 +5870,38 @@ impl AnyConnection {
     ///
     /// Every message is dispatched into the endpoint before it is returned, so
     /// the session's state is correct whether the caller inspects it or not.
-    #[allow(unused_variables)]
+    ///
+    /// # A FETCH is refused
+    ///
+    /// On drafts 08-23 a FETCH is refused with NOT_SUPPORTED and returned as
+    /// [`AnyArrival::Other`], so that it is answered exactly once
+    /// (draft-08 Section 4.3, draft-23 Section 3.2). A Joining Fetch for a
+    /// subscription this session cannot join is refused with the draft's
+    /// Invalid Joining code instead. Draft-07 defines no FETCH_ERROR codes, so
+    /// a FETCH there is returned unanswered.
+    /// [`AnyConnection::recv_inbound_serving_fetch`] hands a FETCH over to be
+    /// served.
     pub async fn recv_inbound(&mut self) -> Result<AnyArrival, AnyConnectionError> {
-        // Used only by the per-draft arms below, so a build with no draft
-        // feature enabled — the `<zero drafts>` row of `just draft-matrix`,
-        // which exists to prove the crate still compiles with nothing
-        // selected — compiles this import and reaches no arm that reads it.
-        #[allow(unused_imports)]
-        use moqtap_codec::dispatch::AnyControlMessage;
-
-        let draft = self.draft();
-
-        // The shared-control-stream drafts, whose only difference here is what
-        // their SUBSCRIBE calls the field holding the peer's Request ID:
-        // `subscribe_id` up to draft-10 and `request_id` from draft-11. The id
-        // is read out before the message is wrapped, because wrapping moves it.
-        #[allow(unused_macros)]
-        macro_rules! control_plane {
-            ($conn:ident, $version:ident, $module:ident, $id_field:ident) => {{
-                let message = $conn.recv_and_dispatch().await.map_err(AnyConnectionError::from)?;
-                let request_id = match &message {
-                    moqtap_codec::$module::message::ControlMessage::Subscribe(s) => {
-                        Some(s.$id_field)
-                    }
-                    _ => None,
-                };
-                let message = AnyControlMessage::$version(message);
-                Ok(match request_id {
-                    Some(request_id) => AnyArrival::Subscribe {
-                        message,
-                        request: AnyInboundRequest::ControlPlane { request_id, draft },
-                    },
-                    None => AnyArrival::Other(message),
-                })
-            }};
-        }
-
-        // The request-stream drafts. A request this facade cannot answer is
-        // refused with REQUEST_ERROR NOT_SUPPORTED and its stream finished —
-        // see [`AnyArrival::Other`]. `$extra` fills the fields REQUEST_ERROR
-        // gained after draft-17.
-        #[allow(unused_macros)]
-        macro_rules! request_stream {
-            ($conn:ident, $version:ident, $module:ident $(, $extra:ident: $value:expr)*) => {{
-                let (message, mut stream) =
-                    $conn.accept_request_stream().await.map_err(AnyConnectionError::from)?;
-                let subscribe =
-                    matches!(message, moqtap_codec::$module::message::ControlMessage::Subscribe(_));
-                let message = AnyControlMessage::$version(message);
-                if subscribe {
-                    return Ok(AnyArrival::Subscribe {
-                        message,
-                        request: AnyInboundRequest::$version(stream),
-                    });
+        Ok(match self.recv_inbound_serving_fetch().await? {
+            AnyServedArrival::Subscribe { message, request } => {
+                AnyArrival::Subscribe { message, request }
+            }
+            AnyServedArrival::Other(message) => AnyArrival::Other(message),
+            AnyServedArrival::Fetch { message, mut request } => {
+                // The endpoint accepts only the Invalid Joining code for a
+                // Joining Fetch for a subscription this session cannot join,
+                // so a failed NOT_SUPPORTED is retried with it. If that fails
+                // too, the handle's drop resets the stream on drafts 17-23, so
+                // it is not this call's error.
+                if self.refuse_fetch(&mut request, FetchRefusal::NotSupported, b"").await.is_err()
+                    && matches!(request.kind(), InboundFetchKind::Joining { .. })
+                {
+                    let _ =
+                        self.refuse_fetch(&mut request, FetchRefusal::InvalidJoining, b"").await;
                 }
-                let refusal = moqtap_codec::$module::message::RequestError {
-                    error_code: moqtap_codec::varint::VarInt::from_u64(
-                        moqtap_codec::$module::error_codes::RequestErrorCode::NotSupported as u64,
-                    )
-                    .expect("a request error code fits a varint"),
-                    retry_interval: moqtap_codec::varint::VarInt::from_u64(0).expect("zero fits a varint"),
-                    reason_phrase: Vec::new(),
-                    $($extra: $value,)*
-                };
-                // A failed answer falls back to the reset the handle's drop
-                // sends, so it is not this call's error.
-                let _ = $conn.respond_error(&mut stream, refusal).await;
-                Ok(AnyArrival::Other(message))
-            }};
-        }
-
-        match self {
-            #[cfg(feature = "draft07")]
-            Self::Draft07(c) => control_plane!(c, Draft07, draft07, subscribe_id),
-            #[cfg(feature = "draft08")]
-            Self::Draft08(c) => control_plane!(c, Draft08, draft08, subscribe_id),
-            #[cfg(feature = "draft09")]
-            Self::Draft09(c) => control_plane!(c, Draft09, draft09, subscribe_id),
-            #[cfg(feature = "draft10")]
-            Self::Draft10(c) => control_plane!(c, Draft10, draft10, subscribe_id),
-            #[cfg(feature = "draft11")]
-            Self::Draft11(c) => control_plane!(c, Draft11, draft11, request_id),
-            #[cfg(feature = "draft12")]
-            Self::Draft12(c) => control_plane!(c, Draft12, draft12, request_id),
-            #[cfg(feature = "draft13")]
-            Self::Draft13(c) => control_plane!(c, Draft13, draft13, request_id),
-            #[cfg(feature = "draft14")]
-            Self::Draft14(c) => control_plane!(c, Draft14, draft14, request_id),
-            #[cfg(feature = "draft15")]
-            Self::Draft15(c) => control_plane!(c, Draft15, draft15, request_id),
-            // Draft-16 gave a stream to namespace subscriptions and to nothing
-            // else, so an inbound SUBSCRIBE is still a control-stream message
-            // here and the handle is still a `ControlPlane`.
-            #[cfg(feature = "draft16")]
-            Self::Draft16(c) => control_plane!(c, Draft16, draft16, request_id),
-            #[cfg(feature = "draft17")]
-            Self::Draft17(c) => request_stream!(c, Draft17, draft17),
-            #[cfg(feature = "draft18")]
-            Self::Draft18(c) => request_stream!(c, Draft18, draft18, redirect: None),
-            #[cfg(feature = "draft19")]
-            Self::Draft19(c) => request_stream!(c, Draft19, draft19, redirect: None),
-            #[cfg(feature = "draft20")]
-            Self::Draft20(c) => request_stream!(c, Draft20, draft20, redirect: None),
-            #[cfg(feature = "draft21")]
-            Self::Draft21(c) => request_stream!(c, Draft21, draft21, redirect: None),
-            #[cfg(feature = "draft22")]
-            Self::Draft22(c) => request_stream!(c, Draft22, draft22, redirect: None),
-            #[cfg(feature = "draft23")]
-            Self::Draft23(c) => request_stream!(c, Draft23, draft23, error_details: Vec::new()),
-            #[allow(unreachable_patterns)]
-            other => Err(AnyConnectionError::facade(format!(
-                "recv_inbound: not yet wired up for draft {:?} via AnyConnection",
-                other.draft()
-            ))),
-        }
+                AnyArrival::Other(message)
+            }
+        })
     }
 
     /// Answer a peer's SUBSCRIBE with SUBSCRIBE_OK. Supported on **every draft
@@ -6220,13 +6191,15 @@ impl AnyConnection {
     /// * **Draft-14** folds the type into the header as a flag word, and the
     ///   Subgroup ID becomes an `Option` that must agree with it — a type
     ///   saying a field follows, with no field, is refused.
-    /// * **Drafts 15 through 20** replace the flags with a type byte:
+    /// * **Drafts 15 through 23** replace the flags with a type byte:
     ///   `0x14` is the subgroup base `0x10`, plus `0x04` for an explicit
     ///   Subgroup ID, with the extension bit `0x01` clear, the end-of-group
-    ///   bit `0x08` clear, and the no-priority bit `0x20` clear. Drafts 15 and
-    ///   16 read those two ID bits as a pair of table columns and drafts 17
-    ///   through 20 call them a SUBGROUP_ID_MODE field, which is a difference
-    ///   in wording and not in bytes.
+    ///   bit `0x08` clear, and the no-priority bit `0x20` clear. Draft-15
+    ///   reads those two ID bits as a pair of table columns and drafts 16
+    ///   through 23 call them a SUBGROUP_ID_MODE field, which is a difference
+    ///   in wording and not in bytes. Drafts 18 through 23 add the
+    ///   FIRST_OBJECT bit `0x40`, set for [`SubgroupStart::First`], so the
+    ///   byte is `0x54` there and `0x14` for [`SubgroupStart::Later`].
     ///
     /// # Why the extension block is not an argument
     ///
@@ -6251,6 +6224,10 @@ impl AnyConnection {
     /// Nothing checks that `track_alias` names a track this session agreed to
     /// publish, because a probe measuring a relay may want to send objects for
     /// one it did not.
+    ///
+    /// `start` says whether this stream begins the subgroup. The facade keeps
+    /// no per-track state, so the caller states it; drafts 07-17 have no field
+    /// for it and ignore it.
     #[allow(unused_variables)]
     pub async fn open_subgroup(
         &self,
@@ -6258,6 +6235,7 @@ impl AnyConnection {
         group_id: u64,
         subgroup_id: u64,
         publisher_priority: u8,
+        start: SubgroupStart,
     ) -> Result<AnySubgroupWriter, AnyConnectionError> {
         // Used only by the per-draft arms below, so a build with no draft
         // feature enabled — the `<zero drafts>` row of `just draft-matrix`,
@@ -6272,6 +6250,11 @@ impl AnyConnection {
             .map_err(|e| AnyConnectionError::facade(format!("group id {group_id}: {e}")))?;
         let subgroup = VarInt::from_u64(subgroup_id)
             .map_err(|e| AnyConnectionError::facade(format!("subgroup id {subgroup_id}: {e}")))?;
+        // Read by the drafts 18-23 arms only.
+        let flagged_type: u8 = match start {
+            SubgroupStart::First => 0x54,
+            SubgroupStart::Later => 0x14,
+        };
 
         #[allow(unused_macros)]
         macro_rules! open {
@@ -6422,7 +6405,7 @@ impl AnyConnection {
                 c,
                 Draft18,
                 moqtap_codec::draft18::data_stream::SubgroupHeader {
-                    header_type: 0x14,
+                    header_type: flagged_type,
                     track_alias: alias,
                     group_id: group,
                     subgroup_id: subgroup,
@@ -6434,7 +6417,7 @@ impl AnyConnection {
                 c,
                 Draft19,
                 moqtap_codec::draft19::data_stream::SubgroupHeader {
-                    header_type: 0x14,
+                    header_type: flagged_type,
                     track_alias: alias,
                     group_id: group,
                     subgroup_id: subgroup,
@@ -6446,7 +6429,7 @@ impl AnyConnection {
                 c,
                 Draft20,
                 moqtap_codec::draft20::data_stream::SubgroupHeader {
-                    header_type: 0x14,
+                    header_type: flagged_type,
                     track_alias: alias,
                     group_id: group,
                     subgroup_id: subgroup,
@@ -6458,7 +6441,7 @@ impl AnyConnection {
                 c,
                 Draft21,
                 moqtap_codec::draft21::data_stream::SubgroupHeader {
-                    header_type: 0x14,
+                    header_type: flagged_type,
                     track_alias: alias,
                     group_id: group,
                     subgroup_id: subgroup,
@@ -6470,7 +6453,7 @@ impl AnyConnection {
                 c,
                 Draft22,
                 moqtap_codec::draft22::data_stream::SubgroupHeader {
-                    header_type: 0x14,
+                    header_type: flagged_type,
                     track_alias: alias,
                     group_id: group,
                     subgroup_id: subgroup,
@@ -6482,7 +6465,7 @@ impl AnyConnection {
                 c,
                 Draft23,
                 moqtap_codec::draft23::data_stream::SubgroupHeader {
-                    header_type: 0x14,
+                    header_type: flagged_type,
                     track_alias: alias,
                     group_id: group,
                     subgroup_id: subgroup,
@@ -6736,10 +6719,1668 @@ impl AnyConnection {
                 .map_err(AnyConnectionError::from),
             #[allow(unreachable_patterns)]
             other => Err(AnyConnectionError::facade(format!(
-                "subscribe_update: not yet wired up for draft {:?} via AnyConnection",
+                "subscribe_update: draft {:?} is not served by AnyConnection",
                 other.draft()
             ))),
         }
+    }
+}
+
+/// What arrived from the peer, for a caller that serves FETCH as well as
+/// SUBSCRIBE.
+///
+/// [`AnyConnection::recv_inbound_serving_fetch`] returns one of these per
+/// message. `Subscribe` and `Other` mean what they mean on [`AnyArrival`]; the
+/// difference is that a FETCH is handed over instead of being refused.
+#[allow(clippy::large_enum_variant)]
+pub enum AnyServedArrival {
+    /// The peer subscribed to a track this session publishes. See
+    /// [`AnyArrival::Subscribe`].
+    Subscribe {
+        /// The SUBSCRIBE, decoded by the negotiated draft.
+        message: moqtap_codec::dispatch::AnyControlMessage,
+        /// The handle to answer it through.
+        request: AnyInboundRequest,
+    },
+    /// The peer asked for Objects of a track this session publishes.
+    ///
+    /// Answer it once, with [`AnyConnection::answer_fetch`] or
+    /// [`AnyConnection::refuse_fetch`]. draft-23 Section 3.2: "The publisher
+    /// MUST send exactly one FETCH_OK or FETCH_ERROR in response to a FETCH."
+    /// draft-23 Section 1.5 uses those names as shorthand for a REQUEST_OK and
+    /// a REQUEST_ERROR sent in response to a FETCH.
+    Fetch {
+        /// The FETCH, decoded by the negotiated draft.
+        message: moqtap_codec::dispatch::AnyControlMessage,
+        /// The handle to answer and serve it through.
+        request: AnyInboundFetch,
+    },
+    /// Anything else the peer sent. See [`AnyArrival::Other`].
+    Other(moqtap_codec::dispatch::AnyControlMessage),
+}
+
+/// A FETCH the peer sent, read into the terms every draft from 11 on shares.
+///
+/// Dropping it on drafts 17-23 before [`AnyInboundFetch::finish`] resets the
+/// request stream, which the peer reads as a cancellation
+/// (draft-23 Section 6.4.2.3). After `finish` it does nothing. On drafts
+/// 11-16 the request is a control-stream message and dropping it sends
+/// nothing.
+#[must_use = "a FETCH is answered exactly once, with answer_fetch or refuse_fetch"]
+pub struct AnyInboundFetch {
+    request: AnyInboundRequest,
+    kind: InboundFetchKind,
+    group_order: moqtap_codec::types::GroupOrder,
+    range_filters: bool,
+}
+
+impl AnyInboundFetch {
+    /// The Request ID the peer allocated for this FETCH.
+    pub fn request_id(&self) -> moqtap_codec::varint::VarInt {
+        self.request.request_id()
+    }
+
+    /// The draft that carried it.
+    pub fn draft(&self) -> DraftVersion {
+        self.request.draft()
+    }
+
+    /// The request stream it arrived on, or `None` on drafts 11-16.
+    pub fn stream_id(&self) -> Option<u64> {
+        self.request.stream_id()
+    }
+
+    /// What the FETCH asks for.
+    pub fn kind(&self) -> &InboundFetchKind {
+        &self.kind
+    }
+
+    /// The order the Groups are to be served in: Ascending or Descending.
+    ///
+    /// Drafts 11-14 carry it as a field, where `0x0` leaves the choice to the
+    /// publisher and this facade chooses Ascending. Drafts 15-23 carry it as
+    /// GROUP_ORDER (Parameter Type 0x22), and an absent one is Ascending:
+    /// draft-23 Section 9.19.8, "If omitted from FETCH, the receiver uses
+    /// Ascending (0x1)."
+    pub fn group_order(&self) -> moqtap_codec::types::GroupOrder {
+        self.group_order
+    }
+
+    /// Whether the FETCH carries a Range Filter (Parameter Types 0x25-0x29).
+    ///
+    /// Drafts 19-23 define them on FETCH. draft-23 Section 3.3.2: "Range
+    /// Filters are only allowed if the setup option MAX_FILTER_RANGES is
+    /// non-zero", and "If this limit is exceeded, an endpoint MUST reject this
+    /// with REQUEST_ERROR with error code INVALID_FILTER." A caller that
+    /// advertised no such option refuses with [`FetchRefusal::InvalidFilter`].
+    /// Always `false` on drafts 11-18.
+    pub fn has_range_filters(&self) -> bool {
+        self.range_filters
+    }
+
+    /// FIN the request stream once the FETCH has been answered, on drafts
+    /// 17-23. Nothing happens on drafts 11-16, and nothing happens after a
+    /// refusal, which has already finished the stream.
+    pub async fn finish(&mut self) -> Result<(), AnyConnectionError> {
+        match &mut self.request {
+            AnyInboundRequest::ControlPlane { .. } => Ok(()),
+            #[cfg(feature = "draft17")]
+            AnyInboundRequest::Draft17(s) => s.finish().await.map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft18")]
+            AnyInboundRequest::Draft18(s) => s.finish().await.map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft19")]
+            AnyInboundRequest::Draft19(s) => s.finish().await.map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft20")]
+            AnyInboundRequest::Draft20(s) => s.finish().await.map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft21")]
+            AnyInboundRequest::Draft21(s) => s.finish().await.map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft22")]
+            AnyInboundRequest::Draft22(s) => s.finish().await.map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft23")]
+            AnyInboundRequest::Draft23(s) => s.finish().await.map_err(AnyConnectionError::from),
+        }
+    }
+}
+
+/// What an inbound FETCH asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InboundFetchKind {
+    /// A Standalone Fetch: a range of a track it names.
+    Standalone {
+        /// The track's namespace.
+        namespace: moqtap_codec::types::TrackNamespace,
+        /// The track's name.
+        name: Vec<u8>,
+        /// The range it asks for.
+        range: InboundFetchRange,
+    },
+    /// A Joining Fetch, drafts 11-19: the track and the end come from the
+    /// peer's subscription it joins, which the caller holds.
+    Joining {
+        /// The Request ID of the subscription it joins.
+        subscription: u64,
+        /// Where it starts, in the form its Fetch Type gives.
+        start: JoiningStart,
+    },
+}
+
+/// A Location in a FETCH and in its answer: a Group ID and an Object ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FetchLocation {
+    /// The Group ID.
+    pub group: u64,
+    /// The Object ID.
+    pub object: u64,
+}
+
+/// The range a Standalone Fetch asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InboundFetchRange {
+    /// Where the range starts.
+    pub start: InboundFetchStart,
+    /// Where it ends, or `None` for a range that runs to the Largest Object:
+    /// draft-23 Section 3.2 defaults the End Location to "Largest Object".
+    /// Drafts 11-19 always carry an end.
+    pub end: Option<InboundFetchEnd>,
+}
+
+/// Where a Standalone Fetch starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InboundFetchStart {
+    /// An absolute Location.
+    Absolute(FetchLocation),
+    /// A number of Groups before the Next Group, resolved against the Largest
+    /// Object. draft-22 Section 9.20.9 Location Filter Type 0x01, and on drafts
+    /// 20 and 21 a LOCATION_FILTER holding only StartGroup.
+    Relative(u64),
+    /// The Next Object after the Largest Object. draft-22 Section 9.20.9
+    /// Location Filter Type 0x05, and on drafts 20 and 21 a LOCATION_FILTER of
+    /// StartGroup 0 and StartObject 0.
+    NextObject,
+}
+
+/// Where a Standalone Fetch ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InboundFetchEnd {
+    /// The end Group, absolute.
+    pub group: u64,
+    /// Where the range stops inside it.
+    pub end: FetchEnd,
+}
+
+/// What [`AnyConnection::answer_fetch`] needs to know about the track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FetchAnswer {
+    /// The Largest Object this publisher has published. For a Joining Fetch,
+    /// the subscription's Largest Location on drafts 11-16, and its Joining
+    /// Location on drafts 17-19 (draft-19 Section 5.1). The response ends
+    /// just before it on drafts 11-13 and at it on drafts 14-19.
+    pub largest_object: FetchLocation,
+    /// Whether the track has ended at `largest_object`. The FETCH_OK's End Of
+    /// Track is 1 only when this is set and the response reaches it. Not sent
+    /// on draft-23, whose answer has no such field.
+    pub end_of_track: bool,
+    /// The last Object ID of the range's end Group, when the range asks for
+    /// the whole of a Group before `largest_object`'s.
+    ///
+    /// Draft-11 and drafts 20-22 state the End Location inclusively, so that
+    /// answer names the last Object of the Group. Unused on the other drafts,
+    /// and [`AnyConnection::answer_fetch`] returns an error without it where
+    /// it is needed.
+    pub end_group_last_object: Option<u64>,
+}
+
+/// How [`AnyConnection::answer_fetch`] answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchAnswered {
+    /// FETCH_OK (REQUEST_OK on draft-23) went out, and these are the Objects
+    /// the response covers.
+    Served(ServedFetchRange),
+    /// The range cannot be served, and the FETCH was refused with the draft's
+    /// INVALID_RANGE.
+    RefusedInvalidRange,
+}
+
+/// The Objects a served FETCH covers, inclusive at both ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServedFetchRange {
+    /// The first Location, with a relative start resolved.
+    pub start: FetchLocation,
+    /// The last Group.
+    pub end_group: u64,
+    /// Where the response stops inside `end_group`.
+    pub end: FetchEnd,
+}
+
+/// Why [`AnyConnection::refuse_fetch`] refuses, mapped to each draft's code by
+/// [`FetchRefusal::code`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchRefusal {
+    /// INVALID_RANGE.
+    InvalidRange,
+    /// Track Does Not Exist on drafts 08-14, DOES_NOT_EXIST on drafts 15-23.
+    DoesNotExist,
+    /// NOT_SUPPORTED.
+    NotSupported,
+    /// The Joining Fetch names no subscription it can join. Drafts 11-19.
+    InvalidJoining,
+    /// INVALID_FILTER. Drafts 19-23.
+    InvalidFilter,
+    /// This error code, sent unchanged on every draft.
+    Code(u64),
+}
+
+impl FetchRefusal {
+    /// The error code `draft` assigns this refusal, or `None` where the draft
+    /// assigns none.
+    ///
+    /// Drafts 08-14 put it in FETCH_ERROR's table (draft-11 Section 8.15,
+    /// draft-14 Section 9.18): Not Supported 0x3, Track Does Not Exist 0x4,
+    /// Invalid Range 0x5, and 0x7 for an invalid Joining Fetch on drafts 11-14
+    /// (Invalid Joining Subscribe ID on draft-11, Invalid Joining Request ID
+    /// on drafts 12-14). Drafts 15-23 put it in REQUEST_ERROR's
+    /// (draft-15 Section 9.8, draft-19 Section 15.11.2,
+    /// draft-23 Section 16.12.2): NOT_SUPPORTED 0x3, DOES_NOT_EXIST 0x10,
+    /// INVALID_RANGE 0x11, INVALID_JOINING_REQUEST_ID 0x32 through draft-19,
+    /// and INVALID_FILTER 0x36 from draft-19.
+    pub fn code(self, draft: DraftVersion) -> Option<u64> {
+        match (self, draft.number()) {
+            (Self::Code(code), _) => Some(code),
+            (Self::NotSupported, 8..=23) => Some(0x3),
+            (Self::DoesNotExist, 8..=14) => Some(0x4),
+            (Self::InvalidRange, 8..=14) => Some(0x5),
+            (Self::InvalidJoining, 11..=14) => Some(0x7),
+            (Self::DoesNotExist, 15..=23) => Some(0x10),
+            (Self::InvalidRange, 15..=23) => Some(0x11),
+            (Self::InvalidJoining, 15..=19) => Some(0x32),
+            (Self::InvalidFilter, 19..=23) => Some(0x36),
+            _ => None,
+        }
+    }
+}
+
+/// A fetch stream this endpoint opened to serve a peer's FETCH.
+///
+/// Returned by [`AnyConnection::open_fetch_response`], with the FETCH_HEADER
+/// already written. Objects go out in the order the caller writes them, which
+/// draft-23 Section 3.2.1 makes the FETCH's group order and then Object ID
+/// order within a Group.
+pub struct AnyFetchWriter {
+    inner: FetchWriterInner,
+}
+
+/// One draft's fetch stream. Drafts 18-23 encode each Object against the one
+/// before it in the stream's group order, so they carry the codec's writer
+/// beside the stream.
+#[allow(clippy::large_enum_variant)]
+enum FetchWriterInner {
+    #[cfg(feature = "draft11")]
+    Draft11(crate::draft11::connection::FramedSendStream),
+    #[cfg(feature = "draft12")]
+    Draft12(crate::draft12::connection::FramedSendStream),
+    #[cfg(feature = "draft13")]
+    Draft13(crate::draft13::connection::FramedSendStream),
+    #[cfg(feature = "draft14")]
+    Draft14(crate::draft14::connection::FramedSendStream),
+    #[cfg(feature = "draft15")]
+    Draft15(crate::draft15::connection::FramedSendStream),
+    #[cfg(feature = "draft16")]
+    Draft16(crate::draft16::connection::FramedSendStream),
+    #[cfg(feature = "draft17")]
+    Draft17(crate::draft17::connection::FramedSendStream),
+    #[cfg(feature = "draft18")]
+    Draft18(
+        crate::draft18::connection::FramedSendStream,
+        moqtap_codec::draft18::data_stream::FetchObjectWriter,
+    ),
+    #[cfg(feature = "draft19")]
+    Draft19(
+        crate::draft19::connection::FramedSendStream,
+        moqtap_codec::draft19::data_stream::FetchObjectWriter,
+    ),
+    #[cfg(feature = "draft20")]
+    Draft20(
+        crate::draft20::connection::FramedSendStream,
+        moqtap_codec::draft20::data_stream::FetchObjectWriter,
+    ),
+    #[cfg(feature = "draft21")]
+    Draft21(
+        crate::draft21::connection::FramedSendStream,
+        moqtap_codec::draft21::data_stream::FetchObjectWriter,
+    ),
+    #[cfg(feature = "draft22")]
+    Draft22(
+        crate::draft22::connection::FramedSendStream,
+        moqtap_codec::draft22::data_stream::FetchObjectWriter,
+    ),
+    #[cfg(feature = "draft23")]
+    Draft23(
+        crate::draft23::connection::FramedSendStream,
+        moqtap_codec::draft23::data_stream::FetchObjectWriter,
+    ),
+}
+
+/// Expands `$body` once per [`FetchWriterInner`] variant, with `$s` bound to the
+/// stream.
+macro_rules! fetch_writer_stream {
+    ($inner:expr, |$s:ident, $draft:ident| $body:expr) => {
+        match $inner {
+            #[cfg(feature = "draft11")]
+            FetchWriterInner::Draft11($s) => {
+                let $draft = DraftVersion::Draft11;
+                $body
+            }
+            #[cfg(feature = "draft12")]
+            FetchWriterInner::Draft12($s) => {
+                let $draft = DraftVersion::Draft12;
+                $body
+            }
+            #[cfg(feature = "draft13")]
+            FetchWriterInner::Draft13($s) => {
+                let $draft = DraftVersion::Draft13;
+                $body
+            }
+            #[cfg(feature = "draft14")]
+            FetchWriterInner::Draft14($s) => {
+                let $draft = DraftVersion::Draft14;
+                $body
+            }
+            #[cfg(feature = "draft15")]
+            FetchWriterInner::Draft15($s) => {
+                let $draft = DraftVersion::Draft15;
+                $body
+            }
+            #[cfg(feature = "draft16")]
+            FetchWriterInner::Draft16($s) => {
+                let $draft = DraftVersion::Draft16;
+                $body
+            }
+            #[cfg(feature = "draft17")]
+            FetchWriterInner::Draft17($s) => {
+                let $draft = DraftVersion::Draft17;
+                $body
+            }
+            #[cfg(feature = "draft18")]
+            FetchWriterInner::Draft18($s, _) => {
+                let $draft = DraftVersion::Draft18;
+                $body
+            }
+            #[cfg(feature = "draft19")]
+            FetchWriterInner::Draft19($s, _) => {
+                let $draft = DraftVersion::Draft19;
+                $body
+            }
+            #[cfg(feature = "draft20")]
+            FetchWriterInner::Draft20($s, _) => {
+                let $draft = DraftVersion::Draft20;
+                $body
+            }
+            #[cfg(feature = "draft21")]
+            FetchWriterInner::Draft21($s, _) => {
+                let $draft = DraftVersion::Draft21;
+                $body
+            }
+            #[cfg(feature = "draft22")]
+            FetchWriterInner::Draft22($s, _) => {
+                let $draft = DraftVersion::Draft22;
+                $body
+            }
+            #[cfg(feature = "draft23")]
+            FetchWriterInner::Draft23($s, _) => {
+                let $draft = DraftVersion::Draft23;
+                $body
+            }
+            #[allow(unreachable_patterns)]
+            _ => unreachable!("no draft from 11 on is enabled"),
+        }
+    };
+}
+
+impl AnyFetchWriter {
+    /// The draft framing this stream.
+    pub fn draft(&self) -> DraftVersion {
+        fetch_writer_stream!(&self.inner, |_s, draft| draft)
+    }
+
+    /// The QUIC stream ID this fetch is being served on.
+    pub fn stream_id(&self) -> u64 {
+        fetch_writer_stream!(&self.inner, |s, _draft| s.stream_id())
+    }
+
+    /// Append one Object.
+    ///
+    /// Every field is stated on drafts 11-17. Drafts 18-23 state the Group and
+    /// Object IDs only where the Object before it does not give them, through
+    /// the codec's `FetchObjectWriter`, which refuses an Object that moves
+    /// against the FETCH's group order or does not advance within its Group.
+    /// An empty payload is an Object with status Normal on drafts 11-15, and
+    /// an Object of length 0 from draft-16, whose fetch objects have no status.
+    #[allow(unused_variables)]
+    pub async fn write_object(
+        &mut self,
+        group_id: u64,
+        subgroup_id: u64,
+        object_id: u64,
+        publisher_priority: u8,
+        payload: &[u8],
+    ) -> Result<(), AnyConnectionError> {
+        use moqtap_codec::varint::VarInt;
+        let field = |n: u64| {
+            VarInt::from_u64(n).map_err(|e| AnyConnectionError::facade(format!("{n}: {e}")))
+        };
+        let length = VarInt::from_usize(payload.len());
+        let empty = payload.is_empty();
+
+        // Drafts 11-13: every field stated, an extension length of zero, and
+        // an Object Status that goes on the wire only when the payload is
+        // empty (draft-11 Section 9.4.4).
+        #[allow(unused_macros)]
+        macro_rules! measured {
+            ($s:ident, $m:ident) => {{
+                let object = crate::$m::event::FetchObject {
+                    header: moqtap_codec::$m::data_stream::FetchObjectHeader {
+                        group_id: field(group_id)?,
+                        subgroup_id: field(subgroup_id)?,
+                        object_id: field(object_id)?,
+                        publisher_priority,
+                        extension_headers_length: VarInt::from_usize(0),
+                        extensions: Vec::new(),
+                        payload_length: length,
+                        object_status: moqtap_codec::$m::types::ObjectStatus::Normal,
+                    },
+                    payload: payload.to_vec(),
+                };
+                $s.write_fetch_object(&object).await.map_err(AnyConnectionError::from)
+            }};
+        }
+        // Drafts 16 and 17: Serialization Flags 0x1F state the Subgroup ID
+        // (0x03), Object ID (0x04), Group ID (0x08) and Publisher Priority
+        // (0x10), with no extensions or properties (0x20 clear).
+        #[allow(unused_macros)]
+        macro_rules! flagged {
+            ($s:ident, $m:ident, $block:ident: $none:expr) => {{
+                let header = moqtap_codec::$m::data_stream::FetchObjectHeader {
+                    serialization_flags: VarInt::from_u64(0x1F).expect("0x1F fits a varint"),
+                    group_id: Some(field(group_id)?),
+                    subgroup_id: Some(field(subgroup_id)?),
+                    object_id: Some(field(object_id)?),
+                    publisher_priority: Some(publisher_priority),
+                    $block: $none,
+                    payload_length: length,
+                };
+                $s.write_fetch_object(&header, payload).await.map_err(AnyConnectionError::from)
+            }};
+        }
+        // Drafts 18-23: the frame is the Object's resolved Location. Flags
+        // 0x13 state the Subgroup ID and Publisher Priority, and the codec's
+        // writer adds a Group ID Delta (0x08) and Object ID Delta (0x04) only
+        // where the Object before it does not already give them.
+        #[allow(unused_macros)]
+        macro_rules! delta {
+            ($s:ident, $w:ident, $m:ident, $flags:expr, $props:expr) => {{
+                use moqtap_codec::$m::data_stream::{FetchObject, FetchObjectHeader};
+                let frame = FetchObject {
+                    header: FetchObjectHeader {
+                        serialization_flags: $flags,
+                        group_id_delta: None,
+                        subgroup_id: Some(VarInt::from_u64_moqt(subgroup_id)),
+                        object_id_delta: None,
+                        publisher_priority: Some(publisher_priority),
+                        properties: $props,
+                        payload_length: length,
+                    },
+                    group_id,
+                    subgroup_id: Some(subgroup_id),
+                    object_id,
+                    publisher_priority: Some(publisher_priority),
+                };
+                let header = $w
+                    .header_for(&frame)
+                    .map_err(|e| AnyConnectionError::facade(format!("fetch object: {e}")))?;
+                $s.write_fetch_object(&header, payload).await.map_err(AnyConnectionError::from)?;
+                $w.advance(&frame);
+                Ok(())
+            }};
+        }
+
+        match &mut self.inner {
+            #[cfg(feature = "draft11")]
+            FetchWriterInner::Draft11(s) => measured!(s, draft11),
+            #[cfg(feature = "draft12")]
+            FetchWriterInner::Draft12(s) => measured!(s, draft12),
+            #[cfg(feature = "draft13")]
+            FetchWriterInner::Draft13(s) => measured!(s, draft13),
+            #[cfg(feature = "draft14")]
+            FetchWriterInner::Draft14(s) => {
+                let object = moqtap_codec::draft14::data_stream::FetchObject {
+                    group_id: field(group_id)?,
+                    subgroup_id: field(subgroup_id)?,
+                    object_id: field(object_id)?,
+                    publisher_priority,
+                    extension_headers: Vec::new(),
+                    status: empty.then_some(moqtap_codec::draft14::types::ObjectStatus::Normal),
+                    payload: payload.to_vec(),
+                };
+                s.write_fetch_object(&object).await.map_err(AnyConnectionError::from)
+            }
+            // Draft-15's flags are a byte with the same layout as draft-16's.
+            #[cfg(feature = "draft15")]
+            FetchWriterInner::Draft15(s) => {
+                let header = moqtap_codec::draft15::data_stream::FetchObjectHeader {
+                    serialization_flags: 0x1F,
+                    group_id: field(group_id)?,
+                    subgroup_id: field(subgroup_id)?,
+                    object_id: field(object_id)?,
+                    publisher_priority,
+                    extension_headers: Vec::new(),
+                    payload_length: length,
+                    object_status: empty
+                        .then_some(moqtap_codec::draft15::types::ObjectStatus::Normal),
+                };
+                s.write_fetch_object(&header, payload).await.map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft16")]
+            FetchWriterInner::Draft16(s) => flagged!(s, draft16, extensions: None),
+            #[cfg(feature = "draft17")]
+            FetchWriterInner::Draft17(s) => flagged!(s, draft17, properties: Vec::new()),
+            #[cfg(feature = "draft18")]
+            FetchWriterInner::Draft18(s, w) => delta!(s, w, draft18, 0x13, Vec::new()),
+            #[cfg(feature = "draft19")]
+            FetchWriterInner::Draft19(s, w) => {
+                delta!(s, w, draft19, VarInt::from_u64_moqt(0x13), None)
+            }
+            #[cfg(feature = "draft20")]
+            FetchWriterInner::Draft20(s, w) => {
+                delta!(s, w, draft20, VarInt::from_u64_moqt(0x13), None)
+            }
+            #[cfg(feature = "draft21")]
+            FetchWriterInner::Draft21(s, w) => {
+                delta!(s, w, draft21, VarInt::from_u64_moqt(0x13), None)
+            }
+            #[cfg(feature = "draft22")]
+            FetchWriterInner::Draft22(s, w) => {
+                delta!(s, w, draft22, VarInt::from_u64_moqt(0x13), None)
+            }
+            #[cfg(feature = "draft23")]
+            FetchWriterInner::Draft23(s, w) => {
+                delta!(s, w, draft23, VarInt::from_u64_moqt(0x13), None)
+            }
+            #[allow(unreachable_patterns)]
+            _ => Err(AnyConnectionError::facade("no draft from 11 on is enabled")),
+        }
+    }
+
+    /// FIN the stream, which ends the response.
+    pub async fn finish(&mut self) -> Result<(), AnyConnectionError> {
+        fetch_writer_stream!(&mut self.inner, |s, _draft| s
+            .finish()
+            .await
+            .map_err(AnyConnectionError::from))
+    }
+
+    /// Reset the stream with `code` as the `RESET_STREAM` application error
+    /// code, ending the response short.
+    #[allow(unused_variables)]
+    pub fn reset(&mut self, code: u64) -> Result<(), AnyConnectionError> {
+        fetch_writer_stream!(&mut self.inner, |s, _draft| s
+            .reset(code)
+            .map_err(AnyConnectionError::from))
+    }
+}
+
+/// The range a Standalone Fetch on drafts 11-19 carries inline.
+///
+/// draft-11 Section 8.13: "End Object: The end Object ID, plus 1. A value of 0
+/// means the entire group is requested." draft-14 Section 9.16.1, the same
+/// through draft-19 Section 10.12.1: "End Location: The end Location, plus 1. A
+/// Location.Object value of 0 means the entire group is requested."
+#[cfg(any(
+    feature = "draft11",
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+))]
+fn inline_fetch_range(
+    start_group: u64,
+    start_object: u64,
+    end_group: u64,
+    end_object: u64,
+) -> InboundFetchRange {
+    InboundFetchRange {
+        start: InboundFetchStart::Absolute(FetchLocation {
+            group: start_group,
+            object: start_object,
+        }),
+        end: Some(InboundFetchEnd {
+            group: end_group,
+            end: match end_object {
+                0 => FetchEnd::EntireGroup,
+                plus_one => FetchEnd::Object(plus_one - 1),
+            },
+        }),
+    }
+}
+
+/// GROUP_ORDER (Parameter Type 0x22) on a FETCH, drafts 15-23. Absent is
+/// Ascending, as draft-15 Section 9.2.1.6 and draft-23 Section 9.19.8 have it;
+/// the codec refuses a value other than 0x1 or 0x2 before it gets here.
+#[cfg(any(
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22",
+    feature = "draft23",
+))]
+fn parameter_group_order(parameters: &[KeyValuePair]) -> moqtap_codec::types::GroupOrder {
+    use moqtap_codec::kvp::KvpValue;
+    use moqtap_codec::types::GroupOrder;
+    match parameters.iter().find(|p| p.key.into_inner() == 0x22).map(|p| &p.value) {
+        Some(KvpValue::Varint(v)) if v.into_inner() == 0x2 => GroupOrder::Descending,
+        _ => GroupOrder::Ascending,
+    }
+}
+
+/// Whether a FETCH carries a Range Filter, Parameter Types 0x25-0x29
+/// (draft-19 Section 5.1.3, draft-23 Section 3.3.2).
+#[cfg(any(
+    feature = "draft19",
+    feature = "draft20",
+    feature = "draft21",
+    feature = "draft22",
+    feature = "draft23",
+))]
+fn carries_range_filters(parameters: &[KeyValuePair]) -> bool {
+    parameters.iter().any(|p| (0x25..=0x29).contains(&p.key.into_inner()))
+}
+
+/// The LOCATION_FILTER (Parameter Type 0x21) value on a FETCH, drafts 20-23.
+#[cfg(any(feature = "draft20", feature = "draft21", feature = "draft22", feature = "draft23"))]
+fn location_filter_value(parameters: &[KeyValuePair]) -> Result<Option<&[u8]>, AnyConnectionError> {
+    use moqtap_codec::kvp::KvpValue;
+    match parameters.iter().find(|p| p.key.into_inner() == 0x21).map(|p| &p.value) {
+        None => Ok(None),
+        Some(KvpValue::Bytes(value)) => Ok(Some(value)),
+        Some(KvpValue::Varint(_)) => {
+            Err(AnyConnectionError::facade("a LOCATION_FILTER holding a bare varint"))
+        }
+    }
+}
+
+/// The range of a draft-20 or draft-21 LOCATION_FILTER, read by its field count.
+///
+/// draft-20 Section 5.1.2: one field is a relative StartGroup; "If only
+/// StartGroup and StartObject are present and both 0, the start Location is
+/// the Next Object"; of EndGroupDelta and EndObject, "When they are omitted
+/// from a Fetch, the EndGroup and EndObject are Largest Object"; "When
+/// EndObject is omitted, the filter includes all objects in the End Group".
+/// No filter is {0, 0} to Largest Object. draft-21 Section 9.20.10 says the same.
+#[cfg(any(feature = "draft20", feature = "draft21"))]
+fn field_count_filter_range(fields: &[u64]) -> Result<InboundFetchRange, AnyConnectionError> {
+    let absolute = |group, object| InboundFetchStart::Absolute(FetchLocation { group, object });
+    let end_group = |start: u64, delta: u64| {
+        start.checked_add(delta).ok_or_else(|| {
+            AnyConnectionError::facade("StartGroup + EndGroupDelta exceeds 2^64 - 1")
+        })
+    };
+    Ok(match *fields {
+        [] => InboundFetchRange { start: absolute(0, 0), end: None },
+        [groups] => InboundFetchRange { start: InboundFetchStart::Relative(groups), end: None },
+        [0, 0] => InboundFetchRange { start: InboundFetchStart::NextObject, end: None },
+        [group, object] => InboundFetchRange { start: absolute(group, object), end: None },
+        [group, object, delta] => InboundFetchRange {
+            start: absolute(group, object),
+            end: Some(InboundFetchEnd {
+                group: end_group(group, delta)?,
+                end: FetchEnd::EntireGroup,
+            }),
+        },
+        [group, object, delta, last] => InboundFetchRange {
+            start: absolute(group, object),
+            end: Some(InboundFetchEnd {
+                group: end_group(group, delta)?,
+                end: FetchEnd::Object(last),
+            }),
+        },
+        _ => return Err(AnyConnectionError::facade("a LOCATION_FILTER of more than four fields")),
+    })
+}
+
+/// The range of a draft-22 or draft-23 LOCATION_FILTER, read by its Location
+/// Filter Type.
+///
+/// draft-22 Section 9.20.9 and draft-23 Section 9.19.9, Table 6: 0x00 is no
+/// filter, 0x01 a relative StartGroup, 0x02 an absolute start, 0x03 an absolute
+/// start to the "last Object of Group StartGroup + EndGroupDelta", 0x04 an
+/// absolute range to "{StartGroup + EndGroupDelta, EndObject}", 0x05 the Next
+/// Object. An open end on a FETCH is Largest Object (draft-23 Section 3.2).
+#[cfg(any(feature = "draft22", feature = "draft23"))]
+fn typed_filter_range(
+    filter_type: u64,
+    fields: &[u64],
+) -> Result<InboundFetchRange, AnyConnectionError> {
+    let absolute = |group, object| InboundFetchStart::Absolute(FetchLocation { group, object });
+    let end_group = |start: u64, delta: u64| {
+        start.checked_add(delta).ok_or_else(|| {
+            AnyConnectionError::facade("StartGroup + EndGroupDelta exceeds 2^64 - 1")
+        })
+    };
+    Ok(match (filter_type, fields) {
+        (0x00, []) => InboundFetchRange { start: absolute(0, 0), end: None },
+        (0x01, [groups]) => {
+            InboundFetchRange { start: InboundFetchStart::Relative(*groups), end: None }
+        }
+        (0x02, [group, object]) => {
+            InboundFetchRange { start: absolute(*group, *object), end: None }
+        }
+        (0x03, [group, object, delta]) => InboundFetchRange {
+            start: absolute(*group, *object),
+            end: Some(InboundFetchEnd {
+                group: end_group(*group, *delta)?,
+                end: FetchEnd::EntireGroup,
+            }),
+        },
+        (0x04, [group, object, delta, last]) => InboundFetchRange {
+            start: absolute(*group, *object),
+            end: Some(InboundFetchEnd {
+                group: end_group(*group, *delta)?,
+                end: FetchEnd::Object(*last),
+            }),
+        },
+        (0x05, []) => InboundFetchRange { start: InboundFetchStart::NextObject, end: None },
+        _ => {
+            return Err(AnyConnectionError::facade(format!(
+                "a LOCATION_FILTER of type {filter_type:#x} with {} fields",
+                fields.len()
+            )))
+        }
+    })
+}
+
+/// The Group a relative start resolves to.
+///
+/// draft-22 Section 9.20.9: "the start Location is {Largest Object.Group + 1 -
+/// StartGroup, 0}", and "If a relative start group results in a computed
+/// absolute group less than 0, the computed value is set to 0; if greater than
+/// 2^64 - 1, it is set to 2^64 - 1." draft-20 Section 5.1.2 says the same.
+fn relative_start_group(largest_group: u64, groups: u64) -> u64 {
+    let computed = i128::from(largest_group) + 1 - i128::from(groups);
+    computed.clamp(0, i128::from(u64::MAX)) as u64
+}
+
+/// Where a Joining Fetch ends against `largest`, or `None` when it ends before
+/// Group 0.
+///
+/// Drafts 11-13 end it on the plus-one End Location `largest`, so the last
+/// Object covered is the one before it. draft-11 Section 8.13.1: "Fetch End
+/// Object: Subscribe Largest Object", where draft-11 Section 8.13 has End
+/// Object "The end Object ID, plus 1", and "1 is subtracted from the Fetch
+/// End Group if Fetch End Object is 0." draft-12 Section 8.16.1 and
+/// draft-13 Section 8.16.1: "Fetch End Location: Subscribe Largest Location",
+/// and "1 is subtracted from the Fetch End Location.Group if Fetch End
+/// Location.Object is 0." draft-14 Section 9.16.2.1 includes `largest`: "the
+/// last Object included in the Joining FETCH response is Subscribe Largest
+/// Location", and draft-19 Section 10.12.2.1 says the same of the Joining
+/// Location.
+fn joining_end(draft: DraftVersion, largest: FetchLocation) -> Option<InboundFetchEnd> {
+    if !(11..=13).contains(&draft.number()) {
+        return Some(InboundFetchEnd {
+            group: largest.group,
+            end: FetchEnd::Object(largest.object),
+        });
+    }
+    match largest.object.checked_sub(1) {
+        Some(object) => {
+            Some(InboundFetchEnd { group: largest.group, end: FetchEnd::Object(object) })
+        }
+        None => largest
+            .group
+            .checked_sub(1)
+            .map(|group| InboundFetchEnd { group, end: FetchEnd::EntireGroup }),
+    }
+}
+
+/// The Objects a FETCH from `start` to `end` covers against `largest`, and
+/// whether the response reaches `largest`; `None` when the range cannot be
+/// served.
+///
+/// draft-11 Section 8.13: "If Start Group/Start Object is greater than the
+/// latest published Object group, the publisher MUST return FETCH_ERROR with
+/// error code 'Invalid Range'." draft-23 Section 3.2: "If no Objects have been
+/// published for the track or Start Location is greater than the Largest
+/// Object (Section 3.1.4) the publisher MUST return FETCH_ERROR with error code
+/// INVALID_RANGE." draft-11 Section 8.15 also names "The end of the requested
+/// range is earlier than the beginning" as Invalid Range. A range that runs
+/// past `largest` ends at it: draft-23 Section 3.2, "If Largest Object is
+/// within the requested range, the FETCH response ends at Largest Object".
+fn serve_inbound_range(
+    start: FetchLocation,
+    end: Option<InboundFetchEnd>,
+    largest: FetchLocation,
+) -> Option<(ServedFetchRange, bool)> {
+    let at = |l: FetchLocation| (l.group, l.object);
+    if at(start) > at(largest) {
+        return None;
+    }
+    let to_largest =
+        ServedFetchRange { start, end_group: largest.group, end: FetchEnd::Object(largest.object) };
+    let Some(end) = end else {
+        return Some((to_largest, true));
+    };
+    let before_start = end.group < start.group
+        || matches!(end.end, FetchEnd::Object(o) if end.group == start.group && o < start.object);
+    if before_start {
+        return None;
+    }
+    let past_largest = match end.end {
+        FetchEnd::Object(o) => (end.group, o) >= at(largest),
+        FetchEnd::EntireGroup => end.group >= largest.group,
+    };
+    if past_largest {
+        return Some((to_largest, true));
+    }
+    Some((ServedFetchRange { start, end_group: end.group, end: end.end }, false))
+}
+
+/// The inclusive End Location Object of draft-11 and drafts 20-22.
+///
+/// draft-11 Section 8.14: "End Location: The largest object covered by the
+/// FETCH response." draft-22 Section 9.12: "The end of the range covered by the
+/// FETCH response, inclusive." Drafts 20 and 21 have no plus one either: their
+/// ranges are inclusive (draft-20 Section 5.1.2).
+#[cfg(any(feature = "draft11", feature = "draft20", feature = "draft21", feature = "draft22"))]
+fn inclusive_end_object(
+    served: &ServedFetchRange,
+    answer: &FetchAnswer,
+) -> Result<u64, AnyConnectionError> {
+    match served.end {
+        FetchEnd::Object(object) => Ok(object),
+        FetchEnd::EntireGroup => answer.end_group_last_object.ok_or_else(|| {
+            AnyConnectionError::facade(format!(
+                "answer_fetch: the response covers all of Group {}, and this draft's End \
+                 Location names its last Object, which FetchAnswer::end_group_last_object \
+                 does not carry",
+                served.end_group
+            ))
+        }),
+    }
+}
+
+/// The End Location Object of drafts 12-19, the last Object plus 1.
+///
+/// draft-12 Section 8.17: "If the requested FETCH End Location was beyond the
+/// Largest known (possibly final) Object, End Location is {Largest.Group,
+/// Largest.Object + 1}"; "If End Location.Object in the FETCH request was 0
+/// and the response covers the last Object in the Group, End Location is
+/// {Fetch.End Location.Group, 0}"; "Otherwise, End Location is Fetch.End
+/// Location". draft-19 Section 10.13 uses "the same encoding as the FETCH
+/// request End Location (the last Object, plus 1; or 0 to indicate the entire
+/// Group)".
+#[cfg(any(
+    feature = "draft12",
+    feature = "draft13",
+    feature = "draft14",
+    feature = "draft15",
+    feature = "draft16",
+    feature = "draft17",
+    feature = "draft18",
+    feature = "draft19",
+))]
+fn plus_one_end_object(served: &ServedFetchRange) -> Result<u64, AnyConnectionError> {
+    match served.end {
+        FetchEnd::EntireGroup => Ok(0),
+        FetchEnd::Object(object) => object.checked_add(1).ok_or_else(|| {
+            AnyConnectionError::facade(format!(
+                "answer_fetch: an End Location at Object {object} has no encoding as the last \
+                 Object plus 1"
+            ))
+        }),
+    }
+}
+
+impl AnyConnection {
+    /// Wait for the peer to send something, handing a FETCH over to be served.
+    ///
+    /// [`AnyConnection::recv_inbound`] with one difference: a FETCH comes back
+    /// as [`AnyServedArrival::Fetch`] rather than being refused. Drafts 11-23.
+    /// On drafts 07-10 this is `recv_inbound`, which refuses a FETCH on drafts
+    /// 08-10.
+    #[allow(unused_variables)]
+    pub async fn recv_inbound_serving_fetch(
+        &mut self,
+    ) -> Result<AnyServedArrival, AnyConnectionError> {
+        #[allow(unused_imports)]
+        use moqtap_codec::dispatch::AnyControlMessage;
+
+        let draft = self.draft();
+
+        // Drafts 07-10, where the peer's Request ID field on SUBSCRIBE and
+        // FETCH is `subscribe_id`. The `refuse` arm is drafts 08-10, which
+        // refuse a FETCH: draft-08 Section 4.3, a publisher "MUST send exactly
+        // one FETCH_OK or FETCH_ERROR in response to a FETCH".
+        #[allow(unused_macros)]
+        macro_rules! subscribe_id_era {
+            ($conn:ident, $version:ident, $module:ident) => {{
+                use moqtap_codec::$module::message::ControlMessage;
+                let message = $conn.recv_and_dispatch().await.map_err(AnyConnectionError::from)?;
+                Ok(match &message {
+                    ControlMessage::Subscribe(s) => {
+                        let request_id = s.subscribe_id;
+                        AnyServedArrival::Subscribe {
+                            message: AnyControlMessage::$version(message),
+                            request: AnyInboundRequest::ControlPlane { request_id, draft },
+                        }
+                    }
+                    _ => AnyServedArrival::Other(AnyControlMessage::$version(message)),
+                })
+            }};
+            ($conn:ident, $version:ident, $module:ident, refuse) => {{
+                use moqtap_codec::$module::message::ControlMessage;
+                let message = $conn.recv_and_dispatch().await.map_err(AnyConnectionError::from)?;
+                Ok(match &message {
+                    ControlMessage::Subscribe(s) => {
+                        let request_id = s.subscribe_id;
+                        AnyServedArrival::Subscribe {
+                            message: AnyControlMessage::$version(message),
+                            request: AnyInboundRequest::ControlPlane { request_id, draft },
+                        }
+                    }
+                    ControlMessage::Fetch(f) => {
+                        let code = moqtap_codec::varint::VarInt::from_u64(
+                            moqtap_codec::$module::error_codes::FetchErrorCode::NotSupported as u64,
+                        )
+                        .expect("a fetch error code fits a varint");
+                        // A failed refusal leaves the FETCH unanswered and is
+                        // not this call's error.
+                        let _ = $conn.fetch_error(f.subscribe_id, code, Vec::new()).await;
+                        AnyServedArrival::Other(AnyControlMessage::$version(message))
+                    }
+                    _ => AnyServedArrival::Other(AnyControlMessage::$version(message)),
+                })
+            }};
+        }
+
+        // Drafts 11-16: every request on the shared control stream. `$parts`
+        // reads a FETCH (bound to `$f`) into its kind, group order and Range
+        // Filter flag.
+        #[allow(unused_macros)]
+        macro_rules! control_plane {
+            ($conn:ident, $version:ident, $module:ident, |$f:ident| $parts:expr) => {{
+                use moqtap_codec::$module::message::ControlMessage;
+                let message = $conn.recv_and_dispatch().await.map_err(AnyConnectionError::from)?;
+                match &message {
+                    ControlMessage::Subscribe(s) => {
+                        let request_id = s.request_id;
+                        Ok(AnyServedArrival::Subscribe {
+                            message: AnyControlMessage::$version(message),
+                            request: AnyInboundRequest::ControlPlane { request_id, draft },
+                        })
+                    }
+                    ControlMessage::Fetch($f) => {
+                        let request_id = $f.request_id;
+                        let (kind, group_order, range_filters) = $parts;
+                        Ok(AnyServedArrival::Fetch {
+                            message: AnyControlMessage::$version(message),
+                            request: AnyInboundFetch {
+                                request: AnyInboundRequest::ControlPlane { request_id, draft },
+                                kind,
+                                group_order,
+                                range_filters,
+                            },
+                        })
+                    }
+                    _ => Ok(AnyServedArrival::Other(AnyControlMessage::$version(message))),
+                }
+            }};
+        }
+
+        // Drafts 17-23: each request on a bidirectional stream of its own. A
+        // request this facade has no entry point for is refused as
+        // `recv_inbound` documents.
+        #[allow(unused_macros)]
+        macro_rules! request_stream {
+            ($conn:ident, $version:ident, $module:ident, |$f:ident| $parts:expr
+             $(, $extra:ident: $value:expr)*) => {{
+                use moqtap_codec::$module::message::ControlMessage;
+                let (message, mut stream) =
+                    $conn.accept_request_stream().await.map_err(AnyConnectionError::from)?;
+                let parts = match &message {
+                    ControlMessage::Subscribe(_) => {
+                        return Ok(AnyServedArrival::Subscribe {
+                            message: AnyControlMessage::$version(message),
+                            request: AnyInboundRequest::$version(stream),
+                        });
+                    }
+                    ControlMessage::Fetch($f) => Some($parts),
+                    _ => None,
+                };
+                if let Some((kind, group_order, range_filters)) = parts {
+                    return Ok(AnyServedArrival::Fetch {
+                        message: AnyControlMessage::$version(message),
+                        request: AnyInboundFetch {
+                            request: AnyInboundRequest::$version(stream),
+                            kind,
+                            group_order,
+                            range_filters,
+                        },
+                    });
+                }
+                let refusal = moqtap_codec::$module::message::RequestError {
+                    error_code: moqtap_codec::varint::VarInt::from_u64(
+                        moqtap_codec::$module::error_codes::RequestErrorCode::NotSupported as u64,
+                    )
+                    .expect("a request error code fits a varint"),
+                    retry_interval: moqtap_codec::varint::VarInt::from_u64(0)
+                        .expect("zero fits a varint"),
+                    reason_phrase: Vec::new(),
+                    $($extra: $value,)*
+                };
+                // A failed answer falls back to the reset the handle's drop
+                // sends, so it is not this call's error.
+                let _ = $conn.respond_error(&mut stream, refusal).await;
+                Ok(AnyServedArrival::Other(AnyControlMessage::$version(message)))
+            }};
+        }
+
+        // A FETCH that carries its range inline, drafts 11-19.
+        #[allow(unused_macros)]
+        macro_rules! inline_kind {
+            ($f:ident, $module:ident, $joining:ident) => {{
+                use moqtap_codec::$module::message::{FetchPayload, FetchType};
+                match &$f.fetch_payload {
+                    FetchPayload::Standalone {
+                        track_namespace,
+                        track_name,
+                        start_group,
+                        start_object,
+                        end_group,
+                        end_object,
+                    } => InboundFetchKind::Standalone {
+                        namespace: track_namespace.clone(),
+                        name: track_name.clone(),
+                        range: inline_fetch_range(
+                            start_group.into_inner(),
+                            start_object.into_inner(),
+                            end_group.into_inner(),
+                            end_object.into_inner(),
+                        ),
+                    },
+                    FetchPayload::Joining { $joining, joining_start } => {
+                        InboundFetchKind::Joining {
+                            subscription: $joining.into_inner(),
+                            start: match $f.fetch_type {
+                                FetchType::AbsoluteJoining => {
+                                    JoiningStart::Group(joining_start.into_inner())
+                                }
+                                _ => JoiningStart::GroupsBefore(joining_start.into_inner()),
+                            },
+                        }
+                    }
+                }
+            }};
+        }
+
+        // Drafts 11-14 carry Group Order as a field, where 0x0 is the
+        // publisher's preference.
+        #[allow(unused_macros)]
+        macro_rules! field_order {
+            ($f:ident) => {
+                match $f.group_order {
+                    moqtap_codec::types::GroupOrder::Descending => {
+                        moqtap_codec::types::GroupOrder::Descending
+                    }
+                    _ => moqtap_codec::types::GroupOrder::Ascending,
+                }
+            };
+        }
+
+        // A FETCH whose range is its LOCATION_FILTER, drafts 20-23.
+        #[allow(unused_macros)]
+        macro_rules! filter_kind {
+            ($f:ident, $module:ident, $read:ident) => {{
+                let range = match location_filter_value(&$f.parameters)? {
+                    None => InboundFetchRange {
+                        start: InboundFetchStart::Absolute(FetchLocation { group: 0, object: 0 }),
+                        end: None,
+                    },
+                    Some(value) => $read!(value, $module)?,
+                };
+                (
+                    InboundFetchKind::Standalone {
+                        namespace: $f.track_namespace.clone(),
+                        name: $f.track_name.clone(),
+                        range,
+                    },
+                    parameter_group_order(&$f.parameters),
+                    carries_range_filters(&$f.parameters),
+                )
+            }};
+        }
+        #[allow(unused_macros)]
+        macro_rules! by_count {
+            ($value:expr, $module:ident) => {{
+                let fields = moqtap_codec::$module::message::decode_location_filter($value)
+                    .map_err(|e| AnyConnectionError::facade(e.to_string()))?;
+                field_count_filter_range(&fields)
+            }};
+        }
+        #[allow(unused_macros)]
+        macro_rules! by_type {
+            ($value:expr, $module:ident) => {{
+                let (filter_type, fields) =
+                    moqtap_codec::$module::message::decode_location_filter($value)
+                        .map_err(|e| AnyConnectionError::facade(e.to_string()))?;
+                typed_filter_range(filter_type, &fields)
+            }};
+        }
+
+        match self {
+            #[cfg(feature = "draft07")]
+            Self::Draft07(c) => subscribe_id_era!(c, Draft07, draft07),
+            #[cfg(feature = "draft08")]
+            Self::Draft08(c) => subscribe_id_era!(c, Draft08, draft08, refuse),
+            #[cfg(feature = "draft09")]
+            Self::Draft09(c) => subscribe_id_era!(c, Draft09, draft09, refuse),
+            #[cfg(feature = "draft10")]
+            Self::Draft10(c) => subscribe_id_era!(c, Draft10, draft10, refuse),
+            #[cfg(feature = "draft11")]
+            Self::Draft11(c) => control_plane!(c, Draft11, draft11, |f| (
+                inline_kind!(f, draft11, joining_subscribe_id),
+                field_order!(f),
+                false
+            )),
+            #[cfg(feature = "draft12")]
+            Self::Draft12(c) => control_plane!(c, Draft12, draft12, |f| (
+                inline_kind!(f, draft12, joining_request_id),
+                field_order!(f),
+                false
+            )),
+            #[cfg(feature = "draft13")]
+            Self::Draft13(c) => control_plane!(c, Draft13, draft13, |f| (
+                inline_kind!(f, draft13, joining_request_id),
+                field_order!(f),
+                false
+            )),
+            #[cfg(feature = "draft14")]
+            Self::Draft14(c) => control_plane!(c, Draft14, draft14, |f| (
+                inline_kind!(f, draft14, joining_request_id),
+                field_order!(f),
+                false
+            )),
+            #[cfg(feature = "draft15")]
+            Self::Draft15(c) => control_plane!(c, Draft15, draft15, |f| (
+                inline_kind!(f, draft15, joining_request_id),
+                parameter_group_order(&f.parameters),
+                false
+            )),
+            #[cfg(feature = "draft16")]
+            Self::Draft16(c) => control_plane!(c, Draft16, draft16, |f| (
+                inline_kind!(f, draft16, joining_request_id),
+                parameter_group_order(&f.parameters),
+                false
+            )),
+            #[cfg(feature = "draft17")]
+            Self::Draft17(c) => request_stream!(c, Draft17, draft17, |f| (
+                inline_kind!(f, draft17, joining_request_id),
+                parameter_group_order(&f.parameters),
+                false
+            )),
+            #[cfg(feature = "draft18")]
+            Self::Draft18(c) => request_stream!(c, Draft18, draft18, |f| (
+                inline_kind!(f, draft18, joining_request_id),
+                parameter_group_order(&f.parameters),
+                false
+            ), redirect: None),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => request_stream!(c, Draft19, draft19, |f| (
+                inline_kind!(f, draft19, joining_request_id),
+                parameter_group_order(&f.parameters),
+                carries_range_filters(&f.parameters)
+            ), redirect: None),
+            #[cfg(feature = "draft20")]
+            Self::Draft20(c) => request_stream!(c, Draft20, draft20, |f| filter_kind!(
+                f, draft20, by_count
+            ), redirect: None),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => request_stream!(c, Draft21, draft21, |f| filter_kind!(
+                f, draft21, by_count
+            ), redirect: None),
+            #[cfg(feature = "draft22")]
+            Self::Draft22(c) => request_stream!(c, Draft22, draft22, |f| filter_kind!(
+                f, draft22, by_type
+            ), redirect: None),
+            #[cfg(feature = "draft23")]
+            Self::Draft23(c) => request_stream!(c, Draft23, draft23, |f| filter_kind!(
+                f, draft23, by_type
+            ), error_details: Vec::new()),
+            #[allow(unreachable_patterns)]
+            other => Err(AnyConnectionError::facade(format!(
+                "recv_inbound_serving_fetch: draft {:?} is not served by AnyConnection",
+                other.draft()
+            ))),
+        }
+    }
+
+    /// Answer a peer's FETCH with FETCH_OK, or with REQUEST_OK on draft-23.
+    ///
+    /// The End Location is computed from the FETCH's range and
+    /// `answer.largest_object`, and a relative start is resolved against it.
+    /// A Joining Fetch starts where its Joining Start says, counted from
+    /// `largest_object`. It ends just before `largest_object` on drafts 11-13
+    /// and at it on drafts 14-19.
+    ///
+    /// Refused with the draft's INVALID_RANGE instead, and
+    /// [`FetchAnswered::RefusedInvalidRange`] returned, when the start is past
+    /// `largest_object` (draft-11 Section 8.13, the same through
+    /// draft-23 Section 3.2), when the end comes before the start
+    /// (draft-11 Section 8.15), and for a relative start on draft-23:
+    /// draft-23 Section 3.2, "If the Location filter is relative (see
+    /// Section 9.19.9), the publisher MUST return REQUEST_ERROR with error
+    /// code INVALID_RANGE." A Next Object start is past `largest_object` by
+    /// definition.
+    ///
+    /// # The End Location on the wire
+    ///
+    /// - Draft-11 and drafts 20-22: the last Object the response covers.
+    /// - Drafts 12-19: that Object plus 1, or `{Group, 0}` for a range that
+    ///   asked for a whole Group and covers it.
+    /// - Draft-23: REQUEST_OK carries LARGEST_OBJECT when the Largest Object is
+    ///   within the range, and nothing otherwise (draft-23 Section 3.2).
+    ///
+    /// Leaves the request stream open on drafts 17-23. Call
+    /// [`AnyInboundFetch::finish`] after.
+    #[allow(unused_variables)]
+    pub async fn answer_fetch(
+        &mut self,
+        fetch: &mut AnyInboundFetch,
+        answer: FetchAnswer,
+    ) -> Result<FetchAnswered, AnyConnectionError> {
+        use moqtap_codec::varint::VarInt;
+
+        let largest = answer.largest_object;
+        let resolved = match fetch.kind {
+            InboundFetchKind::Standalone { range, .. } => match range.start {
+                InboundFetchStart::Absolute(start) => Some((start, range.end)),
+                InboundFetchStart::Relative(_) if fetch.draft() == DraftVersion::Draft23 => None,
+                InboundFetchStart::Relative(groups) => Some((
+                    FetchLocation { group: relative_start_group(largest.group, groups), object: 0 },
+                    range.end,
+                )),
+                InboundFetchStart::NextObject => None,
+            },
+            // draft-12 Section 8.16.1: "Fetch Start Location: {Subscribe
+            // Largest Location.Group - Joining Start, 0}".
+            // draft-19 Section 10.12.2.1: "{Joining Location.Group - Joining
+            // Start, 0}" for a Relative Joining Fetch and "{Joining Start, 0}"
+            // for an Absolute one.
+            InboundFetchKind::Joining { start, .. } => {
+                let start = FetchLocation {
+                    group: match start {
+                        JoiningStart::GroupsBefore(groups) => largest.group.saturating_sub(groups),
+                        JoiningStart::Group(group) => group,
+                    },
+                    object: 0,
+                };
+                joining_end(fetch.draft(), largest).map(|end| (start, Some(end)))
+            }
+        };
+        let Some((served, reaches_largest)) =
+            resolved.and_then(|(start, end)| serve_inbound_range(start, end, largest))
+        else {
+            self.refuse_fetch(fetch, FetchRefusal::InvalidRange, b"").await?;
+            return Ok(FetchAnswered::RefusedInvalidRange);
+        };
+        let end_of_track = u8::from(answer.end_of_track && reaches_largest);
+        let quic = |n: u64| {
+            VarInt::from_u64(n).map_err(|e| AnyConnectionError::facade(format!("{n}: {e}")))
+        };
+        let group_order = fetch.group_order;
+
+        #[allow(unused_macros)]
+        macro_rules! location_ok {
+            ($c:ident, $id:expr, $object:expr) => {
+                $c.fetch_ok(
+                    *$id,
+                    group_order,
+                    end_of_track,
+                    moqtap_codec::types::Location {
+                        group: quic(served.end_group)?,
+                        object: quic($object)?,
+                    },
+                    Vec::new(),
+                )
+                .await
+                .map_err(AnyConnectionError::from)
+            };
+        }
+        #[allow(unused_macros)]
+        macro_rules! stream_ok {
+            ($c:ident, $s:ident, $module:ident, $object:expr, $varint:expr) => {
+                $c.respond_fetch_ok(
+                    $s,
+                    moqtap_codec::$module::message::FetchOk {
+                        end_of_track,
+                        end_group: $varint(served.end_group)?,
+                        end_object: $varint($object)?,
+                        parameters: Vec::new(),
+                        track_properties: Vec::new(),
+                    },
+                )
+                .await
+                .map_err(AnyConnectionError::from)
+            };
+        }
+        #[allow(unused_variables)]
+        let moqt = |n: u64| Ok::<_, AnyConnectionError>(VarInt::from_u64_moqt(n));
+
+        let sent = match (&mut *self, &mut fetch.request) {
+            #[cfg(feature = "draft11")]
+            (Self::Draft11(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                location_ok!(c, request_id, inclusive_end_object(&served, &answer)?)
+            }
+            #[cfg(feature = "draft12")]
+            (Self::Draft12(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                location_ok!(c, request_id, plus_one_end_object(&served)?)
+            }
+            #[cfg(feature = "draft13")]
+            (Self::Draft13(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                location_ok!(c, request_id, plus_one_end_object(&served)?)
+            }
+            #[cfg(feature = "draft14")]
+            (Self::Draft14(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                location_ok!(c, request_id, plus_one_end_object(&served)?)
+            }
+            #[cfg(feature = "draft15")]
+            (Self::Draft15(c), AnyInboundRequest::ControlPlane { request_id, .. }) => c
+                .fetch_ok(
+                    *request_id,
+                    end_of_track,
+                    quic(served.end_group)?,
+                    quic(plus_one_end_object(&served)?)?,
+                    Vec::new(),
+                )
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft16")]
+            (Self::Draft16(c), AnyInboundRequest::ControlPlane { request_id, .. }) => c
+                .fetch_ok(
+                    *request_id,
+                    end_of_track,
+                    quic(served.end_group)?,
+                    quic(plus_one_end_object(&served)?)?,
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft17")]
+            (Self::Draft17(c), AnyInboundRequest::Draft17(s)) => {
+                stream_ok!(c, s, draft17, plus_one_end_object(&served)?, quic)
+            }
+            #[cfg(feature = "draft18")]
+            (Self::Draft18(c), AnyInboundRequest::Draft18(s)) => {
+                stream_ok!(c, s, draft18, plus_one_end_object(&served)?, moqt)
+            }
+            #[cfg(feature = "draft19")]
+            (Self::Draft19(c), AnyInboundRequest::Draft19(s)) => {
+                stream_ok!(c, s, draft19, plus_one_end_object(&served)?, moqt)
+            }
+            #[cfg(feature = "draft20")]
+            (Self::Draft20(c), AnyInboundRequest::Draft20(s)) => {
+                stream_ok!(c, s, draft20, inclusive_end_object(&served, &answer)?, moqt)
+            }
+            #[cfg(feature = "draft21")]
+            (Self::Draft21(c), AnyInboundRequest::Draft21(s)) => {
+                stream_ok!(c, s, draft21, inclusive_end_object(&served, &answer)?, moqt)
+            }
+            #[cfg(feature = "draft22")]
+            (Self::Draft22(c), AnyInboundRequest::Draft22(s)) => {
+                stream_ok!(c, s, draft22, inclusive_end_object(&served, &answer)?, moqt)
+            }
+            // draft-23 Section 9.19.17: LARGEST_OBJECT "is a Location", two
+            // varints; in FETCH_OK "it is only required when Largest Object is
+            // within the requested range".
+            #[cfg(feature = "draft23")]
+            (Self::Draft23(c), AnyInboundRequest::Draft23(s)) => {
+                use moqtap_codec::kvp::KvpValue;
+                use moqtap_codec::varint::Moqt18;
+                let mut parameters = Vec::new();
+                if reaches_largest {
+                    let mut value = Vec::new();
+                    VarInt::from_u64_moqt(largest.group).encode_moqt::<Moqt18>(&mut value);
+                    VarInt::from_u64_moqt(largest.object).encode_moqt::<Moqt18>(&mut value);
+                    parameters.push(KeyValuePair {
+                        key: VarInt::from_u64_moqt(0x09),
+                        value: KvpValue::Bytes(value),
+                    });
+                }
+                c.respond_ok(
+                    s,
+                    moqtap_codec::draft23::message::RequestOk {
+                        parameters,
+                        track_properties: Vec::new(),
+                    },
+                )
+                .await
+                .map_err(AnyConnectionError::from)
+            }
+            #[allow(unreachable_patterns)]
+            (connection, request) => Err(AnyConnectionError::facade(format!(
+                "answer_fetch: a draft {:?} FETCH cannot be answered on a draft {:?} connection",
+                request.draft(),
+                connection.draft(),
+            ))),
+        };
+        sent.map(|()| FetchAnswered::Served(served))
+    }
+
+    /// Refuse a peer's FETCH with FETCH_ERROR (drafts 11-14) or REQUEST_ERROR
+    /// (drafts 15-23), under the code [`FetchRefusal::code`] gives for the
+    /// draft. On drafts 17-23 the request stream is then finished.
+    ///
+    /// # Errors
+    ///
+    /// A refusal the draft has no code for, and the endpoint's refusal of a
+    /// Joining Fetch for a subscription this session cannot join under any
+    /// code but [`FetchRefusal::InvalidJoining`]'s. Nothing is sent either way.
+    #[allow(unused_variables)]
+    pub async fn refuse_fetch(
+        &mut self,
+        fetch: &mut AnyInboundFetch,
+        refusal: FetchRefusal,
+        reason: &[u8],
+    ) -> Result<(), AnyConnectionError> {
+        use moqtap_codec::varint::VarInt;
+
+        let draft = fetch.draft();
+        let code = refusal.code(draft).ok_or_else(|| {
+            AnyConnectionError::facade(format!(
+                "refuse_fetch: {draft:?} assigns {refusal:?} no code"
+            ))
+        })?;
+        let code = VarInt::from_u64(code)
+            .map_err(|e| AnyConnectionError::facade(format!("error code {code}: {e}")))?;
+        let reason = reason.to_vec();
+        let no_retry = VarInt::from_u64(0).expect("zero fits a varint");
+
+        #[allow(unused_macros)]
+        macro_rules! stream_error {
+            ($c:ident, $s:ident, $module:ident $(, $extra:ident: $value:expr)*) => {
+                $c.respond_error(
+                    $s,
+                    moqtap_codec::$module::message::RequestError {
+                        error_code: code,
+                        retry_interval: no_retry,
+                        reason_phrase: reason,
+                        $($extra: $value,)*
+                    },
+                )
+                .await
+                .map_err(AnyConnectionError::from)
+            };
+        }
+
+        match (self, &mut fetch.request) {
+            #[cfg(feature = "draft11")]
+            (Self::Draft11(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                c.fetch_error(*request_id, code, reason).await.map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft12")]
+            (Self::Draft12(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                c.fetch_error(*request_id, code, reason).await.map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft13")]
+            (Self::Draft13(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                c.fetch_error(*request_id, code, reason).await.map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft14")]
+            (Self::Draft14(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                c.fetch_error(*request_id, code, reason).await.map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft15")]
+            (Self::Draft15(c), AnyInboundRequest::ControlPlane { request_id, .. }) => {
+                c.request_error(*request_id, code, reason).await.map_err(AnyConnectionError::from)
+            }
+            #[cfg(feature = "draft16")]
+            (Self::Draft16(c), AnyInboundRequest::ControlPlane { request_id, .. }) => c
+                .request_error(*request_id, code, no_retry, reason)
+                .await
+                .map_err(AnyConnectionError::from),
+            #[cfg(feature = "draft17")]
+            (Self::Draft17(c), AnyInboundRequest::Draft17(s)) => stream_error!(c, s, draft17),
+            #[cfg(feature = "draft18")]
+            (Self::Draft18(c), AnyInboundRequest::Draft18(s)) => {
+                stream_error!(c, s, draft18, redirect: None)
+            }
+            #[cfg(feature = "draft19")]
+            (Self::Draft19(c), AnyInboundRequest::Draft19(s)) => {
+                stream_error!(c, s, draft19, redirect: None)
+            }
+            #[cfg(feature = "draft20")]
+            (Self::Draft20(c), AnyInboundRequest::Draft20(s)) => {
+                stream_error!(c, s, draft20, redirect: None)
+            }
+            #[cfg(feature = "draft21")]
+            (Self::Draft21(c), AnyInboundRequest::Draft21(s)) => {
+                stream_error!(c, s, draft21, redirect: None)
+            }
+            #[cfg(feature = "draft22")]
+            (Self::Draft22(c), AnyInboundRequest::Draft22(s)) => {
+                stream_error!(c, s, draft22, redirect: None)
+            }
+            #[cfg(feature = "draft23")]
+            (Self::Draft23(c), AnyInboundRequest::Draft23(s)) => {
+                stream_error!(c, s, draft23, error_details: Vec::new())
+            }
+            #[allow(unreachable_patterns)]
+            (connection, request) => Err(AnyConnectionError::facade(format!(
+                "refuse_fetch: a draft {:?} FETCH cannot be refused on a draft {:?} connection",
+                request.draft(),
+                connection.draft(),
+            ))),
+        }
+    }
+
+    /// Open the fetch stream that serves `fetch` and write its FETCH_HEADER.
+    ///
+    /// draft-23 Section 3.2.1: "The publisher creates a single unidirectional
+    /// stream (see Section 11.4) that is used to send the Objects." There are
+    /// no End of Group or End of Track writers here; the stream's FIN ends the
+    /// response.
+    // A build with no draft from 11 on has no variant to return.
+    #[allow(unused_variables, unreachable_code)]
+    pub async fn open_fetch_response(
+        &self,
+        fetch: &AnyInboundFetch,
+    ) -> Result<AnyFetchWriter, AnyConnectionError> {
+        #[allow(unused_imports)]
+        use moqtap_codec::dispatch::AnyFetchHeader;
+
+        let request_id = fetch.request_id();
+        if fetch.draft() != self.draft() {
+            return Err(AnyConnectionError::facade(format!(
+                "open_fetch_response: a draft {:?} FETCH cannot be served on a draft {:?} \
+                 connection",
+                fetch.draft(),
+                self.draft(),
+            )));
+        }
+
+        #[allow(unused_macros)]
+        macro_rules! open {
+            ($c:ident, $version:ident, $module:ident) => {{
+                let header =
+                    AnyFetchHeader::$version(moqtap_codec::$module::data_stream::FetchHeader {
+                        request_id,
+                    });
+                $c.open_fetch_stream(&header).await.map_err(AnyConnectionError::from)?
+            }};
+        }
+        #[allow(unused_macros)]
+        macro_rules! order {
+            ($module:ident) => {
+                match fetch.group_order {
+                    moqtap_codec::types::GroupOrder::Descending => {
+                        moqtap_codec::$module::data_stream::GroupOrder::Descending
+                    }
+                    _ => moqtap_codec::$module::data_stream::GroupOrder::Ascending,
+                }
+            };
+        }
+        #[allow(unused_macros)]
+        macro_rules! delta {
+            ($c:ident, $version:ident, $module:ident) => {
+                FetchWriterInner::$version(
+                    open!($c, $version, $module),
+                    moqtap_codec::$module::data_stream::FetchObjectWriter::new(order!($module)),
+                )
+            };
+        }
+
+        let inner = match self {
+            #[cfg(feature = "draft11")]
+            Self::Draft11(c) => FetchWriterInner::Draft11(open!(c, Draft11, draft11)),
+            #[cfg(feature = "draft12")]
+            Self::Draft12(c) => FetchWriterInner::Draft12(open!(c, Draft12, draft12)),
+            #[cfg(feature = "draft13")]
+            Self::Draft13(c) => FetchWriterInner::Draft13(open!(c, Draft13, draft13)),
+            #[cfg(feature = "draft14")]
+            Self::Draft14(c) => FetchWriterInner::Draft14(open!(c, Draft14, draft14)),
+            #[cfg(feature = "draft15")]
+            Self::Draft15(c) => FetchWriterInner::Draft15(open!(c, Draft15, draft15)),
+            #[cfg(feature = "draft16")]
+            Self::Draft16(c) => FetchWriterInner::Draft16(open!(c, Draft16, draft16)),
+            #[cfg(feature = "draft17")]
+            Self::Draft17(c) => FetchWriterInner::Draft17(open!(c, Draft17, draft17)),
+            #[cfg(feature = "draft18")]
+            Self::Draft18(c) => delta!(c, Draft18, draft18),
+            #[cfg(feature = "draft19")]
+            Self::Draft19(c) => delta!(c, Draft19, draft19),
+            #[cfg(feature = "draft20")]
+            Self::Draft20(c) => delta!(c, Draft20, draft20),
+            #[cfg(feature = "draft21")]
+            Self::Draft21(c) => delta!(c, Draft21, draft21),
+            #[cfg(feature = "draft22")]
+            Self::Draft22(c) => delta!(c, Draft22, draft22),
+            #[cfg(feature = "draft23")]
+            Self::Draft23(c) => delta!(c, Draft23, draft23),
+            #[allow(unreachable_patterns)]
+            other => {
+                return Err(AnyConnectionError::facade(format!(
+                    "open_fetch_response: draft {:?} has no inbound FETCH to serve",
+                    other.draft()
+                )))
+            }
+        };
+        Ok(AnyFetchWriter { inner })
     }
 }
 

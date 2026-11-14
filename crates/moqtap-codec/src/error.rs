@@ -791,20 +791,33 @@ pub enum CodecError {
         /// How the value failed to match.
         detail: &'static str,
     },
-    /// A SETUP whose AUTHORIZATION TOKEN option names an Alias with DELETE or
-    /// USE_ALIAS.
+    /// A SETUP whose AUTHORIZATION TOKEN option references, with DELETE or
+    /// USE_ALIAS, an Alias that an earlier REGISTER in the same SETUP carries.
     ///
-    /// SETUP is the first message on the control stream, so no Alias is
-    /// registered when it arrives. Draft-23 Section 9.1.4: "If a server
-    /// receives Alias Type DELETE (0x0) or USE_ALIAS (0x2) in a SETUP message,
-    /// it MUST close the session with ROLE_VIOLATION." At a client, Section
-    /// 8.9: "The receiver of a message referencing an Alias that is not
-    /// currently registered MUST reject the message with
-    /// UNKNOWN_AUTH_TOKEN_ALIAS." Which applies is the receiver's role.
+    /// Draft-23 Section 9.1.4: "If a server receives Alias Type DELETE (0x0) or
+    /// USE_ALIAS (0x2) in a SETUP message, it MUST close the session with
+    /// ROLE_VIOLATION." Whether the REGISTER took effect at a client depends on
+    /// the cache size it advertised: draft-23 Section 9.1.4 treats a REGISTER
+    /// over MAX_AUTH_TOKEN_CACHE_SIZE as USE_VALUE. The codec knows neither the
+    /// receiver's role nor its cache size.
     #[error("SETUP carries an authorization token with Alias Type {alias_type:#x}")]
     TokenAliasInSetup {
         /// The Alias Type, DELETE (0x0) or USE_ALIAS (0x2).
         alias_type: u64,
+    },
+    /// A SETUP whose AUTHORIZATION TOKEN option references, with DELETE or
+    /// USE_ALIAS, an Alias that no earlier REGISTER in the same SETUP carries.
+    ///
+    /// SETUP is the first message on the control stream, so nothing else can
+    /// have registered it. Draft-23 Section 8.9: "The receiver of a message
+    /// referencing an Alias that is not currently registered MUST reject the
+    /// message with UNKNOWN_AUTH_TOKEN_ALIAS."
+    #[error("SETUP references authorization token Alias {alias}, which is not registered")]
+    UnregisteredTokenAliasInSetup {
+        /// The Alias Type, DELETE (0x0) or USE_ALIAS (0x2).
+        alias_type: u64,
+        /// The Alias referenced.
+        alias: u64,
     },
     /// A Track Name with a length of zero.
     ///
@@ -854,6 +867,24 @@ pub enum CodecError {
     MalformedObject {
         /// What could not be decoded.
         detail: &'static str,
+    },
+    /// End of Group or End of Track as the first entry on a draft-23 fetch
+    /// stream.
+    ///
+    /// Draft-23 Section 11.4.2.2 defines both by the Object before them: "The
+    /// prior Object is the last Object in its Group, or in the Track,
+    /// respectively." Draft-23 Section 11.4.1.1 names MALFORMED_OBJECT for a
+    /// first Object that "uses a flag that references fields in the prior
+    /// Object", but draft-23 Section 11.4.1 makes a value of 128 or greater an
+    /// indicator: "When less than 128, the bits represent flags". No sentence
+    /// states what a receiver does with a marker that has no prior Object, so
+    /// this names no session error code.
+    #[error(
+        "fetch stream opens with End of Group or End of Track (flags {serialization_flags:#x})"
+    )]
+    FetchEndMarkerFirst {
+        /// The Serialization Flags value, 0x80 or 0x81.
+        serialization_flags: u64,
     },
     /// An Object whose Prior Group ID Gap or Prior Object ID Gap makes its
     /// Track malformed.

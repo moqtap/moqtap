@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-14
+
+### Changed
+
+- **Breaking.** Requires `moqtap-codec` 0.12.0 (was 0.11.1) and `quinn` 0.11.12 (was 0.11). `CodecRule` gains `UnregisteredTokenAlias`.
+- **Breaking.** `AnyConnection::open_subgroup(alias, group, subgroup, priority)` is now `open_subgroup(alias, group, subgroup, priority, start)`, where `start` is a `SubgroupStart` (`First` or `Later`). Drafts 07-17 write the same header for both.
+- **Breaking.** `recv_inbound` now refuses a FETCH with NOT_SUPPORTED on drafts 08-16, where it was never answered, as it already did on drafts 17-23. The FETCH is still returned as `AnyArrival::Other`, and `AnyArrival` is unchanged.
+
+### Added
+
+- `min_rtt` on `Transport`, `Connection` and `AnyConnection`: the smallest round-trip time seen on the path, ignoring ack delay. `None` until the peer has acknowledged a packet.
+- `AnySubgroupWriter::reset`, and `reset` on each draft's `FramedSendStream` on drafts 07-15, as drafts 16-23 already had.
+- Serving a peer's FETCH on drafts 11-23: `recv_inbound_serving_fetch`, `answer_fetch`, `refuse_fetch` and `open_fetch_response`.
+
+### Fixed
+
+- Drafts 18-23: a stream `open_subgroup` opens with `SubgroupStart::First` now sets FIRST_OBJECT (0x40) in its header type. Before, no stream set it.
+- Draft-23: End of Group or End of Track as a fetch stream's first entry no longer closes the session. The fetch reader returns `FetchEndMarkerFirst`.
+
 ## [0.11.2] - 2026-11-12
 
 ### Added

@@ -2033,6 +2033,16 @@ pub enum CodecRule {
     /// state neither form.
     ExtensionsOnNonExistentObject,
 
+    // ── Authorization tokens ───────────────────────────────────
+    /// A SETUP whose AUTHORIZATION TOKEN option references, with DELETE or
+    /// USE_ALIAS, an Alias that no earlier REGISTER in the same SETUP carries.
+    ///
+    /// Draft-23 alone, draft-23 Section 8.9. Drafts 11 through 22 state the
+    /// rule too, but their decoders do not check SETUP Aliases. A reference to
+    /// an Alias a REGISTER did carry is not this rule: whether it took effect
+    /// rests on the receiver's MAX_AUTH_TOKEN_CACHE_SIZE.
+    UnregisteredTokenAlias,
+
     // ── And one that lived for exactly one draft ───────────────
     /// A request message's Required Request ID Delta naming a dependency below
     /// zero.
@@ -2207,6 +2217,9 @@ const EXTENSIONS_ON_NONEXISTENT_14: &str = "Any Object may have extension header
                                             endpoint receives a non-existent Object containing \
                                             extension headers it MUST close the session with a \
                                             PROTOCOL_VIOLATION.";
+const UNKNOWN_TOKEN_ALIAS_23: &str = "The receiver of a message referencing an Alias that is \
+                                      not currently registered MUST reject the message with \
+                                      UNKNOWN_AUTH_TOKEN_ALIAS.";
 const REQUIRED_REQUEST_ID_DELTA: &str = "An endpoint MUST close the session with \
                                          INVALID_REQUIRED_REQUEST_ID if it receives a delta where \
                                          2 × Required Request ID Delta exceeds the Request ID.";
@@ -2744,6 +2757,12 @@ impl CodecRule {
                     code_name: Some("PROTOCOL_VIOLATION"),
                 },
             ],
+            Self::UnregisteredTokenAlias => &[RuleCitation {
+                drafts: (23, 23),
+                section: "8.9",
+                sentence: UNKNOWN_TOKEN_ALIAS_23,
+                code_name: Some("UNKNOWN_AUTH_TOKEN_ALIAS"),
+            }],
             Self::InvalidRequiredRequestIdDelta => &[RuleCitation {
                 drafts: (17, 17),
                 section: "9.2",
@@ -2835,6 +2854,7 @@ mod tests {
         CodecRule::InvalidDatagramTypeValue,
         CodecRule::EndOfTrackObjectId,
         CodecRule::ExtensionsOnNonExistentObject,
+        CodecRule::UnregisteredTokenAlias,
         CodecRule::InvalidRequiredRequestIdDelta,
     ];
 
@@ -2867,7 +2887,7 @@ mod tests {
     /// And the same for the decoder's half.
     #[test]
     fn every_codec_rule_is_swept() {
-        assert_eq!(ALL_CODEC.len(), 18, "a rule was added or removed without updating ALL_CODEC");
+        assert_eq!(ALL_CODEC.len(), 19, "a rule was added or removed without updating ALL_CODEC");
     }
 
     /// A cited rule is a rule this build can actually raise on that draft.
@@ -2955,7 +2975,7 @@ mod tests {
         }
         assert_eq!(
             seen.len(),
-            122,
+            123,
             "the sentence count moved; recount the cited sentences against the rendered drafts \
              and update this number"
         );

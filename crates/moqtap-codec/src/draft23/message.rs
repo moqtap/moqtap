@@ -1087,14 +1087,25 @@ fn decode_setup_options(buf: &mut impl Buf) -> Result<Vec<KeyValuePair>, CodecEr
 
 /// Refuse a SETUP token that names an Alias with DELETE or USE_ALIAS.
 ///
-/// SETUP is the first message an endpoint sends, so no Alias can be registered
-/// when one arrives. Section 9.1.4: "If a server receives Alias Type DELETE
-/// (0x0) or USE_ALIAS (0x2) in a SETUP message, it MUST close the session with
-/// ROLE_VIOLATION." A client receiving one is referencing an Alias that is not
-/// registered, which Section 8.9 answers with UNKNOWN_AUTH_TOKEN_ALIAS. Either
-/// way the frame is refused, as [`CodecError::TokenAliasInSetup`].
+/// SETUP is the first message an endpoint sends, so an Alias can be registered
+/// only by a REGISTER earlier in the same SETUP. The options are scanned in
+/// wire order: REGISTER adds its Alias and DELETE of a registered Alias removes
+/// it. Section 8.9: "The receiver of a message referencing an Alias that is not
+/// currently registered MUST reject the message with UNKNOWN_AUTH_TOKEN_ALIAS."
+/// A reference to an Alias not registered is refused at once, as
+/// [`CodecError::UnregisteredTokenAliasInSetup`].
+///
+/// A reference to a registered Alias is refused once the scan ends, as
+/// [`CodecError::TokenAliasInSetup`]. Section 9.1.4: "If a server receives
+/// Alias Type DELETE (0x0) or USE_ALIAS (0x2) in a SETUP message, it MUST close
+/// the session with ROLE_VIOLATION." At a client the REGISTER may not have
+/// taken effect: Section 9.1.4 treats one over the receiver's
+/// MAX_AUTH_TOKEN_CACHE_SIZE as USE_VALUE. The codec knows neither the role
+/// nor the cache size.
 fn check_setup_token_aliases(options: &[KeyValuePair]) -> Result<(), CodecError> {
     use crate::auth_token::TokenAliasType;
+    let mut registered: Vec<u64> = Vec::new();
+    let mut registered_reference = None;
     for option in options {
         let key = option.key.into_inner();
         let KvpValue::Bytes(value) = &option.value else { continue };
@@ -1104,11 +1115,25 @@ fn check_setup_token_aliases(options: &[KeyValuePair]) -> Result<(), CodecError>
         let token = AuthorizationToken::decode_moqt::<Wire>(key, value).map_err(|_| {
             CodecError::MalformedAuthToken { key, detail: "the Token does not parse" }
         })?;
-        if matches!(token.alias_type, TokenAliasType::Delete | TokenAliasType::UseAlias) {
-            return Err(CodecError::TokenAliasInSetup { alias_type: token.alias_type.id() });
+        let alias_type = token.alias_type.id();
+        match (token.alias_type, token.alias) {
+            (TokenAliasType::Register, Some(alias)) => registered.push(alias),
+            (TokenAliasType::Delete | TokenAliasType::UseAlias, Some(alias)) => {
+                let Some(at) = registered.iter().position(|&r| r == alias) else {
+                    return Err(CodecError::UnregisteredTokenAliasInSetup { alias_type, alias });
+                };
+                if token.alias_type == TokenAliasType::Delete {
+                    registered.swap_remove(at);
+                }
+                registered_reference.get_or_insert(alias_type);
+            }
+            _ => {}
         }
     }
-    Ok(())
+    match registered_reference {
+        Some(alias_type) => Err(CodecError::TokenAliasInSetup { alias_type }),
+        None => Ok(()),
+    }
 }
 
 /// Encode the Setup Options of a SETUP message.
@@ -2819,5 +2844,39 @@ mod tests {
                 "message type {ty:#x}"
             );
         }
+    }
+
+    /// A SETUP's Alias references, scanned in wire order against the
+    /// REGISTERs before them in the same SETUP.
+    #[test]
+    fn setup_alias_references_are_told_apart_by_registration() {
+        let token = |bytes: &[u8]| param(AUTH_TOKEN_PARAMETER, bytes);
+        let register = |alias: u8| token(&[0x01, alias, 0x00, b't']);
+        let delete = |alias: u8| token(&[0x00, alias]);
+        let use_alias = |alias: u8| token(&[0x02, alias]);
+        let use_value = token(&[0x03, 0x00, b't']);
+        let unregistered = |alias_type, alias| {
+            Err(CodecError::UnregisteredTokenAliasInSetup { alias_type, alias })
+        };
+        let registered = |alias_type| Err(CodecError::TokenAliasInSetup { alias_type });
+
+        assert_eq!(check_setup_token_aliases(&[register(1), use_value.clone()]), Ok(()));
+        assert_eq!(check_setup_token_aliases(&[delete(0)]), unregistered(0, 0));
+        assert_eq!(check_setup_token_aliases(&[use_alias(7)]), unregistered(2, 7));
+        assert_eq!(check_setup_token_aliases(&[register(1), use_alias(2)]), unregistered(2, 2));
+        // A reference ahead of its REGISTER is not registered yet.
+        assert_eq!(check_setup_token_aliases(&[use_alias(1), register(1)]), unregistered(2, 1));
+        assert_eq!(check_setup_token_aliases(&[register(1), use_alias(1)]), registered(2));
+        assert_eq!(check_setup_token_aliases(&[register(1), delete(1)]), registered(0));
+        // DELETE retires the Alias, so a later reference to it is unregistered.
+        assert_eq!(
+            check_setup_token_aliases(&[register(1), delete(1), use_alias(1)]),
+            unregistered(2, 1)
+        );
+        // A later unregistered reference outranks an earlier registered one.
+        assert_eq!(
+            check_setup_token_aliases(&[register(1), use_alias(1), use_alias(3)]),
+            unregistered(2, 3)
+        );
     }
 }

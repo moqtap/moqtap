@@ -299,6 +299,17 @@ impl FramedSendStream {
         self.inner.finish()?;
         Ok(())
     }
+
+    /// Reset the stream with `code`, telling the peer transmission was
+    /// abandoned rather than completed.
+    ///
+    /// Dropping a send stream sends a FIN, which claims the stream ended
+    /// cleanly; this is the only way to say the opposite. See
+    /// [`SendStream::reset`].
+    pub fn reset(&mut self, code: u64) -> Result<(), ConnectionError> {
+        self.inner.reset(code)?;
+        Ok(())
+    }
 }
 
 /// What an Object Status makes of an object, for Section 8.1.1.1's table.
@@ -852,6 +863,12 @@ impl Connection {
     /// [`TransportClose`](crate::transport::TransportClose).
     pub fn transport_close(&self) -> Option<crate::transport::TransportClose> {
         self.transport.transport_close()
+    }
+
+    /// The smallest round-trip time seen on this path, ignoring ack delay.
+    /// `None` until the peer has acknowledged a packet.
+    pub fn min_rtt(&self) -> Option<std::time::Duration> {
+        self.transport.min_rtt()
     }
 
     /// Emit an event to the observer, if one is attached.
@@ -1774,11 +1791,13 @@ impl Connection {
             | CodecError::MissingErrorDetail { .. }
             | CodecError::MalformedErrorDetail { .. }
             | CodecError::TokenAliasInSetup { .. }
+            | CodecError::UnregisteredTokenAliasInSetup { .. }
             | CodecError::EmptyTrackName
             | CodecError::MalformedAuthToken { .. }
             | CodecError::TrackPropertiesNotPermitted
             | CodecError::DeltaDecodingOverflow { .. }
             | CodecError::MalformedObject { .. }
+            | CodecError::FetchEndMarkerFirst { .. }
             | CodecError::MalformedTrack { .. }
             | CodecError::UnknownObjectStatus(_)
             | CodecError::UnsupportedDraft(_)

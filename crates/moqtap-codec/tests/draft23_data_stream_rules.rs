@@ -1051,11 +1051,11 @@ fn end_of_group_and_end_of_track_carry_nothing_and_reset_the_object_id() {
         seen.header.encode(&mut out).unwrap();
         assert_eq!(out, cursor_wire, "flags {flags:#x} encode to the flags alone");
 
-        // As the first entry it names a prior Object that does not exist.
+        // As the first entry it has no prior Object to name.
         let mut reader = FetchObjectReader::new(GroupOrder::Ascending);
-        assert!(matches!(
+        assert_eq!(
             reader.read_object_header(&mut &cursor_wire[..]),
-            Err(CodecError::MalformedObject { .. })
-        ));
+            Err(CodecError::FetchEndMarkerFirst { serialization_flags: flags })
+        );
     }
 }

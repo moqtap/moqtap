@@ -1808,8 +1808,10 @@ impl FetchObjectReader {
     /// Object that does not exist. Section 11.4.1.1: "If the first Object in
     /// the FETCH response uses a flag that references fields in the prior
     /// Object, the Subscriber MUST close the session with MALFORMED_OBJECT."
-    /// End of Group or End of Track as the first entry names a prior Object
-    /// too, and is refused the same way.
+    ///
+    /// [`CodecError::FetchEndMarkerFirst`] for End of Group or End of Track as
+    /// the first entry. Section 11.4.2.2 defines both by a prior Object, and
+    /// no sentence states what a receiver does when there is none.
     ///
     /// [`CodecError::DeltaDecodingOverflow`] for an ID below 0 or above
     /// 2^64-1 (Section 11.4.1.1 and Section 11.4.2.1).
@@ -1842,7 +1844,7 @@ impl FetchObjectReader {
         if header.end_marker().is_some() {
             let (group_id, object_id) = self
                 .prior_location
-                .ok_or_else(|| malformed("End of Group or End of Track has no prior Object"))?;
+                .ok_or(CodecError::FetchEndMarkerFirst { serialization_flags: header.flags() })?;
             self.prior_location = Some((group_id, u64::MAX));
             return Ok(FetchObject {
                 header,

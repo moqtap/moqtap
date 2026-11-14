@@ -70,23 +70,28 @@ fn control_message_refusals_close_with_the_code_their_rule_names() {
     namespace_33.extend_from_slice(&[0x01, b'v', 0x00]);
 
     let rows: Vec<(&str, Vec<u8>, u64)> = vec![
-        // Section 9: "An endpoint that receives an unknown message type MUST
-        // close the session with UNEXPECTED_MESSAGE."
+        // draft-23 Section 9: "An endpoint that receives an unknown message
+        // type MUST close the session with UNEXPECTED_MESSAGE."
         ("unknown-type.json fetch-ok-reserved", hex("1804000a0300"), UNEXPECTED_MESSAGE),
-        // Section 9: "If an endpoint receives a control message with a length
-        // larger than its MAX_CONTROL_MESSAGE_SIZE, it MUST close the session
-        // with FIELD_LENGTH_EXCEEDED."
+        // draft-23 Section 9: "If an endpoint receives a control message with a
+        // length larger than its MAX_CONTROL_MESSAGE_SIZE, it MUST close the
+        // session with FIELD_LENGTH_EXCEEDED."
         (
             "setup.json length-over-max-control-message-size",
             framed(0x2F00, &over_limit),
             FIELD_LENGTH_EXCEEDED,
         ),
-        // Section 8.9: "The receiver of a message referencing an Alias that is
-        // not currently registered MUST reject the message with
+        // draft-23 Section 8.9: "The receiver of a message referencing an Alias
+        // that is not currently registered MUST reject the message with
         // UNKNOWN_AUTH_TOKEN_ALIAS." A `Connection` is the client.
         ("setup.json with-auth-token-delete", hex("af000403020000"), UNKNOWN_AUTH_TOKEN_ALIAS),
-        // Section 2.4.1: "If an endpoint receives a Track Name with a length
-        // of 0, it MUST close the session with a PROTOCOL_VIOLATION."
+        // A REGISTER of Alias 1, then USE_ALIAS 1. The client registers no
+        // Alias: draft-23 Section 9.1.3 "The default value is 0 which prohibits
+        // the use of token Aliases", and draft-23 Section 9.1.4 treats a
+        // REGISTER over it as USE_VALUE, so Alias 1 is not registered either.
+        ("register then use-alias", hex("af000a03040101007400020201"), UNKNOWN_AUTH_TOKEN_ALIAS),
+        // draft-23 Section 2.4.1: "If an endpoint receives a Track Name with a
+        // length of 0, it MUST close the session with a PROTOCOL_VIOLATION."
         ("subscribe.json empty-track-name", hex("0306020101610000"), PROTOCOL_VIOLATION),
         (
             "subscribe.json namespace-33-fields",
@@ -98,20 +103,20 @@ fn control_message_refusals_close_with_the_code_their_rule_names() {
             hex("030c010201610005766964656f00"),
             INVALID_TRACK_NAMESPACE,
         ),
-        // Section 8.9: "If the Token structure cannot be decoded, including an
-        // unknown Alias Type, the receiver MUST close the Session with
-        // MALFORMED_AUTH_TOKEN."
+        // draft-23 Section 8.9: "If the Token structure cannot be decoded,
+        // including an unknown Alias Type, the receiver MUST close the Session
+        // with MALFORMED_AUTH_TOKEN."
         (
             "subscribe.json auth-token-unknown-alias-type",
             hex("03110101046c69766505766964656f01030104"),
             MALFORMED_AUTH_TOKEN,
         ),
-        // Section 9.4.2.1: "An endpoint that receives a REQUEST_ERROR with
-        // Error Code REDIRECT and no REDIRECT Error Detail MUST close the
+        // draft-23 Section 9.4.2.1: "An endpoint that receives a REQUEST_ERROR
+        // with Error Code REDIRECT and no REDIRECT Error Detail MUST close the
         // session with MALFORMED_MESSAGE."
         ("request-error.json redirect-without-detail", hex("0503340000"), MALFORMED_MESSAGE),
-        // Section 8.3: a Value that does not match its Type's serialization is
-        // MALFORMED_KEY_VALUE.
+        // draft-23 Section 8.3: a Value that does not match its Type's
+        // serialization is MALFORMED_KEY_VALUE.
         (
             "request-error.json redirect-detail-trailing-bytes",
             hex("050c340000010700010161016200"),
@@ -126,13 +131,13 @@ fn control_message_refusals_close_with_the_code_their_rule_names() {
 
 #[test]
 fn data_stream_refusals_close_with_the_code_their_rule_names() {
-    // Section 11.4.1: "If an endpoint receives any other value greater than
-    // 127, it MUST close the session with MALFORMED_OBJECT."
+    // draft-23 Section 11.4.1: "If an endpoint receives any other value greater
+    // than 127, it MUST close the session with MALFORMED_OBJECT."
     let err = fetch_refusal(&hex("05048082"));
     assert_eq!(close(&err), Some(MALFORMED_OBJECT), "invalid-serialization-flags-0x82: {err:?}");
 
-    // Section 11.4.1.1: "If the computed Object ID would be greater than
-    // 2^64-1, the Subscriber MUST close the Session with
+    // draft-23 Section 11.4.1.1: "If the computed Object ID would be greater
+    // than 2^64-1, the Subscriber MUST close the Session with
     // DELTA_ENCODING_OVERFLOW."
     let err = fetch_refusal(&hex("05041c05028001aa808018008001bb"));
     assert_eq!(
@@ -141,14 +146,15 @@ fn data_stream_refusals_close_with_the_code_their_rule_names() {
         "end-of-group-then-object-id-overflow: {err:?}"
     );
 
-    // Section 11.3.1: Type values "where bit 4 is not set" are invalid, and
-    // the receiver "MUST close the session with INVALID_STREAM_HEADER".
+    // draft-23 Section 11.3.1: Type values "where bit 4 is not set" are
+    // invalid, and the receiver "MUST close the session with
+    // INVALID_STREAM_HEADER".
     let err = SubgroupHeader::decode(&mut &hex("200100800004deadbeef")[..])
         .expect_err("subgroup.json bit-4-not-set");
     assert_eq!(close(&err), Some(INVALID_STREAM_HEADER), "bit-4-not-set: {err:?}");
 
-    // Section 11.1.1: "If an endpoint receives any other value, it SHOULD
-    // close the session with INVALID_OBJECT_STATUS (Section 12.2)." The
+    // draft-23 Section 11.1.1: "If an endpoint receives any other value, it
+    // SHOULD close the session with INVALID_OBJECT_STATUS (Section 12.2)." The
     // `subgroup-single-object` header, then an Object with no payload and
     // status 0x1.
     let bytes = hex("10010080000001");
@@ -156,4 +162,16 @@ fn data_stream_refusals_close_with_the_code_their_rule_names() {
     let header = SubgroupHeader::decode(&mut buf).expect("the SUBGROUP_HEADER");
     let err = SubgroupObjectReader::new(&header).read_object(&mut buf).expect_err("status 0x1");
     assert_eq!(close(&err), Some(INVALID_OBJECT_STATUS), "status 0x1: {err:?}");
+}
+
+/// End of Group or End of Track as a fetch stream's first entry has no prior
+/// Object to end (draft-23 Section 11.4.2.2). No sentence states a receiver
+/// action, so the refusal closes nothing.
+#[test]
+fn an_end_marker_first_on_a_fetch_stream_closes_nothing() {
+    for (bytes, flags) in [(hex("05048080"), 0x80), (hex("05048081"), 0x81)] {
+        let err = fetch_refusal(&bytes);
+        assert_eq!(err, CodecError::FetchEndMarkerFirst { serialization_flags: flags });
+        assert_eq!(close(&err), None, "flags {flags:#x}");
+    }
 }

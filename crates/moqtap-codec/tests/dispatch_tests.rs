@@ -604,6 +604,9 @@ fn check_header_case(version: DraftVersion, case: &HeaderCase) -> AnySubgroupHea
         case.subgroup_id_mode,
         "{version:?} [{what}]: subgroup_id_mode"
     );
+    if version.number() < 18 {
+        assert_eq!(header.first_object(), None, "{version:?} [{what}]: first_object");
+    }
     header
 }
 
@@ -1238,3 +1241,45 @@ modal_accessor_tests!(
         0x7F
     ]
 );
+
+/// Drafts 18-23 add the FIRST_OBJECT bit (0x40) to the subgroup header type.
+/// draft-18 Section 2.2: "When the Original Publisher opens a new subgroup, it
+/// MUST set the FIRST_OBJECT bit".
+///
+/// Fails if `first_object()` reads another bit, or if `encode_stream` drops the
+/// bit on the way back out.
+macro_rules! first_object_accessor_tests {
+    ($name:ident, $feat:literal, $variant:ident) => {
+        #[cfg(feature = $feat)]
+        mod $name {
+            use super::*;
+
+            #[test]
+            fn first_object_round_trips() {
+                for (header_type, first) in [(0x54u8, true), (0x14, false)] {
+                    let case = header_case(
+                        DraftVersion::$variant,
+                        "explicit",
+                        header_type,
+                        Some(42),
+                        Some(64),
+                        Some(42),
+                        Some(2),
+                    );
+                    let header = check_header_case(DraftVersion::$variant, &case);
+                    assert_eq!(header.first_object(), Some(first), "type {header_type:#04x}");
+                    let mut out = Vec::new();
+                    header.encode_stream(&mut out);
+                    assert_eq!(out, case.wire, "type {header_type:#04x} re-encoded");
+                }
+            }
+        }
+    };
+}
+
+first_object_accessor_tests!(first_object_draft18, "draft18", Draft18);
+first_object_accessor_tests!(first_object_draft19, "draft19", Draft19);
+first_object_accessor_tests!(first_object_draft20, "draft20", Draft20);
+first_object_accessor_tests!(first_object_draft21, "draft21", Draft21);
+first_object_accessor_tests!(first_object_draft22, "draft22", Draft22);
+first_object_accessor_tests!(first_object_draft23, "draft23", Draft23);

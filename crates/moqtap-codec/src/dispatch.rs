@@ -1115,6 +1115,27 @@ impl AnySubgroupHeader {
             Draft20 @ "draft20", Draft21 @ "draft21", Draft22 @ "draft22", Draft23 @ "draft23",
         ] => |h| { h.has_properties() },
     }
+
+    subgroup_header_accessor! {
+        /// Whether the header sets the FIRST_OBJECT bit (0x40), or `None` on
+        /// drafts 07-17, which define no such bit.
+        ///
+        /// draft-18 Section 2.2, unchanged through draft-23 Section 2.2: "When
+        /// the Original Publisher opens a new subgroup, it MUST set the
+        /// FIRST_OBJECT bit". The bit is defined in draft-18 Section 11.4.2
+        /// and draft-23 Section 11.3.1.
+        first_object -> Option<bool>;
+        [
+            Draft07 @ "draft07", Draft08 @ "draft08", Draft09 @ "draft09",
+            Draft10 @ "draft10", Draft11 @ "draft11", Draft12 @ "draft12",
+            Draft13 @ "draft13", Draft14 @ "draft14", Draft15 @ "draft15",
+            Draft16 @ "draft16", Draft17 @ "draft17",
+        ] => |_h| None,
+        [
+            Draft18 @ "draft18", Draft19 @ "draft19", Draft20 @ "draft20",
+            Draft21 @ "draft21", Draft22 @ "draft22", Draft23 @ "draft23",
+        ] => |h| Some(h.is_first_object()),
+    }
 }
 
 dispatch_enum! {

@@ -911,6 +911,15 @@ BOUNDARIES = {
              "\"The PAUSED parameter (Parameter Type 0x11) is a uint8.\" The "
              "draft-23 facade writes it through `draft23::publish::"
              "paused_parameter`."),
+    ("crates/moqtap-client/src/dispatch.rs", "serve_inbound_range",
+     "a `cfg(any(...))` draft list"):
+        (23, "`inclusive_end_object` writes the FETCH_OK End Location of "
+             "draft-11 and drafts 20-22. Draft-23 answers a FETCH with "
+             "REQUEST_OK, which has no End Location and which "
+             "draft-23 Section 1.5 calls FETCH_OK: draft-23 Section 3.2, "
+             "\"If Largest Object is within the requested range, the FETCH "
+             "response ends at Largest Object and the publisher MUST include "
+             "the LARGEST_OBJECT parameter (Section 9.19.17) in FETCH_OK.\""),
 }
 
 

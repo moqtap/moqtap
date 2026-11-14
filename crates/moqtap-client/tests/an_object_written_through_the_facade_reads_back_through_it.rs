@@ -34,9 +34,21 @@
 //! The header takes four shapes. Drafts 07 through 10 keep the stream type
 //! outside it; drafts 11 through 13 name a `StreamType` variant per layout;
 //! draft-14 folds the type in as a flag word and makes the Subgroup ID an
-//! `Option` that must agree with it; drafts 15 through 20 replace the flags
+//! `Option` that must agree with it; drafts 15 through 23 replace the flags
 //! with a type byte. The transcripts open `04`, `0c`, `14`, `14` — the type
 //! moved twice inside that range without the struct moving with it.
+//!
+//! # FIRST_OBJECT
+//!
+//! draft-18 Section 2.2, unchanged through draft-23 Section 2.2: "When the
+//! Original Publisher opens a new subgroup, it MUST set the FIRST_OBJECT bit".
+//! So on drafts 18-23 a `SubgroupStart::First` stream opens `54` and a
+//! `SubgroupStart::Later` one `14`; drafts 07-17 write the same header for both.
+//!
+//! # Reset
+//!
+//! `AnySubgroupWriter::reset` must reach the peer as a `RESET_STREAM` carrying
+//! the code it was given, not as a FIN.
 //!
 //! The object takes five. Draft-07 has no extension block at all. Draft-08
 //! counts its extensions and draft-09 changed the count to a byte length, which
@@ -128,7 +140,9 @@ mod common;
 
 use std::time::Duration;
 
-use moqtap_client::dispatch::{AnyClientConfig, AnyConnection, AnyObject, AnyTransportType};
+use moqtap_client::dispatch::{
+    AnyClientConfig, AnyConnection, AnyObject, AnyTransportType, SubgroupStart,
+};
 use moqtap_codec::dispatch::{AnyControlMessage, AnySubgroupHeader};
 use moqtap_codec::kvp::KeyValuePair;
 use moqtap_codec::version::DraftVersion;
@@ -179,6 +193,10 @@ const OBJECTS: [(u64, &[u8]); 3] = [(0, b"first"), (3, b"second object"), (7, b"
 /// all agree that a non-zero code forbids a payload, which fixes zero as the
 /// one an object with a payload could have carried.
 const NORMAL: u64 = 0;
+
+/// The code the reset gate hands the peer. Not zero, so a reset that lost its
+/// code shows.
+const RESET_CODE: u64 = 0x2A;
 
 /// What [`OBJECTS`] must read back as.
 ///
@@ -397,10 +415,13 @@ macro_rules! first_subgroup_index {
 /// `$handshake` picks the setup exchange, `$params` whatever that draft needs
 /// in it, `$header` is what both parsers must make of the header the client
 /// wrote, `$bytes` is how long the whole stream came out, and `$wire` is every
-/// byte of it.
+/// byte of it for a `SubgroupStart::First` stream. `$first` and `$later` are
+/// what `first_object()` reads for each start, and `$later_wire` is the
+/// `SubgroupStart::Later` stream.
 macro_rules! subgroup_gate {
     ($module:ident, $feat:literal, $version:ident, $handshake:tt, $params:tt,
-     $header:literal, $bytes:literal, $wire:literal) => {
+     $header:literal, $bytes:literal, $wire:literal,
+     $first:literal, $later:literal, $later_wire:literal) => {
         #[cfg(feature = $feat)]
         mod $module {
             use super::*;
@@ -448,8 +469,9 @@ macro_rules! subgroup_gate {
                 // framing agree with each other; the only thing that does not
                 // is a fixed transcript of what went out.
                 let report = format!(
-                    "{} bytes={} wire={}",
+                    "{} first_object={:?} bytes={} wire={}",
                     describe_header(&header),
+                    header.first_object(),
                     bytes.len(),
                     bytes.iter().map(|b| format!("{b:02x}")).collect::<String>(),
                 );
@@ -482,7 +504,7 @@ macro_rules! subgroup_gate {
 
                 let mut writer = tokio::time::timeout(
                     PATIENCE,
-                    conn.open_subgroup(ALIAS, GROUP, SUBGROUP, PRIORITY),
+                    conn.open_subgroup(ALIAS, GROUP, SUBGROUP, PRIORITY, SubgroupStart::First),
                 )
                 .await
                 .expect("opening the subgroup did not finish")
@@ -525,6 +547,7 @@ macro_rules! subgroup_gate {
                     $header,
                     "the header the facade's reader handed back is not the one that was asked for"
                 );
+                assert_eq!(format!("{:?}", header.first_object()), $first, "echoed first_object");
 
                 let mut read = Vec::new();
                 for (id, _) in OBJECTS {
@@ -551,7 +574,7 @@ macro_rules! subgroup_gate {
                     .expect("the peer task");
                 assert_eq!(
                     seen,
-                    concat!($header, " bytes=", $bytes, " wire=", $wire),
+                    concat!($header, " first_object=", $first, " bytes=", $bytes, " wire=", $wire),
                     "the header the peer decoded off the wire is not the one that was asked for"
                 );
             }
@@ -609,7 +632,7 @@ macro_rules! subgroup_gate {
 
                 let mut writer = tokio::time::timeout(
                     PATIENCE,
-                    conn.open_subgroup(ALIAS, GROUP, SUBGROUP, PRIORITY),
+                    conn.open_subgroup(ALIAS, GROUP, SUBGROUP, PRIORITY, SubgroupStart::First),
                 )
                 .await
                 .expect("opening the subgroup did not finish")
@@ -658,6 +681,117 @@ macro_rules! subgroup_gate {
                     .expect("the peer hung")
                     .expect("the peer task");
             }
+
+            #[tokio::test]
+            async fn a_later_subgroup_stream_leaves_first_object_clear() {
+                common::init_crypto();
+                let (endpoint, addr) = common::spawn_server(&[DRAFT.quic_alpn()]);
+                let peer = tokio::spawn(serve(endpoint));
+
+                let conn = tokio::time::timeout(
+                    PATIENCE,
+                    AnyConnection::connect(&addr.to_string(), client_config()),
+                )
+                .await
+                .expect("connect did not finish")
+                .expect("connect");
+
+                let mut writer = tokio::time::timeout(
+                    PATIENCE,
+                    conn.open_subgroup(ALIAS, GROUP, SUBGROUP, PRIORITY, SubgroupStart::Later),
+                )
+                .await
+                .expect("opening the subgroup did not finish")
+                .expect("open a subgroup stream");
+                for (id, payload) in OBJECTS {
+                    tokio::time::timeout(PATIENCE, writer.write_object(id, payload))
+                        .await
+                        .expect("writing an object did not finish")
+                        .unwrap_or_else(|e| panic!("write object {id}: {e}"));
+                }
+                tokio::time::timeout(PATIENCE, writer.finish())
+                    .await
+                    .expect("finishing the subgroup did not finish")
+                    .expect("finish the subgroup");
+
+                let (header, _reader) = tokio::time::timeout(PATIENCE, conn.accept_subgroup())
+                    .await
+                    .expect("the echoed subgroup never arrived")
+                    .expect("accept the echoed subgroup");
+                assert_eq!(format!("{:?}", header.first_object()), $later, "echoed first_object");
+
+                conn.close(0, b"gate complete");
+                let seen = tokio::time::timeout(PATIENCE * 2, peer)
+                    .await
+                    .expect("the peer hung")
+                    .expect("the peer task");
+                assert_eq!(
+                    seen,
+                    concat!(
+                        $header,
+                        " first_object=",
+                        $later,
+                        " bytes=",
+                        $bytes,
+                        " wire=",
+                        $later_wire
+                    ),
+                    "the header the peer decoded off the wire is not the one that was asked for"
+                );
+            }
+
+            /// Read the client's subgroup stream until it ends, then close the
+            /// session and return the reset code it ended with.
+            async fn serve_reset(server: quinn::Endpoint) -> Option<u64> {
+                let conn = server.accept().await.expect("accept").await.expect("tls handshake");
+                let _control = peer_setup!($handshake, conn, $version, $module);
+
+                let mut recv =
+                    conn.accept_uni().await.expect("accept the client's subgroup stream");
+                let code = match recv.read_to_end(64 * 1024).await {
+                    Err(quinn::ReadToEndError::Read(quinn::ReadError::Reset(code))) => {
+                        Some(code.into_inner())
+                    }
+                    _ => None,
+                };
+                conn.close(0u32.into(), b"gate complete");
+                code
+            }
+
+            #[tokio::test]
+            async fn a_reset_subgroup_reaches_the_peer_with_its_code() {
+                common::init_crypto();
+                let (endpoint, addr) = common::spawn_server(&[DRAFT.quic_alpn()]);
+                let peer = tokio::spawn(serve_reset(endpoint));
+
+                let conn = tokio::time::timeout(
+                    PATIENCE,
+                    AnyConnection::connect(&addr.to_string(), client_config()),
+                )
+                .await
+                .expect("connect did not finish")
+                .expect("connect");
+
+                let mut writer = tokio::time::timeout(
+                    PATIENCE,
+                    conn.open_subgroup(ALIAS, GROUP, SUBGROUP, PRIORITY, SubgroupStart::First),
+                )
+                .await
+                .expect("opening the subgroup did not finish")
+                .expect("open a subgroup stream");
+                let (id, payload) = OBJECTS[0];
+                tokio::time::timeout(PATIENCE, writer.write_object(id, payload))
+                    .await
+                    .expect("writing an object did not finish")
+                    .unwrap_or_else(|e| panic!("write object {id}: {e}"));
+                writer.reset(RESET_CODE).expect("reset the subgroup");
+
+                let code = tokio::time::timeout(PATIENCE * 2, peer)
+                    .await
+                    .expect("the peer hung")
+                    .expect("the peer task");
+                assert_eq!(code, Some(RESET_CODE), "the peer saw no reset with the code given");
+            }
         }
     };
 }
@@ -670,6 +804,9 @@ subgroup_gate!(
     with_role,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "04070305c800056669727374030d7365636f6e64206f626a656374070000",
+    "None",
+    "None",
     "04070305c800056669727374030d7365636f6e64206f626a656374070000"
 );
 subgroup_gate!(
@@ -680,6 +817,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=true",
     "33",
+    "04070305c8000005666972737403000d7365636f6e64206f626a65637407000000",
+    "None",
+    "None",
     "04070305c8000005666972737403000d7365636f6e64206f626a65637407000000"
 );
 subgroup_gate!(
@@ -690,6 +830,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=true",
     "33",
+    "04070305c8000005666972737403000d7365636f6e64206f626a65637407000000",
+    "None",
+    "None",
     "04070305c8000005666972737403000d7365636f6e64206f626a65637407000000"
 );
 subgroup_gate!(
@@ -700,6 +843,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=true",
     "33",
+    "04070305c8000005666972737403000d7365636f6e64206f626a65637407000000",
+    "None",
+    "None",
     "04070305c8000005666972737403000d7365636f6e64206f626a65637407000000"
 );
 subgroup_gate!(
@@ -710,6 +856,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "0c070305c800056669727374030d7365636f6e64206f626a656374070000",
+    "None",
+    "None",
     "0c070305c800056669727374030d7365636f6e64206f626a656374070000"
 );
 subgroup_gate!(
@@ -720,6 +869,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "14070305c800056669727374030d7365636f6e64206f626a656374070000",
+    "None",
+    "None",
     "14070305c800056669727374030d7365636f6e64206f626a656374070000"
 );
 subgroup_gate!(
@@ -730,6 +882,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "14070305c800056669727374030d7365636f6e64206f626a656374070000",
+    "None",
+    "None",
     "14070305c800056669727374030d7365636f6e64206f626a656374070000"
 );
 subgroup_gate!(
@@ -740,6 +895,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "14070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "None",
+    "None",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -750,6 +908,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "14070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "None",
+    "None",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -760,6 +921,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "14070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "None",
+    "None",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -770,6 +934,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "14070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "None",
+    "None",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -780,6 +947,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "54070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "Some(true)",
+    "Some(false)",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -790,6 +960,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "54070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "Some(true)",
+    "Some(false)",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -800,6 +973,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "54070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "Some(true)",
+    "Some(false)",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -810,6 +986,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "54070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "Some(true)",
+    "Some(false)",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -820,6 +999,9 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "54070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "Some(true)",
+    "Some(false)",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );
 subgroup_gate!(
@@ -830,5 +1012,8 @@ subgroup_gate!(
     none,
     "subgroup alias=7 group=3 subgroup=5 priority=200 extensions=false",
     "30",
+    "54070305c800056669727374020d7365636f6e64206f626a656374030000",
+    "Some(true)",
+    "Some(false)",
     "14070305c800056669727374020d7365636f6e64206f626a656374030000"
 );

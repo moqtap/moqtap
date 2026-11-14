@@ -351,6 +351,13 @@ impl Transport {
         async move { TransportClose::of(&conn.closed().await) }
     }
 
+    /// The smallest round-trip time seen on this path, ignoring ack delay.
+    ///
+    /// `None` until the peer has acknowledged a packet.
+    pub fn min_rtt(&self) -> Option<std::time::Duration> {
+        sampled(&self.quinn_connection().stats())
+    }
+
     /// A handle on the quinn connection under either transport.
     pub(crate) fn quinn_connection(&self) -> quinn::Connection {
         match self {
@@ -413,6 +420,11 @@ impl Transport {
             Transport::WebTransport(t) => t.wt_protocol(),
         }
     }
+}
+
+/// quinn reports its initial RTT as the minimum until an ACK gives it a sample.
+fn sampled(stats: &quinn::ConnectionStats) -> Option<std::time::Duration> {
+    (stats.frame_rx.acks > 0).then_some(stats.path.min_rtt)
 }
 
 /// A transport-agnostic send stream.
@@ -694,5 +706,25 @@ impl RecvStream {
             #[cfg(feature = "webtransport")]
             RecvStream::WebTransport(s) => s.stop(code),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::sampled;
+
+    #[test]
+    fn min_rtt_is_none_before_any_ack() {
+        assert_eq!(sampled(&quinn::ConnectionStats::default()), None);
+    }
+
+    #[test]
+    fn min_rtt_is_the_path_minimum_once_an_ack_arrives() {
+        let mut stats = quinn::ConnectionStats::default();
+        stats.path.min_rtt = Duration::from_millis(7);
+        stats.frame_rx.acks = 1;
+        assert_eq!(sampled(&stats), Some(Duration::from_millis(7)));
     }
 }

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-14
+
+### Changed
+
+- **Breaking.** `CodecError` gains `FetchEndMarkerFirst` and `UnregisteredTokenAliasInSetup`. On draft-23, End of Group or End of Track as a fetch stream's first entry was `MalformedObject` and is now `FetchEndMarkerFirst`. `TokenAliasInSetup`, which covered any DELETE or USE_ALIAS in a SETUP, now covers only a reference to an Alias that an earlier REGISTER in the same SETUP carries; any other is `UnregisteredTokenAliasInSetup`.
+
+### Added
+
+- `AnySubgroupHeader::first_object`: whether a subgroup header sets FIRST_OBJECT, on drafts 18-23. `None` on drafts 07-17.
+
 ## [0.11.1] - 2026-11-04
 
 ### Fixed
