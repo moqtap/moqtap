@@ -382,12 +382,14 @@ pub struct FramedSendStream {
     draft: DraftVersion,
     /// Stateful subgroup object writer.
     subgroup_io: Option<SubgroupObjectReader>,
+    /// Whether `finish` or `reset` has ended the stream.
+    ended: bool,
 }
 
 impl FramedSendStream {
     /// Create a new framed send stream for the given draft version.
     pub fn new(inner: SendStream, draft: DraftVersion) -> Self {
-        Self { inner, draft, subgroup_io: None }
+        Self { inner, draft, subgroup_io: None, ended: false }
     }
 
     /// Get the transport-level stream ID.
@@ -503,6 +505,7 @@ impl FramedSendStream {
     /// Finish the stream (send FIN).
     pub async fn finish(&mut self) -> Result<(), ConnectionError> {
         self.inner.finish()?;
+        self.ended = true;
         Ok(())
     }
 
@@ -514,7 +517,16 @@ impl FramedSendStream {
     /// [`SendStream::reset`].
     pub fn reset(&mut self, code: u64) -> Result<(), ConnectionError> {
         self.inner.reset(code)?;
+        self.ended = true;
         Ok(())
+    }
+
+    /// Reset with `code` unless the stream was already finished or reset: a
+    /// reset after FIN can cut off the retransmission of a complete stream.
+    fn abandon(&mut self, code: u64) {
+        if !self.ended {
+            let _ = self.reset(code);
+        }
     }
 
     /// Returns the draft version this stream is framed for.
@@ -1233,6 +1245,10 @@ pub const fn starts_a_request_stream(ty: MessageType) -> bool {
 /// FIN instead, telling the peer the request ended *cleanly* when it was
 /// abandoned.
 ///
+/// A FETCH data stream opened through [`Connection::open_fetch_stream_on`] and
+/// not finished is reset with CANCELLED when the handle is dropped or
+/// cancelled. A finished one is left alone.
+///
 /// A finished handle is not reset, and once the peer owes nothing more on this
 /// stream its drop sends no `STOP_SENDING` either, because draft-20 Section
 /// 3.3.3 reads it as a cancel: "An endpoint that has already sent a FIN on its
@@ -1418,6 +1434,10 @@ impl RequestStream {
     /// has one. Writing objects goes through this rather than through a handle
     /// the caller keeps, so that the connection can still reach the stream
     /// when a rule says to reset it.
+    ///
+    /// End a complete response with [`FramedSendStream::finish`]. A data
+    /// stream left unfinished is reset with CANCELLED when this handle is
+    /// dropped or cancelled.
     pub fn fetch_data(&mut self) -> Option<&mut FramedSendStream> {
         self.fetch_data.as_mut()
     }
@@ -1431,6 +1451,23 @@ impl RequestStream {
     fn reset_fetch_data(&mut self) {
         if let Some(mut framed) = self.fetch_data.take() {
             let _ = framed.reset(StreamResetErrorCode::Cancelled as u64);
+        }
+    }
+
+    /// Reset the fetch data stream with CANCELLED unless it was finished, and
+    /// forget it. Run when the request is dropped or cancelled.
+    ///
+    /// Draft-20 Section 3.3.3: "Implementations cancel a request by abruptly
+    /// terminating any directions of the stream that are still open, using
+    /// RESET_STREAM for a direction they are sending". That sentence covers
+    /// the request stream; draft-20 Section 5.2 names the data stream for a
+    /// FETCH cancelled by STOP_SENDING: "It MUST reset the bidi request
+    /// stream and unidirectional data stream associated with the FETCH."
+    ///
+    /// A FIN would instead claim the response complete.
+    fn abandon_fetch_data(&mut self) {
+        if let Some(mut framed) = self.fetch_data.take() {
+            framed.abandon(StreamResetErrorCode::Cancelled as u64);
         }
     }
 
@@ -1465,6 +1502,8 @@ impl RequestStream {
     /// is what a caller holding a connection should reach for; this stays
     /// because [`Drop`] has no connection to reach.
     ///
+    /// An unfinished FETCH data stream is reset with CANCELLED as well.
+    ///
     /// Idempotent, and it retires the [`Drop`] behaviour: a cancelled handle
     /// does nothing further when it goes out of scope. Errors from a stream
     /// that was already reset or stopped are swallowed for the same reason —
@@ -1488,6 +1527,7 @@ impl RequestStream {
             ))));
         }
         self.cancelled = true;
+        self.abandon_fetch_data();
         // Already-finished or already-reset halves report StreamClosed; the
         // request ends up cancelled regardless, so neither is worth raising.
         let _ = self.send.reset(code);
@@ -1577,7 +1617,8 @@ impl RequestStream {
 
 impl Drop for RequestStream {
     /// Reset the request unless it was already cancelled or finished. A
-    /// finished one is let go of as the type-level note describes.
+    /// finished one is let go of as the type-level note describes. An
+    /// unfinished FETCH data stream is reset with CANCELLED in every case.
     ///
     /// See the type-level note: the default drop would FIN the send half,
     /// which claims a clean end for a request the caller walked away from —
@@ -1592,6 +1633,7 @@ impl Drop for RequestStream {
     /// before one, the request was never served; after one, the obligations
     /// that follow it are still outstanding.
     fn drop(&mut self) {
+        self.abandon_fetch_data();
         if self.cancelled {
             return;
         }
@@ -5258,6 +5300,84 @@ mod accept_on_the_wire {
             format!("{err}").to_lowercase().contains("reset"),
             "the peer should see a reset, got {err}",
         );
+    }
+
+    /// A peer's FETCH, answered, with its data stream open. Returns the
+    /// handle, the peer's halves of the request stream and the peer's raw
+    /// half of the data stream.
+    async fn served_fetch(
+        lb: &mut Loopback,
+    ) -> (RequestStream, quinn::SendStream, FramedRecvStream, quinn::RecvStream) {
+        let (mut ps, pr) = lb.peer.open_bi().await.expect("open_bi");
+        ps.write_all(&encode(peer_fetch(1))).await.expect("write FETCH");
+        let mut pr = framed(pr);
+        let (_, mut stream) = tokio::time::timeout(PATIENCE, lb.conn.accept_request_stream())
+            .await
+            .expect("accept hung")
+            .expect("accept");
+        lb.conn.respond_fetch_ok(&mut stream, fetch_ok()).await.expect("respond_fetch_ok");
+        assert!(matches!(next_control(&mut pr).await, ControlMessage::FetchOk(_)));
+        lb.conn
+            .open_fetch_stream_on(
+                &mut stream,
+                &AnyFetchHeader::Draft20(FetchHeader { request_id: v(1) }),
+            )
+            .await
+            .expect("open the fetch data stream");
+        let data = tokio::time::timeout(PATIENCE, lb.peer.accept_uni())
+            .await
+            .expect("no data stream arrived")
+            .expect("accept_uni");
+        (stream, ps, pr, data)
+    }
+
+    /// How the peer's read of a data stream ends: the bytes on a FIN, the
+    /// code on a reset.
+    async fn data_stream_end(data: &mut quinn::RecvStream) -> Result<Vec<u8>, u64> {
+        match tokio::time::timeout(PATIENCE, data.read_to_end(1 << 16))
+            .await
+            .expect("the data stream never ended")
+        {
+            Ok(bytes) => Ok(bytes),
+            Err(quinn::ReadToEndError::Read(quinn::ReadError::Reset(code))) => {
+                Err(code.into_inner())
+            }
+            Err(e) => panic!("unexpected read error: {e}"),
+        }
+    }
+
+    /// Dropping the handle of a served FETCH resets its unfinished data stream.
+    ///
+    /// A FIN here would claim the response complete.
+    #[tokio::test]
+    async fn a_dropped_fetch_handle_resets_the_unfinished_data_stream() {
+        let mut lb = loopback().await;
+        let (stream, _ps, _pr, mut data) = served_fetch(&mut lb).await;
+        drop(stream);
+        assert_eq!(data_stream_end(&mut data).await, Err(StreamResetErrorCode::Cancelled as u64));
+    }
+
+    /// Cancelling a served FETCH resets its data stream at once.
+    #[tokio::test]
+    async fn cancelling_a_served_fetch_resets_its_data_stream() {
+        let mut lb = loopback().await;
+        let (mut stream, _ps, _pr, mut data) = served_fetch(&mut lb).await;
+        stream.cancel(REQUEST_CANCELLED).expect("cancel");
+        assert_eq!(data_stream_end(&mut data).await, Err(StreamResetErrorCode::Cancelled as u64));
+        drop(stream);
+    }
+
+    /// A finished data stream ends in its FIN when the handle is dropped.
+    #[tokio::test]
+    async fn a_finished_fetch_data_stream_is_not_reset_on_drop() {
+        let mut lb = loopback().await;
+        let (mut stream, _ps, _pr, mut data) = served_fetch(&mut lb).await;
+        let writer = stream.fetch_data().expect("the data stream is held");
+        writer.finish().await.expect("finish");
+        assert!(writer.ended, "a finished stream counts as ended");
+        drop(stream);
+        let bytes = data_stream_end(&mut data).await.expect("the data stream should end in a FIN");
+        assert!(!bytes.is_empty(), "the FETCH_HEADER should have arrived");
     }
 
     /// A publisher can open the stream a FETCH's objects go on, and owns it.

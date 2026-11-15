@@ -480,8 +480,9 @@ impl SendStream {
     /// stream is never laundered into a complete one.
     ///
     /// # Errors
-    /// - [`TransportError::StreamClosed`] if the stream was already finished or
-    ///   reset.
+    /// - [`TransportError::StreamClosed`] if the stream was already reset. On
+    ///   QUIC a finished stream can still be reset until all its data is
+    ///   acknowledged; on WebTransport a finished one returns this error.
     /// - [`TransportError::Write`] if `code` is outside the QUIC varint range
     ///   (`0..2^62`). Nothing is sent in that case and the stream stays usable.
     pub fn reset(&mut self, code: u64) -> Result<(), TransportError> {

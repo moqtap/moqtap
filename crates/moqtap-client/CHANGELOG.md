@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-11-15
+
+### Fixed
+
+- Drafts 18-23: dropping or cancelling a request stream serving a FETCH ended its data stream with a FIN, which tells the peer the response is complete. An unfinished data stream is now reset with CANCELLED (0x1); end a complete response with `finish()` on `fetch_data()`.
+
 ## [0.13.1] - 2026-11-15
 
 ### Fixed
