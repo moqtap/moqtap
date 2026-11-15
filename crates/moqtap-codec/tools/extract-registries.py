@@ -2070,7 +2070,7 @@ def main(argv: list[str]) -> int:
                 else:
                     stale.append(destination.name)
         else:
-            destination.write_text(payload, encoding="utf-8")
+            destination.write_text(payload, encoding="utf-8", newline="\n")
 
         totals = result["totals"]
         total_registries += totals["registries"]
