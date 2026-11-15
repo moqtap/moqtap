@@ -1529,9 +1529,9 @@ impl SubscribeRange {
 /// request ID at all. The variants reflect that split rather than hiding it.
 ///
 /// Hold on to this value for as long as the request is live. Dropping a
-/// per-request variant resets its stream, which the peer reads as a
-/// cancellation; dropping [`AnyRequest::ControlPlane`] does nothing, because
-/// there is no stream to reset.
+/// per-request variant while its request is live cancels it: an unfinished one
+/// resets its stream, a finished one stops its receive half. Dropping
+/// [`AnyRequest::ControlPlane`] does nothing, because there is no stream.
 ///
 /// The per-request variants are large — a `RequestStream` holds both halves of
 /// a QUIC stream — and `ControlPlane` is two small fields. That disparity is

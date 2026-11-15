@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-15
+
+### Fixed
+
+- Drafts 17-23: dropping a finished request stream sent STOP_SENDING with code 0, cancelling a request that had already completed.
+
 ## [0.13.0] - 2026-11-14
 
 ### Changed

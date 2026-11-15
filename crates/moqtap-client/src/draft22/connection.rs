@@ -1225,13 +1225,29 @@ pub const fn starts_a_request_stream(ty: MessageType) -> bool {
 /// needs the first of them. Neither moves the endpoint's record of the request,
 /// which is why the connection carries a pair of its own.
 ///
-/// # Dropping this cancels the request
+/// # Dropping an unfinished handle cancels the request
 ///
 /// A dropped handle resets the send half and sends `STOP_SENDING` on the
 /// receive half, both with [`REQUEST_CANCELLED`], unless the stream was
 /// already cancelled or finished. Letting the default drop stand would send a
 /// FIN instead, telling the peer the request ended *cleanly* when it was
 /// abandoned.
+///
+/// A finished handle is not reset, and once the peer owes nothing more on this
+/// stream its drop sends no `STOP_SENDING` either, because draft-22 Section
+/// 6.4.2.3 reads it as a cancel: "An endpoint that has already sent a FIN on
+/// its sending direction and subsequently wishes to cancel sends STOP_SENDING
+/// on the receiving direction." The receive half is read to the peer's FIN on a
+/// task of its own, and what arrives is discarded without reaching the
+/// observer. Until that FIN, a reset or the session's end, the stream counts
+/// against the stream limit of the side that opened it, and dropping the
+/// [`Connection`] without [`Connection::close`] can still send `STOP_SENDING`
+/// with code 0. While the peer still owes anything (the answer to a request
+/// other than PUBLISH sent from here, the PUBLISH_DONE of a live subscription,
+/// more of a live namespace or track subscription, or the responder's FIN on a
+/// live FETCH or PUBLISH_NAMESPACE), a finished handle's drop stops the receive
+/// half with [`REQUEST_CANCELLED`] instead. Only a PUBLISH_DONE read from the
+/// stream ends what the peer owes.
 ///
 /// The consequence is sharp and worth stating: a live subscription's request
 /// stream must be **held for the subscription's life**, because PUBLISH_DONE
@@ -1264,7 +1280,16 @@ pub const fn starts_a_request_stream(ty: MessageType) -> bool {
 #[must_use = "dropping a request stream cancels the request; hold it until the response arrives"]
 pub struct RequestStream {
     send: FramedSendStream,
-    recv: FramedRecvStream,
+    /// Taken only in [`Drop`].
+    recv: Option<FramedRecvStream>,
+    /// Whether the peer still owes anything on this stream; see the
+    /// type-level note.
+    peer_owes: bool,
+    /// Whether the peer has answered a request sent from here.
+    answered: bool,
+    /// Closed when the [`Connection`] is dropped, which ends a drain [`Drop`]
+    /// left running.
+    session: tokio::sync::watch::Receiver<()>,
     request_id: VarInt,
     kind: RequestKind,
     /// The unidirectional stream this request's objects are being served on.
@@ -1297,6 +1322,40 @@ pub struct RequestStream {
 }
 
 impl RequestStream {
+    fn recv_mut(&mut self) -> &mut FramedRecvStream {
+        self.recv.as_mut().expect("the receive half is taken only in Drop")
+    }
+
+    /// Clear `peer_owes` once `msg`, read off this stream, is the last
+    /// message the peer owes on it.
+    fn note_from_peer(&mut self, msg: &ControlMessage) {
+        let answer = matches!(
+            msg,
+            ControlMessage::RequestOk(_)
+                | ControlMessage::RequestError(_)
+                | ControlMessage::SubscribeOk(_)
+                | ControlMessage::FetchOk(_)
+        );
+        let first = answer && self.origin == RequestOrigin::Local && !self.answered;
+        let ends = match (self.origin, self.kind) {
+            _ if matches!(msg, ControlMessage::PublishDone(_)) => true,
+            (RequestOrigin::Peer, _) => false,
+            (
+                RequestOrigin::Local,
+                RequestKind::Subscribe
+                | RequestKind::SubscribeNamespace
+                | RequestKind::SubscribeTracks
+                | RequestKind::Fetch
+                | RequestKind::PublishNamespace,
+            ) => first && matches!(msg, ControlMessage::RequestError(_)),
+            (RequestOrigin::Local, _) => first,
+        };
+        self.answered |= first;
+        if ends {
+            self.peer_owes = false;
+        }
+    }
+
     /// The request id the endpoint allocated for this request.
     ///
     /// Useful for logging and for endpoint calls that still take one. It is
@@ -1432,7 +1491,7 @@ impl RequestStream {
         // Already-finished or already-reset halves report StreamClosed; the
         // request ends up cancelled regardless, so neither is worth raising.
         let _ = self.send.reset(code);
-        let _ = self.recv.stop(code);
+        let _ = self.recv_mut().stop(code);
         Ok(())
     }
 
@@ -1456,7 +1515,7 @@ impl RequestStream {
     /// reset-only observable, so a WebTransport caller learns of a peer cancel
     /// on its next read and not before.
     pub async fn peer_cancelled(&mut self) -> Result<Option<u64>, ConnectionError> {
-        self.recv.received_reset().await
+        self.recv_mut().received_reset().await
     }
 
     /// Finish the send half cleanly, leaving the receive half open.
@@ -1496,11 +1555,11 @@ impl RequestStream {
     /// Drafts 17 and 18 have no Section 6.4.2.2 and no guard: their `finish` is
     /// unconditional. A porter must not carry this one back to them.
     ///
-    /// A finished handle, like a cancelled one, does nothing further on
-    /// [`Drop`]. That matters here: the default drop resets both halves, which
-    /// Section 6.4.2.2 contrasts with a FIN as the abrupt close, so a request
-    /// that ended cleanly must come through this to avoid being reported as
-    /// cancelled.
+    /// A finished handle is not reset on [`Drop`]; the type-level note says
+    /// what its drop does instead. That matters here: the default drop resets
+    /// both halves, which Section 6.4.2.2 contrasts with a FIN as the abrupt
+    /// close, so a request that ended cleanly must come through this to avoid
+    /// being reported as cancelled.
     pub async fn finish(&mut self) -> Result<(), ConnectionError> {
         if self.finished || self.cancelled {
             return Ok(());
@@ -1517,7 +1576,8 @@ impl RequestStream {
 }
 
 impl Drop for RequestStream {
-    /// Reset the request unless it was already cancelled or finished.
+    /// Reset the request unless it was already cancelled or finished. A
+    /// finished one is let go of as the type-level note describes.
     ///
     /// See the type-level note: the default drop would FIN the send half,
     /// which claims a clean end for a request the caller walked away from —
@@ -1532,7 +1592,18 @@ impl Drop for RequestStream {
     /// before one, the request was never served; after one, the obligations
     /// that follow it are still outstanding.
     fn drop(&mut self) {
-        if self.cancelled || self.finished {
+        if self.cancelled {
+            return;
+        }
+        if self.finished {
+            let Some(FramedRecvStream { mut inner, .. }) = self.recv.take() else {
+                return;
+            };
+            if !self.peer_owes {
+                inner.release(self.session.clone());
+            } else if !inner.ended_now() {
+                let _ = inner.stop(REQUEST_CANCELLED);
+            }
             return;
         }
         let code = match self.origin {
@@ -1540,7 +1611,7 @@ impl Drop for RequestStream {
             RequestOrigin::Peer => REQUEST_UNANSWERED,
         };
         let _ = self.send.reset(code);
-        let _ = self.recv.stop(code);
+        let _ = self.recv_mut().stop(code);
     }
 }
 
@@ -1581,6 +1652,9 @@ const MAX_QUIC_VARINT: u64 = (1u64 << 62) - 1;
 /// A live MoQT connection over QUIC or WebTransport, combining the endpoint
 /// state machine with actual network I/O.
 pub struct Connection {
+    /// Dropped with the connection, ending every drain a dropped
+    /// [`RequestStream`] left running.
+    drain_guard: tokio::sync::watch::Sender<()>,
     transport: Transport,
     endpoint: Endpoint,
     draft: DraftVersion,
@@ -1856,6 +1930,7 @@ impl Connection {
             deferred_uni: Mutex::new(deferred_uni),
             deferred_fetch: Mutex::new(deferred_fetch),
             pending_inbound: Mutex::new(VecDeque::new()),
+            drain_guard: tokio::sync::watch::channel(()).0,
         })
     }
 
@@ -2267,7 +2342,12 @@ impl Connection {
         });
         Ok(RequestStream {
             send,
-            recv,
+            recv: Some(recv),
+            // A PUBLISH sender finishes only after its PUBLISH_DONE, which ends the
+            // request whether or not its answer was read.
+            peer_owes: kind != RequestKind::Publish,
+            answered: false,
+            session: self.drain_guard.subscribe(),
             request_id,
             kind,
             draft: self.draft,
@@ -2315,7 +2395,7 @@ impl Connection {
         stream: &mut RequestStream,
     ) -> Result<ControlMessage, ConnectionError> {
         let capture_raw = self.observer.is_some();
-        let (any, raw) = match stream.recv.read_control(capture_raw).await {
+        let (any, raw) = match stream.recv_mut().read_control(capture_raw).await {
             Ok(read) => read,
             Err(e) => {
                 // A peer that reset this stream cancelled the request on it,
@@ -2326,7 +2406,7 @@ impl Connection {
                 if matches!(e, ConnectionError::Transport(TransportError::StreamReset(_))) {
                     let _ = self.endpoint.cancel_request(stream.request_id);
                 }
-                let raw = stream.recv.take_refused();
+                let raw = stream.recv_mut().take_refused();
                 let err = self.close_for_codec(e);
                 self.emit_refused(&err, Some(stream.stream_id()), raw);
                 return Err(err);
@@ -2390,6 +2470,7 @@ impl Connection {
         if matches!(msg, ControlMessage::RequestError(_)) {
             stream.owes_publish_done = false;
         }
+        stream.note_from_peer(&msg);
         Ok(msg)
     }
 
@@ -2653,7 +2734,12 @@ impl Connection {
             msg,
             RequestStream {
                 send,
-                recv,
+                recv: Some(recv),
+                // A peer's PUBLISH owes its PUBLISH_DONE; every other request
+                // the peer makes owes nothing on its direction.
+                peer_owes: kind == RequestKind::Publish,
+                answered: false,
+                session: self.drain_guard.subscribe(),
                 request_id,
                 kind,
                 draft: self.draft,
@@ -2752,6 +2838,7 @@ impl Connection {
             // `finish` cannot be standing: clear the flag rather than let a
             // REQUEST_ERROR trip over an obligation the error just retired.
             stream.owes_publish_done = false;
+            stream.peer_owes = false;
             stream.finish().await?;
         }
         Ok(())
@@ -5476,5 +5563,73 @@ mod accept_on_the_wire {
             .expect("no PUBLISH_DONE arrived")
             .expect("the publishing peer may end its own publication");
         assert!(matches!(msg, ControlMessage::PublishDone(_)), "{msg:?}");
+    }
+
+    /// A finished request this endpoint made is cancelled on drop while it is
+    /// still live: its answer is owed, or a FETCH's responder has not sent its
+    /// FIN. A request whose answer ends it is let go of without `STOP_SENDING`.
+    /// Section 6.4.2.3: "An endpoint that has already sent a FIN on its sending
+    /// direction and subsequently wishes to cancel sends STOP_SENDING on the
+    /// receiving direction."
+    #[tokio::test]
+    async fn a_finished_request_is_stopped_on_drop_only_while_it_is_live() {
+        let mut lb = loopback().await;
+
+        let mut owed = lb.conn.subscribe(ns(), b"video".to_vec(), vec![]).await.expect("subscribe");
+        let (their_send, their_recv) = lb.peer.accept_bi().await.expect("accept_bi");
+        let mut their_recv = framed(their_recv);
+        assert!(matches!(next_control(&mut their_recv).await, ControlMessage::Subscribe(_)));
+        owed.finish().await.expect("finish");
+        drop(owed);
+        let stopped = tokio::time::timeout(PATIENCE, their_send.stopped()).await;
+        assert!(
+            matches!(stopped, Ok(Ok(Some(code))) if u64::from(code) == REQUEST_CANCELLED),
+            "an unanswered request is cancelled with CANCELLED (0x1): {stopped:?}",
+        );
+
+        let mut answered =
+            lb.conn.subscribe(ns(), b"audio".to_vec(), vec![]).await.expect("subscribe");
+        let (mut their_send, their_recv) = lb.peer.accept_bi().await.expect("accept_bi");
+        let mut their_recv = framed(their_recv);
+        assert!(matches!(next_control(&mut their_recv).await, ControlMessage::Subscribe(_)));
+        their_send
+            .write_all(&encode(ControlMessage::RequestError(request_error())))
+            .await
+            .expect("write REQUEST_ERROR");
+        let msg = tokio::time::timeout(PATIENCE, lb.conn.recv_on_request_stream(&mut answered))
+            .await
+            .expect("no answer arrived")
+            .expect("read the answer");
+        assert!(matches!(msg, ControlMessage::RequestError(_)), "{msg:?}");
+        answered.finish().await.expect("finish");
+        drop(answered);
+        assert!(
+            tokio::time::timeout(QUIET, their_send.stopped()).await.is_err(),
+            "an answered request is let go of without STOP_SENDING",
+        );
+        their_send.finish().expect("finish the peer's direction");
+        let acked = tokio::time::timeout(PATIENCE, their_send.stopped()).await;
+        assert!(matches!(acked, Ok(Ok(None))), "the peer's FIN is read: {acked:?}");
+
+        let mut fetch = lb.conn.fetch(ns(), b"video".to_vec(), vec![]).await.expect("fetch");
+        let (mut their_send, their_recv) = lb.peer.accept_bi().await.expect("accept_bi");
+        let mut their_recv = framed(their_recv);
+        assert!(matches!(next_control(&mut their_recv).await, ControlMessage::Fetch(_)));
+        their_send
+            .write_all(&encode(ControlMessage::FetchOk(fetch_ok())))
+            .await
+            .expect("write FETCH_OK");
+        let msg = tokio::time::timeout(PATIENCE, lb.conn.recv_on_request_stream(&mut fetch))
+            .await
+            .expect("no answer arrived")
+            .expect("read the answer");
+        assert!(matches!(msg, ControlMessage::FetchOk(_)), "{msg:?}");
+        fetch.finish().await.expect("finish");
+        drop(fetch);
+        let stopped = tokio::time::timeout(PATIENCE, their_send.stopped()).await;
+        assert!(
+            matches!(stopped, Ok(Ok(Some(code))) if u64::from(code) == REQUEST_CANCELLED),
+            "an answered FETCH is cancelled until the responder's FIN: {stopped:?}",
+        );
     }
 }

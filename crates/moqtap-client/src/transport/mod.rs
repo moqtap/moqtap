@@ -678,9 +678,9 @@ impl RecvStream {
     /// telling the peer to stop transmitting with `code` as the
     /// `STOP_SENDING` application error code.
     ///
-    /// Dropping a `RecvStream` also stops it, but with a hard-coded code
-    /// of 0 — so a forwarder mirroring a peer's `STOP_SENDING` must call
-    /// this explicitly to keep the original code intact.
+    /// Dropping a `RecvStream` whose end was never read also stops it, with
+    /// code 0, so a forwarder mirroring a peer's `STOP_SENDING` must call this
+    /// explicitly to keep the original code intact.
     ///
     /// After a successful call the stream is no longer readable, and the
     /// two arms say so differently: the QUIC arm's [`read`](Self::read)
@@ -707,6 +707,66 @@ impl RecvStream {
             RecvStream::WebTransport(s) => s.stop(code),
         }
     }
+
+    /// Read and discard what has already arrived, without waiting.
+    ///
+    /// True once the stream has ended in a FIN or a reset, or the connection
+    /// is gone. A stream in that state drops without sending anything.
+    #[cfg(any(
+        feature = "draft17",
+        feature = "draft18",
+        feature = "draft19",
+        feature = "draft20",
+        feature = "draft21",
+        feature = "draft22",
+        feature = "draft23",
+    ))]
+    pub(crate) fn ended_now(&mut self) -> bool {
+        let mut buf = [0u8; 2048];
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        loop {
+            let read = std::pin::pin!(self.read(&mut buf));
+            match read.poll(&mut cx) {
+                std::task::Poll::Ready(Ok(Some(_))) => {}
+                std::task::Poll::Ready(Ok(None) | Err(_)) => return true,
+                std::task::Poll::Pending => return false,
+            }
+        }
+    }
+
+    /// Let go of the stream without sending `STOP_SENDING`.
+    ///
+    /// Reads and discards on a spawned task until the peer's FIN or reset,
+    /// the connection's end, or the drop of `session`'s sender. A peer that
+    /// never finishes keeps the stream, and one unit of the opener's stream
+    /// limit, until then. With no runtime, or the session already gone, this
+    /// is a plain drop.
+    #[cfg(any(
+        feature = "draft17",
+        feature = "draft18",
+        feature = "draft19",
+        feature = "draft20",
+        feature = "draft21",
+        feature = "draft22",
+        feature = "draft23",
+    ))]
+    pub(crate) fn release(mut self, mut session: tokio::sync::watch::Receiver<()>) {
+        if self.ended_now() || session.has_changed().is_err() {
+            return;
+        }
+        // A runtime that is shutting down drops the task at once, as with no
+        // runtime: its connection driver is gone too.
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        runtime.spawn(async move {
+            let mut buf = [0u8; 2048];
+            tokio::select! {
+                _ = async { while let Ok(Some(_)) = self.read(&mut buf).await {} } => {}
+                _ = session.changed() => {}
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -726,5 +786,67 @@ mod tests {
         stats.path.min_rtt = Duration::from_millis(7);
         stats.frame_rx.acks = 1;
         assert_eq!(sampled(&stats), Some(Duration::from_millis(7)));
+    }
+
+    /// A released receive half sends no `STOP_SENDING` on WebTransport, where
+    /// the drop it replaces would stop with a raw QUIC code 0.
+    #[cfg(feature = "webtransport")]
+    #[tokio::test]
+    async fn a_released_webtransport_stream_is_not_stopped() {
+        use super::webtransport::WebTransportTransport;
+        use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("keypair");
+        let cert = CertificateParams::new(vec!["localhost".into()])
+            .expect("params")
+            .self_signed(&key_pair)
+            .expect("self-sign");
+        let identity = wtransport::Identity::new(
+            wtransport::tls::CertificateChain::single(
+                wtransport::tls::Certificate::from_der(cert.der().to_vec()).expect("DER"),
+            ),
+            wtransport::tls::PrivateKey::from_der_pkcs8(key_pair.serialize_der()),
+        );
+        let server = wtransport::Endpoint::server(
+            wtransport::ServerConfig::builder()
+                .with_bind_address("127.0.0.1:0".parse().unwrap())
+                .with_identity(identity)
+                .build(),
+        )
+        .expect("server");
+        let addr = server.local_addr().expect("local_addr");
+        let accepting = tokio::spawn(async move {
+            let request = server.accept().await.await.expect("session request");
+            let conn = WebTransportTransport::new(request.accept().await.expect("accept"));
+            let (mut send, _recv) = conn.accept_bi().await.expect("accept_bi");
+            send.write_all(&[1, 2, 3]).await.expect("write");
+            let mut stopped = Box::pin(send.stopped());
+            let early = tokio::time::timeout(Duration::from_millis(500), &mut stopped).await;
+            send.finish().expect("finish");
+            let acked = tokio::time::timeout(Duration::from_secs(5), stopped).await;
+            (early.is_err(), acked.map_err(|_| "timed out").map(|r| r.map_err(|e| e.to_string())))
+        });
+
+        let client = wtransport::Endpoint::client(
+            wtransport::ClientConfig::builder()
+                .with_bind_default()
+                .with_no_cert_validation()
+                .build(),
+        )
+        .expect("client");
+        let conn = WebTransportTransport::new(
+            client.connect(format!("https://{addr}/")).await.expect("connect"),
+        );
+        let (mut send, recv) = conn.open_bi().await.expect("open_bi");
+        // A stream reaches the peer only once something is written on it.
+        send.write_all(&[0]).await.expect("write");
+        let (session, watched) = tokio::sync::watch::channel(());
+        recv.release(watched);
+
+        let (pending, acked) = accepting.await.expect("server task");
+        assert!(pending, "a released stream was stopped");
+        assert_eq!(acked, Ok(Ok(())), "the peer's FIN is read, not stopped");
+        drop((session, send));
     }
 }
