@@ -1,7 +1,7 @@
 {
   "draft": 16,
   "source_file": "draft-16.html",
-  "source_sha256": "301ad8ce1969749138e62929e1afb6f81274627e01ea3fe88d2253875d94ca3c",
+  "source_sha256": "b14c7f1d73d99f8fec3a630bc7747af589cca4484114bd7fab1c0e9d6b992b47",
   "source_sha256_of": "the draft-NN.html file as bytes on disk",
   "generated_by": "crates/moqtap-codec/tools/extract-registries.py",
   "row_definition": "One <tr> of a table identified as an error, status or termination code registry that assigns a code point. Header rows are excluded; empty-code line-wrap continuation rows are merged into the row above; range and expression code points count as one row each and are tagged kind=\"reserved\".",
