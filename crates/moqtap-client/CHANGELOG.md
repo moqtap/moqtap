@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-16
+
+### Changed
+
+- **Breaking.** Dropping an unfinished data stream writer (from `open_subgroup_stream` or `open_fetch_stream`, or an `AnySubgroupWriter` or `AnyFetchWriter`) now resets it with code 0x1 (CANCELLED on drafts 11-23) instead of sending a FIN. Call `finish()` to end a complete stream. Streams built with `FramedSendStream::new` are unchanged.
+
 ## [0.13.2] - 2026-11-15
 
 ### Fixed

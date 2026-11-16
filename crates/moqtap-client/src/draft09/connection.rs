@@ -164,6 +164,11 @@ impl ClientConfig {
 }
 
 /// A framed writer for a send stream. Handles MoQT length-prefixed framing.
+///
+/// A data stream from [`Connection::open_subgroup_stream`] or
+/// [`Connection::open_fetch_stream`] is reset with code 0x1 when it is dropped
+/// before [`Self::finish`] or [`Self::reset`] ends it. A stream built with
+/// [`Self::new`] sends a FIN when dropped.
 pub struct FramedSendStream {
     inner: SendStream,
     /// The last Object ID written on this subgroup stream, once one has been.
@@ -172,12 +177,48 @@ pub struct FramedSendStream {
     /// subgroup header has been written, which is what makes an object sent
     /// before its header answerable rather than unframed bytes.
     subgroup_objects: Option<Option<u64>>,
+    /// Whether `finish` or `reset` has ended the stream.
+    ended: bool,
+    /// Whether dropping the stream before it ended resets it.
+    reset_on_drop: bool,
+}
+
+/// The code a data stream dropped unfinished is reset with.
+///
+/// Draft-09 assigns no code for resetting a stream. 0x1 is the value
+/// draft-11 Section 9.4.3 later assigns to Cancelled, so a dropped data stream
+/// is reset with the same code on every draft.
+const DATA_STREAM_CANCELLED: u64 = 0x1;
+
+/// Resets a data stream dropped before `finish` or `reset` ended it.
+///
+/// draft-09 Section 8.4.2: "If a sender closes the stream before delivering all
+/// such objects to the QUIC stream, it MUST use a RESET_STREAM or
+/// RESET_STREAM_AT [I-D.draft-ietf-quic-reliable-stream-reset] frame."
+/// A fetch stream ended by a FIN would instead say its unsent objects were
+/// omitted: draft-09 Section 7.7, "If there are gaps between Objects, the
+/// publisher omits them from the fetch response. All omitted objects have
+/// status Object Does Not Exist."
+impl Drop for FramedSendStream {
+    fn drop(&mut self) {
+        if self.reset_on_drop {
+            self.abandon(DATA_STREAM_CANCELLED);
+        }
+    }
 }
 
 impl FramedSendStream {
     /// Create a new framed send stream.
     pub fn new(inner: SendStream) -> Self {
-        Self { inner, subgroup_objects: None }
+        Self { inner, subgroup_objects: None, ended: false, reset_on_drop: false }
+    }
+
+    /// [`Self::new`] for a data stream, which [`DATA_STREAM_CANCELLED`] resets
+    /// if it is dropped before it ended.
+    fn data(inner: SendStream) -> Self {
+        let mut stream = Self::new(inner);
+        stream.reset_on_drop = true;
+        stream
     }
 
     /// Get the transport-level stream ID.
@@ -297,18 +338,29 @@ impl FramedSendStream {
     /// Finish the stream (send FIN).
     pub async fn finish(&mut self) -> Result<(), ConnectionError> {
         self.inner.finish()?;
+        self.ended = true;
         Ok(())
     }
 
     /// Reset the stream with `code`, telling the peer transmission was
     /// abandoned rather than completed.
     ///
-    /// Dropping a send stream sends a FIN, which claims the stream ended
-    /// cleanly; this is the only way to say the opposite. See
-    /// [`SendStream::reset`].
+    /// A stream built with [`Self::new`] sends a FIN when dropped, which claims
+    /// it ended cleanly; this is the only way to say the opposite. A data
+    /// stream from `open_subgroup_stream` or `open_fetch_stream` is reset on
+    /// drop unless it was finished. See [`SendStream::reset`].
     pub fn reset(&mut self, code: u64) -> Result<(), ConnectionError> {
         self.inner.reset(code)?;
+        self.ended = true;
         Ok(())
+    }
+
+    /// Reset with `code` unless the stream was already finished or reset: a
+    /// reset after FIN can cut off the retransmission of a complete stream.
+    fn abandon(&mut self, code: u64) {
+        if !self.ended {
+            let _ = self.reset(code);
+        }
     }
 }
 
@@ -1351,6 +1403,9 @@ impl Connection {
     // ── Data streams ────────────────────────────────────────
 
     /// Open a new unidirectional stream for sending subgroup data.
+    ///
+    /// End it with [`FramedSendStream::finish`]; dropping it unfinished resets
+    /// it with code 0x1.
     pub async fn open_subgroup_stream(
         &self,
         header: &AnySubgroupHeader,
@@ -1363,7 +1418,7 @@ impl Connection {
             ObjectForwardingPreference::Subgroup,
         )?;
         let send = self.transport.open_uni().await?;
-        let mut framed = FramedSendStream::new(send);
+        let mut framed = FramedSendStream::data(send);
         let sid = framed.stream_id();
         framed.write_subgroup_header(header).await?;
         self.emit(ClientEvent::StreamOpened {
@@ -1391,12 +1446,15 @@ impl Connection {
     /// The caller owns the stream that comes back. Nothing here remembers
     /// which request it belongs to, so an endpoint serving several fetches at
     /// once keeps its own map from Request ID to stream.
+    ///
+    /// End it with [`FramedSendStream::finish`]; dropping it unfinished resets
+    /// it with code 0x1.
     pub async fn open_fetch_stream(
         &self,
         header: &AnyFetchHeader,
     ) -> Result<FramedSendStream, ConnectionError> {
         let send = self.transport.open_uni().await?;
-        let mut framed = FramedSendStream::new(send);
+        let mut framed = FramedSendStream::data(send);
         let sid = framed.stream_id();
         framed.write_fetch_header(header).await?;
         self.emit(ClientEvent::StreamOpened {

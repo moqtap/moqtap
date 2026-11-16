@@ -364,6 +364,11 @@ impl ClientConfig {
 }
 
 /// A framed writer for a send stream. Handles MoQT length-prefixed framing.
+///
+/// A data stream from [`Connection::open_subgroup_stream`] or
+/// [`Connection::open_fetch_stream`] is reset with CANCELLED (0x1) when it is
+/// dropped before [`Self::finish`] or [`Self::reset`] ends it. A stream built
+/// with [`Self::new`] sends a FIN when dropped.
 pub struct FramedSendStream {
     inner: SendStream,
     draft: DraftVersion,
@@ -371,12 +376,45 @@ pub struct FramedSendStream {
     subgroup_io: Option<SubgroupObjectReader>,
     /// Whether `finish` or `reset` has ended the stream.
     ended: bool,
+    /// Whether dropping the stream before it ended resets it.
+    reset_on_drop: bool,
+}
+
+/// The code a data stream dropped unfinished is reset with.
+///
+/// Cancelled, 0x1, from the stream reset codes of draft-23 Section 12.5.
+const DATA_STREAM_CANCELLED: u64 = StreamResetErrorCode::Cancelled as u64;
+
+/// Resets a data stream dropped before `finish` or `reset` ended it.
+///
+/// draft-23 Section 11.3.2: "If a sender closes the stream before delivering
+/// all such objects to the QUIC stream, it MUST reset the stream." A fetch
+/// stream ended by a FIN would instead mark its unsent objects as a gap:
+/// draft-23 Section 3.2.2, "Unless the request included Range Filters (see
+/// Section 3.3.2), any gaps in the Group and Object IDs in the response stream
+/// that are not otherwise marked indicate objects that do not exist (see
+/// Section 2.1.2). When one or more Range Filters are present, unmarked gaps
+/// indicate objects in the Unknown state."
+impl Drop for FramedSendStream {
+    fn drop(&mut self) {
+        if self.reset_on_drop {
+            self.abandon(DATA_STREAM_CANCELLED);
+        }
+    }
 }
 
 impl FramedSendStream {
     /// Create a new framed send stream for the given draft version.
     pub fn new(inner: SendStream, draft: DraftVersion) -> Self {
-        Self { inner, draft, subgroup_io: None, ended: false }
+        Self { inner, draft, subgroup_io: None, ended: false, reset_on_drop: false }
+    }
+
+    /// [`Self::new`] for a data stream, which [`DATA_STREAM_CANCELLED`] resets
+    /// if it is dropped before it ended.
+    fn data(inner: SendStream, draft: DraftVersion) -> Self {
+        let mut stream = Self::new(inner, draft);
+        stream.reset_on_drop = true;
+        stream
     }
 
     /// Get the transport-level stream ID.
@@ -520,9 +558,10 @@ impl FramedSendStream {
     /// Reset the stream with `code`, telling the peer transmission was
     /// abandoned rather than completed.
     ///
-    /// Dropping a send stream sends a FIN, which claims the stream ended
-    /// cleanly; this is the only way to say the opposite. See
-    /// [`SendStream::reset`].
+    /// A stream built with [`Self::new`] sends a FIN when dropped, which claims
+    /// it ended cleanly; this is the only way to say the opposite. A data
+    /// stream from `open_subgroup_stream` or `open_fetch_stream` is reset on
+    /// drop unless it was finished. See [`SendStream::reset`].
     pub fn reset(&mut self, code: u64) -> Result<(), ConnectionError> {
         self.inner.reset(code)?;
         self.ended = true;
@@ -3376,12 +3415,15 @@ impl Connection {
     // -- Data streams -----------------------------------------------
 
     /// Open a new unidirectional stream for sending subgroup data.
+    ///
+    /// End it with [`FramedSendStream::finish`]; dropping it unfinished resets
+    /// it with CANCELLED (0x1).
     pub async fn open_subgroup_stream(
         &self,
         header: &AnySubgroupHeader,
     ) -> Result<FramedSendStream, ConnectionError> {
         let send = self.transport.open_uni().await?;
-        let mut framed = FramedSendStream::new(send, self.draft);
+        let mut framed = FramedSendStream::data(send, self.draft);
         let sid = framed.stream_id();
         framed.write_subgroup_header(header).await?;
         self.emit(ClientEvent::StreamOpened {
@@ -3409,12 +3451,15 @@ impl Connection {
     /// The caller owns the stream that comes back. Nothing here remembers
     /// which request it belongs to, so an endpoint serving several fetches at
     /// once keeps its own map from Request ID to stream.
+    ///
+    /// End it with [`FramedSendStream::finish`]; dropping it unfinished resets
+    /// it with CANCELLED (0x1).
     pub async fn open_fetch_stream(
         &self,
         header: &AnyFetchHeader,
     ) -> Result<FramedSendStream, ConnectionError> {
         let send = self.transport.open_uni().await?;
-        let mut framed = FramedSendStream::new(send, self.draft);
+        let mut framed = FramedSendStream::data(send, self.draft);
         let sid = framed.stream_id();
         framed.write_fetch_header(header).await?;
         self.emit(ClientEvent::StreamOpened {
@@ -4817,7 +4862,7 @@ mod accept_on_the_wire {
     ///
     /// Both control streams are handed back so they stay open for the
     /// connection's life. Dropping a quinn receive stream sends STOP_SENDING
-    /// and dropping a send stream resets it, either of which would look to the
+    /// and dropping a send stream finishes it, either of which would look to the
     /// client like the control plane failing.
     async fn peer_handshake(
         endpoint: &quinn::Endpoint,
@@ -5514,6 +5559,59 @@ mod accept_on_the_wire {
         assert!(!bytes.is_empty(), "the FETCH_HEADER should have arrived");
     }
 
+    fn subgroup_header() -> AnySubgroupHeader {
+        AnySubgroupHeader::Draft23(moqtap_codec::draft23::data_stream::SubgroupHeader {
+            header_type: 0x14,
+            track_alias: v(7),
+            group_id: v(3),
+            subgroup_id: v(5),
+            publisher_priority: Some(128),
+        })
+    }
+
+    async fn accept_data(lb: &Loopback) -> quinn::RecvStream {
+        tokio::time::timeout(PATIENCE, lb.peer.accept_uni())
+            .await
+            .expect("no data stream arrived")
+            .expect("accept_uni")
+    }
+
+    /// A subgroup stream dropped unfinished is reset with CANCELLED.
+    ///
+    /// draft-23 Section 11.3.2: "If a sender closes the stream before delivering
+    /// all such objects to the QUIC stream, it MUST reset the stream."
+    #[tokio::test]
+    async fn a_dropped_subgroup_stream_is_reset_with_cancelled() {
+        let lb = loopback().await;
+        let send = lb.conn.open_subgroup_stream(&subgroup_header()).await.expect("open");
+        let mut data = accept_data(&lb).await;
+        drop(send);
+        assert_eq!(data_stream_end(&mut data).await, Err(StreamResetErrorCode::Cancelled as u64));
+    }
+
+    /// A fetch stream dropped unfinished is reset with CANCELLED.
+    #[tokio::test]
+    async fn a_dropped_fetch_stream_is_reset_with_cancelled() {
+        let lb = loopback().await;
+        let header = AnyFetchHeader::Draft23(FetchHeader { request_id: v(4) });
+        let send = lb.conn.open_fetch_stream(&header).await.expect("open");
+        let mut data = accept_data(&lb).await;
+        drop(send);
+        assert_eq!(data_stream_end(&mut data).await, Err(StreamResetErrorCode::Cancelled as u64));
+    }
+
+    /// A finished subgroup stream ends in its FIN when dropped at once.
+    #[tokio::test]
+    async fn a_finished_subgroup_stream_ends_in_its_fin_on_drop() {
+        let lb = loopback().await;
+        let mut send = lb.conn.open_subgroup_stream(&subgroup_header()).await.expect("open");
+        send.finish().await.expect("finish");
+        drop(send);
+        let mut data = accept_data(&lb).await;
+        let bytes = data_stream_end(&mut data).await.expect("the stream should end in a FIN");
+        assert!(!bytes.is_empty(), "the subgroup header should have arrived");
+    }
+
     /// A publisher can open the stream a FETCH's objects go on, and owns it.
     ///
     /// The objects answering a FETCH go on a unidirectional stream of their
@@ -5818,5 +5916,111 @@ mod accept_on_the_wire {
             .expect("no PUBLISH_DONE arrived")
             .expect("the publishing peer may end its own publication");
         assert!(matches!(msg, ControlMessage::PublishDone(_)), "{msg:?}");
+    }
+}
+
+#[cfg(all(test, feature = "webtransport"))]
+mod webtransport_data_streams {
+    //! A data stream's drop over WebTransport, where `finish` hands the stream
+    //! to a task of its own.
+
+    use super::*;
+    use std::net::SocketAddr;
+    use std::time::Duration;
+
+    use crate::transport::webtransport::WebTransportTransport;
+    use crate::transport::RecvStream;
+    use moqtap_codec::draft23::data_stream::FetchHeader;
+    use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
+
+    const PATIENCE: Duration = Duration::from_secs(5);
+
+    /// A WebTransport session: this end's transport and the peer's.
+    async fn session() -> (WebTransportTransport, WebTransportTransport) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("keypair");
+        let cert = CertificateParams::new(vec!["localhost".into()])
+            .expect("params")
+            .self_signed(&key_pair)
+            .expect("self-sign");
+        let identity = wtransport::Identity::new(
+            wtransport::tls::CertificateChain::single(
+                wtransport::tls::Certificate::from_der(cert.der().to_vec()).expect("DER"),
+            ),
+            wtransport::tls::PrivateKey::from_der_pkcs8(key_pair.serialize_der()),
+        );
+        let bind: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let server = wtransport::Endpoint::server(
+            wtransport::ServerConfig::builder()
+                .with_bind_address(bind)
+                .with_identity(identity)
+                .build(),
+        )
+        .expect("server");
+        let addr = server.local_addr().expect("local_addr");
+        let accepting = tokio::spawn(async move {
+            let request = server.accept().await.await.expect("session request");
+            WebTransportTransport::new(request.accept().await.expect("accept"))
+        });
+        let client = wtransport::Endpoint::client(
+            wtransport::ClientConfig::builder()
+                .with_bind_default()
+                .with_no_cert_validation()
+                .build(),
+        )
+        .expect("client");
+        let ours = WebTransportTransport::new(
+            client.connect(format!("https://{addr}/")).await.expect("connect"),
+        );
+        (ours, accepting.await.expect("server task"))
+    }
+
+    /// Read `recv` to its end: the bytes on a FIN, the code on a reset.
+    async fn stream_end(recv: &mut RecvStream) -> Result<Vec<u8>, u64> {
+        let mut bytes = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            match tokio::time::timeout(PATIENCE, recv.read(&mut chunk)).await.expect("read hung") {
+                Ok(Some(n)) => bytes.extend_from_slice(&chunk[..n]),
+                Ok(None) => return Ok(bytes),
+                Err(TransportError::StreamReset(code)) => return Err(code),
+                Err(e) => panic!("the stream ended neither in a FIN nor a reset: {e}"),
+            }
+        }
+    }
+
+    async fn fetch_stream(ours: &WebTransportTransport) -> FramedSendStream {
+        let mut send =
+            FramedSendStream::data(ours.open_uni().await.expect("open_uni"), DraftVersion::Draft23);
+        send.write_fetch_header(&AnyFetchHeader::Draft23(FetchHeader { request_id: v(4) }))
+            .await
+            .expect("write the FETCH_HEADER");
+        send
+    }
+
+    fn v(n: u64) -> VarInt {
+        VarInt::from_u64(n).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_dropped_data_stream_is_reset_with_cancelled() {
+        let (ours, peer) = session().await;
+        let send = fetch_stream(&ours).await;
+        let mut recv =
+            tokio::time::timeout(PATIENCE, peer.accept_uni()).await.expect("hung").expect("uni");
+        drop(send);
+        assert_eq!(stream_end(&mut recv).await, Err(StreamResetErrorCode::Cancelled as u64));
+    }
+
+    #[tokio::test]
+    async fn a_finished_data_stream_ends_in_its_fin_on_drop() {
+        let (ours, peer) = session().await;
+        let mut send = fetch_stream(&ours).await;
+        send.finish().await.expect("finish");
+        drop(send);
+        let mut recv =
+            tokio::time::timeout(PATIENCE, peer.accept_uni()).await.expect("hung").expect("uni");
+        let bytes = stream_end(&mut recv).await.expect("the stream should end in a FIN");
+        assert!(!bytes.is_empty(), "the FETCH_HEADER should have arrived");
     }
 }

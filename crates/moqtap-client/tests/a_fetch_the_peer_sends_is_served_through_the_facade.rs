@@ -625,6 +625,61 @@ macro_rules! serve_gate {
                 Seen { answers, stream, refused }
             }
 
+            /// Ask one FETCH and return the code its fetch stream was reset
+            /// with, or `None` if it ended any other way.
+            async fn serve_cut_short(server: quinn::Endpoint) -> Option<u64> {
+                let conn = server.accept().await.expect("accept").await.expect("tls handshake");
+                let mut peer = handshake(&conn).await;
+                let ask = Ask::Through { start: (0, 0), end: (0, 1) };
+                peer.ask(&conn, DRAFT, fetch(request_id(0), ask)).await;
+                let mut uni = conn.accept_uni().await.expect("the fetch stream");
+                let code = match uni.read_to_end(1 << 16).await {
+                    Err(quinn::ReadToEndError::Read(quinn::ReadError::Reset(code))) => {
+                        Some(code.into_inner())
+                    }
+                    _ => None,
+                };
+                conn.close(0u32.into(), b"gate complete");
+                code
+            }
+
+            #[tokio::test]
+            async fn an_unfinished_fetch_writer_is_reset_with_cancelled_on_drop() {
+                common::init_crypto();
+                let (endpoint, addr) = common::spawn_server(&[DRAFT.quic_alpn()]);
+                let peer = tokio::spawn(serve_cut_short(endpoint));
+
+                let mut conn = tokio::time::timeout(
+                    PATIENCE,
+                    AnyConnection::connect(&addr.to_string(), client_config(DRAFT)),
+                )
+                .await
+                .expect("connect did not finish")
+                .expect("connect");
+                let arrival = tokio::time::timeout(PATIENCE, conn.recv_inbound_serving_fetch())
+                    .await
+                    .expect("nothing arrived")
+                    .expect("read the peer's FETCH");
+                let AnyServedArrival::Fetch { request: mut fetch, .. } = arrival else {
+                    panic!("a FETCH did not come back as one");
+                };
+                let answered = conn.answer_fetch(&mut fetch, ANSWER).await.expect("answer");
+                assert!(matches!(answered, FetchAnswered::Served(_)), "{answered:?}");
+                let mut writer =
+                    conn.open_fetch_response(&fetch).await.expect("open the fetch stream");
+                writer.write_object(0, 0, 0, 128, b"a").await.expect("first object");
+                drop(writer);
+                fetch.finish().await.expect("finish the request");
+
+                let code = tokio::time::timeout(PATIENCE * 2, peer)
+                    .await
+                    .expect("the peer hung")
+                    .expect("the peer task");
+                // CANCELLED, 0x1: draft-11 Section 9.4.3, draft-23 Section 12.5.
+                assert_eq!(code, Some(0x1), "{DRAFT:?}: an unfinished fetch writer must not FIN");
+                drop(conn);
+            }
+
             #[tokio::test]
             async fn a_peers_fetch_is_answered_and_served_as_its_draft_defines() {
                 common::init_crypto();

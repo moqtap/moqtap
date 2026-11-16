@@ -48,7 +48,8 @@
 //! # Reset
 //!
 //! `AnySubgroupWriter::reset` must reach the peer as a `RESET_STREAM` carrying
-//! the code it was given, not as a FIN.
+//! the code it was given, not as a FIN. A writer dropped unfinished must reach
+//! it as a reset with [`CANCELLED`], and a finished one as its FIN.
 //!
 //! The object takes five. Draft-07 has no extension block at all. Draft-08
 //! counts its extensions and draft-09 changed the count to a byte length, which
@@ -197,6 +198,13 @@ const NORMAL: u64 = 0;
 /// The code the reset gate hands the peer. Not zero, so a reset that lost its
 /// code shows.
 const RESET_CODE: u64 = 0x2A;
+
+/// The code a writer dropped unfinished is reset with: `CANCELLED`, 0x1.
+///
+/// draft-11 Section 9.4.3 assigns it first; draft-17 Section 10.4.3 and
+/// draft-23 Section 12.5 keep the value. Drafts 07-10 assign no stream reset
+/// code, and the writer uses the same value there.
+const CANCELLED: u64 = 0x1;
 
 /// What [`OBJECTS`] must read back as.
 ///
@@ -741,28 +749,106 @@ macro_rules! subgroup_gate {
             }
 
             /// Read the client's subgroup stream until it ends, then close the
-            /// session and return the reset code it ended with.
-            async fn serve_reset(server: quinn::Endpoint) -> Option<u64> {
+            /// session. Returns the bytes on a FIN, the reset code on a reset,
+            /// and `Err(None)` on any other end.
+            async fn serve_end(server: quinn::Endpoint) -> Result<Vec<u8>, Option<u64>> {
                 let conn = server.accept().await.expect("accept").await.expect("tls handshake");
                 let _control = peer_setup!($handshake, conn, $version, $module);
 
                 let mut recv =
                     conn.accept_uni().await.expect("accept the client's subgroup stream");
-                let code = match recv.read_to_end(64 * 1024).await {
+                let end = match recv.read_to_end(64 * 1024).await {
+                    Ok(bytes) => Ok(bytes),
                     Err(quinn::ReadToEndError::Read(quinn::ReadError::Reset(code))) => {
-                        Some(code.into_inner())
+                        Err(Some(code.into_inner()))
                     }
-                    _ => None,
+                    _ => Err(None),
                 };
                 conn.close(0u32.into(), b"gate complete");
-                code
+                end
+            }
+
+            /// Connect and open a subgroup stream through the facade.
+            async fn open_writer(
+                addr: std::net::SocketAddr,
+            ) -> (AnyConnection, moqtap_client::dispatch::AnySubgroupWriter) {
+                let conn = tokio::time::timeout(
+                    PATIENCE,
+                    AnyConnection::connect(&addr.to_string(), client_config()),
+                )
+                .await
+                .expect("connect did not finish")
+                .expect("connect");
+                let writer = tokio::time::timeout(
+                    PATIENCE,
+                    conn.open_subgroup(ALIAS, GROUP, SUBGROUP, PRIORITY, SubgroupStart::First),
+                )
+                .await
+                .expect("opening the subgroup did not finish")
+                .expect("open a subgroup stream");
+                (conn, writer)
+            }
+
+            #[tokio::test]
+            async fn an_unfinished_subgroup_writer_is_reset_with_cancelled_on_drop() {
+                common::init_crypto();
+                let (endpoint, addr) = common::spawn_server(&[DRAFT.quic_alpn()]);
+                let peer = tokio::spawn(serve_end(endpoint));
+
+                let (_conn, mut writer) = open_writer(addr).await;
+                let (id, payload) = OBJECTS[0];
+                tokio::time::timeout(PATIENCE, writer.write_object(id, payload))
+                    .await
+                    .expect("writing an object did not finish")
+                    .unwrap_or_else(|e| panic!("write object {id}: {e}"));
+                drop(writer);
+
+                let end = tokio::time::timeout(PATIENCE * 2, peer)
+                    .await
+                    .expect("the peer hung")
+                    .expect("the peer task");
+                assert_eq!(end, Err(Some(CANCELLED)), "an unfinished writer must not end in a FIN");
+            }
+
+            /// The drop follows `finish` with no await between, so the FIN is
+            /// still unacknowledged when the writer goes: a reset sent on drop
+            /// would reach the peer in its place.
+            #[tokio::test]
+            async fn a_finished_subgroup_writer_ends_in_its_fin_on_drop() {
+                common::init_crypto();
+                let (endpoint, addr) = common::spawn_server(&[DRAFT.quic_alpn()]);
+                let peer = tokio::spawn(serve_end(endpoint));
+
+                let (_conn, mut writer) = open_writer(addr).await;
+                for (id, payload) in OBJECTS {
+                    tokio::time::timeout(PATIENCE, writer.write_object(id, payload))
+                        .await
+                        .expect("writing an object did not finish")
+                        .unwrap_or_else(|e| panic!("write object {id}: {e}"));
+                }
+                tokio::time::timeout(PATIENCE, writer.finish())
+                    .await
+                    .expect("finishing the subgroup did not finish")
+                    .expect("finish the subgroup");
+                drop(writer);
+
+                let end = tokio::time::timeout(PATIENCE * 2, peer)
+                    .await
+                    .expect("the peer hung")
+                    .expect("the peer task");
+                let bytes = end.expect("a finished writer must end in its FIN");
+                assert_eq!(
+                    bytes.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+                    $wire,
+                    "the peer did not receive the whole stream"
+                );
             }
 
             #[tokio::test]
             async fn a_reset_subgroup_reaches_the_peer_with_its_code() {
                 common::init_crypto();
                 let (endpoint, addr) = common::spawn_server(&[DRAFT.quic_alpn()]);
-                let peer = tokio::spawn(serve_reset(endpoint));
+                let peer = tokio::spawn(serve_end(endpoint));
 
                 let conn = tokio::time::timeout(
                     PATIENCE,
@@ -790,7 +876,11 @@ macro_rules! subgroup_gate {
                     .await
                     .expect("the peer hung")
                     .expect("the peer task");
-                assert_eq!(code, Some(RESET_CODE), "the peer saw no reset with the code given");
+                assert_eq!(
+                    code,
+                    Err(Some(RESET_CODE)),
+                    "the peer saw no reset with the code given"
+                );
             }
         }
     };

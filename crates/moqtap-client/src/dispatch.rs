@@ -1921,6 +1921,10 @@ pub enum SubgroupStart {
 /// step, because a unidirectional stream with no header on it is not a subgroup
 /// stream and there is nothing a caller could do with one.
 ///
+/// End it with [`Self::finish`]. Dropping it unfinished resets the stream with
+/// code 0x1, which is CANCELLED where the draft defines stream reset codes. The
+/// drafts that define none get the same value.
+///
 /// Unlike [`AnyRequest`], there is no era split here and no variant that stands
 /// for "the draft has no stream for this". Every draft from 07 on carries
 /// subgroup objects on a unidirectional stream of their own, and this is the
@@ -2251,8 +2255,9 @@ impl AnySubgroupWriter {
     /// Abandon the stream, handing the peer `code` as the `RESET_STREAM`
     /// application error code.
     ///
-    /// [`Self::finish`] and dropping both end the stream cleanly; this is the
-    /// only way to tell the peer the subgroup was cut short.
+    /// [`Self::finish`] ends the stream cleanly, and dropping the writer
+    /// unfinished resets it with code 0x1. This resets it with a code of the
+    /// caller's choosing.
     // A build with no draft feature reads `code` nowhere.
     #[allow(unused_variables)]
     pub fn reset(&mut self, code: u64) -> Result<(), AnyConnectionError> {
@@ -7005,6 +7010,9 @@ impl FetchRefusal {
 /// already written. Objects go out in the order the caller writes them, which
 /// draft-23 Section 3.2.1 makes the FETCH's group order and then Object ID
 /// order within a Group.
+///
+/// End it with [`Self::finish`]. Dropping it unfinished resets the stream with
+/// CANCELLED (0x1).
 pub struct AnyFetchWriter {
     inner: FetchWriterInner,
 }
@@ -7310,7 +7318,8 @@ impl AnyFetchWriter {
         }
     }
 
-    /// FIN the stream, which ends the response.
+    /// FIN the stream, which ends the response. A writer dropped without it is
+    /// reset with CANCELLED (0x1).
     pub async fn finish(&mut self) -> Result<(), AnyConnectionError> {
         fetch_writer_stream!(&mut self.inner, |s, _draft| s
             .finish()
@@ -8305,8 +8314,9 @@ impl AnyConnection {
     ///
     /// draft-23 Section 3.2.1: "The publisher creates a single unidirectional
     /// stream (see Section 11.4) that is used to send the Objects." There are
-    /// no End of Group or End of Track writers here; the stream's FIN ends the
-    /// response.
+    /// no End of Group or End of Track writers here: [`AnyFetchWriter::finish`]
+    /// ends the response, and dropping the writer unfinished resets it with
+    /// CANCELLED (0x1).
     // A build with no draft from 11 on has no variant to return.
     #[allow(unused_variables, unreachable_code)]
     pub async fn open_fetch_response(
