@@ -311,42 +311,83 @@ impl AnyControlMessage {
     /// the match had not met would reach a reader as data rather than as an
     /// error.
     pub fn fields(&self) -> crate::fields::FieldMap {
+        self.fields_with(crate::fields::FieldOptions::default())
+    }
+
+    /// [`Self::fields`], rendered as `options` says. The default options
+    /// render what [`Self::fields`] renders.
+    #[allow(unused_variables)]
+    pub fn fields_with(&self, options: crate::fields::FieldOptions) -> crate::fields::FieldMap {
         // `*self` and no catch-all; see `is_setup` for why both.
         match *self {
             #[cfg(feature = "draft07")]
-            AnyControlMessage::Draft07(ref m) => crate::draft07::fields::message_fields(m),
+            AnyControlMessage::Draft07(ref m) => {
+                crate::draft07::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft08")]
-            AnyControlMessage::Draft08(ref m) => crate::draft08::fields::message_fields(m),
+            AnyControlMessage::Draft08(ref m) => {
+                crate::draft08::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft09")]
-            AnyControlMessage::Draft09(ref m) => crate::draft09::fields::message_fields(m),
+            AnyControlMessage::Draft09(ref m) => {
+                crate::draft09::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft10")]
-            AnyControlMessage::Draft10(ref m) => crate::draft10::fields::message_fields(m),
+            AnyControlMessage::Draft10(ref m) => {
+                crate::draft10::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft11")]
-            AnyControlMessage::Draft11(ref m) => crate::draft11::fields::message_fields(m),
+            AnyControlMessage::Draft11(ref m) => {
+                crate::draft11::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft12")]
-            AnyControlMessage::Draft12(ref m) => crate::draft12::fields::message_fields(m),
+            AnyControlMessage::Draft12(ref m) => {
+                crate::draft12::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft13")]
-            AnyControlMessage::Draft13(ref m) => crate::draft13::fields::message_fields(m),
+            AnyControlMessage::Draft13(ref m) => {
+                crate::draft13::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft14")]
-            AnyControlMessage::Draft14(ref m) => crate::draft14::fields::message_fields(m),
+            AnyControlMessage::Draft14(ref m) => {
+                crate::draft14::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft15")]
-            AnyControlMessage::Draft15(ref m) => crate::draft15::fields::message_fields(m),
+            AnyControlMessage::Draft15(ref m) => {
+                crate::draft15::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft16")]
-            AnyControlMessage::Draft16(ref m) => crate::draft16::fields::message_fields(m),
+            AnyControlMessage::Draft16(ref m) => {
+                crate::draft16::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft17")]
-            AnyControlMessage::Draft17(ref m) => crate::draft17::fields::message_fields(m),
+            AnyControlMessage::Draft17(ref m) => {
+                crate::draft17::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft18")]
-            AnyControlMessage::Draft18(ref m) => crate::draft18::fields::message_fields(m),
+            AnyControlMessage::Draft18(ref m) => {
+                crate::draft18::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft19")]
-            AnyControlMessage::Draft19(ref m) => crate::draft19::fields::message_fields(m),
+            AnyControlMessage::Draft19(ref m) => {
+                crate::draft19::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft20")]
-            AnyControlMessage::Draft20(ref m) => crate::draft20::fields::message_fields(m),
+            AnyControlMessage::Draft20(ref m) => {
+                crate::draft20::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft21")]
-            AnyControlMessage::Draft21(ref m) => crate::draft21::fields::message_fields(m),
+            AnyControlMessage::Draft21(ref m) => {
+                crate::draft21::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft22")]
-            AnyControlMessage::Draft22(ref m) => crate::draft22::fields::message_fields(m),
+            AnyControlMessage::Draft22(ref m) => {
+                crate::draft22::fields::message_fields_with(m, options)
+            }
             #[cfg(feature = "draft23")]
-            AnyControlMessage::Draft23(ref m) => crate::draft23::fields::message_fields(m),
+            AnyControlMessage::Draft23(ref m) => {
+                crate::draft23::fields::message_fields_with(m, options)
+            }
         }
     }
 

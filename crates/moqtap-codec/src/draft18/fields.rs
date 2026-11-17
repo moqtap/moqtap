@@ -1,4 +1,5 @@
 use crate::draft18::message::ControlMessage;
+use crate::fields::{opaque, parameter_bytes, text, FieldOptions};
 use crate::fields::{FieldMap as Map, FieldValue as Value};
 use crate::kvp::{KeyValuePair, KvpValue};
 use crate::types::*;
@@ -8,10 +9,8 @@ fn vi(v: u64) -> Value {
     Value::Uint(v)
 }
 
-fn ns_to_json(ns: &TrackNamespace) -> Value {
-    Value::Array(
-        ns.0.iter().map(|e| Value::Text(String::from_utf8_lossy(e).into_owned())).collect(),
-    )
+fn ns_to_json(ns: &TrackNamespace, opts: FieldOptions) -> Value {
+    Value::Array(ns.0.iter().map(|e| opaque(e, opts)).collect())
 }
 
 // Draft-18 known parameter types and their encodings
@@ -174,15 +173,15 @@ fn decode_largest_object(bytes: &[u8]) -> Value {
     Value::Map(obj)
 }
 
-fn decode_track_namespace_prefix(bytes: &[u8]) -> Value {
+fn decode_track_namespace_prefix(bytes: &[u8], opts: FieldOptions) -> Value {
     let mut buf = bytes;
     match TrackNamespace::decode_allow_empty_moqt::<Wire>(&mut buf) {
-        Ok(ns) => ns_to_json(&ns),
+        Ok(ns) => ns_to_json(&ns, opts),
         Err(_) => Value::Bytes(bytes.to_vec()),
     }
 }
 
-fn params_to_json(params: &[KeyValuePair]) -> Value {
+fn params_to_json(params: &[KeyValuePair], opts: FieldOptions) -> Value {
     crate::fields::kvp_entries(params, |key, value| {
         let Some(name) = d18_param_name(key) else {
             return (None, None);
@@ -190,16 +189,16 @@ fn params_to_json(params: &[KeyValuePair]) -> Value {
         let rendered = match (value, key) {
             (KvpValue::Bytes(b), 0x21) => decode_subscription_filter(b),
             (KvpValue::Bytes(b), 0x09) => decode_largest_object(b),
-            (KvpValue::Bytes(b), 0x34) => decode_track_namespace_prefix(b),
+            (KvpValue::Bytes(b), 0x34) => decode_track_namespace_prefix(b, opts),
             (KvpValue::Bytes(b), _) if name == "authorization_token" => auth_token_to_json_d18(b),
             (KvpValue::Varint(v), _) => vi(v.into_inner()),
-            (KvpValue::Bytes(b), _) => Value::Text(String::from_utf8_lossy(b).into_owned()),
+            (KvpValue::Bytes(b), _) => parameter_bytes(name, b, opts),
         };
         (Some(name), Some(rendered))
     })
 }
 
-pub(crate) fn options_to_json(options: &[KeyValuePair]) -> Value {
+pub(crate) fn options_to_json(options: &[KeyValuePair], opts: FieldOptions) -> Value {
     crate::fields::kvp_entries(options, |key, value| {
         let Some(name) = d18_option_name(key) else {
             return (None, None);
@@ -207,7 +206,7 @@ pub(crate) fn options_to_json(options: &[KeyValuePair]) -> Value {
         let rendered = match value {
             KvpValue::Varint(v) => vi(v.into_inner()),
             KvpValue::Bytes(b) if name == "authorization_token" => auth_token_to_json_d18(b),
-            KvpValue::Bytes(b) => Value::Text(String::from_utf8_lossy(b).into_owned()),
+            KvpValue::Bytes(b) => parameter_bytes(name, b, opts),
         };
         (Some(name), Some(rendered))
     })
@@ -246,18 +245,20 @@ fn track_props_to_json(props: &[KeyValuePair]) -> Value {
 /// them. An optional field the message did not carry is absent rather than
 /// zero.
 pub fn message_fields(msg: &ControlMessage) -> Map {
-    let obj = match msg {
+    message_fields_with(msg, FieldOptions::default())
+}
+
+/// [`message_fields`], rendered as `opts` says.
+pub fn message_fields_with(msg: &ControlMessage, opts: FieldOptions) -> Map {
+    match msg {
         ControlMessage::Setup(m) => {
             let mut o = Map::new();
-            o.insert("options".into(), options_to_json(&m.options));
+            o.insert("options".into(), options_to_json(&m.options, opts));
             o
         }
         ControlMessage::GoAway(m) => {
             let mut o = Map::new();
-            o.insert(
-                "new_session_uri".into(),
-                Value::Text(String::from_utf8_lossy(&m.new_session_uri).into_owned()),
-            );
+            o.insert("new_session_uri".into(), text(&m.new_session_uri, opts));
             o.insert("timeout".into(), vi(m.timeout.into_inner()));
             if let Some(rid) = &m.request_id {
                 o.insert("request_id".into(), vi(rid.into_inner()));
@@ -266,7 +267,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
         }
         ControlMessage::RequestOk(m) => {
             let mut o = Map::new();
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o.insert("track_properties".into(), track_props_to_json(&m.track_properties));
             o
         }
@@ -274,21 +275,12 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("error_code".into(), vi(m.error_code.into_inner()));
             o.insert("retry_interval".into(), vi(m.retry_interval.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             if let Some(r) = &m.redirect {
                 let mut r_obj = Map::new();
-                r_obj.insert(
-                    "connect_uri".into(),
-                    Value::Text(String::from_utf8_lossy(&r.connect_uri).into_owned()),
-                );
-                r_obj.insert("track_namespace".into(), ns_to_json(&r.track_namespace));
-                r_obj.insert(
-                    "track_name".into(),
-                    Value::Text(String::from_utf8_lossy(&r.track_name).into_owned()),
-                );
+                r_obj.insert("connect_uri".into(), text(&r.connect_uri, opts));
+                r_obj.insert("track_namespace".into(), ns_to_json(&r.track_namespace, opts));
+                r_obj.insert("track_name".into(), opaque(&r.track_name, opts));
                 o.insert("redirect".into(), Value::Map(r_obj));
             }
             o
@@ -296,37 +288,31 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
         ControlMessage::Subscribe(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
-            o.insert(
-                "track_name".into(),
-                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
-            );
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
+            o.insert("track_name".into(), opaque(&m.track_name, opts));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o
         }
         ControlMessage::SubscribeOk(m) => {
             let mut o = Map::new();
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o.insert("track_properties".into(), track_props_to_json(&m.track_properties));
             o
         }
         ControlMessage::RequestUpdate(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o
         }
         ControlMessage::Publish(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
-            o.insert(
-                "track_name".into(),
-                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
-            );
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
+            o.insert("track_name".into(), opaque(&m.track_name, opts));
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o.insert("track_properties".into(), track_props_to_json(&m.track_properties));
             o
         }
@@ -334,52 +320,46 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("status_code".into(), vi(m.status_code.into_inner()));
             o.insert("stream_count".into(), vi(m.stream_count.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             o
         }
         ControlMessage::PublishNamespace(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o
         }
         ControlMessage::Namespace(m) => {
             let mut o = Map::new();
-            o.insert("namespace_suffix".into(), ns_to_json(&m.namespace_suffix));
+            o.insert("namespace_suffix".into(), ns_to_json(&m.namespace_suffix, opts));
             o
         }
         ControlMessage::NamespaceDone(m) => {
             let mut o = Map::new();
-            o.insert("namespace_suffix".into(), ns_to_json(&m.namespace_suffix));
+            o.insert("namespace_suffix".into(), ns_to_json(&m.namespace_suffix, opts));
             o
         }
         ControlMessage::SubscribeNamespace(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("namespace_prefix".into(), ns_to_json(&m.namespace_prefix));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("namespace_prefix".into(), ns_to_json(&m.namespace_prefix, opts));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o
         }
         ControlMessage::SubscribeTracks(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("namespace_prefix".into(), ns_to_json(&m.namespace_prefix));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("namespace_prefix".into(), ns_to_json(&m.namespace_prefix, opts));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o
         }
         ControlMessage::TrackStatus(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
-            o.insert(
-                "track_name".into(),
-                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
-            );
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
+            o.insert("track_name".into(), opaque(&m.track_name, opts));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o
         }
         ControlMessage::Fetch(m) => {
@@ -395,11 +375,8 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
                     end_group,
                     end_object,
                 } => {
-                    o.insert("track_namespace".into(), ns_to_json(track_namespace));
-                    o.insert(
-                        "track_name".into(),
-                        Value::Text(String::from_utf8_lossy(track_name).into_owned()),
-                    );
+                    o.insert("track_namespace".into(), ns_to_json(track_namespace, opts));
+                    o.insert("track_name".into(), opaque(track_name, opts));
                     o.insert("start_group".into(), vi(start_group.into_inner()));
                     o.insert("start_object".into(), vi(start_object.into_inner()));
                     o.insert("end_group".into(), vi(end_group.into_inner()));
@@ -413,7 +390,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
                     o.insert("joining_start".into(), vi(joining_start.into_inner()));
                 }
             }
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o
         }
         ControlMessage::FetchOk(m) => {
@@ -421,19 +398,15 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             o.insert("end_of_track".into(), vi(m.end_of_track as u64));
             o.insert("end_group".into(), vi(m.end_group.into_inner()));
             o.insert("end_object".into(), vi(m.end_object.into_inner()));
-            o.insert("parameters".into(), params_to_json(&m.parameters));
+            o.insert("parameters".into(), params_to_json(&m.parameters, opts));
             o.insert("track_properties".into(), track_props_to_json(&m.track_properties));
             o
         }
         ControlMessage::PublishBlocked(m) => {
             let mut o = Map::new();
-            o.insert("namespace_suffix".into(), ns_to_json(&m.namespace_suffix));
-            o.insert(
-                "track_name".into(),
-                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
-            );
+            o.insert("namespace_suffix".into(), ns_to_json(&m.namespace_suffix, opts));
+            o.insert("track_name".into(), opaque(&m.track_name, opts));
             o
         }
-    };
-    obj
+    }
 }

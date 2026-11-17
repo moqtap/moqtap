@@ -2,7 +2,8 @@
 //! compiles: a SETUP refused during the handshake, a control message refused
 //! after it, a frame refused on a request stream, and the SETUP this side sent
 //! before a peer that never answers. A peer's close reaches the caller with its
-//! code.
+//! code. A refused frame that decoded is the last frame reported as received
+//! before its refusal, with the same bytes.
 
 mod common;
 
@@ -155,7 +156,11 @@ impl PeerStream {
         loop {
             let mut cursor = &self.buf[..];
             match AnyControlMessage::decode(self.draft, &mut cursor) {
-                Ok(msg) => return Some(msg),
+                Ok(msg) => {
+                    let read = self.buf.len() - cursor.len();
+                    self.buf.drain(..read);
+                    return Some(msg);
+                }
                 Err(CodecError::UnexpectedEnd | CodecError::VarInt(VarIntError::UnexpectedEnd)) => {
                     let mut tmp = [0u8; 2048];
                     match self.recv.read(&mut tmp).await {
@@ -240,6 +245,111 @@ enum Peer {
     /// Answer properly, then answer the client's first request stream with a
     /// padded SETUP.
     AnswerBi,
+    /// Answer properly, then send the same GOAWAY twice.
+    GoAwayTwice,
+    /// Answer properly, then answer the client's TRACK_STATUS with a REQUEST_OK
+    /// whose GROUP_ORDER is 3.
+    #[cfg(feature = "draft15")]
+    GroupOrderOutOfRange,
+    /// Answer properly, then answer the client's first request stream with a
+    /// REQUEST_OK carrying a Track Property.
+    #[cfg(feature = "draft23")]
+    TrackPropertiesOnRequestOk,
+}
+
+/// A GOAWAY with no New Session URI and a zero for every other field.
+#[allow(unused_variables, unreachable_code)]
+fn goaway(draft: DraftVersion) -> Vec<u8> {
+    #[allow(unused_macros)]
+    macro_rules! goaway {
+        ($variant:ident, $module:ident $(, $field:ident: $value:expr)*) => {{
+            use moqtap_codec::$module::message::{ControlMessage, GoAway};
+            AnyControlMessage::$variant(ControlMessage::GoAway(GoAway {
+                new_session_uri: Vec::new(),
+                $($field: $value,)*
+            }))
+        }};
+    }
+    let zero = || VarInt::from_u64(0).expect("a varint");
+    let msg = match draft {
+        #[cfg(feature = "draft07")]
+        DraftVersion::Draft07 => goaway!(Draft07, draft07),
+        #[cfg(feature = "draft08")]
+        DraftVersion::Draft08 => goaway!(Draft08, draft08),
+        #[cfg(feature = "draft09")]
+        DraftVersion::Draft09 => goaway!(Draft09, draft09),
+        #[cfg(feature = "draft10")]
+        DraftVersion::Draft10 => goaway!(Draft10, draft10),
+        #[cfg(feature = "draft11")]
+        DraftVersion::Draft11 => goaway!(Draft11, draft11),
+        #[cfg(feature = "draft12")]
+        DraftVersion::Draft12 => goaway!(Draft12, draft12),
+        #[cfg(feature = "draft13")]
+        DraftVersion::Draft13 => goaway!(Draft13, draft13),
+        #[cfg(feature = "draft14")]
+        DraftVersion::Draft14 => goaway!(Draft14, draft14),
+        #[cfg(feature = "draft15")]
+        DraftVersion::Draft15 => goaway!(Draft15, draft15),
+        #[cfg(feature = "draft16")]
+        DraftVersion::Draft16 => goaway!(Draft16, draft16),
+        #[cfg(feature = "draft17")]
+        DraftVersion::Draft17 => goaway!(Draft17, draft17, timeout: zero()),
+        #[cfg(feature = "draft18")]
+        DraftVersion::Draft18 => {
+            goaway!(Draft18, draft18, timeout: zero(), request_id: Some(zero()))
+        }
+        #[cfg(feature = "draft19")]
+        DraftVersion::Draft19 => goaway!(Draft19, draft19, timeout: zero()),
+        #[cfg(feature = "draft20")]
+        DraftVersion::Draft20 => goaway!(Draft20, draft20, timeout: zero()),
+        #[cfg(feature = "draft21")]
+        DraftVersion::Draft21 => goaway!(Draft21, draft21, timeout: zero()),
+        #[cfg(feature = "draft22")]
+        DraftVersion::Draft22 => goaway!(Draft22, draft22, timeout: zero()),
+        #[cfg(feature = "draft23")]
+        DraftVersion::Draft23 => goaway!(Draft23, draft23, timeout: zero()),
+        #[allow(unreachable_patterns)]
+        other => panic!("{other:?} is not compiled"),
+    };
+    let mut out = Vec::new();
+    msg.encode(&mut out).expect("a GOAWAY this test built encodes");
+    out
+}
+
+/// The REQUEST_OK the peer answers `request` with: a GROUP_ORDER of 3.
+#[cfg(feature = "draft15")]
+fn group_order_out_of_range(request: &AnyControlMessage) -> Vec<u8> {
+    use moqtap_codec::draft15::message::{ControlMessage, RequestOk};
+    let request_id = match request {
+        AnyControlMessage::Draft15(ControlMessage::TrackStatus(t)) => t.request_id,
+        other => panic!("expected a TRACK_STATUS, got {other:?}"),
+    };
+    let answer = AnyControlMessage::Draft15(ControlMessage::RequestOk(RequestOk {
+        request_id,
+        parameters: vec![KeyValuePair {
+            key: VarInt::from_u64(0x22).expect("a key is a varint"),
+            value: KvpValue::Varint(VarInt::from_u64(3).expect("a varint")),
+        }],
+    }));
+    let mut out = Vec::new();
+    answer.encode(&mut out).expect("a REQUEST_OK this test built encodes");
+    out
+}
+
+/// A REQUEST_OK carrying one Track Property.
+#[cfg(feature = "draft23")]
+fn request_ok_with_track_properties() -> Vec<u8> {
+    use moqtap_codec::draft23::message::{ControlMessage, RequestOk};
+    let answer = AnyControlMessage::Draft23(ControlMessage::RequestOk(RequestOk {
+        parameters: Vec::new(),
+        track_properties: vec![KeyValuePair {
+            key: VarInt::from_u64(0x02).expect("a key is a varint"),
+            value: KvpValue::Varint(VarInt::from_u64(1).expect("a varint")),
+        }],
+    }));
+    let mut out = Vec::new();
+    answer.encode(&mut out).expect("a REQUEST_OK this test built encodes");
+    out
 }
 
 /// Play `script` against one client, handing back what the peer wrote last and
@@ -251,15 +361,17 @@ async fn serve(
 ) -> (Vec<u8>, Option<u64>) {
     let incoming = endpoint.accept().await.expect("a client");
     let conn = incoming.await.expect("tls handshake");
-    let (mut send, setup) = if unidirectional_control(draft) {
+    #[allow(unused_mut)]
+    let (mut send, mut control, setup) = if unidirectional_control(draft) {
         let recv = conn.accept_uni().await.expect("the client's control stream");
         let mut control = PeerStream { recv, draft, buf: Vec::new() };
         let setup = control.read_control().await.expect("the client's SETUP");
-        (conn.open_uni().await.expect("open the peer's control stream"), setup)
+        (conn.open_uni().await.expect("open the peer's control stream"), control, setup)
     } else {
         let (send, recv) = conn.accept_bi().await.expect("the control stream");
         let mut control = PeerStream { recv, draft, buf: Vec::new() };
-        (send, control.read_control().await.expect("the client's CLIENT_SETUP"))
+        let setup = control.read_control().await.expect("the client's CLIENT_SETUP");
+        (send, control, setup)
     };
     let reply = answer(draft, &setup);
     let written = match script {
@@ -299,7 +411,33 @@ async fn serve(
             ours.write_all(&frame).await.expect("write the answer");
             return finish(conn, frame, (send, ours, theirs)).await;
         }
+        Peer::GoAwayTwice => {
+            send.write_all(&reply).await.expect("write the SETUP");
+            let frame = goaway(draft);
+            send.write_all(&frame).await.expect("write the first GOAWAY");
+            send.write_all(&frame).await.expect("write the second GOAWAY");
+            frame
+        }
+        #[cfg(feature = "draft15")]
+        Peer::GroupOrderOutOfRange => {
+            send.write_all(&reply).await.expect("write the SETUP");
+            let request = control.read_control().await.expect("the client's TRACK_STATUS");
+            let frame = group_order_out_of_range(&request);
+            send.write_all(&frame).await.expect("write the REQUEST_OK");
+            frame
+        }
+        #[cfg(feature = "draft23")]
+        Peer::TrackPropertiesOnRequestOk => {
+            send.write_all(&reply).await.expect("write the SETUP");
+            let (mut ours, mut theirs) = conn.accept_bi().await.expect("the client's request");
+            let mut first = [0u8; 1];
+            theirs.read_exact(&mut first).await.expect("the request");
+            let frame = request_ok_with_track_properties();
+            ours.write_all(&frame).await.expect("write the REQUEST_OK");
+            return finish(conn, frame, (send, control, ours, theirs)).await;
+        }
     };
+    drop(control);
     finish(conn, written, send).await
 }
 
@@ -421,16 +559,133 @@ async fn a_refused_control_message_reaches_the_observer() {
             .unwrap_or_else(|_| panic!("{draft:?}: the padded frame never arrived"))
             .expect_err("a padded frame was accepted");
         assert!(matches!(err.cause(), ErrorCause::Codec { .. }), "{draft:?}: got {err}");
-        let refused: Vec<Vec<u8>> = events
-            .events()
-            .iter()
-            .filter_map(|e| e.refused_frame().map(|f| f.raw.to_vec()))
-            .collect();
+        let events = events.events();
+        let refused: Vec<Vec<u8>> =
+            events.iter().filter_map(|e| e.refused_frame().map(|f| f.raw.to_vec())).collect();
         conn.close(0, b"");
         drop(conn);
         let (written, _) = tokio::time::timeout(PATIENCE, peer).await.expect("peer").expect("peer");
-        assert_eq!(refused, vec![written], "{draft:?}: one refusal, with the bytes the peer wrote");
+        assert_eq!(
+            refused,
+            std::slice::from_ref(&written),
+            "{draft:?}: one refusal, with the bytes the peer wrote"
+        );
+        let decoded = events
+            .iter()
+            .filter_map(AnyClientEvent::control_frame)
+            .any(|f| !f.outbound && f.raw == Some(&written[..]));
+        assert!(!decoded, "{draft:?}: a frame the decoder refused is reported as received");
     }
+}
+
+/// The one refusal in `events` follows the received frame it refuses: the last
+/// frame received before it carries the same bytes and is a `name`. Returns the
+/// refusal's index.
+fn assert_refusal_follows_its_decode(
+    draft: DraftVersion,
+    events: &[AnyClientEvent],
+    name: &str,
+) -> usize {
+    let at: Vec<usize> =
+        events.iter().enumerate().filter_map(|(i, e)| e.refused_frame().map(|_| i)).collect();
+    assert_eq!(at.len(), 1, "{draft:?}: one refusal, got {events:?}");
+    let refused = events[at[0]].refused_frame().expect("a refusal");
+    let decoded = events[..at[0]]
+        .iter()
+        .filter_map(AnyClientEvent::control_frame)
+        .rfind(|f| !f.outbound)
+        .unwrap_or_else(|| panic!("{draft:?}: nothing received before the refusal"));
+    assert_eq!(decoded.raw, Some(refused.raw), "{draft:?}: with the refused bytes");
+    assert_eq!(decoded.message.message_type_name(), name, "{draft:?}");
+    at[0]
+}
+
+/// A second GOAWAY decodes, breaks a rule this side holds the peer to, and is
+/// the last frame reported as received before its refusal.
+#[tokio::test]
+async fn a_repeated_goaway_is_reported_as_received_then_refused() {
+    common::init_crypto();
+    for draft in compiled_drafts() {
+        let (transport, peer) = start(draft, Peer::GoAwayTwice).await;
+        let events = Arc::new(Collect::default());
+        let mut conn = adopted(draft, transport, &events).await;
+        tokio::time::timeout(PATIENCE, conn.recv_and_dispatch())
+            .await
+            .unwrap_or_else(|_| panic!("{draft:?}: the first GOAWAY never arrived"))
+            .unwrap_or_else(|e| panic!("{draft:?}: the first GOAWAY was refused: {e}"));
+        tokio::time::timeout(PATIENCE, conn.recv_and_dispatch())
+            .await
+            .unwrap_or_else(|_| panic!("{draft:?}: the second GOAWAY never arrived"))
+            .expect_err("a second GOAWAY was accepted");
+        drop(conn);
+        let (written, _) = tokio::time::timeout(PATIENCE, peer).await.expect("peer").expect("peer");
+        let events = events.events();
+        let at = assert_refusal_follows_its_decode(draft, &events, "goaway");
+        let refused = events[at].refused_frame().expect("a refusal");
+        assert_eq!(refused.raw, &written[..], "{draft:?}: the bytes the peer wrote");
+        let received = events[..at]
+            .iter()
+            .filter_map(AnyClientEvent::control_frame)
+            .filter(|f| !f.outbound && f.raw == Some(&written[..]))
+            .count();
+        assert_eq!(received, 2, "{draft:?}: both GOAWAYs reported as received first");
+    }
+}
+
+/// Draft-15's REQUEST_OK answering a TRACK_STATUS with a GROUP_ORDER of 3 is
+/// refused after it decodes, and is reported as received first.
+#[cfg(feature = "draft15")]
+#[tokio::test]
+async fn a_track_status_answer_refused_after_its_decode_is_reported_as_received() {
+    common::init_crypto();
+    let draft = DraftVersion::Draft15;
+    let (transport, peer) = start(draft, Peer::GroupOrderOutOfRange).await;
+    let events = Arc::new(Collect::default());
+    let mut conn = adopted(draft, transport, &events).await;
+    let mut request = conn
+        .track_status(TrackNamespace(vec![b"status".to_vec()]), b"t".to_vec())
+        .await
+        .unwrap_or_else(|e| panic!("track_status: {e}"));
+    let err = tokio::time::timeout(PATIENCE, conn.recv_response(&mut request))
+        .await
+        .expect("the answer never arrived")
+        .expect_err("a GROUP_ORDER of 3 was accepted");
+    assert!(matches!(err.cause(), ErrorCause::Codec { .. }), "got {err}");
+    drop(request);
+    drop(conn);
+    let (written, _) = tokio::time::timeout(PATIENCE, peer).await.expect("peer").expect("peer");
+    let events = events.events();
+    assert_refusal_follows_its_decode(draft, &events, "request_ok");
+    let refused = events.iter().find_map(AnyClientEvent::refused_frame).expect("a refusal");
+    assert_eq!(refused.raw, &written[..], "the bytes the peer wrote");
+}
+
+/// Draft-23's REQUEST_OK carrying Track Properties for a SUBSCRIBE_NAMESPACE
+/// is refused after it decodes, and is reported as received first.
+#[cfg(feature = "draft23")]
+#[tokio::test]
+async fn a_request_ok_refused_after_its_decode_is_reported_as_received() {
+    common::init_crypto();
+    let draft = DraftVersion::Draft23;
+    let (transport, peer) = start(draft, Peer::TrackPropertiesOnRequestOk).await;
+    let events = Arc::new(Collect::default());
+    let mut conn = adopted(draft, transport, &events).await;
+    let mut request = conn
+        .subscribe_namespace(TrackNamespace(vec![b"properties".to_vec()]))
+        .await
+        .unwrap_or_else(|e| panic!("subscribe_namespace: {e}"));
+    let err = tokio::time::timeout(PATIENCE, conn.recv_response(&mut request))
+        .await
+        .expect("the answer never arrived")
+        .expect_err("Track Properties on a SUBSCRIBE_NAMESPACE's REQUEST_OK were accepted");
+    assert!(matches!(err.cause(), ErrorCause::Codec { .. }), "got {err}");
+    drop(request);
+    drop(conn);
+    let (written, _) = tokio::time::timeout(PATIENCE, peer).await.expect("peer").expect("peer");
+    let events = events.events();
+    assert_refusal_follows_its_decode(draft, &events, "request_ok");
+    let refused = events.iter().find_map(AnyClientEvent::refused_frame).expect("a refusal");
+    assert_eq!(refused.raw, &written[..], "the bytes the peer wrote");
 }
 
 /// A peer's application close reaches the caller as a code in the application

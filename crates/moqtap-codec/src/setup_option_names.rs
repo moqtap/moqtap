@@ -95,6 +95,7 @@ use crate::kvp::KeyValuePair;
 #[allow(unreachable_code)]
 pub fn setup_option_name(draft: u8, param: &KeyValuePair) -> Option<String> {
     let one = std::slice::from_ref(param);
+    let options = crate::fields::FieldOptions::default();
     // `return None` rather than `None` as the absent answer: the arms produce a
     // `FieldValue` to be read by `name_in` below, and "this build has no table
     // for that draft" is not a rendering of anything. See
@@ -102,25 +103,25 @@ pub fn setup_option_name(draft: u8, param: &KeyValuePair) -> Option<String> {
     let rendered = crate::draft_table::by_draft! { draft, return None,
         // Drafts 08 through 10 share draft-08's table, which is the same two
         // parameters draft-07 has minus ROLE.
-        ("draft07", Draft07) => crate::fields::params::kvp_to_json_d07_setup(one),
-        ("draft08", Draft08) => crate::fields::params::kvp_to_json_d08_setup(one),
-        ("draft09", Draft09) => crate::fields::params::kvp_to_json_d08_setup(one),
-        ("draft10", Draft10) => crate::fields::params::kvp_to_json_d08_setup(one),
-        ("draft11", Draft11) => crate::draft11::fields::kvp_to_json_setup(one),
-        ("draft12", Draft12) => crate::draft12::fields::kvp_to_json_setup(one),
-        ("draft13", Draft13) => crate::draft13::fields::kvp_to_json_setup(one),
-        ("draft14", Draft14) => crate::draft14::fields::kvp_to_json_d14_setup(one),
-        ("draft15", Draft15) => crate::draft15::fields::kvp_to_json_d15_setup(one),
-        ("draft16", Draft16) => crate::draft16::fields::kvp_to_json_d16_setup(one),
+        ("draft07", Draft07) => crate::fields::params::kvp_to_json_d07_setup(one, options),
+        ("draft08", Draft08) => crate::fields::params::kvp_to_json_d08_setup(one, options),
+        ("draft09", Draft09) => crate::fields::params::kvp_to_json_d08_setup(one, options),
+        ("draft10", Draft10) => crate::fields::params::kvp_to_json_d08_setup(one, options),
+        ("draft11", Draft11) => crate::draft11::fields::kvp_to_json_setup(one, options),
+        ("draft12", Draft12) => crate::draft12::fields::kvp_to_json_setup(one, options),
+        ("draft13", Draft13) => crate::draft13::fields::kvp_to_json_setup(one, options),
+        ("draft14", Draft14) => crate::draft14::fields::kvp_to_json_d14_setup(one, options),
+        ("draft15", Draft15) => crate::draft15::fields::kvp_to_json_d15_setup(one, options),
+        ("draft16", Draft16) => crate::draft16::fields::kvp_to_json_d16_setup(one, options),
         // Draft-17 renamed the block to Setup Options and unified the message;
         // the renderer's name follows the draft's word for it.
-        ("draft17", Draft17) => crate::draft17::fields::options_to_json(one),
-        ("draft18", Draft18) => crate::draft18::fields::options_to_json(one),
-        ("draft19", Draft19) => crate::draft19::fields::options_to_json(one),
-        ("draft20", Draft20) => crate::draft20::fields::options_to_json(one),
-        ("draft21", Draft21) => crate::draft21::fields::options_to_json(one),
-        ("draft22", Draft22) => crate::draft22::fields::options_to_json(one),
-        ("draft23", Draft23) => crate::draft23::fields::options_to_json(one),
+        ("draft17", Draft17) => crate::draft17::fields::options_to_json(one, options),
+        ("draft18", Draft18) => crate::draft18::fields::options_to_json(one, options),
+        ("draft19", Draft19) => crate::draft19::fields::options_to_json(one, options),
+        ("draft20", Draft20) => crate::draft20::fields::options_to_json(one, options),
+        ("draft21", Draft21) => crate::draft21::fields::options_to_json(one, options),
+        ("draft22", Draft22) => crate::draft22::fields::options_to_json(one, options),
+        ("draft23", Draft23) => crate::draft23::fields::options_to_json(one, options),
     };
     name_in(&rendered)
 }

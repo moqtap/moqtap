@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-17
+
+### Added
+
+- `AnyControlMessage::fields_with(FieldOptions)` and each draft's `message_fields_with`. With `FieldOptions::new().with_opaque(Opaque::Bytes)`, opaque fields render as `Bytes`, text fields as `Text` only when valid UTF-8, and a Range Filter's `violates` as the new `RangeFilterError::code()`. `fields()` is unchanged.
+
 ## [0.13.0] - 2026-11-14
 
 ### Changed

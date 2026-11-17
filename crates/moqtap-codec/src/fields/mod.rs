@@ -111,6 +111,96 @@ impl FieldMap {
     }
 }
 
+/// How [`AnyControlMessage::fields_with`](crate::dispatch::AnyControlMessage::fields_with)
+/// renders the fields a draft leaves as bytes or as text.
+///
+/// Start from [`FieldOptions::new`] or `Default`, which render what
+/// [`fields`](crate::dispatch::AnyControlMessage::fields) renders, and set each
+/// option with its `with_` method.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FieldOptions {
+    /// How opaque bytes and text fields are rendered.
+    pub opaque: Opaque,
+}
+
+impl FieldOptions {
+    /// The default options.
+    pub const fn new() -> Self {
+        Self { opaque: Opaque::Text }
+    }
+
+    /// These options with `opaque` set.
+    #[must_use]
+    pub const fn with_opaque(mut self, opaque: Opaque) -> Self {
+        self.opaque = opaque;
+        self
+    }
+}
+
+/// How opaque bytes and text fields are rendered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Opaque {
+    /// As [`FieldValue::Text`], with invalid UTF-8 replaced by U+FFFD. This is
+    /// what [`fields`](crate::dispatch::AnyControlMessage::fields) renders.
+    #[default]
+    Text,
+    /// Exactly. Opaque fields are [`FieldValue::Bytes`]. A text field is
+    /// [`FieldValue::Text`] when it is valid UTF-8 and `Bytes` when it is not.
+    /// A Range Filter's `violates` is the
+    /// [`RangeFilterError::code`](crate::range_filter::RangeFilterError::code)
+    /// of the rule it breaks.
+    Bytes,
+}
+
+fn lossy(bytes: &[u8]) -> FieldValue {
+    FieldValue::Text(String::from_utf8_lossy(bytes).into_owned())
+}
+
+/// A field the draft leaves as opaque bytes. The `allow`s on these helpers are
+/// for the build with no draft, which has no caller.
+#[allow(dead_code)]
+pub(crate) fn opaque(bytes: &[u8], options: FieldOptions) -> FieldValue {
+    match options.opaque {
+        Opaque::Text => lossy(bytes),
+        Opaque::Bytes => FieldValue::Bytes(bytes.to_vec()),
+    }
+}
+
+/// A field the draft defines as text.
+#[allow(dead_code)]
+pub(crate) fn text(bytes: &[u8], options: FieldOptions) -> FieldValue {
+    match (options.opaque, std::str::from_utf8(bytes)) {
+        (Opaque::Text, _) => lossy(bytes),
+        (Opaque::Bytes, Ok(s)) => FieldValue::Text(s.to_owned()),
+        (Opaque::Bytes, Err(_)) => FieldValue::Bytes(bytes.to_vec()),
+    }
+}
+
+/// A named parameter's byte value that its renderer does not structure: text
+/// for the parameters a draft defines as text, opaque otherwise.
+#[allow(dead_code)]
+pub(crate) fn parameter_bytes(name: &str, bytes: &[u8], options: FieldOptions) -> FieldValue {
+    match name {
+        "path" | "authority" | "moqt_implementation" | "authorization_info" => text(bytes, options),
+        _ => opaque(bytes, options),
+    }
+}
+
+/// A Range Filter's `violates`: the rule's description, or its code under
+/// [`Opaque::Bytes`].
+#[allow(dead_code)]
+pub(crate) fn violates(
+    broken: &crate::range_filter::RangeFilterError,
+    options: FieldOptions,
+) -> FieldValue {
+    FieldValue::Text(match options.opaque {
+        Opaque::Text => broken.to_string(),
+        Opaque::Bytes => broken.code().to_string(),
+    })
+}
+
 impl IntoIterator for FieldMap {
     type Item = (String, FieldValue);
     type IntoIter = std::vec::IntoIter<(String, FieldValue)>;

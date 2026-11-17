@@ -192,6 +192,19 @@ pub enum RangeFilterError {
     PropertyTypeIsNotAnInteger(u64),
 }
 
+impl RangeFilterError {
+    /// A stable snake_case name for this error's kind, without its values.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::NotARangeFilter(_) => "not_a_range_filter",
+            Self::Malformed { .. } => "malformed",
+            Self::DeltaOverflow { .. } => "delta_overflow",
+            Self::PriorityAboveTheField(_) => "priority_above_the_field",
+            Self::PropertyTypeIsNotAnInteger(_) => "property_type_is_not_an_integer",
+        }
+    }
+}
+
 /// The value ran out before `detail`.
 const NO_SET_ID: &str = "it ends before the SetID";
 const NO_PROPERTY_TYPE: &str = "it ends before the Property Type this filter type carries";

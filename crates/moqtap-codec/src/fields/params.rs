@@ -1,4 +1,5 @@
 use crate::fields::FieldValue as Value;
+use crate::fields::{parameter_bytes, FieldOptions};
 use crate::kvp::{KeyValuePair, KvpValue};
 use crate::varint::VarInt;
 
@@ -62,6 +63,7 @@ fn kvp_to_json_d07_inner(
     params: &[KeyValuePair],
     name_fn: fn(u64) -> Option<&'static str>,
     is_varint_fn: fn(u64) -> bool,
+    opts: FieldOptions,
 ) -> Value {
     crate::fields::kvp_entries(params, |key, value| {
         let Some(name) = name_fn(key) else {
@@ -85,7 +87,7 @@ fn kvp_to_json_d07_inner(
                     Err(_) => None,
                 }
             }
-            KvpValue::Bytes(b) => Some(Value::Text(String::from_utf8_lossy(b).into_owned())),
+            KvpValue::Bytes(b) => Some(parameter_bytes(name, b, opts)),
             KvpValue::Varint(v) => Some(Value::Uint(v.into_inner())),
         };
         (Some(name), rendered)
@@ -93,16 +95,16 @@ fn kvp_to_json_d07_inner(
 }
 
 #[cfg(feature = "draft07")]
-pub fn kvp_to_json_d07_setup(params: &[KeyValuePair]) -> Value {
-    kvp_to_json_d07_inner(params, d07_setup_param_name, d07_setup_is_varint)
+pub fn kvp_to_json_d07_setup(params: &[KeyValuePair], opts: FieldOptions) -> Value {
+    kvp_to_json_d07_inner(params, d07_setup_param_name, d07_setup_is_varint, opts)
 }
 
-pub fn kvp_to_json_d07(params: &[KeyValuePair]) -> Value {
-    kvp_to_json_d07_inner(params, d07_message_param_name, d07_msg_is_varint)
+pub fn kvp_to_json_d07(params: &[KeyValuePair], opts: FieldOptions) -> Value {
+    kvp_to_json_d07_inner(params, d07_message_param_name, d07_msg_is_varint, opts)
 }
 
 /// The setup parameter list of a draft that dropped ROLE.
 #[cfg(any(feature = "draft08", feature = "draft09", feature = "draft10"))]
-pub fn kvp_to_json_d08_setup(params: &[KeyValuePair]) -> Value {
-    kvp_to_json_d07_inner(params, d08_setup_param_name, d08_setup_is_varint)
+pub fn kvp_to_json_d08_setup(params: &[KeyValuePair], opts: FieldOptions) -> Value {
+    kvp_to_json_d07_inner(params, d08_setup_param_name, d08_setup_is_varint, opts)
 }

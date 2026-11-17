@@ -1,4 +1,5 @@
 use crate::draft12::message::*;
+use crate::fields::{opaque, text, FieldOptions};
 use crate::fields::{FieldMap as Map, FieldValue as Value};
 use crate::kvp::{KeyValuePair, KvpValue};
 use crate::types::*;
@@ -8,10 +9,8 @@ fn vi(v: u64) -> Value {
     Value::Uint(v)
 }
 
-fn ns_to_json(ns: &TrackNamespace) -> Value {
-    Value::Array(
-        ns.0.iter().map(|e| Value::Text(String::from_utf8_lossy(e).into_owned())).collect(),
-    )
+fn ns_to_json(ns: &TrackNamespace, opts: FieldOptions) -> Value {
+    Value::Array(ns.0.iter().map(|e| opaque(e, opts)).collect())
 }
 
 fn loc_to_json(loc: &Location) -> Value {
@@ -97,11 +96,9 @@ fn auth_token_to_json(bytes: &[u8]) -> Value {
 /// draft's `decode_setup_parameters` already admits and structurally validates
 /// it. The table has to name every parameter that decoder accepts, or a
 /// renderer answers `None` for one the same file reads.
-pub(crate) fn kvp_to_json_setup(params: &[KeyValuePair]) -> Value {
+pub(crate) fn kvp_to_json_setup(params: &[KeyValuePair], opts: FieldOptions) -> Value {
     crate::fields::kvp_entries(params, |key, value| match (key, value) {
-        (0x01, KvpValue::Bytes(b)) => {
-            (Some("path"), Some(Value::Text(String::from_utf8_lossy(b).into_owned())))
-        }
+        (0x01, KvpValue::Bytes(b)) => (Some("path"), Some(text(b, opts))),
         (0x02, KvpValue::Varint(v)) => (Some("max_request_id"), Some(vi(v.into_inner()))),
         (0x03, KvpValue::Bytes(b)) => (Some("authorization_token"), Some(auth_token_to_json(b))),
         (0x04, KvpValue::Varint(v)) => {
@@ -126,6 +123,11 @@ fn kvp_to_json_msg(params: &[KeyValuePair]) -> Value {
 /// them. An optional field the message did not carry is absent rather than
 /// zero.
 pub fn message_fields(msg: &ControlMessage) -> Map {
+    message_fields_with(msg, FieldOptions::default())
+}
+
+/// [`message_fields`], rendered as `opts` says.
+pub fn message_fields_with(msg: &ControlMessage, opts: FieldOptions) -> Map {
     let obj = match msg {
         ControlMessage::ClientSetup(m) => {
             let mut o = Map::new();
@@ -133,21 +135,18 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
                 "supported_versions".into(),
                 Value::Array(m.supported_versions.iter().map(|v| vi(v.into_inner())).collect()),
             );
-            o.insert("parameters".into(), kvp_to_json_setup(&m.parameters));
+            o.insert("parameters".into(), kvp_to_json_setup(&m.parameters, opts));
             o
         }
         ControlMessage::ServerSetup(m) => {
             let mut o = Map::new();
             o.insert("selected_version".into(), vi(m.selected_version.into_inner()));
-            o.insert("parameters".into(), kvp_to_json_setup(&m.parameters));
+            o.insert("parameters".into(), kvp_to_json_setup(&m.parameters, opts));
             o
         }
         ControlMessage::GoAway(m) => {
             let mut o = Map::new();
-            o.insert(
-                "new_session_uri".into(),
-                Value::Text(String::from_utf8_lossy(&m.new_session_uri).into_owned()),
-            );
+            o.insert("new_session_uri".into(), text(&m.new_session_uri, opts));
             o
         }
         ControlMessage::MaxRequestId(m) => {
@@ -163,11 +162,8 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
         ControlMessage::Subscribe(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
-            o.insert(
-                "track_name".into(),
-                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
-            );
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
+            o.insert("track_name".into(), opaque(&m.track_name, opts));
             o.insert("subscriber_priority".into(), vi(m.subscriber_priority as u64));
             o.insert("group_order".into(), vi(m.group_order as u64));
             o.insert("forward".into(), vi(m.forward as u64));
@@ -201,10 +197,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("error_code".into(), vi(m.error_code.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             o
         }
         ControlMessage::SubscribeUpdate(m) => {
@@ -223,10 +216,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("status_code".into(), vi(m.status_code.into_inner()));
             o.insert("stream_count".into(), vi(m.stream_count.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             o
         }
         ControlMessage::Unsubscribe(m) => {
@@ -237,7 +227,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
         ControlMessage::Announce(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
             o.insert("parameters".into(), kvp_to_json_msg(&m.parameters));
             o
         }
@@ -250,31 +240,25 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("error_code".into(), vi(m.error_code.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             o
         }
         ControlMessage::AnnounceCancel(m) => {
             let mut o = Map::new();
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
             o.insert("error_code".into(), vi(m.error_code.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             o
         }
         ControlMessage::Unannounce(m) => {
             let mut o = Map::new();
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
             o
         }
         ControlMessage::SubscribeAnnounces(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace_prefix".into(), ns_to_json(&m.track_namespace_prefix));
+            o.insert("track_namespace_prefix".into(), ns_to_json(&m.track_namespace_prefix, opts));
             o.insert("parameters".into(), kvp_to_json_msg(&m.parameters));
             o
         }
@@ -287,25 +271,19 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("error_code".into(), vi(m.error_code.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             o
         }
         ControlMessage::UnsubscribeAnnounces(m) => {
             let mut o = Map::new();
-            o.insert("track_namespace_prefix".into(), ns_to_json(&m.track_namespace_prefix));
+            o.insert("track_namespace_prefix".into(), ns_to_json(&m.track_namespace_prefix, opts));
             o
         }
         ControlMessage::TrackStatusRequest(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
-            o.insert(
-                "track_name".into(),
-                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
-            );
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
+            o.insert("track_name".into(), opaque(&m.track_name, opts));
             o.insert("parameters".into(), kvp_to_json_msg(&m.parameters));
             o
         }
@@ -332,11 +310,8 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
                     end_group,
                     end_object,
                 } => {
-                    o.insert("track_namespace".into(), ns_to_json(track_namespace));
-                    o.insert(
-                        "track_name".into(),
-                        Value::Text(String::from_utf8_lossy(track_name).into_owned()),
-                    );
+                    o.insert("track_namespace".into(), ns_to_json(track_namespace, opts));
+                    o.insert("track_name".into(), opaque(track_name, opts));
                     o.insert("start_group".into(), vi(start_group.into_inner()));
                     o.insert("start_object".into(), vi(start_object.into_inner()));
                     o.insert("end_group".into(), vi(end_group.into_inner()));
@@ -368,10 +343,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("error_code".into(), vi(m.error_code.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             o
         }
         ControlMessage::FetchCancel(m) => {
@@ -382,11 +354,8 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
         ControlMessage::Publish(m) => {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
-            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace));
-            o.insert(
-                "track_name".into(),
-                Value::Text(String::from_utf8_lossy(&m.track_name).into_owned()),
-            );
+            o.insert("track_namespace".into(), ns_to_json(&m.track_namespace, opts));
+            o.insert("track_name".into(), opaque(&m.track_name, opts));
             o.insert("track_alias".into(), vi(m.track_alias.into_inner()));
             o.insert("group_order".into(), vi(m.group_order as u64));
             o.insert("content_exists".into(), vi(m.content_exists as u64));
@@ -420,10 +389,7 @@ pub fn message_fields(msg: &ControlMessage) -> Map {
             let mut o = Map::new();
             o.insert("request_id".into(), vi(m.request_id.into_inner()));
             o.insert("error_code".into(), vi(m.error_code.into_inner()));
-            o.insert(
-                "reason_phrase".into(),
-                Value::Text(String::from_utf8_lossy(&m.reason_phrase).into_owned()),
-            );
+            o.insert("reason_phrase".into(), text(&m.reason_phrase, opts));
             o
         }
     };
