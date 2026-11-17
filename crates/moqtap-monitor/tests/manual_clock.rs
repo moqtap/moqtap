@@ -59,22 +59,23 @@ async fn seals_follow(threaded: bool) {
     // One advance across four intervals seals four bodies, one at each 15 s.
     let rest = if threaded { 60_000 } else { 45_001 };
     clock.advance(Duration::from_millis(rest)).await;
-    let ups = mock.wait_for(1, Duration::from_secs(5)).await;
-    let first = read_body(&ups[0].body, SOURCE);
+
+    relay.object_sent(&["live"], "video", obj(1, 0), Some(clock.instant_at(59_000_000))).ok();
+    // Bodies are read only after shutdown: a long advance can pass an
+    // upload's timeout while its request is in flight, and the retry then
+    // backs off on manual time, which no longer moves; only shutdown ends
+    // that wait. The same body may also be sent twice; count each seq once.
+    let s = m.shutdown(Duration::from_secs(5)).await;
+    assert_eq!(s.state, State::ShutDown);
+    let mut bodies: Vec<_> = mock.uploads().iter().map(|c| read_body(&c.body, SOURCE)).collect();
+    bodies.dedup_by(|a, b| a.preamble["seal"]["seq"] == b.preamble["seal"]["seq"]);
+    let first = &bodies[0];
     assert_eq!(first.preamble["seal"]["from_us"], 0);
     assert_eq!(first.preamble["seal"]["through_us"], 15_000_000);
     assert_eq!(first.batch["start"]["wall_ms"], WALL_US / 1000);
     assert_eq!(first.batch["clk"]["res_us"], 1);
     assert_eq!(first.runs.len(), 1);
     assert_eq!(first.runs[0].ids, vec![0]);
-
-    relay.object_sent(&["live"], "video", obj(1, 0), Some(clock.instant_at(59_000_000))).ok();
-    let s = m.shutdown(Duration::from_secs(5)).await;
-    assert_eq!(s.state, State::ShutDown);
-    // A long advance can pass an upload's timeout while its reply is in
-    // flight, so a body may be sent twice; count each seq once.
-    let mut bodies: Vec<_> = mock.uploads().iter().map(|c| read_body(&c.body, SOURCE)).collect();
-    bodies.dedup_by(|a, b| a.preamble["seal"]["seq"] == b.preamble["seal"]["seq"]);
     let throughs: Vec<_> =
         bodies.iter().map(|b| b.preamble["seal"]["through_us"].clone()).collect();
     assert_eq!(throughs.len(), 5, "four timed bodies and the final one: {throughs:?}");
