@@ -150,6 +150,21 @@ pub enum ClientEvent {
         /// much of it as had been read when the framing itself was refused.
         raw: Vec<u8>,
     },
+
+    /// The bytes on the peer's control stream when the read of its SETUP
+    /// ended without one.
+    ///
+    /// Emitted when that read fails without refusing a frame (the stream
+    /// ended or was reset, or the connection failed), and when the caller
+    /// drops the handshake future, as a timeout does. It reaches only an
+    /// observer attached before the handshake, and only once bytes have
+    /// arrived. A frame this side refuses is a
+    /// [`ClientEvent::ControlMessageRefused`] instead.
+    SetupUnread {
+        /// Every byte the control stream delivered, from its first, up to a
+        /// frame with a 65535-byte payload.
+        raw: Vec<u8>,
+    },
 }
 
 impl ClientEvent {
@@ -157,6 +172,14 @@ impl ClientEvent {
     pub(crate) fn refused(&self) -> Option<(Option<u64>, &[u8])> {
         match self {
             ClientEvent::ControlMessageRefused { raw } => Some((None, raw)),
+            _ => None,
+        }
+    }
+
+    /// The bytes of a [`ClientEvent::SetupUnread`].
+    pub(crate) fn setup_unread(&self) -> Option<&[u8]> {
+        match self {
+            ClientEvent::SetupUnread { raw } => Some(raw),
             _ => None,
         }
     }

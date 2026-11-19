@@ -3,7 +3,8 @@
 //! after it, a frame refused on a request stream, and the SETUP this side sent
 //! before a peer that never answers. A peer's close reaches the caller with its
 //! code. A refused frame that decoded is the last frame reported as received
-//! before its refusal, with the same bytes.
+//! before its refusal, with the same bytes. A SETUP read that ends without a
+//! SETUP and without a refusal leaves the bytes that arrived with the observer.
 
 mod common;
 
@@ -230,6 +231,13 @@ enum Peer {
     RefuseSetup,
     /// Read the SETUP and say nothing.
     Silent,
+    /// Answer with the SETUP's type written twice, so the second reads as a
+    /// Length the rest never fills, then say nothing more.
+    DoubledType,
+    /// Answer with all but the last byte of the SETUP, then end the stream.
+    CutShort,
+    /// Answer with a GOAWAY in place of the SETUP, then say nothing more.
+    GoAwayFirst,
     /// Answer properly, then send a padded SETUP on the control stream.
     RefuseLater,
     /// Answer properly, then close the connection with this code.
@@ -376,6 +384,23 @@ async fn serve(
             bad
         }
         Peer::Silent => Vec::new(),
+        Peer::DoubledType => {
+            let mut doubled = reply[..draft.varint_len(reply[0])].to_vec();
+            doubled.extend_from_slice(&reply);
+            send.write_all(&doubled).await.expect("write the doubled SETUP");
+            doubled
+        }
+        Peer::CutShort => {
+            let cut = reply[..reply.len() - 1].to_vec();
+            send.write_all(&cut).await.expect("write part of the SETUP");
+            send.finish().expect("end the stream");
+            cut
+        }
+        Peer::GoAwayFirst => {
+            let frame = goaway(draft);
+            send.write_all(&frame).await.expect("write the GOAWAY");
+            frame
+        }
         Peer::RefuseLater => {
             send.write_all(&reply).await.expect("write the SETUP");
             let bad = padded(draft, &reply);
@@ -507,7 +532,90 @@ async fn a_refused_setup_reaches_an_observer_attached_before_the_handshake() {
         assert_eq!(refused[0].draft, draft);
         assert_eq!(refused[0].stream_id, None, "{draft:?}: the control stream");
         assert_eq!(refused[0].raw, &written[..], "{draft:?}: the bytes the peer wrote");
+        assert!(
+            !events.iter().any(|e| e.setup_unread().is_some()),
+            "{draft:?}: a refused SETUP is not also reported unread"
+        );
     }
+}
+
+/// The bytes a SETUP read held when the caller gave up on the handshake reach
+/// the observer.
+#[tokio::test]
+async fn a_setup_read_the_caller_gives_up_on_reports_what_arrived() {
+    common::init_crypto();
+    for draft in compiled_drafts() {
+        let (transport, peer) = start(draft, Peer::DoubledType).await;
+        let events = Arc::new(Collect::default());
+        let adopted = tokio::time::timeout(
+            Duration::from_millis(500),
+            AnyConnection::adopt_observed(transport, config(draft), events.clone()),
+        )
+        .await;
+        assert!(adopted.is_err(), "{draft:?}: a SETUP with its type doubled was read");
+        let (written, _) = tokio::time::timeout(PATIENCE, peer).await.expect("peer").expect("peer");
+        assert_setup_unread(draft, &events.events(), &written);
+    }
+}
+
+/// The bytes of a SETUP its stream ended in the middle of reach the observer.
+#[tokio::test]
+async fn a_setup_cut_short_by_the_end_of_its_stream_reports_what_arrived() {
+    common::init_crypto();
+    for draft in compiled_drafts() {
+        let (transport, peer) = start(draft, Peer::CutShort).await;
+        let events = Arc::new(Collect::default());
+        let err = tokio::time::timeout(
+            PATIENCE,
+            AnyConnection::adopt_observed(transport, config(draft), events.clone()),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{draft:?}: adopt did not finish"))
+        .err()
+        .unwrap_or_else(|| panic!("{draft:?}: a SETUP cut short was accepted"));
+        assert!(!matches!(err.cause(), ErrorCause::Codec { .. }), "{draft:?}: got {err}");
+        let (written, _) = tokio::time::timeout(PATIENCE, peer).await.expect("peer").expect("peer");
+        assert_setup_unread(draft, &events.events(), &written);
+    }
+}
+
+/// On drafts 07-16, a first control message that decodes but is not
+/// SERVER_SETUP is reported as received, then refused with the bytes the peer
+/// wrote, and not as unread.
+#[tokio::test]
+async fn a_first_control_message_other_than_server_setup_is_refused() {
+    common::init_crypto();
+    for draft in compiled_drafts().filter(|draft| !unidirectional_control(*draft)) {
+        let (transport, peer) = start(draft, Peer::GoAwayFirst).await;
+        let events = Arc::new(Collect::default());
+        let adopted = tokio::time::timeout(
+            PATIENCE,
+            AnyConnection::adopt_observed(transport, config(draft), events.clone()),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{draft:?}: adopt did not finish"));
+        assert!(adopted.is_err(), "{draft:?}: a GOAWAY was taken for the SETUP");
+        let (written, _) = tokio::time::timeout(PATIENCE, peer).await.expect("peer").expect("peer");
+        let events = events.events();
+        let at = assert_refusal_follows_its_decode(draft, &events, "goaway");
+        let refused = events[at].refused_frame().expect("a refusal");
+        assert_eq!(refused.raw, &written[..], "{draft:?}: the bytes the peer wrote");
+        assert!(
+            !events.iter().any(|e| e.setup_unread().is_some()),
+            "{draft:?}: a refused first message is not also reported unread"
+        );
+    }
+}
+
+/// `events` report the SETUP read as unread with exactly `written`, and report
+/// no refusal.
+fn assert_setup_unread(draft: DraftVersion, events: &[AnyClientEvent], written: &[u8]) {
+    let unread: Vec<&[u8]> = events.iter().filter_map(AnyClientEvent::setup_unread).collect();
+    assert_eq!(unread, [written], "{draft:?}: the bytes the peer wrote, got {events:?}");
+    assert!(
+        !events.iter().any(|e| e.refused_frame().is_some()),
+        "{draft:?}: nothing was refused, got {events:?}"
+    );
 }
 
 /// The SETUP this side sent reaches the observer even when the peer never
@@ -555,6 +663,10 @@ async fn a_refused_control_message_reaches_the_observer() {
             .expect_err("a padded frame was accepted");
         assert!(matches!(err.cause(), ErrorCause::Codec { .. }), "{draft:?}: got {err}");
         let events = events.events();
+        assert!(
+            !events.iter().any(|e| e.setup_unread().is_some()),
+            "{draft:?}: a SETUP that was read is not reported unread"
+        );
         let refused: Vec<Vec<u8>> =
             events.iter().filter_map(|e| e.refused_frame().map(|f| f.raw.to_vec())).collect();
         conn.close(0, b"");

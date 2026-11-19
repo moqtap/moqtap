@@ -410,6 +410,28 @@ macro_rules! dispatch_all {
                     _ => None,
                 }
             }
+
+            /// The bytes on the peer's control stream when the read of its
+            /// SETUP ended without one, or `None` if this is another event.
+            ///
+            /// Reported when that read fails without refusing a frame (the
+            /// stream ended or was reset, or the connection failed), and when
+            /// the caller drops the handshake future, as a timeout does. It
+            /// reaches only an observer attached before the handshake, and
+            /// only once bytes have arrived. The bytes run from the stream's
+            /// first, up to a frame with a 65535-byte payload, or on draft-23
+            /// one whose payload is the MAX_CONTROL_MESSAGE_SIZE this side
+            /// advertised (65535 if it advertised none).
+            pub fn setup_unread(&self) -> Option<&[u8]> {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(event) => event.setup_unread(),
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => None,
+                }
+            }
         }
 
         // The classification, written once and instantiated per draft.
@@ -3541,7 +3563,10 @@ impl AnyConnection {
     /// [`Self::adopt`] with `observer` attached before the handshake, so it
     /// sees the SETUP this side sends as it is sent, and a SETUP from the peer
     /// that this side refuses as a
-    /// [`refused_frame`](AnyClientEvent::refused_frame).
+    /// [`refused_frame`](AnyClientEvent::refused_frame). A read of the peer's
+    /// SETUP that ends without one, including when the caller drops this
+    /// future, reports what had arrived as
+    /// [`setup_unread`](AnyClientEvent::setup_unread).
     ///
     /// [`Self::set_observer`] after `adopt` sees the same handshake events
     /// replayed, but only once the handshake has succeeded.

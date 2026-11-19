@@ -499,6 +499,42 @@ fn object_role(status: Option<u64>) -> ObjectRole {
     }
 }
 
+/// The read of the peer's SETUP, reporting what its control stream holds as
+/// [`ClientEvent::SetupUnread`] when dropped unless disarmed: on a failed
+/// read that refused no frame, and when the handshake future is dropped
+/// mid-read.
+struct SetupRead<'a> {
+    recv: &'a mut FramedRecvStream,
+    observer: Option<&'a dyn ConnectionObserver>,
+    /// The longest control message payload the read accepts.
+    payload_limit: usize,
+}
+
+impl SetupRead<'_> {
+    /// The longest type and Length fields before a payload: an 8-byte type
+    /// varint and the two-byte Length.
+    const FIELDS: usize = 10;
+
+    fn disarm(mut self) {
+        self.observer = None;
+    }
+}
+
+impl Drop for SetupRead<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        let Some(obs) = self.observer else { return };
+        let buf = &self.recv.buf;
+        if !buf.is_empty() {
+            let cap = self.payload_limit.saturating_add(Self::FIELDS);
+            let raw = buf[..buf.len().min(cap)].to_vec();
+            obs.on_event_owned(ClientEvent::SetupUnread { raw });
+        }
+    }
+}
+
 /// A framed reader for a recv stream. Handles MoQT varint-length decoding.
 pub struct FramedRecvStream {
     inner: RecvStream,
@@ -920,6 +956,8 @@ impl Connection {
     ///
     /// The SETUP this side sends is reported as it is written, and a SETUP from
     /// the peer that this side refuses as [`ClientEvent::ControlMessageRefused`].
+    /// A read of the peer's SETUP that ends without one reports what had
+    /// arrived as [`ClientEvent::SetupUnread`].
     /// [`Self::set_observer`] after `adopt` sees the same handshake events, but
     /// only once the handshake has succeeded.
     pub async fn adopt_observed(
@@ -982,11 +1020,20 @@ impl Connection {
             });
         }
 
-        let (server_setup, raw_server_setup) = match control_recv.read_control(true).await {
-            Ok(read) => read,
+        let setup_read = SetupRead {
+            recv: &mut control_recv,
+            observer: observer.as_deref(),
+            payload_limit: moqtap_codec::error::MAX_MESSAGE_LENGTH,
+        };
+        let (server_setup, raw_server_setup) = match setup_read.recv.read_control(true).await {
+            Ok(read) => {
+                setup_read.disarm();
+                read
+            }
             Err(e) => {
                 if let Some(obs) = &observer {
-                    if let Some(event) = Self::refused_event(&e, control_recv.take_refused()) {
+                    if let Some(event) = Self::refused_event(&e, setup_read.recv.take_refused()) {
+                        setup_read.disarm();
                         obs.on_event_owned(event);
                     }
                 }
@@ -1002,6 +1049,18 @@ impl Connection {
                 }
             }
             _ => {
+                // The peer's first control message is not its SERVER_SETUP.
+                // refused_event skips NotActive, a non-peer fault, so report it here.
+                if let Some(obs) = &observer {
+                    obs.on_event_owned(ClientEvent::ControlMessage {
+                        direction: Direction::Receive,
+                        message: server_setup.clone(),
+                        raw: raw_server_setup.clone(),
+                    });
+                    if let Some(raw) = raw_server_setup {
+                        obs.on_event_owned(ClientEvent::ControlMessageRefused { raw });
+                    }
+                }
                 return Err(ConnectionError::Endpoint(EndpointError::NotActive));
             }
         }

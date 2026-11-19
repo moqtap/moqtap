@@ -90,6 +90,12 @@ need to hold a MoQT connection without compile-time coupling to one draft:
   handshake, so the SETUP sent and a SETUP refused reach it too.
   `AnyClientEvent::refused_frame` gives the bytes of a received control frame
   the connection refused.
+  `AnyClientEvent::setup_unread` gives the bytes on the peer's control stream,
+  from its first byte, when the read of its SETUP ended without one (the
+  stream ended or failed, or the caller's timeout dropped the handshake), up
+  to a frame with a 65535-byte payload (on draft-23, a payload of the
+  MAX_CONTROL_MESSAGE_SIZE the client advertised). On drafts 17-23 the first
+  bytes are the control stream's type, which is SETUP's type.
 - `AnyConnection::transport_close` — the code the QUIC connection closed with,
   and whether the peer sent it. `AnyConnectionError::transport_close` gives the
   same for a failed `adopt`.

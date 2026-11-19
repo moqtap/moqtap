@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `accept_data_stream`, on every draft's `Connection` and on `AnyConnection`, returns a data stream before its header arrives, so a late header no longer holds up the streams after it. `read_header` on the returned stream reads its type and header; `adopt_subgroup_stream`, `adopt_fetch_stream`, `adopt_fill_stream` (drafts 20-23) or `set_aside_fetch_stream` then take it in (`adopt_subgroup`, `adopt_fetch`, `set_aside_fetch` on `AnyConnection`).
+- `ClientEvent::SetupUnread` on every draft, and `AnyClientEvent::setup_unread`: an observer attached before the handshake gets the bytes on the peer's control stream when the read of its SETUP ends without one, including when the caller's timeout drops the handshake.
 
 ### Fixed
 
+- On drafts 07-16, a first control message from the peer that decoded but was not SERVER_SETUP (a GOAWAY or a CLIENT_SETUP) failed `adopt` without reaching the observer. An observer attached before the handshake now gets it as received, then as `ControlMessageRefused` with its bytes.
 - A data stream the peer reset before its type arrived is reported as the reset (`TransportError::StreamReset`) rather than as `UnexpectedEnd` by `accept_subgroup_stream`, `accept_fetch_stream` and `accept_fill_stream`, and by `accept_subgroup` and `accept_fetch` on `AnyConnection`: on drafts 20-23 for every stream, on drafts 17-19 for a stream opened before the peer's control stream.
 
 ## [0.14.0] - 2026-11-16
