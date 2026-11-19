@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -67,7 +68,8 @@ pub enum ConnectionError {
     /// TLS configuration error.
     #[error("TLS config error: {0}")]
     TlsConfig(String),
-    /// Data stream used out of order (e.g. object before header).
+    /// Data stream used out of order (e.g. object before header), or handed to
+    /// a connection that did not accept it.
     #[error("data stream state error: {0}")]
     DataStreamState(&'static str),
     /// A control message this build decoded for draft-16 and then could not
@@ -535,6 +537,8 @@ pub struct FramedRecvStream {
     /// without being measured, because `note_subgroup_object` has nothing to
     /// measure it against.
     tracking: Option<(TrackObjects, u64)>,
+    /// The code of a reset the peer sent, returned again by every later read.
+    reset: Option<u64>,
     /// The bytes of the last control frame a capturing read refused.
     refused: Option<Vec<u8>>,
 }
@@ -548,6 +552,7 @@ impl FramedRecvStream {
             draft,
             subgroup_io: None,
             tracking: None,
+            reset: None,
             refused: None,
         }
     }
@@ -605,6 +610,10 @@ impl FramedRecvStream {
 
     /// Read more data from the stream into the internal buffer.
     async fn fill(&mut self) -> Result<bool, ConnectionError> {
+        // quinn reports a reset once, then reads the stream as ended.
+        if let Some(code) = self.reset {
+            return Err(ConnectionError::Transport(TransportError::StreamReset(code)));
+        }
         let mut tmp = [0u8; 4096];
         match self.inner.read(&mut tmp).await {
             Ok(Some(n)) => {
@@ -612,7 +621,12 @@ impl FramedRecvStream {
                 Ok(true)
             }
             Ok(None) => Ok(false),
-            Err(e) => Err(ConnectionError::Transport(e)),
+            Err(e) => {
+                if let TransportError::StreamReset(code) = e {
+                    self.reset = Some(code);
+                }
+                Err(ConnectionError::Transport(e))
+            }
         }
     }
 
@@ -638,10 +652,20 @@ impl FramedRecvStream {
 
     /// Wait for the peer to reset this stream, consuming nothing.
     ///
-    /// See [`RecvStream::received_reset`] for what `Ok(None)` means and why a
+    /// Once a read has returned the peer's reset, this returns its code at
+    /// once, over WebTransport too. Until then it gives the transport's own
+    /// answer, which on WebTransport is always `Ok(None)`: see
+    /// [`RecvStream::received_reset`] for what `Ok(None)` means and why a
     /// caller must not re-poll after it.
     pub async fn received_reset(&mut self) -> Result<Option<u64>, ConnectionError> {
-        Ok(self.inner.received_reset().await?)
+        if let Some(code) = self.reset {
+            return Ok(Some(code));
+        }
+        let code = self.inner.received_reset().await?;
+        if code.is_some() {
+            self.reset = code;
+        }
+        Ok(code)
     }
 
     /// Read the next control message, or report that the peer finished the
@@ -1186,9 +1210,10 @@ impl NamespaceStream {
     /// with the record attached. Cancel-safe, and it grants no flow-control
     /// credit.
     ///
-    /// On WebTransport this always answers `Ok(None)`: `wtransport` exposes no
-    /// reset-only observable, so a WebTransport caller learns of a peer reset
-    /// on its next read and not before.
+    /// On WebTransport, `Ok(None)` means only that no read has returned a reset
+    /// yet: `wtransport` exposes no reset-only observable, so a WebTransport
+    /// caller learns of a peer reset on its next read, and from then on this
+    /// returns the reset's code.
     pub async fn peer_cancelled(&mut self) -> Result<Option<u64>, ConnectionError> {
         self.recv.received_reset().await
     }
@@ -1241,6 +1266,16 @@ pub struct Connection {
     /// observer attaches via `set_observer` — without this, an observer
     /// attached after `connect` returns would never see the handshake.
     pending_events: Vec<ClientEvent>,
+    /// Tells the [`IncomingDataStream`]s this connection accepted from another's.
+    id: usize,
+    /// Fetch streams handed to
+    /// [`set_aside_fetch_stream`](Connection::set_aside_fetch_stream), with
+    /// their arrival stamps, in arrival order. The lock is only held for an
+    /// insert or a pop.
+    deferred_fetch: Mutex<VecDeque<(usize, FramedRecvStream)>>,
+    /// The arrival stamp the next stream
+    /// [`accept_data_stream`](Connection::accept_data_stream) takes gets.
+    arrivals: AtomicUsize,
     /// The server's half of the setup handshake, kept whole.
     ///
     /// The endpoint acts on the parameters it recognises and retains none of
@@ -1417,6 +1452,9 @@ impl Connection {
             control_recv: Some(control_recv),
             observer,
             pending_events,
+            id: NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed),
+            deferred_fetch: Mutex::new(VecDeque::new()),
+            arrivals: AtomicUsize::new(0),
             server_setup,
             server_setup_raw: raw_server_setup,
             pending_inbound: Mutex::new(VecDeque::new()),
@@ -2605,11 +2643,41 @@ impl Connection {
     ///
     /// Objects come off the returned stream with
     /// [`FramedRecvStream::read_fetch_object`].
+    ///
+    /// Streams given to [`set_aside_fetch_stream`](Self::set_aside_fetch_stream)
+    /// come first, in arrival order.
     pub async fn accept_fetch_stream(
         &self,
     ) -> Result<(AnyFetchHeader, FramedRecvStream), ConnectionError> {
-        let recv = self.transport.accept_uni().await?;
-        let mut framed = FramedRecvStream::new(recv, self.draft);
+        let framed = match self.take_deferred_fetch() {
+            Some(framed) => framed,
+            None => FramedRecvStream::new(self.transport.accept_uni().await?, self.draft),
+        };
+        self.take_in_fetch(framed).await
+    }
+
+    /// Read the header of a stream [`accept_data_stream`](Self::accept_data_stream)
+    /// returned and take it in as a fetch stream.
+    ///
+    /// What [`accept_fetch_stream`](Self::accept_fetch_stream) does once it has a
+    /// stream, with the same events and errors, whether or not
+    /// [`IncomingDataStream::read_header`] was called first. A stream another
+    /// connection accepted is refused with [`ConnectionError::DataStreamState`]
+    /// and dropped.
+    pub async fn adopt_fetch_stream(
+        &self,
+        stream: IncomingDataStream,
+    ) -> Result<(AnyFetchHeader, FramedRecvStream), ConnectionError> {
+        let framed = self.own(stream)?.1;
+        self.take_in_fetch(framed).await
+    }
+
+    /// [`adopt_fetch_stream`](Self::adopt_fetch_stream) once the stream is known
+    /// to be this connection's.
+    async fn take_in_fetch(
+        &self,
+        mut framed: FramedRecvStream,
+    ) -> Result<(AnyFetchHeader, FramedRecvStream), ConnectionError> {
         let sid = framed.stream_id();
         let header = framed.read_fetch_header().await?;
         self.emit(ClientEvent::StreamOpened {
@@ -2630,13 +2698,93 @@ impl Connection {
         Ok((header, framed))
     }
 
+    /// The stream inside `stream`, with its arrival stamp, refused unless this
+    /// connection accepted it.
+    fn own(
+        &self,
+        stream: IncomingDataStream,
+    ) -> Result<(usize, FramedRecvStream), ConnectionError> {
+        if stream.connection == self.id {
+            Ok((stream.arrival, stream.framed))
+        } else {
+            Err(ConnectionError::DataStreamState("the stream is from another connection"))
+        }
+    }
+
+    /// Accept the next unidirectional data stream without reading from it.
+    ///
+    /// Returns as soon as the transport hands the stream over, so a stream whose
+    /// header is late holds up no stream accepted after it. Read its header with
+    /// [`IncomingDataStream::read_header`], in its own task if need be, then
+    /// pass it to [`adopt_subgroup_stream`](Self::adopt_subgroup_stream) or
+    /// [`adopt_fetch_stream`](Self::adopt_fetch_stream), or set a fetch stream
+    /// aside for [`accept_fetch_stream`](Self::accept_fetch_stream) with
+    /// [`set_aside_fetch_stream`](Self::set_aside_fetch_stream).
+    ///
+    /// Streams set aside come back in the order their accepts returned, which
+    /// is arrival order while one task accepts at a time.
+    pub async fn accept_data_stream(&self) -> Result<IncomingDataStream, ConnectionError> {
+        let framed = FramedRecvStream::new(self.transport.accept_uni().await?, self.draft);
+        let arrival = self.arrivals.fetch_add(1, Ordering::Relaxed);
+        Ok(IncomingDataStream { framed, connection: self.id, arrival })
+    }
+
+    /// Queue a stream [`accept_data_stream`](Self::accept_data_stream) returned for
+    /// [`accept_fetch_stream`](Self::accept_fetch_stream), which hands the streams
+    /// set aside out in arrival order, before any stream it accepts itself.
+    ///
+    /// A stream another connection accepted is refused with
+    /// [`ConnectionError::DataStreamState`] and dropped.
+    pub fn set_aside_fetch_stream(
+        &self,
+        stream: IncomingDataStream,
+    ) -> Result<(), ConnectionError> {
+        let (arrival, framed) = self.own(stream)?;
+        let mut queue = self.deferred_fetch.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let at = queue.partition_point(|(earlier, _)| *earlier < arrival);
+        queue.insert(at, (arrival, framed));
+        Ok(())
+    }
+
+    /// Take the earliest-arrived stream
+    /// [`set_aside_fetch_stream`](Self::set_aside_fetch_stream) queued, if any.
+    fn take_deferred_fetch(&self) -> Option<FramedRecvStream> {
+        let mut queue = self.deferred_fetch.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        queue.pop_front().map(|(_, framed)| framed)
+    }
+
     /// Accept an incoming unidirectional data stream and read its subgroup
     /// header.
     pub async fn accept_subgroup_stream(
         &self,
     ) -> Result<(AnySubgroupHeader, FramedRecvStream), ConnectionError> {
         let recv = self.transport.accept_uni().await?;
-        let mut framed = FramedRecvStream::new(recv, self.draft);
+        let framed = FramedRecvStream::new(recv, self.draft);
+        self.take_in_subgroup(framed).await
+    }
+
+    /// Read the header of a stream [`accept_data_stream`](Self::accept_data_stream)
+    /// returned and take it in as a subgroup stream.
+    ///
+    /// What [`accept_subgroup_stream`](Self::accept_subgroup_stream) does once it
+    /// has a stream, with the same events and errors, whether or not
+    /// [`IncomingDataStream::read_header`] was called first. A stream another
+    /// connection accepted is refused with [`ConnectionError::DataStreamState`]
+    /// and dropped.
+    pub async fn adopt_subgroup_stream(
+        &self,
+        stream: IncomingDataStream,
+    ) -> Result<(AnySubgroupHeader, FramedRecvStream), ConnectionError> {
+        let framed = self.own(stream)?.1;
+        self.take_in_subgroup(framed).await
+    }
+
+    /// [`adopt_subgroup_stream`](Self::adopt_subgroup_stream) once the stream is known
+    /// to be this connection's.
+    async fn take_in_subgroup(
+        &self,
+        mut framed: FramedRecvStream,
+    ) -> Result<(AnySubgroupHeader, FramedRecvStream), ConnectionError> {
         let sid = framed.stream_id();
         let header = framed.read_subgroup_header().await?;
         self.emit(ClientEvent::StreamOpened {
@@ -3393,6 +3541,111 @@ fn malformed_track_condition(err: &ConnectionError) -> Option<MalformedTrackCond
 /// Determine the encoded length of a varint from its first byte.
 fn varint_len(first_byte: u8) -> usize {
     1 << (first_byte >> 6)
+}
+
+/// The stream type a FETCH_HEADER stream opens with.
+const FETCH_STREAM_TYPE: u64 = 0x05;
+
+/// Where each [`Connection`] gets its `id`.
+static NEXT_CONNECTION_ID: AtomicUsize = AtomicUsize::new(0);
+
+/// A unidirectional data stream the peer opened, not yet taken in by the connection.
+///
+/// [`Connection::accept_data_stream`] returns one. Its header is read with
+/// [`read_header`](Self::read_header), which needs no connection, and the stream
+/// is then handed back to the connection: to
+/// [`Connection::adopt_subgroup_stream`] or [`Connection::adopt_fetch_stream`],
+/// which emit its events and return the stream its objects are read from, or to
+/// [`Connection::set_aside_fetch_stream`].
+///
+/// A connection refuses a stream another connection accepted.
+pub struct IncomingDataStream {
+    framed: FramedRecvStream,
+    /// The `id` of the connection that accepted it.
+    connection: usize,
+    /// Its place in the order that connection's `accept_data_stream` took
+    /// streams off the transport.
+    arrival: usize,
+}
+
+/// The header an [`IncomingDataStream`] opened with.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum IncomingHeader {
+    /// A subgroup header.
+    Subgroup(AnySubgroupHeader),
+    /// A FETCH_HEADER.
+    Fetch(AnyFetchHeader),
+}
+
+impl std::fmt::Debug for IncomingDataStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IncomingDataStream")
+            .field("stream_id", &self.stream_id())
+            .field("draft", &self.framed.draft)
+            .finish_non_exhaustive()
+    }
+}
+
+impl IncomingDataStream {
+    /// The transport-level stream ID.
+    pub fn stream_id(&self) -> u64 {
+        self.framed.stream_id()
+    }
+
+    /// Read the stream type and the header after it.
+    ///
+    /// A FETCH_HEADER stream (type 0x05) is read as a fetch header, any other as a
+    /// subgroup header. The header stays buffered until the stream is adopted, so
+    /// calling this again returns it without reading the stream again. The errors
+    /// are the ones the matching accept returns for the same bytes.
+    pub async fn read_header(&mut self) -> Result<IncomingHeader, ConnectionError> {
+        let draft = self.framed.draft;
+        match self.framed.peek_stream_type().await {
+            Ok(FETCH_STREAM_TYPE) => self
+                .framed
+                .buffer_header(|cursor| AnyFetchHeader::decode(draft, cursor))
+                .await
+                .map(IncomingHeader::Fetch),
+            Ok(_) => self
+                .framed
+                .buffer_header(|cursor| AnySubgroupHeader::decode(draft, cursor))
+                .await
+                .map(IncomingHeader::Subgroup),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl FramedRecvStream {
+    /// Fill the buffer until `decode` reads a whole value off its front, and
+    /// leave the bytes there.
+    async fn buffer_header<T>(
+        &mut self,
+        decode: impl Fn(&mut &[u8]) -> Result<T, CodecError>,
+    ) -> Result<T, ConnectionError> {
+        self.ensure(1).await?;
+        loop {
+            let mut cursor = &self.buf[..];
+            match decode(&mut cursor) {
+                Ok(value) => return Ok(value),
+                Err(e) if e.is_incomplete() => {
+                    if !self.fill().await? {
+                        return Err(ConnectionError::UnexpectedEnd);
+                    }
+                }
+                Err(e) => return Err(ConnectionError::Codec(e)),
+            }
+        }
+    }
+
+    /// The stream type at the front of the stream, left in the buffer.
+    async fn peek_stream_type(&mut self) -> Result<u64, ConnectionError> {
+        self.buffer_header(|cursor| {
+            VarInt::decode(cursor).map(VarInt::into_inner).map_err(CodecError::VarInt)
+        })
+        .await
+    }
 }
 
 #[cfg(test)]

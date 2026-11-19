@@ -169,6 +169,163 @@ macro_rules! dispatch_all {
             }
         }
 
+        /// A unidirectional data stream the peer opened, not yet taken in by
+        /// the connection, on any enabled draft.
+        ///
+        /// Returned by [`AnyConnection::accept_data_stream`]. Owns its stream
+        /// and borrows nothing, so [`read_header`](Self::read_header) can run
+        /// in its own task.
+        pub enum AnyIncomingDataStream {
+            $(
+                #[cfg(feature = $feat)]
+                #[doc = concat!("A draft-", $feat, " stream.")]
+                $variant(crate::$module::connection::IncomingDataStream),
+            )+
+        }
+
+        impl AnyIncomingDataStream {
+            /// The draft of the connection that accepted the stream.
+            #[allow(unreachable_code)]
+            pub fn draft(&self) -> DraftVersion {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(_) => DraftVersion::$variant,
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!("AnyIncomingDataStream has no enabled variants"),
+                }
+            }
+
+            /// The transport-level stream ID.
+            #[allow(unreachable_code)]
+            pub fn stream_id(&self) -> u64 {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(s) => s.stream_id(),
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!("AnyIncomingDataStream has no enabled variants"),
+                }
+            }
+
+            /// Read the stream type and the header after it.
+            ///
+            /// A FETCH_HEADER stream reads as [`AnyIncomingHeader::Fetch`] and
+            /// any other as [`AnyIncomingHeader::Subgroup`]. The header stays
+            /// buffered until the stream is adopted, so calling this again
+            /// returns it without reading the stream again. The errors are the ones
+            /// [`AnyConnection::accept_subgroup`] and
+            /// [`AnyConnection::accept_fetch`] return for the same bytes.
+            #[allow(unreachable_code)]
+            pub async fn read_header(&mut self) -> Result<AnyIncomingHeader, AnyConnectionError> {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(s) => match s.read_header().await {
+                            Ok(crate::$module::connection::IncomingHeader::Subgroup(h)) => {
+                                Ok(AnyIncomingHeader::Subgroup(h))
+                            }
+                            Ok(crate::$module::connection::IncomingHeader::Fetch(h)) => {
+                                Ok(AnyIncomingHeader::Fetch(h))
+                            }
+                            Err(e) => Err(AnyConnectionError::from(e)),
+                        },
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!("AnyIncomingDataStream has no enabled variants"),
+                }
+            }
+        }
+
+        impl AnyConnection {
+            /// Accept the next unidirectional data stream without reading from
+            /// it.
+            ///
+            /// Returns as soon as the transport hands the stream over, so a
+            /// stream whose header is late holds up no stream accepted after
+            /// it. Read the header with
+            /// [`AnyIncomingDataStream::read_header`], then pass the stream to
+            /// [`adopt_subgroup`](Self::adopt_subgroup) or
+            /// [`adopt_fetch`](Self::adopt_fetch), or set a fetch stream aside
+            /// for [`accept_fetch`](Self::accept_fetch) with
+            /// [`set_aside_fetch`](Self::set_aside_fetch).
+            pub async fn accept_data_stream(
+                &self,
+            ) -> Result<AnyIncomingDataStream, AnyConnectionError> {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(c) => c
+                            .accept_data_stream()
+                            .await
+                            .map(AnyIncomingDataStream::$variant)
+                            .map_err(AnyConnectionError::from),
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => Err(AnyConnectionError::facade("no draft feature is enabled")),
+                }
+            }
+
+            /// Take in a stream [`accept_data_stream`](Self::accept_data_stream)
+            /// returned as a subgroup stream.
+            ///
+            /// What [`accept_subgroup`](Self::accept_subgroup) does once it has
+            /// a stream, with the same events and errors. A stream another
+            /// connection accepted, of this draft or another, is refused with
+            /// [`ErrorCause::Facade`] and dropped.
+            #[allow(unused_variables)]
+            pub async fn adopt_subgroup(
+                &self,
+                stream: AnyIncomingDataStream,
+            ) -> Result<
+                (moqtap_codec::dispatch::AnySubgroupHeader, AnySubgroupReader),
+                AnyConnectionError,
+            > {
+                match (self, stream) {
+                    $(
+                        #[cfg(feature = $feat)]
+                        (Self::$variant(c), AnyIncomingDataStream::$variant(s)) => c
+                            .adopt_subgroup_stream(s)
+                            .await
+                            .map(|(header, stream)| (header, AnySubgroupReader::$variant(stream)))
+                            .map_err(AnyConnectionError::from),
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => Err(AnyConnectionError::facade(
+                        "adopt_subgroup: the stream is from another draft's connection",
+                    )),
+                }
+            }
+
+            /// Queue a stream [`accept_data_stream`](Self::accept_data_stream)
+            /// returned for [`accept_fetch`](Self::accept_fetch), which hands the
+            /// streams set aside out in arrival order, before any stream it
+            /// accepts itself.
+            ///
+            /// A stream another connection accepted, of this draft or another,
+            /// is refused with [`ErrorCause::Facade`] and dropped.
+            #[allow(unused_variables)]
+            pub fn set_aside_fetch(
+                &self,
+                stream: AnyIncomingDataStream,
+            ) -> Result<(), AnyConnectionError> {
+                match (self, stream) {
+                    $(
+                        #[cfg(feature = $feat)]
+                        (Self::$variant(c), AnyIncomingDataStream::$variant(s)) => {
+                            c.set_aside_fetch_stream(s).map_err(AnyConnectionError::from)
+                        }
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => Err(AnyConnectionError::facade(
+                        "set_aside_fetch: the stream is from another draft's connection",
+                    )),
+                }
+            }
+        }
+
         /// An event from a MoQT connection of any enabled draft version.
         ///
         /// Event shapes differ across drafts (e.g. draft-17's
@@ -2939,6 +3096,79 @@ fn forward_parameter(forward: moqtap_codec::types::Forward) -> Vec<KeyValuePair>
         key: VarInt::from_u64(0x10).expect("0x10 fits in VarInt"),
         value: KvpValue::Varint(VarInt::from_u64(forward as u64).expect("0 or 1 fits in VarInt")),
     }]
+}
+
+impl std::fmt::Debug for AnyIncomingDataStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnyIncomingDataStream")
+            .field("stream_id", &self.stream_id())
+            .field("draft", &self.draft())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The header an [`AnyIncomingDataStream`] opened with.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum AnyIncomingHeader {
+    /// A subgroup header. Adopt the stream with
+    /// [`AnyConnection::adopt_subgroup`].
+    Subgroup(moqtap_codec::dispatch::AnySubgroupHeader),
+    /// A FETCH_HEADER. Adopt the stream with [`AnyConnection::adopt_fetch`],
+    /// or queue it for [`AnyConnection::accept_fetch`] with
+    /// [`AnyConnection::set_aside_fetch`].
+    Fetch(moqtap_codec::dispatch::AnyFetchHeader),
+}
+
+/// Wrap one draft's accepted fetch stream in its [`AnyFetchReader`] variant.
+#[allow(unused_macros)]
+macro_rules! fetch_reader {
+    ($accepted:expr, $variant:ident) => {{
+        $accepted
+            .await
+            .map(|(header, stream)| (header, AnyFetchReader::$variant(stream)))
+            .map_err(AnyConnectionError::from)
+    }};
+    // The resolver is created here rather than seeded from the header,
+    // because draft-16's first object supplies its own Location and
+    // every later one inherits from the object before it.
+    ($accepted:expr, draft16 resolver) => {{
+        $accepted
+            .await
+            .map(|(header, stream)| {
+                (
+                    header,
+                    AnyFetchReader::Draft16(Draft16FetchStream {
+                        stream,
+                        reader: moqtap_codec::draft16::data_stream::FetchObjectReader::new(),
+                    }),
+                )
+            })
+            .map_err(AnyConnectionError::from)
+    }};
+    // The drafts whose object reader has to be pointed in a
+    // direction before it will read anything. Each of them declares its
+    // own two-valued `GroupOrder` beside the reader that consumes it,
+    // because a delta either adds or subtracts and there is no third
+    // thing it could do. `Publisher` — the third value of the control
+    // plane's own enum, and the one a FETCH_OK omitting the property
+    // leaves — becomes Ascending here, which is what draft-20 Section
+    // 10.2.8 makes the default.
+    ($accepted:expr, $variant:ident, $module:ident, $group_order:ident) => {{
+        let order = match $group_order {
+            moqtap_codec::types::GroupOrder::Descending => {
+                moqtap_codec::$module::data_stream::GroupOrder::Descending
+            }
+            _ => moqtap_codec::$module::data_stream::GroupOrder::Ascending,
+        };
+        $accepted
+            .await
+            .map(|(header, mut stream)| {
+                stream.begin_fetch_objects(order);
+                (header, AnyFetchReader::$variant(stream))
+            })
+            .map_err(AnyConnectionError::from)
+    }};
 }
 
 impl AnyConnection {
@@ -6554,20 +6784,16 @@ impl AnyConnection {
     /// reader that did not know the last of those could not frame a single
     /// object.
     ///
-    /// Reading the header is not separable from accepting the stream, and the
-    /// per-draft connections do both in one call for a reason beyond
-    /// convenience: the header settles the track's forwarding preference and
-    /// binds the stream to the endpoint's object bookkeeping for that alias, so
-    /// a stream accepted without its header read would be a stream whose
-    /// objects nothing is measuring.
+    /// This waits for the stream's header, so a stream whose header is late
+    /// holds up every stream after it.
+    /// [`accept_data_stream`](Self::accept_data_stream) and
+    /// [`adopt_subgroup`](Self::adopt_subgroup) split the two steps.
     ///
-    /// This waits on the *next* unidirectional stream, whatever it carries. A
-    /// draft that sends something else on one — and every draft does, for
-    /// fetches — will fail to parse a subgroup header out of it, which is the
-    /// same wall [`AnyConnection::accept_fetch`] hits from the other side.
-    /// Nothing here reads the stream type first and branches: a caller that
-    /// could receive either has to know which it is expecting, because the
-    /// header decides how every object after it is framed.
+    /// On drafts 07-19 this takes the *next* unidirectional stream, whatever it
+    /// carries, and a fetch stream fails to parse as a subgroup header. From
+    /// draft-20 a FETCH_HEADER stream is set aside for
+    /// [`accept_fetch`](Self::accept_fetch). To take both kinds in arrival
+    /// order, use [`AnyIncomingDataStream::read_header`].
     pub async fn accept_subgroup(
         &self,
     ) -> Result<(moqtap_codec::dispatch::AnySubgroupHeader, AnySubgroupReader), AnyConnectionError>
@@ -6624,12 +6850,13 @@ impl AnyConnection {
 
     /// Accept the next fetch stream the peer opens, and read its FETCH_HEADER.
     ///
-    /// [`AnyConnection::accept_subgroup`]'s twin, and it waits on the same
-    /// queue: the *next* unidirectional stream, whatever it carries. A subgroup
-    /// stream arriving here fails to parse as a FETCH_HEADER, and a fetch stream
-    /// arriving there fails the other way. A caller reading both kinds on one
-    /// session has to know which is next, and this facade will not guess for it
-    /// — see `accept_subgroup` for why guessing is the wrong shape.
+    /// [`AnyConnection::accept_subgroup`]'s twin. Streams queued with
+    /// [`set_aside_fetch`](Self::set_aside_fetch) come first, in arrival order.
+    /// On drafts 07-19 it then takes the *next* unidirectional stream, whatever
+    /// it carries, and a subgroup stream arriving here fails to parse as a
+    /// FETCH_HEADER; from draft-20 a stream of another type is set aside for
+    /// `accept_subgroup`. To take both kinds in arrival order, use
+    /// [`AnyIncomingDataStream::read_header`].
     ///
     /// The header comes back because it names the request: everything on the
     /// stream after it answers the FETCH whose Request ID it carries, and a
@@ -6638,7 +6865,7 @@ impl AnyConnection {
     ///
     /// # Why this takes a Group Order and `accept_subgroup` takes nothing
     ///
-    /// Because on four drafts the reader cannot be started without it, and
+    /// Because on drafts 18-23 the reader cannot be started without it, and
     /// starting it wrong is silent. Drafts 18 through 23 encode an object's
     /// Group ID as a **delta**, and draft-18 Section 11.4.4.1 makes that delta
     /// count upward under Ascending and downward under Descending. A reader
@@ -6660,91 +6887,126 @@ impl AnyConnection {
         &self,
         group_order: moqtap_codec::types::GroupOrder,
     ) -> Result<(moqtap_codec::dispatch::AnyFetchHeader, AnyFetchReader), AnyConnectionError> {
-        #[allow(unused_macros)]
-        macro_rules! accept {
-            ($c:ident, $variant:ident) => {{
-                $c.accept_fetch_stream()
-                    .await
-                    .map(|(header, stream)| (header, AnyFetchReader::$variant(stream)))
-                    .map_err(AnyConnectionError::from)
-            }};
-            // The three drafts whose object reader has to be pointed in a
-            // direction before it will read anything. Each of them declares its
-            // own two-valued `GroupOrder` beside the reader that consumes it,
-            // because a delta either adds or subtracts and there is no third
-            // thing it could do. `Publisher` — the third value of the control
-            // plane's own enum, and the one a FETCH_OK omitting the property
-            // leaves — becomes Ascending here, which is what draft-20 Section
-            // 10.2.8 makes the default.
-            ($c:ident, $variant:ident, $module:ident) => {{
-                let order = match group_order {
-                    moqtap_codec::types::GroupOrder::Descending => {
-                        moqtap_codec::$module::data_stream::GroupOrder::Descending
-                    }
-                    _ => moqtap_codec::$module::data_stream::GroupOrder::Ascending,
-                };
-                $c.accept_fetch_stream()
-                    .await
-                    .map(|(header, mut stream)| {
-                        stream.begin_fetch_objects(order);
-                        (header, AnyFetchReader::$variant(stream))
-                    })
-                    .map_err(AnyConnectionError::from)
-            }};
-        }
-
         match self {
             #[cfg(feature = "draft07")]
-            Self::Draft07(c) => accept!(c, Draft07),
+            Self::Draft07(c) => fetch_reader!(c.accept_fetch_stream(), Draft07),
             #[cfg(feature = "draft08")]
-            Self::Draft08(c) => accept!(c, Draft08),
+            Self::Draft08(c) => fetch_reader!(c.accept_fetch_stream(), Draft08),
             #[cfg(feature = "draft09")]
-            Self::Draft09(c) => accept!(c, Draft09),
+            Self::Draft09(c) => fetch_reader!(c.accept_fetch_stream(), Draft09),
             #[cfg(feature = "draft10")]
-            Self::Draft10(c) => accept!(c, Draft10),
+            Self::Draft10(c) => fetch_reader!(c.accept_fetch_stream(), Draft10),
             #[cfg(feature = "draft11")]
-            Self::Draft11(c) => accept!(c, Draft11),
+            Self::Draft11(c) => fetch_reader!(c.accept_fetch_stream(), Draft11),
             #[cfg(feature = "draft12")]
-            Self::Draft12(c) => accept!(c, Draft12),
+            Self::Draft12(c) => fetch_reader!(c.accept_fetch_stream(), Draft12),
             #[cfg(feature = "draft13")]
-            Self::Draft13(c) => accept!(c, Draft13),
+            Self::Draft13(c) => fetch_reader!(c.accept_fetch_stream(), Draft13),
             #[cfg(feature = "draft14")]
-            Self::Draft14(c) => accept!(c, Draft14),
+            Self::Draft14(c) => fetch_reader!(c.accept_fetch_stream(), Draft14),
             #[cfg(feature = "draft15")]
-            Self::Draft15(c) => accept!(c, Draft15),
-            // The resolver is created here rather than seeded from the header,
-            // because draft-16's first object supplies its own Location and
-            // every later one inherits from the object before it.
+            Self::Draft15(c) => fetch_reader!(c.accept_fetch_stream(), Draft15),
             #[cfg(feature = "draft16")]
-            Self::Draft16(c) => c
-                .accept_fetch_stream()
-                .await
-                .map(|(header, stream)| {
-                    (
-                        header,
-                        AnyFetchReader::Draft16(Draft16FetchStream {
-                            stream,
-                            reader: moqtap_codec::draft16::data_stream::FetchObjectReader::new(),
-                        }),
-                    )
-                })
-                .map_err(AnyConnectionError::from),
+            Self::Draft16(c) => fetch_reader!(c.accept_fetch_stream(), draft16 resolver),
             #[cfg(feature = "draft17")]
-            Self::Draft17(c) => accept!(c, Draft17),
+            Self::Draft17(c) => fetch_reader!(c.accept_fetch_stream(), Draft17),
             #[cfg(feature = "draft18")]
-            Self::Draft18(c) => accept!(c, Draft18, draft18),
+            Self::Draft18(c) => {
+                fetch_reader!(c.accept_fetch_stream(), Draft18, draft18, group_order)
+            }
             #[cfg(feature = "draft19")]
-            Self::Draft19(c) => accept!(c, Draft19, draft19),
+            Self::Draft19(c) => {
+                fetch_reader!(c.accept_fetch_stream(), Draft19, draft19, group_order)
+            }
             #[cfg(feature = "draft20")]
-            Self::Draft20(c) => accept!(c, Draft20, draft20),
+            Self::Draft20(c) => {
+                fetch_reader!(c.accept_fetch_stream(), Draft20, draft20, group_order)
+            }
             #[cfg(feature = "draft21")]
-            Self::Draft21(c) => accept!(c, Draft21, draft21),
+            Self::Draft21(c) => {
+                fetch_reader!(c.accept_fetch_stream(), Draft21, draft21, group_order)
+            }
             #[cfg(feature = "draft22")]
-            Self::Draft22(c) => accept!(c, Draft22, draft22),
+            Self::Draft22(c) => {
+                fetch_reader!(c.accept_fetch_stream(), Draft22, draft22, group_order)
+            }
             #[cfg(feature = "draft23")]
-            Self::Draft23(c) => accept!(c, Draft23, draft23),
+            Self::Draft23(c) => {
+                fetch_reader!(c.accept_fetch_stream(), Draft23, draft23, group_order)
+            }
             #[allow(unreachable_patterns)]
             _ => Err(AnyConnectionError::facade("no draft feature is enabled")),
+        }
+    }
+
+    /// Take in a stream [`accept_data_stream`](Self::accept_data_stream)
+    /// returned as a fetch stream.
+    ///
+    /// What [`accept_fetch`](Self::accept_fetch) does once it has a stream,
+    /// with the same events, errors and use of `group_order`. A stream another
+    /// connection accepted, of this draft or another, is refused with
+    /// [`ErrorCause::Facade`] and dropped.
+    #[allow(unused_variables)]
+    pub async fn adopt_fetch(
+        &self,
+        stream: AnyIncomingDataStream,
+        group_order: moqtap_codec::types::GroupOrder,
+    ) -> Result<(moqtap_codec::dispatch::AnyFetchHeader, AnyFetchReader), AnyConnectionError> {
+        #[allow(dead_code)]
+        type S = AnyIncomingDataStream;
+        match (self, stream) {
+            #[cfg(feature = "draft07")]
+            (Self::Draft07(c), S::Draft07(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft07),
+            #[cfg(feature = "draft08")]
+            (Self::Draft08(c), S::Draft08(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft08),
+            #[cfg(feature = "draft09")]
+            (Self::Draft09(c), S::Draft09(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft09),
+            #[cfg(feature = "draft10")]
+            (Self::Draft10(c), S::Draft10(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft10),
+            #[cfg(feature = "draft11")]
+            (Self::Draft11(c), S::Draft11(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft11),
+            #[cfg(feature = "draft12")]
+            (Self::Draft12(c), S::Draft12(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft12),
+            #[cfg(feature = "draft13")]
+            (Self::Draft13(c), S::Draft13(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft13),
+            #[cfg(feature = "draft14")]
+            (Self::Draft14(c), S::Draft14(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft14),
+            #[cfg(feature = "draft15")]
+            (Self::Draft15(c), S::Draft15(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft15),
+            #[cfg(feature = "draft16")]
+            (Self::Draft16(c), S::Draft16(s)) => {
+                fetch_reader!(c.adopt_fetch_stream(s), draft16 resolver)
+            }
+            #[cfg(feature = "draft17")]
+            (Self::Draft17(c), S::Draft17(s)) => fetch_reader!(c.adopt_fetch_stream(s), Draft17),
+            #[cfg(feature = "draft18")]
+            (Self::Draft18(c), S::Draft18(s)) => {
+                fetch_reader!(c.adopt_fetch_stream(s), Draft18, draft18, group_order)
+            }
+            #[cfg(feature = "draft19")]
+            (Self::Draft19(c), S::Draft19(s)) => {
+                fetch_reader!(c.adopt_fetch_stream(s), Draft19, draft19, group_order)
+            }
+            #[cfg(feature = "draft20")]
+            (Self::Draft20(c), S::Draft20(s)) => {
+                fetch_reader!(c.adopt_fetch_stream(s), Draft20, draft20, group_order)
+            }
+            #[cfg(feature = "draft21")]
+            (Self::Draft21(c), S::Draft21(s)) => {
+                fetch_reader!(c.adopt_fetch_stream(s), Draft21, draft21, group_order)
+            }
+            #[cfg(feature = "draft22")]
+            (Self::Draft22(c), S::Draft22(s)) => {
+                fetch_reader!(c.adopt_fetch_stream(s), Draft22, draft22, group_order)
+            }
+            #[cfg(feature = "draft23")]
+            (Self::Draft23(c), S::Draft23(s)) => {
+                fetch_reader!(c.adopt_fetch_stream(s), Draft23, draft23, group_order)
+            }
+            #[allow(unreachable_patterns)]
+            _ => Err(AnyConnectionError::facade(
+                "adopt_fetch: the stream is from another draft's connection",
+            )),
         }
     }
 

@@ -8,13 +8,20 @@
 //! the subscription's own Objects arrive on subgroup streams beside it. The
 //! leading stream type is all that tells the two apart:
 //! draft-21 Section 6.4.1.
+//!
+//! A fill stream reset before its FETCH_HEADER arrives reaches the fill accept
+//! as the reset: draft-21 Section 3.4.1 has the publisher signal a failed
+//! fill by resetting the stream.
 
 mod common;
 
 use std::time::Duration;
 
-use moqtap_client::draft21::connection::{ClientConfig, Connection, TransportType};
+use moqtap_client::draft21::connection::{
+    ClientConfig, Connection, ConnectionError, TransportType,
+};
 use moqtap_client::draft21::fill::FillParameters;
+use moqtap_client::transport::TransportError;
 use moqtap_codec::dispatch::{AnyControlMessage, AnyFetchHeader, AnySubgroupHeader};
 use moqtap_codec::draft21::data_stream::FetchHeader;
 use moqtap_codec::draft21::message::{ControlMessage, Setup, SubscribeOk, FILL_PARAMETERS};
@@ -33,11 +40,18 @@ const LIVE_GROUP: u64 = 9;
 
 const PAYLOAD: [u8; 3] = [0xDE, 0xAD, 0xBE];
 
-/// Which stream the peer opens first.
+/// The code the peer resets a failed fill's stream with.
+const FILL_FAILED: u32 = 0x9;
+
+/// What the peer opens once the SUBSCRIBE is answered.
 #[derive(Clone, Copy)]
 enum First {
+    /// The fill stream, then the subgroup stream.
     Fill,
+    /// The subgroup stream, then the fill stream.
     Subgroup,
+    /// A fill stream reset before a byte of it is written, and nothing else.
+    FailedFill,
 }
 
 fn v(n: u64) -> VarInt {
@@ -160,6 +174,10 @@ async fn serve(server: quinn::Endpoint, first: First) {
             write_stream(&conn, &live).await;
             write_stream(&conn, &fill).await;
         }
+        First::FailedFill => {
+            let mut stream = conn.open_uni().await.expect("open the fill stream");
+            stream.reset(quinn::VarInt::from_u32(FILL_FAILED)).expect("reset the fill stream");
+        }
     }
 
     let _ = tokio::time::timeout(PATIENCE * 2, conn.closed()).await;
@@ -249,6 +267,29 @@ async fn a_fill_accept_leaves_a_subgroup_stream_that_arrived_first() {
     accept_fill(&mut conn, request_id).await;
     assert_eq!(conn.deferred_stream_count(), 1, "the subgroup stream is held for its accept");
     accept_subgroup(&conn).await;
+    assert_eq!(conn.deferred_stream_count(), 0);
+
+    conn.close(0, b"bye");
+    tokio::time::timeout(PATIENCE * 3, peer).await.expect("the peer hung").expect("the peer task");
+}
+
+#[tokio::test]
+async fn a_fill_stream_reset_before_its_header_reaches_the_fill_accept_as_the_reset() {
+    common::init_crypto();
+    let (endpoint, addr) = common::spawn_server(&[DraftVersion::Draft21.quic_alpn()]);
+    let peer = tokio::spawn(serve(endpoint, First::FailedFill));
+    let (mut conn, _) = subscribed(addr).await;
+
+    match tokio::time::timeout(PATIENCE, conn.accept_fill_stream())
+        .await
+        .expect("the reset fill stream never reached accept_fill_stream")
+    {
+        Err(ConnectionError::Transport(TransportError::StreamReset(code))) => {
+            assert_eq!(code, u64::from(FILL_FAILED))
+        }
+        Err(e) => panic!("expected the peer's reset, got {e}"),
+        Ok(_) => panic!("a reset fill stream was taken in"),
+    }
     assert_eq!(conn.deferred_stream_count(), 0);
 
     conn.close(0, b"bye");

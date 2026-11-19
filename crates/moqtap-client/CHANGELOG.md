@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking.** `QuicDialOptions`, `AnyClientConfig` and every draft's `ClientConfig` are `#[non_exhaustive]`, so other crates can no longer build them with a struct literal or struct-update syntax. Build them with `new`, then set fields with the `with_` setters or by assignment: `ClientConfig::new(transport)` on drafts 07-13, `ClientConfig::new(draft, transport)` from draft-14 on, `AnyClientConfig::new(draft, transport)`. `AnyTransportType` and every draft's `TransportType` are `#[non_exhaustive]` too, so a `match` on them needs a wildcard arm. The fields, the `QuicDialOptions` defaults and its existing setters are unchanged.
+- After a peer reset, every later read of a `FramedRecvStream` returns the reset (`TransportError::StreamReset`) again rather than an early end. From draft-16 on, `received_reset` and `peer_cancelled` then return its code, over WebTransport too.
+
+### Added
+
+- `accept_data_stream`, on every draft's `Connection` and on `AnyConnection`, returns a data stream before its header arrives, so a late header no longer holds up the streams after it. `read_header` on the returned stream reads its type and header; `adopt_subgroup_stream`, `adopt_fetch_stream`, `adopt_fill_stream` (drafts 20-23) or `set_aside_fetch_stream` then take it in (`adopt_subgroup`, `adopt_fetch`, `set_aside_fetch` on `AnyConnection`).
+
+### Fixed
+
+- A data stream the peer reset before its type arrived is reported as the reset (`TransportError::StreamReset`) rather than as `UnexpectedEnd` by `accept_subgroup_stream`, `accept_fetch_stream` and `accept_fill_stream`, and by `accept_subgroup` and `accept_fetch` on `AnyConnection`: on drafts 20-23 for every stream, on drafts 17-19 for a stream opened before the peer's control stream.
 
 ## [0.14.0] - 2026-11-16
 
