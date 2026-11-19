@@ -59,14 +59,9 @@ fn granted_budget() -> KeyValuePair {
 }
 
 fn client_config(draft: DraftVersion) -> AnyClientConfig {
-    AnyClientConfig {
-        draft,
-        additional_versions: Vec::new(),
-        transport: AnyTransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: vec![granted_budget()],
-    }
+    AnyClientConfig::new(draft, AnyTransportType::Quic)
+        .with_skip_cert_verification(true)
+        .with_setup_parameters(vec![granted_budget()])
 }
 
 fn encoded(msg: AnyControlMessage) -> Vec<u8> {

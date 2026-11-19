@@ -191,13 +191,8 @@ macro_rules! object_forwarding_preference_gate {
             }
 
             fn client_config() -> ClientConfig {
-                ClientConfig {
-                    draft: DraftVersion::$version,
-                    transport: TransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: Vec::new(),
-                }
+                ClientConfig::new(DraftVersion::$version, TransportType::Quic)
+                    .with_skip_cert_verification(true)
             }
 
             /// The peer's SETUP. Its message type is also its stream's type, so

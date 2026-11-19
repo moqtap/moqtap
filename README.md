@@ -36,14 +36,8 @@ use moqtap_codec::types::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = ClientConfig {
-        draft: DraftVersion::Draft14,
-        additional_versions: Vec::new(),
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    };
+    let config = ClientConfig::new(DraftVersion::Draft14, TransportType::Quic)
+        .with_skip_cert_verification(true);
     let mut conn = Connection::connect("127.0.0.1:4443", config).await?;
 
     // Wait for server to grant request IDs, then subscribe

@@ -97,14 +97,7 @@ fn labels(events: &[ClientEvent]) -> Vec<&'static str> {
 }
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft14,
-        additional_versions: Vec::new(),
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(DraftVersion::Draft14, TransportType::Quic).with_skip_cert_verification(true)
 }
 
 /// Answer CLIENT_SETUP and hand back the live connection.

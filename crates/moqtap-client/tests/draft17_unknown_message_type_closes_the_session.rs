@@ -58,13 +58,7 @@ const PATIENCE: Duration = Duration::from_secs(10);
 const UNASSIGNED_TYPE: u64 = 0x0C;
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft17,
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(DraftVersion::Draft17, TransportType::Quic).with_skip_cert_verification(true)
 }
 
 fn encode_setup() -> Vec<u8> {

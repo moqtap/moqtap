@@ -177,32 +177,19 @@ macro_rules! announce_answer_wire_gates {
 #[macro_export]
 macro_rules! client_config {
     (versions, $version:ident, $params:expr) => {
-        ClientConfig {
-            additional_versions: Vec::new(),
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new(TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
     (draft_and_versions, $version:ident, $params:expr) => {
-        ClientConfig {
-            draft: DraftVersion::$version,
-            additional_versions: Vec::new(),
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new(DraftVersion::$version, TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
     (draft_only, $version:ident, $params:expr) => {
-        ClientConfig {
-            draft: DraftVersion::$version,
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new(DraftVersion::$version, TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
 }
 

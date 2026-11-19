@@ -668,13 +668,9 @@ macro_rules! eot_second_status_gates {
 #[macro_export]
 macro_rules! eot_config_for {
     (early, $version:expr, $params:expr) => {
-        ClientConfig {
-            additional_versions: Vec::new(),
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new(TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
 }
 

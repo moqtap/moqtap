@@ -418,6 +418,7 @@ dispatch_all! {
 
 /// Draft-agnostic transport choice for [`AnyConnection::connect`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum AnyTransportType {
     /// Raw QUIC via quinn. The `addr` passed to `connect` should be `host:port`.
     Quic,
@@ -432,9 +433,13 @@ pub enum AnyTransportType {
 /// is constructed internally by [`AnyConnection::connect`] based on `draft`.
 ///
 /// Fields that aren't meaningful for the selected draft are ignored:
-/// `additional_versions` is not carried by drafts 15–22 (single-version
+/// `additional_versions` is not carried by drafts 15–23 (single-version
 /// setup) and drafts 07–14 always offer their own draft first.
+///
+/// Build it with [`new`](Self::new), then set fields with the `with_` methods
+/// or by assignment.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AnyClientConfig {
     /// Primary draft version for the connection.
     pub draft: DraftVersion,
@@ -448,6 +453,63 @@ pub struct AnyClientConfig {
     pub ca_certs: Vec<Vec<u8>>,
     /// Setup parameters to include in CLIENT_SETUP (e.g., auth tokens).
     pub setup_parameters: Vec<KeyValuePair>,
+}
+
+impl AnyClientConfig {
+    /// A configuration for `draft` over `transport`, verifying certificates and with every
+    /// other field empty.
+    pub const fn new(draft: DraftVersion, transport: AnyTransportType) -> Self {
+        Self {
+            draft,
+            additional_versions: Vec::new(),
+            transport,
+            skip_cert_verification: false,
+            ca_certs: Vec::new(),
+            setup_parameters: Vec::new(),
+        }
+    }
+
+    /// This configuration with [`draft`](Self::draft) set.
+    #[must_use]
+    pub const fn with_draft(mut self, draft: DraftVersion) -> Self {
+        self.draft = draft;
+        self
+    }
+
+    /// This configuration with [`additional_versions`](Self::additional_versions) set.
+    #[must_use]
+    pub fn with_additional_versions(mut self, additional_versions: Vec<DraftVersion>) -> Self {
+        self.additional_versions = additional_versions;
+        self
+    }
+
+    /// This configuration with [`transport`](Self::transport) set.
+    #[must_use]
+    pub fn with_transport(mut self, transport: AnyTransportType) -> Self {
+        self.transport = transport;
+        self
+    }
+
+    /// This configuration with [`skip_cert_verification`](Self::skip_cert_verification) set.
+    #[must_use]
+    pub const fn with_skip_cert_verification(mut self, skip_cert_verification: bool) -> Self {
+        self.skip_cert_verification = skip_cert_verification;
+        self
+    }
+
+    /// This configuration with [`ca_certs`](Self::ca_certs) set.
+    #[must_use]
+    pub fn with_ca_certs(mut self, ca_certs: Vec<Vec<u8>>) -> Self {
+        self.ca_certs = ca_certs;
+        self
+    }
+
+    /// This configuration with [`setup_parameters`](Self::setup_parameters) set.
+    #[must_use]
+    pub fn with_setup_parameters(mut self, setup_parameters: Vec<KeyValuePair>) -> Self {
+        self.setup_parameters = setup_parameters;
+        self
+    }
 }
 
 /// Why a call through this facade stopped, kept as a value rather than as

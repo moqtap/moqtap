@@ -499,13 +499,9 @@ macro_rules! request_helper_gates {
             /// The client's own SETUP, granting the peer the same budget the
             /// peer grants it.
             fn client_config() -> ClientConfig {
-                ClientConfig {
-                    draft: $version,
-                    transport: TransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: setup_parameters(),
-                }
+                ClientConfig::new($version, TransportType::Quic)
+                    .with_skip_cert_verification(true)
+                    .with_setup_parameters(setup_parameters())
             }
 
             fn encode(msg: ControlMessage) -> Vec<u8> {

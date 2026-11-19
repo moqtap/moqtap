@@ -147,13 +147,8 @@ async fn draft16_answers_the_malformation_with_protocol_violation() {
 
     let mut conn = Connection::connect(
         &addr.to_string(),
-        ClientConfig {
-            draft: DraftVersion::Draft16,
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: Vec::new(),
-        },
+        ClientConfig::new(DraftVersion::Draft16, TransportType::Quic)
+            .with_skip_cert_verification(true),
     )
     .await
     .expect("client connect");
@@ -244,13 +239,8 @@ async fn draft17_answers_the_malformation_with_a_key_value_formatting_error() {
 
     let mut conn = Connection::connect(
         &addr.to_string(),
-        ClientConfig {
-            draft: DraftVersion::Draft17,
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: Vec::new(),
-        },
+        ClientConfig::new(DraftVersion::Draft17, TransportType::Quic)
+            .with_skip_cert_verification(true),
     )
     .await
     .expect("client connect");

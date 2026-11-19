@@ -66,14 +66,7 @@ const OVERSIZED_VALUE_LEN: usize = 65_536;
 const ODD_PARAMETER_TYPE: u64 = 0x01;
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft14,
-        additional_versions: Vec::new(),
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(DraftVersion::Draft14, TransportType::Quic).with_skip_cert_verification(true)
 }
 
 fn server_setup() -> AnyControlMessage {

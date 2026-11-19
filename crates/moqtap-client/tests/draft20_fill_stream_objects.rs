@@ -125,13 +125,7 @@ fn namespace() -> TrackNamespace {
 }
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft20,
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(DraftVersion::Draft20, TransportType::Quic).with_skip_cert_verification(true)
 }
 
 fn setup_bytes() -> Vec<u8> {

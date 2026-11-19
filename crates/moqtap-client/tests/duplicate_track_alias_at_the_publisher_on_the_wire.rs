@@ -90,13 +90,9 @@ macro_rules! publisher_alias_wire_gate {
             }
 
             fn client_config() -> ClientConfig {
-                ClientConfig {
-                    additional_versions: Vec::new(),
-                    transport: TransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: setup_parameters(),
-                }
+                ClientConfig::new(TransportType::Quic)
+                    .with_skip_cert_verification(true)
+                    .with_setup_parameters(setup_parameters())
             }
 
             fn server_setup() -> ServerSetup {

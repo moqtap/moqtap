@@ -63,16 +63,12 @@ fn under_ns() -> TrackNamespace {
 /// A client config that grants the peer a request budget, so a peer-opened
 /// namespace subscription is not refused for having no room.
 fn config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft16,
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: vec![KeyValuePair {
+    ClientConfig::new(DraftVersion::Draft16, TransportType::Quic)
+        .with_skip_cert_verification(true)
+        .with_setup_parameters(vec![KeyValuePair {
             key: varint(0x02),
             value: KvpValue::Varint(varint(100)),
-        }],
-    }
+        }])
 }
 
 /// The peer's half of the handshake: take the client's control stream, read its

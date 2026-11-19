@@ -194,14 +194,9 @@ fn config(draft: DraftVersion) -> AnyClientConfig {
     } else {
         Vec::new()
     };
-    AnyClientConfig {
-        draft,
-        additional_versions: Vec::new(),
-        transport: AnyTransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters,
-    }
+    AnyClientConfig::new(draft, AnyTransportType::Quic)
+        .with_skip_cert_verification(true)
+        .with_setup_parameters(setup_parameters)
 }
 
 /// `frame` with one more byte in its body than its fields hold, so its

@@ -74,13 +74,7 @@ const GROUP_ID: u64 = 7;
 const OBJECT_ID: u64 = 0;
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        additional_versions: Vec::new(),
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(TransportType::Quic).with_skip_cert_verification(true)
 }
 
 fn server_setup() -> AnyControlMessage {

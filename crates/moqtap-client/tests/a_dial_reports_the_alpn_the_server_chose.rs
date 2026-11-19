@@ -70,13 +70,7 @@ fn options(alpn: Vec<Vec<u8>>) -> QuicDialOptions {
 }
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft16,
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(DraftVersion::Draft16, TransportType::Quic).with_skip_cert_verification(true)
 }
 
 /// The protocol the server selected is the one the dial reports.

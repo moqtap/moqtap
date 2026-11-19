@@ -20,14 +20,7 @@ use moqtap_codec::varint::VarInt;
 use moqtap_codec::version::DraftVersion;
 
 fn default_client_config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft14,
-        additional_versions: Vec::new(),
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(DraftVersion::Draft14, TransportType::Quic).with_skip_cert_verification(true)
 }
 
 #[tokio::test]

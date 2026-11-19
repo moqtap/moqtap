@@ -519,14 +519,9 @@ macro_rules! control_stream_gate {
             const DRAFT: DraftVersion = DraftVersion::$version;
 
             fn client_config() -> AnyClientConfig {
-                AnyClientConfig {
-                    draft: DRAFT,
-                    additional_versions: Vec::new(),
-                    transport: AnyTransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: setup_parameters(),
-                }
+                AnyClientConfig::new(DRAFT, AnyTransportType::Quic)
+                    .with_skip_cert_verification(true)
+                    .with_setup_parameters(setup_parameters())
             }
 
             /// Complete the handshake, read the SUBSCRIBE and then one FETCH per
@@ -638,14 +633,8 @@ macro_rules! request_stream_gate {
             const DRAFT: DraftVersion = DraftVersion::$version;
 
             fn client_config() -> AnyClientConfig {
-                AnyClientConfig {
-                    draft: DRAFT,
-                    additional_versions: Vec::new(),
-                    transport: AnyTransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: Vec::new(),
-                }
+                AnyClientConfig::new(DRAFT, AnyTransportType::Quic)
+                    .with_skip_cert_verification(true)
             }
 
             /// Complete the handshake, then read the SUBSCRIBE off one request
@@ -760,14 +749,9 @@ macro_rules! no_joining_gate {
             const DRAFT: DraftVersion = DraftVersion::$version;
 
             fn client_config() -> AnyClientConfig {
-                AnyClientConfig {
-                    draft: DRAFT,
-                    additional_versions: Vec::new(),
-                    transport: AnyTransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: $params,
-                }
+                AnyClientConfig::new(DRAFT, AnyTransportType::Quic)
+                    .with_skip_cert_verification(true)
+                    .with_setup_parameters($params)
             }
 
             /// Complete the handshake and hold the session open. Nothing is read

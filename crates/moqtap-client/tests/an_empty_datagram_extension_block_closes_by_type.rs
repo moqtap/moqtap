@@ -82,13 +82,9 @@ macro_rules! type_gates {
                 let (endpoint, addr) =
                     crate::common::spawn_server(&[DraftVersion::$version.quic_alpn()]);
                 let served = tokio::spawn(peer(endpoint, bytes));
-                let config = ClientConfig {
-                    additional_versions: Vec::new(),
-                    transport: TransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: setup_parameters(),
-                };
+                let config = ClientConfig::new(TransportType::Quic)
+                    .with_skip_cert_verification(true)
+                    .with_setup_parameters(setup_parameters());
                 let conn =
                     tokio::time::timeout(PATIENCE, Connection::connect(&addr.to_string(), config))
                         .await

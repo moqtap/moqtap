@@ -127,13 +127,8 @@ async fn a_control_stream_violation_closes_the_quic_connection() {
         }
     });
 
-    let config = ClientConfig {
-        draft: DraftVersion::Draft19,
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    };
+    let config = ClientConfig::new(DraftVersion::Draft19, TransportType::Quic)
+        .with_skip_cert_verification(true);
     let mut conn = Connection::connect(&addr.to_string(), config).await.expect("client connect");
 
     // Reading the REQUEST_UPDATE is what raises the violation. The error is
@@ -236,13 +231,8 @@ async fn a_decoder_bound_violation_closes_the_quic_connection() {
         }
     });
 
-    let config = ClientConfig {
-        draft: DraftVersion::Draft19,
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    };
+    let config = ClientConfig::new(DraftVersion::Draft19, TransportType::Quic)
+        .with_skip_cert_verification(true);
     let mut conn = Connection::connect(&addr.to_string(), config).await.expect("client connect");
 
     let err =

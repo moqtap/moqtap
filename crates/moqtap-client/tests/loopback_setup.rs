@@ -49,14 +49,8 @@ async fn handshake_succeeds_against_loopback_server() {
         let _ = conn.closed().await;
     });
 
-    let config = ClientConfig {
-        draft: DraftVersion::Draft14,
-        additional_versions: Vec::new(),
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    };
+    let config = ClientConfig::new(DraftVersion::Draft14, TransportType::Quic)
+        .with_skip_cert_verification(true);
     let conn = Connection::connect(&addr.to_string(), config).await.expect("client connect");
 
     let negotiated = conn.negotiated_version().expect("negotiated version set");

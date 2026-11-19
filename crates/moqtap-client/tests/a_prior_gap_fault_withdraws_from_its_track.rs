@@ -152,13 +152,9 @@ mod draft11 {
         crate::common::init_crypto();
         let (endpoint, addr) = crate::common::spawn_server(&[DraftVersion::Draft11.quic_alpn()]);
         let served = tokio::spawn(peer(endpoint, datagram));
-        let config = ClientConfig {
-            additional_versions: Vec::new(),
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: setup_parameters(),
-        };
+        let config = ClientConfig::new(TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters(setup_parameters());
         let conn = tokio::time::timeout(PATIENCE, Connection::connect(&addr.to_string(), config))
             .await
             .expect("connect did not finish")
@@ -732,32 +728,19 @@ macro_rules! gap_stream_gate {
 #[macro_export]
 macro_rules! gap_config {
     (early, $version:expr, $params:expr) => {
-        ClientConfig {
-            additional_versions: Vec::new(),
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new(TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
     (both, $version:expr, $params:expr) => {
-        ClientConfig {
-            draft: $version,
-            additional_versions: Vec::new(),
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new($version, TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
     (late, $version:expr, $params:expr) => {
-        ClientConfig {
-            draft: $version,
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new($version, TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
 }
 
@@ -1252,13 +1235,8 @@ macro_rules! cancel_gates {
                     crate::common::spawn_server(&[DraftVersion::$version.quic_alpn()]);
                 let (name_fetch, fetch) = tokio::sync::oneshot::channel();
                 let peer = tokio::spawn(serve(endpoint, traffic, fetch));
-                let config = ClientConfig {
-                    draft: DraftVersion::$version,
-                    transport: TransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: Vec::new(),
-                };
+                let config = ClientConfig::new(DraftVersion::$version, TransportType::Quic)
+                    .with_skip_cert_verification(true);
                 let mut conn =
                     tokio::time::timeout(PATIENCE, Connection::connect(&addr.to_string(), config))
                         .await

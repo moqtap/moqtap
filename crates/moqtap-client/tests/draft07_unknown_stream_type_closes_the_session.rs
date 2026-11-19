@@ -69,13 +69,9 @@ fn role() -> KeyValuePair {
 }
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        additional_versions: Vec::new(),
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: vec![role()],
-    }
+    ClientConfig::new(TransportType::Quic)
+        .with_skip_cert_verification(true)
+        .with_setup_parameters(vec![role()])
 }
 
 fn server_setup() -> AnyControlMessage {

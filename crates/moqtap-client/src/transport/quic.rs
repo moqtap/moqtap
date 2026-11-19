@@ -265,6 +265,10 @@ impl From<quinn::SendDatagramError> for TransportError {
 /// `alpn` is a list because ALPN is: one handshake offers several protocols and
 /// the server picks, which is how a caller that does not know a peer's draft
 /// finds out without dialling once per candidate.
+///
+/// Build it with [`new`](Self::new), then set fields with the `with_` methods
+/// or by assignment.
+#[non_exhaustive]
 pub struct QuicDialOptions {
     /// Skip TLS certificate verification. Testing only.
     pub skip_cert_verification: bool,
@@ -364,14 +368,7 @@ impl QuicDialOptions {
     /// alert 120 — which in a conformance report reads as a defect in the
     /// relay rather than in the caller. Naming the offer is the one thing a
     /// dial cannot do without.
-    ///
-    /// It is also the base for functional update, which is how the fields
-    /// below stay additive:
-    ///
-    /// ```ignore
-    /// QuicDialOptions { skip_cert_verification: true, ..QuicDialOptions::new(alpn) }
-    /// ```
-    pub fn new(alpn: Vec<Vec<u8>>) -> Self {
+    pub const fn new(alpn: Vec<Vec<u8>>) -> Self {
         Self {
             skip_cert_verification: false,
             ca_certs: Vec::new(),
@@ -420,6 +417,48 @@ impl QuicDialOptions {
     /// [`wt_protocols`](Self::wt_protocols).
     pub fn offering_wt_protocols(mut self, protocols: Vec<Vec<u8>>) -> Self {
         self.wt_protocols = protocols;
+        self
+    }
+
+    /// These options with [`skip_cert_verification`](Self::skip_cert_verification) set.
+    #[must_use]
+    pub const fn with_skip_cert_verification(mut self, skip: bool) -> Self {
+        self.skip_cert_verification = skip;
+        self
+    }
+
+    /// These options with [`ca_certs`](Self::ca_certs) set.
+    #[must_use]
+    pub fn with_ca_certs(mut self, ca_certs: Vec<Vec<u8>>) -> Self {
+        self.ca_certs = ca_certs;
+        self
+    }
+
+    /// These options with [`alpn`](Self::alpn) set.
+    #[must_use]
+    pub fn with_alpn(mut self, alpn: Vec<Vec<u8>>) -> Self {
+        self.alpn = alpn;
+        self
+    }
+
+    /// These options with [`wt_protocols`](Self::wt_protocols) set.
+    #[must_use]
+    pub fn with_wt_protocols(mut self, wt_protocols: Vec<Vec<u8>>) -> Self {
+        self.wt_protocols = wt_protocols;
+        self
+    }
+
+    /// These options with [`on_peer_certificates`](Self::on_peer_certificates) set.
+    #[must_use]
+    pub fn with_on_peer_certificates(mut self, hook: Option<CertificateHook>) -> Self {
+        self.on_peer_certificates = hook;
+        self
+    }
+
+    /// These options with [`cipher_suites`](Self::cipher_suites) set.
+    #[must_use]
+    pub fn with_cipher_suites(mut self, cipher_suites: Option<Vec<u16>>) -> Self {
+        self.cipher_suites = cipher_suites;
         self
     }
 }

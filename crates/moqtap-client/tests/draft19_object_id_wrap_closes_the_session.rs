@@ -66,13 +66,7 @@ fn encode_setup() -> Vec<u8> {
 }
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft19,
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(DraftVersion::Draft19, TransportType::Quic).with_skip_cert_verification(true)
 }
 
 fn varint(v: u64) -> Vec<u8> {

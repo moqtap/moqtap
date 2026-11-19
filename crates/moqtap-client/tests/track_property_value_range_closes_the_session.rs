@@ -86,13 +86,8 @@ macro_rules! nested_property_closes_the_session {
             $put_varint
 
             fn client_config() -> ClientConfig {
-                ClientConfig {
-                    draft: DraftVersion::$version,
-                    transport: TransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: Vec::new(),
-                }
+                ClientConfig::new(DraftVersion::$version, TransportType::Quic)
+                    .with_skip_cert_verification(true)
             }
 
             /// A SUBSCRIBE_OK whose tail holds an Immutable block, and whose

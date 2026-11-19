@@ -104,14 +104,7 @@ fn namespaces() -> [TrackNamespace; 2] {
 }
 
 fn client_config(draft: DraftVersion) -> AnyClientConfig {
-    AnyClientConfig {
-        draft,
-        additional_versions: Vec::new(),
-        transport: AnyTransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    AnyClientConfig::new(draft, AnyTransportType::Quic).with_skip_cert_verification(true)
 }
 
 /// One field of a decoded message, as a string a failure can be read from.

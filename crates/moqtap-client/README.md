@@ -49,14 +49,8 @@ use moqtap_client::draft14::connection::{Connection, ClientConfig, TransportType
 use moqtap_codec::version::DraftVersion;
 use moqtap_codec::types::*;
 
-let config = ClientConfig {
-    draft: DraftVersion::Draft14,
-    additional_versions: Vec::new(),
-    transport: TransportType::Quic,
-    skip_cert_verification: true,
-    ca_certs: Vec::new(),
-    setup_parameters: Vec::new(),
-};
+let config = ClientConfig::new(DraftVersion::Draft14, TransportType::Quic)
+    .with_skip_cert_verification(true);
 let mut conn = Connection::connect("127.0.0.1:4443", config).await?;
 
 // Wait for MAX_REQUEST_ID, then subscribe

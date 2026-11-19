@@ -1047,32 +1047,19 @@ macro_rules! withdrawal_joining_fetch {
 #[macro_export]
 macro_rules! withdrawal_config {
     (early, $version:expr, $params:expr) => {
-        ClientConfig {
-            additional_versions: Vec::new(),
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new(TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
     (both, $version:expr, $params:expr) => {
-        ClientConfig {
-            draft: $version,
-            additional_versions: Vec::new(),
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new($version, TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
     (late, $version:expr, $params:expr) => {
-        ClientConfig {
-            draft: $version,
-            transport: TransportType::Quic,
-            skip_cert_verification: true,
-            ca_certs: Vec::new(),
-            setup_parameters: $params,
-        }
+        ClientConfig::new($version, TransportType::Quic)
+            .with_skip_cert_verification(true)
+            .with_setup_parameters($params)
     };
 }
 

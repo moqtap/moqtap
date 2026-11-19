@@ -152,6 +152,7 @@ impl From<crate::transport::DialError> for ConnectionError {
 
 /// Transport type for the connection.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum TransportType {
     /// Raw QUIC via quinn. The `addr` field should be `host:port`.
     Quic,
@@ -164,7 +165,9 @@ pub enum TransportType {
 
 /// Configuration for a MoQT client connection.
 ///
-/// Both `draft` and `transport` are required — there is no `Default` impl.
+/// Build it with [`new`](Self::new), then set fields with the `with_` methods
+/// or by assignment.
+#[non_exhaustive]
 pub struct ClientConfig {
     /// The MoQT draft version to use (primary, determines codec/framing).
     pub draft: DraftVersion,
@@ -182,6 +185,64 @@ pub struct ClientConfig {
 }
 
 impl ClientConfig {
+    /// A configuration for `draft` over `transport`, verifying certificates and with every
+    /// other field empty.
+    pub const fn new(draft: DraftVersion, transport: TransportType) -> Self {
+        Self {
+            draft,
+            additional_versions: Vec::new(),
+            transport,
+            skip_cert_verification: false,
+            ca_certs: Vec::new(),
+            setup_parameters: Vec::new(),
+        }
+    }
+
+    /// This configuration with [`draft`](Self::draft) set.
+    #[must_use]
+    pub const fn with_draft(mut self, draft: DraftVersion) -> Self {
+        self.draft = draft;
+        self
+    }
+
+    /// This configuration with [`additional_versions`](Self::additional_versions) set.
+    #[must_use]
+    pub fn with_additional_versions(mut self, additional_versions: Vec<DraftVersion>) -> Self {
+        self.additional_versions = additional_versions;
+        self
+    }
+
+    /// This configuration with [`transport`](Self::transport) set.
+    #[must_use]
+    pub fn with_transport(mut self, transport: TransportType) -> Self {
+        self.transport = transport;
+        self
+    }
+
+    /// This configuration with [`skip_cert_verification`](Self::skip_cert_verification) set.
+    #[must_use]
+    pub const fn with_skip_cert_verification(mut self, skip_cert_verification: bool) -> Self {
+        self.skip_cert_verification = skip_cert_verification;
+        self
+    }
+
+    /// This configuration with [`ca_certs`](Self::ca_certs) set.
+    #[must_use]
+    pub fn with_ca_certs(mut self, ca_certs: Vec<Vec<u8>>) -> Self {
+        self.ca_certs = ca_certs;
+        self
+    }
+
+    /// This configuration with [`setup_parameters`](Self::setup_parameters) set.
+    #[must_use]
+    pub fn with_setup_parameters(
+        mut self,
+        setup_parameters: Vec<moqtap_codec::kvp::KeyValuePair>,
+    ) -> Self {
+        self.setup_parameters = setup_parameters;
+        self
+    }
+
     /// Returns the MoQT version varints for the CLIENT_SETUP message.
     /// Primary draft first, then any additional versions.
     pub fn supported_versions(&self) -> Vec<VarInt> {

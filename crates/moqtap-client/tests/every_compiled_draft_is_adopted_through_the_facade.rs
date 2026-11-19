@@ -229,14 +229,9 @@ fn config(draft: DraftVersion) -> AnyClientConfig {
     } else {
         Vec::new()
     };
-    AnyClientConfig {
-        draft,
-        additional_versions: Vec::new(),
-        transport: AnyTransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters,
-    }
+    AnyClientConfig::new(draft, AnyTransportType::Quic)
+        .with_skip_cert_verification(true)
+        .with_setup_parameters(setup_parameters)
 }
 
 /// Every compiled draft is adopted and says which draft it negotiated; every

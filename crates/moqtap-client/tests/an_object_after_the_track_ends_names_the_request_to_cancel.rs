@@ -205,13 +205,8 @@ macro_rules! cancel_gates {
             }
 
             fn client_config() -> ClientConfig {
-                ClientConfig {
-                    draft: DraftVersion::$version,
-                    transport: TransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: Vec::new(),
-                }
+                ClientConfig::new(DraftVersion::$version, TransportType::Quic)
+                    .with_skip_cert_verification(true)
             }
 
             fn setup_bytes() -> Vec<u8> {

@@ -77,14 +77,7 @@ fn v(n: u64) -> VarInt {
 }
 
 fn client_config(draft: DraftVersion) -> AnyClientConfig {
-    AnyClientConfig {
-        draft,
-        additional_versions: Vec::new(),
-        transport: AnyTransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    AnyClientConfig::new(draft, AnyTransportType::Quic).with_skip_cert_verification(true)
 }
 
 fn field_text(value: &FieldValue) -> String {

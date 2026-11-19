@@ -439,14 +439,9 @@ macro_rules! subgroup_gate {
             draft_setup_parameters!($params);
 
             fn client_config() -> AnyClientConfig {
-                AnyClientConfig {
-                    draft: DRAFT,
-                    additional_versions: Vec::new(),
-                    transport: AnyTransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: setup_parameters(),
-                }
+                AnyClientConfig::new(DRAFT, AnyTransportType::Quic)
+                    .with_skip_cert_verification(true)
+                    .with_setup_parameters(setup_parameters())
             }
 
             /// Complete the handshake, read the client's subgroup stream whole,

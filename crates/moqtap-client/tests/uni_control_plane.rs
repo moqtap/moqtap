@@ -1937,13 +1937,7 @@ macro_rules! uni_control_plane_gates {
             }
 
             fn client_config() -> ClientConfig {
-                ClientConfig {
-                    draft: $version,
-                    transport: TransportType::Quic,
-                    skip_cert_verification: true,
-                    ca_certs: Vec::new(),
-                    setup_parameters: Vec::new(),
-                }
+                ClientConfig::new($version, TransportType::Quic).with_skip_cert_verification(true)
             }
 
             /// A connected client, the task running the peer that serves it,

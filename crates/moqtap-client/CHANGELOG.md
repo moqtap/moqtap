@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking.** `QuicDialOptions`, `AnyClientConfig` and every draft's `ClientConfig` are `#[non_exhaustive]`, so other crates can no longer build them with a struct literal or struct-update syntax. Build them with `new`, then set fields with the `with_` setters or by assignment: `ClientConfig::new(transport)` on drafts 07-13, `ClientConfig::new(draft, transport)` from draft-14 on, `AnyClientConfig::new(draft, transport)`. `AnyTransportType` and every draft's `TransportType` are `#[non_exhaustive]` too, so a `match` on them needs a wildcard arm. The fields, the `QuicDialOptions` defaults and its existing setters are unchanged.
+
 ## [0.14.0] - 2026-11-16
 
 ### Changed

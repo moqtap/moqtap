@@ -60,13 +60,7 @@ const PATIENCE: Duration = Duration::from_secs(10);
 const DELIVERY_TIMEOUT: u64 = 0x03;
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        additional_versions: Vec::new(),
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(TransportType::Quic).with_skip_cert_verification(true)
 }
 
 fn server_setup() -> AnyControlMessage {

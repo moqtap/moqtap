@@ -51,13 +51,7 @@ const PATIENCE: Duration = Duration::from_secs(10);
 const DECLARED_URI_LEN: usize = 9_000;
 
 fn client_config() -> ClientConfig {
-    ClientConfig {
-        draft: DraftVersion::Draft16,
-        transport: TransportType::Quic,
-        skip_cert_verification: true,
-        ca_certs: Vec::new(),
-        setup_parameters: Vec::new(),
-    }
+    ClientConfig::new(DraftVersion::Draft16, TransportType::Quic).with_skip_cert_verification(true)
 }
 
 fn server_setup() -> AnyControlMessage {
