@@ -1077,6 +1077,7 @@ impl Connection {
         match &server_setup {
             AnyControlMessage::Draft13(ControlMessage::ServerSetup(ref ss)) => {
                 if let Err(e) = endpoint.receive_server_setup(ss) {
+                    Self::close_for_setup(&transport, &e);
                     let err = ConnectionError::from(e);
                     Self::refuse_setup(observer.as_deref(), &err, &server_setup, &raw_server_setup);
                     return Err(err);
@@ -1255,6 +1256,17 @@ impl Connection {
         };
         let raw = raw.filter(|_| peers)?;
         Some(ClientEvent::ControlMessageRefused { raw })
+    }
+
+    /// Close the session with the code the draft names when a server's SETUP
+    /// is refused for carrying PATH. Other refusals send nothing here.
+    fn close_for_setup(transport: &Transport, err: &EndpointError) {
+        if let EndpointError::Setup(e) = err {
+            if let Some(code) = e.close_code() {
+                let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+                transport.close(wire_code, e.to_string().as_bytes());
+            }
+        }
     }
 
     /// Report a peer's SETUP the handshake refused to an observer attached

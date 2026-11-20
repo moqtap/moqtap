@@ -1,3 +1,4 @@
+use moqtap_codec::draft12::error_codes::SessionErrorCode;
 use moqtap_codec::draft12::message::{ClientSetup, ServerSetup};
 use moqtap_codec::kvp::KeyValuePair;
 use moqtap_codec::varint::VarInt;
@@ -31,6 +32,17 @@ pub enum SetupError {
     /// The supported versions list is empty.
     #[error("no versions offered")]
     EmptyVersionList,
+}
+
+impl SetupError {
+    /// The code a client closes the session with when it refuses the server's
+    /// SETUP for this error: INVALID_PATH for a PATH (draft-12 Section 8.3.2.1).
+    pub(crate) fn close_code(&self) -> Option<SessionErrorCode> {
+        match self {
+            SetupError::WrongParameterRole(PATH) => Some(SessionErrorCode::InvalidPath),
+            _ => None,
+        }
+    }
 }
 
 /// Validate a CLIENT_SETUP message.

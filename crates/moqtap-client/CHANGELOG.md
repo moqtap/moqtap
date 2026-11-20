@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Drafts 11-13: a server's SETUP carrying PATH was refused, but the session closed with code 0. It now closes with INVALID_PATH (0x8).
+
 ## [0.16.0] - 2026-11-20
 
 ### Changed

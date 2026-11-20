@@ -1,8 +1,21 @@
-//! PATH and AUTHORITY are the client's, for native QUIC only, on drafts 14-23.
+//! PATH is the client's, for native QUIC only, and so is AUTHORITY on drafts
+//! 14-23. A server's PATH closes the session with a named code on drafts 11-23.
 //!
-//! Each draft forbids both "by the server, or when WebTransport is used", and
+//! Each draft forbids them "by the server, or when WebTransport is used", and
 //! closes the session with INVALID_PATH (0x8) on a PATH and INVALID_AUTHORITY
-//! (0x19) on an AUTHORITY received from the server. The AUTHORITY sections:
+//! (0x19) on an AUTHORITY received from the server. Drafts 11-13 have no
+//! AUTHORITY. Their PATH sections:
+//! draft-11 Section 8.3.2.1 ("it MUST close the session with Invalid Path"),
+//! draft-12 Section 8.3.2.1 ("the session MUST be closed with Invalid Path"),
+//! draft-13 Section 8.3.2.1 (the same sentence).
+//! Drafts 07-10 forbid PATH from the server too, but say only "it MUST close
+//! the connection" and name no code, so they are not tested here:
+//! draft-07 Section 6.2.2.2,
+//! draft-08 Section 7.2.2.1,
+//! draft-09 Section 7.2.2.1,
+//! draft-10 Section 8.2.2.1.
+//!
+//! The AUTHORITY sections:
 //! draft-14 Section 9.3.2.1,
 //! draft-15 Section 9.3.1.1,
 //! draft-16 Section 9.3.1.1,
@@ -22,6 +35,9 @@
 //! 0x05 completes the handshake there.
 
 #![cfg(any(
+    feature = "draft11",
+    feature = "draft12",
+    feature = "draft13",
     feature = "draft14",
     feature = "draft15",
     feature = "draft16",
@@ -50,9 +66,7 @@ use moqtap_codec::version::DraftVersion;
 const PATIENCE: Duration = Duration::from_secs(10);
 
 const PATH: u64 = 0x01;
-const AUTHORITY: u64 = 0x05;
 const INVALID_PATH: u32 = 0x8;
-const INVALID_AUTHORITY: u32 = 0x19;
 
 fn parameter(key: u64, value: &[u8]) -> KeyValuePair {
     KeyValuePair { key: VarInt::from_u64(key).unwrap(), value: KvpValue::Bytes(value.to_vec()) }
@@ -68,14 +82,62 @@ fn close_code(reason: quinn::ConnectionError) -> u32 {
     }
 }
 
+/// The AUTHORITY gates: `closes` where a server's AUTHORITY is refused,
+/// `kept` on draft-14, `absent` on the drafts without AUTHORITY.
+macro_rules! authority_gates {
+    (absent, $module:ident) => {};
+    (closes, $module:ident) => {
+        authority_gates!(@items $module, true);
+    };
+    (kept, $module:ident) => {
+        authority_gates!(@items $module, false);
+    };
+    (@items $module:ident, $closes:literal) => {
+        use moqtap_client::$module::session::setup::{
+            validate_client_authority_transport, validate_client_path_transport, SetupError,
+        };
+
+        const AUTHORITY: u64 = 0x05;
+        const INVALID_AUTHORITY: u32 = 0x19;
+
+        server_sending!(authority_server, AUTHORITY);
+
+        #[tokio::test]
+        async fn a_server_authority_is_answered_by_the_draft() {
+            let (completed, reason) = connect_to_server_sending(authority_server::serve).await;
+            if $closes {
+                assert!(!completed, "a SETUP carrying AUTHORITY must be refused");
+                assert_eq!(close_code(reason), INVALID_AUTHORITY);
+            } else {
+                assert!(completed, "a draft-14 0x05 may be MOQT_IMPLEMENTATION");
+                assert_eq!(close_code(reason), 0);
+            }
+        }
+
+        /// The second assertion keeps the first from being satisfied by a
+        /// client that refuses AUTHORITY everywhere.
+        #[test]
+        fn authority_is_refused_over_webtransport_and_allowed_over_quic() {
+            let parameters = vec![parameter(AUTHORITY, b"relay.example")];
+            assert_eq!(
+                validate_client_authority_transport(&parameters, true),
+                Err(SetupError::AuthorityOverWebTransport),
+            );
+            assert_eq!(validate_client_authority_transport(&parameters, false), Ok(()));
+            assert_eq!(
+                validate_client_path_transport(&parameters, true),
+                Ok(()),
+                "an AUTHORITY is not a PATH",
+            );
+        }
+    };
+}
+
 macro_rules! uri_parameter_gate {
-    ($module:ident, $feat:literal, $version:ident, $handshake:tt, authority_closes: $closes:literal) => {
+    ($module:ident, $feat:literal, $version:ident, $handshake:tt, authority: $authority:ident) => {
         #[cfg(feature = $feat)]
         mod $module {
             use super::*;
-            use moqtap_client::$module::session::setup::{
-                validate_client_authority_transport, validate_client_path_transport, SetupError,
-            };
 
             const DRAFT: DraftVersion = DraftVersion::$version;
 
@@ -105,18 +167,17 @@ macro_rules! uri_parameter_gate {
             }
 
             server_sending!(path_server, PATH);
-            server_sending!(authority_server, AUTHORITY);
 
-            /// Connect to a server whose SETUP carries `key`. Returns whether
-            /// the handshake completed and how the session ended.
-            async fn connect_to_server_sending(key: u64) -> (bool, quinn::ConnectionError) {
+            /// Connect to the server `serve` runs. Returns whether the
+            /// handshake completed and how the session ended.
+            async fn connect_to_server_sending<F, Fut>(serve: F) -> (bool, quinn::ConnectionError)
+            where
+                F: FnOnce(quinn::Endpoint) -> Fut,
+                Fut: std::future::Future<Output = quinn::ConnectionError> + Send + 'static,
+            {
                 common::init_crypto();
                 let (endpoint, addr) = common::spawn_server(&[DRAFT.quic_alpn()]);
-                let peer = if key == PATH {
-                    tokio::spawn(path_server::serve(endpoint))
-                } else {
-                    tokio::spawn(authority_server::serve(endpoint))
-                };
+                let peer = tokio::spawn(serve(endpoint));
                 let config = AnyClientConfig::new(DRAFT, AnyTransportType::Quic)
                     .with_skip_cert_verification(true);
                 let connected = tokio::time::timeout(
@@ -141,50 +202,26 @@ macro_rules! uri_parameter_gate {
 
             #[tokio::test]
             async fn a_server_path_closes_with_invalid_path() {
-                let (completed, reason) = connect_to_server_sending(PATH).await;
+                let (completed, reason) = connect_to_server_sending(path_server::serve).await;
                 assert!(!completed, "a SETUP carrying PATH must be refused");
                 assert_eq!(close_code(reason), INVALID_PATH);
             }
 
-            #[tokio::test]
-            async fn a_server_authority_is_answered_by_the_draft() {
-                let (completed, reason) = connect_to_server_sending(AUTHORITY).await;
-                if $closes {
-                    assert!(!completed, "a SETUP carrying AUTHORITY must be refused");
-                    assert_eq!(close_code(reason), INVALID_AUTHORITY);
-                } else {
-                    assert!(completed, "a draft-14 0x05 may be MOQT_IMPLEMENTATION");
-                    assert_eq!(close_code(reason), 0);
-                }
-            }
-
-            /// The second assertion keeps the first from being satisfied by a
-            /// client that refuses AUTHORITY everywhere.
-            #[test]
-            fn authority_is_refused_over_webtransport_and_allowed_over_quic() {
-                let parameters = vec![parameter(AUTHORITY, b"relay.example")];
-                assert_eq!(
-                    validate_client_authority_transport(&parameters, true),
-                    Err(SetupError::AuthorityOverWebTransport),
-                );
-                assert_eq!(validate_client_authority_transport(&parameters, false), Ok(()));
-                assert_eq!(
-                    validate_client_path_transport(&parameters, true),
-                    Ok(()),
-                    "an AUTHORITY is not a PATH",
-                );
-            }
+            authority_gates!($authority, $module);
         }
     };
 }
 
-uri_parameter_gate!(draft14, "draft14", Draft14, versioned, authority_closes: false);
-uri_parameter_gate!(draft15, "draft15", Draft15, plain, authority_closes: true);
-uri_parameter_gate!(draft16, "draft16", Draft16, plain, authority_closes: true);
-uri_parameter_gate!(draft17, "draft17", Draft17, uni, authority_closes: true);
-uri_parameter_gate!(draft18, "draft18", Draft18, uni, authority_closes: true);
-uri_parameter_gate!(draft19, "draft19", Draft19, uni, authority_closes: true);
-uri_parameter_gate!(draft20, "draft20", Draft20, uni, authority_closes: true);
-uri_parameter_gate!(draft21, "draft21", Draft21, uni, authority_closes: true);
-uri_parameter_gate!(draft22, "draft22", Draft22, uni, authority_closes: true);
-uri_parameter_gate!(draft23, "draft23", Draft23, uni, authority_closes: true);
+uri_parameter_gate!(draft11, "draft11", Draft11, versioned, authority: absent);
+uri_parameter_gate!(draft12, "draft12", Draft12, versioned, authority: absent);
+uri_parameter_gate!(draft13, "draft13", Draft13, versioned, authority: absent);
+uri_parameter_gate!(draft14, "draft14", Draft14, versioned, authority: kept);
+uri_parameter_gate!(draft15, "draft15", Draft15, plain, authority: closes);
+uri_parameter_gate!(draft16, "draft16", Draft16, plain, authority: closes);
+uri_parameter_gate!(draft17, "draft17", Draft17, uni, authority: closes);
+uri_parameter_gate!(draft18, "draft18", Draft18, uni, authority: closes);
+uri_parameter_gate!(draft19, "draft19", Draft19, uni, authority: closes);
+uri_parameter_gate!(draft20, "draft20", Draft20, uni, authority: closes);
+uri_parameter_gate!(draft21, "draft21", Draft21, uni, authority: closes);
+uri_parameter_gate!(draft22, "draft22", Draft22, uni, authority: closes);
+uri_parameter_gate!(draft23, "draft23", Draft23, uni, authority: closes);
