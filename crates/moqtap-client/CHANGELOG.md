@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-20
+
+### Changed
+
+- **Breaking.** `SetupError` on drafts 14-23 gains `AuthorityOverWebTransport`, and every draft's `SetupError` is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm. The existing variants are unchanged.
+
+### Added
+
+- `validate_client_authority_transport` in `session::setup` on drafts 14-23, the AUTHORITY counterpart of `validate_client_path_transport`.
+
+### Fixed
+
+- Drafts 14-23: `connect` and `adopt` sent an AUTHORITY (0x05) from `setup_parameters` over WebTransport. They now refuse it with `AuthorityOverWebTransport` before anything is sent.
+- Drafts 15-23: a server's SETUP carrying AUTHORITY was accepted. It is now refused and the session closed with INVALID_AUTHORITY (0x19). On draft-14, where 0x05 is also MOQT_IMPLEMENTATION, a server's 0x05 is still accepted.
+- Drafts 14-23: a server's SETUP carrying PATH was refused, but the session closed with code 0. It now closes with INVALID_PATH (0x8).
+- Drafts 17-23: a unidirectional stream the peer opened before its control stream and left empty stalled `connect`. The handshake no longer waits for it; it is still handed out in arrival order.
+
 ## [0.15.1] - 2026-11-20
 
 ### Added

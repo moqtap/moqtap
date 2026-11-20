@@ -55,9 +55,9 @@ pub const MOQT_ALPN: &[u8] = b"moqt-19";
 /// stream type by writing the message.
 ///
 /// Encoded with MoQT's variable-length integer, whose width is the number of
-/// leading 1 bits in the first byte, 0x2F00 is the two bytes `AF 00` — four
-/// under RFC 9000's encoding, which this draft does not use. Read it through
-/// [`DraftVersion::decode_varint`] rather than assuming a width.
+/// leading 1 bits in the first byte, 0x2F00 is the two bytes `AF 00`, not
+/// RFC 9000's `6F 00`. Read it through [`DraftVersion::decode_varint`] rather
+/// than assuming a width.
 pub const CONTROL_STREAM_TYPE: u64 = 0x2F00;
 
 /// The application error code a request stream is reset with when the
@@ -1916,23 +1916,23 @@ impl Connection {
     /// case the data SHOULD be buffered until both control streams arrive and
     /// setup is complete." Each such stream is set aside and handed to
     /// [`accept_subgroup_stream`](Self::accept_subgroup_stream) in arrival
-    /// order, ahead of any newly accepted stream. Only the leading type
+    /// order, ahead of any newly accepted stream. At most the leading type
     /// varint is read from them here; the rest stays on the transport, unread
     /// and still flow-controlled, so nothing is buffered in this process
     /// beyond those few bytes.
     ///
-    /// One limit worth knowing: the search waits for each stream's type
-    /// varint in turn, so a peer that opens a unidirectional stream and then
-    /// writes nothing on it stalls the handshake behind that stream.
+    /// The types are read concurrently, so the search ends once the control
+    /// stream's type arrives, whatever the streams before it carry. A stream
+    /// whose type has not arrived by then is set aside unread.
     pub async fn connect(addr: &str, config: ClientConfig) -> Result<Self, ConnectionError> {
-        // PATH is for native QUIC only, and the transport is known here and
-        // nowhere further in. Refusing before dialling means a session that
-        // the server would close on sight is never opened.
-        setup::validate_client_path_transport(
-            &config.setup_parameters,
-            matches!(config.transport, TransportType::WebTransport { .. }),
-        )
-        .map_err(EndpointError::from)?;
+        // PATH and AUTHORITY are for native QUIC only, and the transport is
+        // known here and nowhere further in. Refusing before dialling means a
+        // session that the server would close on sight is never opened.
+        let over_webtransport = matches!(config.transport, TransportType::WebTransport { .. });
+        setup::validate_client_path_transport(&config.setup_parameters, over_webtransport)
+            .map_err(EndpointError::from)?;
+        setup::validate_client_authority_transport(&config.setup_parameters, over_webtransport)
+            .map_err(EndpointError::from)?;
 
         let transport = match &config.transport {
             TransportType::Quic => Self::connect_quic(addr, &config).await?,
@@ -1984,14 +1984,14 @@ impl Connection {
         observer: Option<Box<dyn ConnectionObserver>>,
     ) -> Result<Self, ConnectionError> {
         let draft = config.draft;
-        // PATH is for native QUIC only, and the transport is known here and
-        // nowhere further in. Refusing before dialling means a session that
-        // the server would close on sight is never opened.
-        setup::validate_client_path_transport(
-            &config.setup_parameters,
-            matches!(config.transport, TransportType::WebTransport { .. }),
-        )
-        .map_err(EndpointError::from)?;
+        // PATH and AUTHORITY are for native QUIC only, and the transport is
+        // known here and nowhere further in. Refusing before dialling means a
+        // session that the server would close on sight is never opened.
+        let over_webtransport = matches!(config.transport, TransportType::WebTransport { .. });
+        setup::validate_client_path_transport(&config.setup_parameters, over_webtransport)
+            .map_err(EndpointError::from)?;
+        setup::validate_client_authority_transport(&config.setup_parameters, over_webtransport)
+            .map_err(EndpointError::from)?;
 
         // Send half of the control plane: one unidirectional stream whose
         // first message is SETUP, which is also its stream header.
@@ -2017,26 +2017,7 @@ impl Connection {
 
         // Receive half: the peer's control stream is whichever unidirectional
         // stream leads with CONTROL_STREAM_TYPE.
-        let mut deferred_uni: VecDeque<Parked> = VecDeque::new();
-        let mut control_recv = loop {
-            let recv = transport.accept_uni().await?;
-            let mut framed = FramedRecvStream::new(recv, draft);
-            match framed.peek_stream_type().await {
-                Ok(CONTROL_STREAM_TYPE) => break framed,
-                // Every other type is a data stream — and so is a stream that
-                // ended or failed before its type arrived, not because it is
-                // one but because there is nothing left to decide with. The
-                // data path sees the same end one read later and reports it
-                // the way it reports every other. Treating it as the control
-                // stream would hand the session's control plane to a stream
-                // that carried nothing.
-                _ => deferred_uni.push_back(Parked {
-                    arrival: deferred_uni.len(),
-                    kind: ParkedKind::Data,
-                    framed,
-                }),
-            }
-        };
+        let (mut control_recv, deferred_uni) = Self::find_control_stream(&transport, draft).await?;
 
         let setup_read = SetupRead {
             recv: &mut control_recv,
@@ -2064,6 +2045,7 @@ impl Connection {
         match &server_setup {
             AnyControlMessage::Draft19(ControlMessage::Setup(ref s)) => {
                 if let Err(e) = endpoint.receive_setup(s) {
+                    Self::close_for_setup(&transport, &e);
                     let err = ConnectionError::from(e);
                     Self::refuse_setup(observer.as_deref(), &err, &server_setup, &raw_server_setup);
                     return Err(err);
@@ -2113,6 +2095,78 @@ impl Connection {
             pending_inbound: Mutex::new(VecDeque::new()),
             drain_guard: tokio::sync::watch::channel(()).0,
         })
+    }
+
+    /// Accept unidirectional streams until one leads with
+    /// [`CONTROL_STREAM_TYPE`], and return it with the streams that arrived
+    /// before it, set aside in arrival order.
+    ///
+    /// Every waiting stream's type is read alongside the next accept, so a
+    /// stream whose type is late holds up neither the accept nor the other
+    /// streams.
+    async fn find_control_stream(
+        transport: &Transport,
+        draft: DraftVersion,
+    ) -> Result<(FramedRecvStream, VecDeque<Parked>), ConnectionError> {
+        use std::future::Future as _;
+        use std::task::Poll;
+
+        enum Next {
+            Accepted(Result<RecvStream, TransportError>),
+            Typed(usize, Result<u64, ConnectionError>),
+        }
+
+        let mut unread: Vec<(usize, FramedRecvStream)> = Vec::new();
+        let mut parked: Vec<Parked> = Vec::new();
+        let mut accepted = 0;
+        let mut accept = std::pin::pin!(transport.accept_uni());
+        let control = loop {
+            let next = std::future::poll_fn(|cx| {
+                for (i, (_, framed)) in unread.iter_mut().enumerate() {
+                    // A new peek each poll loses nothing: the bytes a read
+                    // returns land in the stream's buffer before it yields,
+                    // and a read still pending has consumed none.
+                    if let Poll::Ready(typed) = std::pin::pin!(framed.peek_stream_type()).poll(cx) {
+                        return Poll::Ready(Next::Typed(i, typed));
+                    }
+                }
+                accept.as_mut().poll(cx).map(Next::Accepted)
+            })
+            .await;
+            match next {
+                Next::Accepted(recv) => {
+                    unread.push((accepted, FramedRecvStream::new(recv?, draft)));
+                    accepted += 1;
+                    accept.set(transport.accept_uni());
+                }
+                Next::Typed(i, typed) => {
+                    let (arrival, framed) = unread.remove(i);
+                    match typed {
+                        Ok(CONTROL_STREAM_TYPE) => break framed,
+                        // Every other type is a data stream — and so is a
+                        // stream that ended or failed before its type arrived,
+                        // not because it is one but because there is nothing
+                        // left to decide with. The data path sees the same end
+                        // one read later and reports it the way it reports
+                        // every other. Treating it as the control stream would
+                        // hand the session's control plane to a stream that
+                        // carried nothing.
+                        _ => parked.push(Parked { arrival, kind: ParkedKind::Data, framed }),
+                    }
+                }
+            }
+        };
+        let leftover = ParkedKind::Data;
+        parked.extend(unread.into_iter().map(|(arrival, framed)| Parked {
+            arrival,
+            kind: leftover,
+            framed,
+        }));
+        parked.sort_by_key(|p| p.arrival);
+        // Renumbered without the control stream, so later stamps follow on.
+        let deferred =
+            parked.into_iter().enumerate().map(|(arrival, p)| Parked { arrival, ..p }).collect();
+        Ok((control, deferred))
     }
 
     /// Establish a raw QUIC connection.
@@ -2243,6 +2297,18 @@ impl Connection {
         };
         let raw = raw.filter(|_| peers)?;
         Some(ClientEvent::ControlMessageRefused { stream_id, raw })
+    }
+
+    /// Close the session with the code the draft names when a server's SETUP
+    /// is refused for carrying PATH or AUTHORITY. Other refusals send nothing
+    /// here.
+    fn close_for_setup(transport: &Transport, err: &EndpointError) {
+        if let EndpointError::Setup(e) = err {
+            if let Some(code) = e.close_code() {
+                let wire_code = u32::try_from(code.as_u64()).unwrap_or(u32::MAX);
+                transport.close(wire_code, e.to_string().as_bytes());
+            }
+        }
     }
 
     /// Report a peer's SETUP the handshake refused to an observer attached
@@ -4681,7 +4747,7 @@ mod tests {
         assert_eq!(draft.varint_len(0xBF), 2);
         assert_eq!(draft.varint_len(0xC0), 3);
         assert_eq!(draft.varint_len(0xFF), 9);
-        // SETUP's type id, 0x2F00, is two bytes here and four under RFC 9000.
+        // SETUP's type id, 0x2F00, is `AF 00` here and `6F 00` under RFC 9000.
         assert_eq!(draft.varint_len(0xAF), 2);
     }
 

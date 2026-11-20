@@ -13,6 +13,7 @@ const DRAFT_VERSION: u64 = 0xff000008;
 
 /// Errors from setup message validation or version negotiation.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SetupError {
     /// Client and server share no supported protocol version.
     #[error("no common version between client and server")]

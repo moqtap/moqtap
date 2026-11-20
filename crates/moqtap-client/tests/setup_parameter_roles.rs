@@ -1,12 +1,15 @@
 //! Which endpoint may send which setup parameter, on every draft that says.
 //!
-//! Exactly one setup parameter has a sender restriction, and it is PATH: "It
-//! MUST NOT be used by the server, or when WebTransport is used. If the peer
-//! receives a PATH parameter from the server, or when WebTransport is used, it
-//! MUST close the connection." The parameter that carries the peer's request
-//! budget - MAX_SUBSCRIBE_ID before draft-11, MAX_REQUEST_ID after - has no
-//! restriction at all: it "communicates an initial value ... to the receiving
-//! endpoint", which is something either end may do.
+//! Through draft-13 exactly one setup parameter has a sender restriction, and
+//! it is PATH: "It MUST NOT be used by the server, or when WebTransport is
+//! used. If the peer receives a PATH parameter from the server, or when
+//! WebTransport is used, it MUST close the connection." From draft-14 AUTHORITY
+//! has the same restriction, gated in
+//! `a_uri_parameter_from_the_server_closes_the_session.rs`. The parameter that
+//! carries the peer's request budget - MAX_SUBSCRIBE_ID before draft-11,
+//! MAX_REQUEST_ID after - has no restriction at all: it "communicates an
+//! initial value ... to the receiving endpoint", which is something either end
+//! may do.
 //!
 //! The first gate below decodes a canonical vector rather than building a
 //! message, because that is where a disagreement between the two shows: a

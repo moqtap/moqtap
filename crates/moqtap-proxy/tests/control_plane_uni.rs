@@ -466,7 +466,7 @@ struct LogState {
 ///
 /// The type field's width comes from the draft, because from draft-17 MoQT
 /// counts leading ones where RFC 9000 read a two-bit prefix: SETUP's 0x2F00
-/// is the two bytes `AF 00` here and would be four under the old rule. The
+/// is the two bytes `AF 00` here and `6F 00` under the old rule. The
 /// length is 16 bits on drafts 17-22 and a varint on draft-23 (draft-23
 /// Section 9, Figure 6: "Message Length (vi64)").
 fn framed_len(draft: DraftVersion, pending: &[u8]) -> Option<usize> {
