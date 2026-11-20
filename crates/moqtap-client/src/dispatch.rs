@@ -210,6 +210,34 @@ macro_rules! dispatch_all {
                 }
             }
 
+            /// Read the stream type and nothing after it.
+            ///
+            /// The type stays buffered, so [`read_header`](Self::read_header)
+            /// and the adopts work on the stream afterwards, and calling this
+            /// again returns the kind without reading the stream. A stream
+            /// reset before its type arrived fails with
+            /// [`ErrorCause::StreamReset`], and one that ended before it with
+            /// [`ErrorCause::StreamEnded`].
+            #[allow(unreachable_code)]
+            pub async fn read_kind(&mut self) -> Result<AnyDataStreamKind, AnyConnectionError> {
+                match self {
+                    $(
+                        #[cfg(feature = $feat)]
+                        Self::$variant(s) => match s.read_kind().await {
+                            Ok(crate::$module::connection::DataStreamKind::Subgroup) => {
+                                Ok(AnyDataStreamKind::Subgroup)
+                            }
+                            Ok(crate::$module::connection::DataStreamKind::Fetch) => {
+                                Ok(AnyDataStreamKind::Fetch)
+                            }
+                            Err(e) => Err(AnyConnectionError::from(e)),
+                        },
+                    )+
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!("AnyIncomingDataStream has no enabled variants"),
+                }
+            }
+
             /// Read the stream type and the header after it.
             ///
             /// A FETCH_HEADER stream reads as [`AnyIncomingHeader::Fetch`] and
@@ -246,7 +274,8 @@ macro_rules! dispatch_all {
             /// Returns as soon as the transport hands the stream over, so a
             /// stream whose header is late holds up no stream accepted after
             /// it. Read the header with
-            /// [`AnyIncomingDataStream::read_header`], then pass the stream to
+            /// [`AnyIncomingDataStream::read_header`], or only the stream type
+            /// with [`AnyIncomingDataStream::read_kind`], then pass the stream to
             /// [`adopt_subgroup`](Self::adopt_subgroup) or
             /// [`adopt_fetch`](Self::adopt_fetch), or set a fetch stream aside
             /// for [`accept_fetch`](Self::accept_fetch) with
@@ -3140,6 +3169,19 @@ pub enum AnyIncomingHeader {
     /// or queue it for [`AnyConnection::accept_fetch`] with
     /// [`AnyConnection::set_aside_fetch`].
     Fetch(moqtap_codec::dispatch::AnyFetchHeader),
+}
+
+/// What an [`AnyIncomingDataStream`] carries, told from its stream type alone.
+///
+/// Returned by [`AnyIncomingDataStream::read_kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum AnyDataStreamKind {
+    /// Any type but FETCH_HEADER. [`AnyIncomingDataStream::read_header`]
+    /// reads a subgroup header from it.
+    Subgroup,
+    /// A FETCH_HEADER stream.
+    Fetch,
 }
 
 /// Wrap one draft's accepted fetch stream in its [`AnyFetchReader`] variant.

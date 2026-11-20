@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-11-20
+
+### Added
+
+- `read_kind` on every draft's `IncomingDataStream` and on `AnyIncomingDataStream` reads only the stream type and returns `DataStreamKind` (`AnyDataStreamKind`): `Fetch` for a FETCH_HEADER stream, `Subgroup` for any other. The type stays buffered for `read_header` and the adopts, so once read, the kind survives a later reset of the stream.
+
 ## [0.15.0] - 2026-11-19
 
 ### Changed

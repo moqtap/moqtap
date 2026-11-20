@@ -2807,6 +2807,17 @@ pub enum IncomingHeader {
     Fetch(AnyFetchHeader),
 }
 
+/// What an [`IncomingDataStream`] carries, told from its stream type alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DataStreamKind {
+    /// Any type but FETCH_HEADER. [`IncomingDataStream::read_header`] reads a
+    /// subgroup header from it.
+    Subgroup,
+    /// A FETCH_HEADER stream (type 0x05).
+    Fetch,
+}
+
 impl std::fmt::Debug for IncomingDataStream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IncomingDataStream")
@@ -2820,6 +2831,20 @@ impl IncomingDataStream {
     /// The transport-level stream ID.
     pub fn stream_id(&self) -> u64 {
         self.framed.stream_id()
+    }
+
+    /// Read the stream type and nothing after it.
+    ///
+    /// The type stays buffered, so [`read_header`](Self::read_header) and the
+    /// adopts work on the stream afterwards, and calling this again returns the
+    /// kind without reading the stream. A stream reset before this reads its type
+    /// fails with the reset, and one that ended before it with
+    /// [`ConnectionError::UnexpectedEnd`].
+    pub async fn read_kind(&mut self) -> Result<DataStreamKind, ConnectionError> {
+        match self.framed.peek_stream_type().await? {
+            FETCH_STREAM_TYPE => Ok(DataStreamKind::Fetch),
+            _ => Ok(DataStreamKind::Subgroup),
+        }
     }
 
     /// Read the stream type and the header after it.
